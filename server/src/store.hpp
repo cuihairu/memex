@@ -117,6 +117,18 @@ struct GroupInfo {
   std::vector<std::string> members; // 含群主
 };
 
+// 跨态会话日志（T4.2）：已登录端上报与未登录设备的会话——时间/双方/时长，
+// 不含消息内容。ended_ms=0 表示进行中。
+struct CrossLogRow {
+  std::int64_t id{0};
+  std::string account;     // 已登录端账号（上报方）
+  std::string peer_device; // 对端设备标识
+  std::string peer_name;   // 对端设备名
+  std::int64_t started_ms{0};
+  std::int64_t ended_ms{0};
+  std::int64_t duration_ms{0}; // 结束后 = ended - started；进行中为 0
+};
+
 class ServerStore {
 public:
   ServerStore() = default;
@@ -254,6 +266,22 @@ public:
                       const std::string& announcement);
   // 群成员账号列表（群不存在返回空）
   std::vector<std::string> group_members(std::uint64_t group_id);
+
+  // —— T4.2 跨态会话 ——
+  // 建立（start）：插入一行进行中记录（同会话重复 start 只记首条）。
+  bool cross_log_start(const std::string& account,
+                       const std::string& peer_device,
+                       const std::string& peer_name, std::int64_t started_ms);
+  // 结束（end）：按 (账号, 对端, 建立时刻) 闭环最早一条未结束记录，算时长。
+  bool cross_log_end(const std::string& account,
+                     const std::string& peer_device, std::int64_t started_ms,
+                     std::int64_t ended_ms);
+  // 全量日志（倒序；进行中 ended_ms=0、duration_ms=0）
+  std::vector<CrossLogRow> cross_logs(int limit = 200);
+  // 归档起点（A8）：首条归档消息之前最近一次成功登录时刻——即该账号
+  // 进入协作态、归档开始的时刻；无归档返回 0；有归档但无登录记录
+  //（旧库数据）退化为首条归档消息时刻。
+  std::int64_t archive_start_ms(const std::string& account);
 
 private:
   bool ensure_schema();

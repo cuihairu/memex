@@ -112,6 +112,14 @@ int main(int argc, char** argv) {
   CHECK(server.waitForStarted(5000));
   CHECK(wait_until([&] { return port_listening(port); }, 8000));
 
+  // 服务端 CLI 直读库（与在跑的 serve 进程并发：短暂锁冲突在轮询中自愈）
+  auto run_cli = [&](const QStringList& args) {
+    QProcess p;
+    p.start(server_bin, args);
+    if (!p.waitForFinished(5000)) return QString();
+    return QString::fromUtf8(p.readAllStandardOutput());
+  };
+
   // 直连双实例（独立于主窗，验证直连子系统与协作服务端完全无关）
   DirectEngine da("dev-A2", tmp.filePath(QStringLiteral("a.db")));
   DirectEngine db("dev-B2", tmp.filePath(QStringLiteral("b.db")));
@@ -162,6 +170,26 @@ int main(int argc, char** argv) {
                       QStringLiteral("alice"), QStringLiteral("pass-a"));
   CHECK(wait_until([&] { return window.collab_logged_in(); }, 8000));
 
+  // —— T4.2 跨态互通：已登录端 × 未登录端的直连会话 ——
+  // A7：跨态会话固定「未归档」标识（横幅＋正文，常驻不可关闭）；
+  // 首触上报会话建立（时间/双方/时长，无内容），登出前服务端可查。
+  CHECK(wait_until([&] { return window.has_direct_peer(QStringLiteral("dev-B2")); },
+                   10000));
+  window.open_direct_peer(QStringLiteral("dev-B2"));
+  CHECK(window.banner_text().contains(QStringLiteral("跨态")));
+  CHECK(window.banner_text().contains(QStringLiteral("未归档")));
+  CHECK(window.chat_html().contains(QStringLiteral("未归档"))); // A7 正文标识
+  CHECK(window.chat_html().contains(QStringLiteral("归档自")));  // A8 客户端面
+  CHECK(window.send_in_current_chat(QStringLiteral("跨态验收消息")));
+  CHECK(wait_until([&] {
+    const QString out =
+        run_cli({QStringLiteral("cross"), QStringLiteral("50"), QStringLiteral("--db"),
+                 srv_db});
+    return out.contains(QStringLiteral("alice")) &&
+           out.contains(QStringLiteral("dev-B2")) &&
+           out.contains(QStringLiteral("进行中"));
+  }, 8000));
+
   // 同库注入一条直连历史（peer 同为 bob）：合并展示按来源标注
   {
     const QString win_db = tmp.filePath(
@@ -191,6 +219,21 @@ int main(int argc, char** argv) {
   // —— 停服务端 → 登录回落直连态，明确提示「消息不进归档」 ——
   window.logout_collab();
   CHECK(wait_until([&] { return !window.collab_logged_in(); }, 5000));
+  // T4.2：登出即闭环跨态会话（end 帧先于 LOGOUT）——服务端日志含
+  // 时间/双方/时长；归档起点显示为实际登录时间（A8 服务端面）。
+  CHECK(wait_until([&] {
+    const QString out =
+        run_cli({QStringLiteral("cross"), QStringLiteral("50"), QStringLiteral("--db"),
+                 srv_db});
+    return out.contains(QStringLiteral("dev-B2")) &&
+           out.contains(QStringLiteral("已结束"));
+  }, 8000));
+  CHECK(wait_until([&] {
+    const QString out =
+        run_cli({QStringLiteral("messages"), QStringLiteral("alice"),
+                 QStringLiteral("--db"), srv_db});
+    return out.contains(QStringLiteral("归档自"));
+  }, 8000));
   server.kill();
   CHECK(server.waitForFinished(5000));
 

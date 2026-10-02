@@ -31,6 +31,9 @@ struct Peer {
   quint16 tcp_port{0};       // 直连 TCP 端口（T1.2 起使用）
   QHostAddress address;
   quint64 last_seen_ms{0};
+  // 对端协作账号（T4.2：登录端广播携带，仅作显示与跨态判定——
+  // 不参与任何消息路由；空=未登录（未进协作态））
+  std::string account;
 };
 
 class DiscoveryService : public QObject {
@@ -49,12 +52,18 @@ public:
   // 直连 TCP 接入端口，随监听器启动更新（记入后续宣告）。
   void set_tcp_port(quint16 port);
 
+  // 本端协作账号（T4.2）：登录态写入后续宣告（空=未登录）；变更立即补宣告。
+  // 仅作对端显示与跨态判定，不参与路由。
+  void set_account(const std::string& account);
+
   QList<Peer> peers() const;
   quint16 listen_port() const { return opts_.port; }
 
 signals:
   void peerJoined(const memex::client::Peer& peer);
   void peerLeft(const std::string& device_id);
+  // 对端条目更新（账号等既有设备的字段变化，T4.2）
+  void peerUpdated(const memex::client::Peer& peer);
 
 private slots:
   void on_ready_read();
@@ -64,6 +73,7 @@ private slots:
 private:
   std::string device_id_;
   std::string device_name_;
+  std::string account_; // 本端协作账号（空=未登录）
   DiscoveryOptions opts_;
   QUdpSocket socket_;
   QTimer announce_timer_;

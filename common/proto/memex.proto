@@ -27,6 +27,7 @@ enum MsgType {
   GROUP_RESULT = 37; // 服务端 → 终端：群命令回执
   GROUP_QUERY = 38;  // 终端 → 服务端：查询我加入的群
   GROUP_DATA = 39;   // 服务端 → 终端：群列表（含成员与公告）
+  CROSS_LOG = 40;    // 终端 → 服务端：跨态会话日志上报（时间/双方/时长，T4.2）
 }
 
 message Hello {
@@ -148,6 +149,17 @@ message GroupData {
   repeated GroupInfo groups = 1; // 我加入的全部群
 }
 
+// —— 跨态会话日志（T4.2）——
+// 由「已登录端」上报与未登录设备的跨态会话：建立（start）与结束（end）。
+// 只记时间、双方与时长——不含任何消息内容（留痕纪律）。
+message CrossLog {
+  string op = 1;          // start（建立）／end（结束）
+  string peer_device = 2; // 对端设备标识
+  string peer_name = 3;   // 对端设备名（显示用）
+  int64 started_ms = 4;   // 会话建立时刻
+  int64 ended_ms = 5;     // 会话结束时刻（end 时有效；时长 = 结束 − 建立）
+}
+
 // 信封：所有帧的载荷体。oneof 字段号 = 100 + 对应类型编号，便于读码对账。
 message Envelope {
   MsgType type = 1;
@@ -173,5 +185,6 @@ message Envelope {
     GroupCmd group_cmd = 136;
     GroupResult group_result = 137;
     GroupData group_data = 139;
+    CrossLog cross_log = 140;
   }
 }

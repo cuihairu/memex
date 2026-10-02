@@ -89,6 +89,9 @@ bool DirectEngine::start() {
           [this](const Peer&) { emit peers_changed(); });
   connect(discovery_.get(), &DiscoveryService::peerLeft, this,
           [this](const std::string&) { emit peers_changed(); });
+  // 对端登录态变化（T4.2）：跨态判定与账号显示随宣告刷新
+  connect(discovery_.get(), &DiscoveryService::peerUpdated, this,
+          [this](const Peer&) { emit peers_changed(); });
 
   connect(transport_.get(), &DirectTransport::text_received, this,
           [this](const QString& from_id, const QString& /*to_id*/, quint64 seq,
@@ -180,6 +183,10 @@ Peer DirectEngine::peer(const std::string& device_id) const {
 
 bool DirectEngine::has_peer(const std::string& device_id) const {
   return !peer(device_id).device_id.empty();
+}
+
+void DirectEngine::set_collab_account(const std::string& account) {
+  if (discovery_) discovery_->set_account(account);
 }
 
 quint64 DirectEngine::send_text(const std::string& peer_device_id,

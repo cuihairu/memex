@@ -44,6 +44,12 @@ public:
   void create_group_dialog();  // 服务端群：建群后全量归档
   void open_group(const QString& group_key); // group_key 形如 "group:7"
 
+  // —— T4.2 跨态互通（验收面）——
+  // 打开（或发起）与某局域网设备的直连会话。
+  void open_direct_peer(const QString& device_id);
+  // 是否已发现该局域网设备（发现表在窗体私有引擎里）。
+  bool has_direct_peer(const QString& device_id) const;
+
   // 状态断言面（验收测试）
   bool collab_logged_in() const;
   QString banner_text() const;   // 归档提示条文案（直连／协作两态）
@@ -70,6 +76,18 @@ private:
   void apply_policy(const QString& org_json); // 解析本人生效策略（T3.4）
   // 直连发送是否被策略放行：免登录使用／跨态通信两项开关（T3.4）
   bool direct_send_allowed();
+
+  // —— T4.2 跨态互通 ——
+  // 跨态＝恰一边登录（我已登录而对端未登录，或反之）。跨态会话固定标
+  // 「未归档」且不可关闭；已登录端上报会话建立/结束日志（时间/双方/时长）。
+  bool is_cross_state(const QString& device_id) const;
+  // 会话首触：首次收发即上报 start（幂等，只记第一条）。
+  void cross_touch(const QString& device_id);
+  // 会话闭环：上报 end 并出表（登出/对端登录/对端离线时调用）。
+  void cross_end(const QString& device_id);
+  void cross_end_all(); // 登出前全量闭环
+  // 发现表变化时巡检跨态表：对端离线或对端已登录 → 该会话闭环（end）。
+  void cross_sweep();
 
   // —— T4.1 群聊 ——
   struct GroupEntry {
@@ -109,6 +127,10 @@ private:
   QMap<quint64, GroupEntry> groups_;  // 群号 → 条目（登录后 query_groups 拉取）
   QHash<QString, QStringList> dgroup_members_; // 临时群 id → 成员设备（本机视图）
   int next_dgroup_{1};                // 临时群序号（标题与 id 用）
+
+  // T4.2 跨态会话表：设备 id → 会话建立时刻（已上报 start、未闭环）
+  QHash<QString, qint64> cross_open_;
+  qint64 collab_login_ms_{0}; // 本次协作态登录时刻（A8 归档起点展示）
 
   DirectEngine direct_engine_;
   CollabEngine collab_engine_;

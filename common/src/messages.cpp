@@ -47,6 +47,7 @@ const char* msg_type_name(MsgType t) {
   case v1::GROUP_RESULT: return "group_result";
   case v1::GROUP_QUERY: return "group_query";
   case v1::GROUP_DATA: return "group_data";
+  case v1::CROSS_LOG: return "cross_log";
   case v1::MSG_TYPE_UNSPECIFIED: break;
   }
   return "unknown";

@@ -53,6 +53,13 @@ void DiscoveryService::stop() {
 
 void DiscoveryService::set_tcp_port(quint16 port) { tcp_port_ = port; }
 
+void DiscoveryService::set_account(const std::string& account) {
+  if (account_ == account) return;
+  account_ = account;
+  // 登出／登录立即补一轮宣告——对端据此判定跨态（T4.2）
+  if (running_) announce();
+}
+
 QList<Peer> DiscoveryService::peers() const {
   QList<Peer> out;
   out.reserve(static_cast<int>(peers_.size()));
@@ -69,6 +76,10 @@ void DiscoveryService::announce() {
   obj.insert(QStringLiteral("device_id"), QString::fromStdString(device_id_));
   obj.insert(QStringLiteral("name"), QString::fromStdString(device_name_));
   obj.insert(QStringLiteral("tcp_port"), static_cast<int>(tcp_port_));
+  if (!account_.empty()) {
+    // T4.2：登录端携带账号标识——仅作对端显示与跨态判定，不参与路由
+    obj.insert(QStringLiteral("account"), QString::fromStdString(account_));
+  }
   obj.insert(QStringLiteral("ts"),
              QDateTime::currentMSecsSinceEpoch());
 
@@ -106,13 +117,16 @@ void DiscoveryService::on_ready_read() {
     peer.address = dgram.senderAddress();
     peer.last_seen_ms =
         static_cast<quint64>(QDateTime::currentMSecsSinceEpoch());
+    peer.account = obj.value(QStringLiteral("account")).toString().toStdString();
 
     const auto it = peers_.find(device_id);
     if (it == peers_.end()) {
       peers_.emplace(device_id, peer);
       emit peerJoined(peer);
     } else {
+      const bool account_changed = it->second.account != peer.account;
       it->second = peer;
+      if (account_changed) emit peerUpdated(peer); // 登录态变化（T4.2 跨态判定）
     }
   }
 }

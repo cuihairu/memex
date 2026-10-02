@@ -71,6 +71,28 @@ int main(int argc, char** argv) {
   CHECK(!has_peer(a, "dev-A"));
   CHECK(!has_peer(b, "dev-B"));
 
+  // T4.2：登录端宣告携带账号（仅作显示与跨态判定）——对端可见，
+  // 且既有条目经 peerUpdated 刷新；登出补宣告立即清空
+  bool updated_seen = false;
+  QObject::connect(&b, &DiscoveryService::peerUpdated, &b,
+                   [&](const Peer& p) {
+                     if (p.device_id == "dev-A" && p.account == "alice") {
+                       updated_seen = true;
+                     }
+                   });
+  auto account_of = [&](const char* id) {
+    const auto list = b.peers();
+    for (const Peer& p : list) {
+      if (p.device_id == id) return p.account;
+    }
+    return std::string("gone");
+  };
+  a.set_account("alice");
+  CHECK(wait_until([&] { return account_of("dev-A") == "alice"; }, 8000));
+  CHECK(updated_seen);
+  a.set_account(""); // 登出即补宣告「未登录」
+  CHECK(wait_until([&] { return account_of("dev-A").empty(); }, 8000));
+
   // 停掉一端 → 另一端超时置离线
   b.stop();
   CHECK(wait_until([&] { return !has_peer(a, "dev-B"); }, 6000));

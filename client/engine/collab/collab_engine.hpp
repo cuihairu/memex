@@ -56,6 +56,10 @@ public slots:
   void leave_group(quint64 group_id);
   void announce_group(quint64 group_id, const QString& announcement);
   void query_groups();
+  // —— 跨态会话日志（T4.2）：op=start（建立）／end（结束）——
+  // 只上报时间、双方与时长，不含任何消息内容；须登录态。
+  void cross_log(const QString& op, const QString& peer_device,
+                 const QString& peer_name, qint64 started_ms, qint64 ended_ms);
 
 signals:
   void logged_in(const QString& account, const QString& display_name);

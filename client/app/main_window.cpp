@@ -296,11 +296,14 @@ void MainWindow::build_ui() {
 
 void MainWindow::wire_engines() {
   connect(&direct_engine_, &DirectEngine::peers_changed, this, [this] {
+    cross_sweep(); // T4.2：对端离线／对端登录 → 跨态会话闭环
+    update_banner(); // 跨态判定随宣告刷新（对端登录态变化即时反映）
     refresh_devices();
     show_status(status_hint_); // 在线数变化，刷新引擎态前缀
   });
   connect(&direct_engine_, &DirectEngine::message_received, this,
           [this](const QString& from, const QString& text, qint64 ts_ms) {
+            cross_touch(from); // T4.2：首条收发即上报会话建立
             if (from == current_peer_ &&
                 current_kind_ == QStringLiteral("direct")) {
               append_message(from, text, ts_ms, false,
@@ -343,7 +346,9 @@ void MainWindow::wire_engines() {
 void MainWindow::wire_collab() {
   connect(&collab_engine_, &CollabEngine::logged_in, this,
           [this](const QString& account, const QString& display) {
-            (void)account;
+            // T4.2：本端登录态写进发现宣告——对端据此判定跨态与显示账号
+            direct_engine_.set_collab_account(account.toStdString());
+            collab_login_ms_ = QDateTime::currentMSecsSinceEpoch(); // A8 归档起点
             act_collab_logout_->setEnabled(true);
             collab_was_logged_in_ = true;
             seed_collab_peers();
@@ -353,6 +358,14 @@ void MainWindow::wire_collab() {
                 QStringLiteral("已切换协作态（%1）：此后消息经服务端转发并"
                                "全量归档")
                     .arg(esc(display)));
+            if (current_kind_ == QStringLiteral("direct")) {
+              // A8 客户端面：跨态直连会话归档自行（此前直连消息不进归档）
+              append_system_line(QStringLiteral(
+                  "归档自 %1（本次协作态登录时刻）：此前跨态直连消息不进"
+                  "归档，转协作会话后自登录时刻起计入")
+                      .arg(QDateTime::currentDateTime().toString(
+                          QStringLiteral("yyyy-MM-dd HH:mm:ss"))));
+            }
             show_status(QStringLiteral("协作态已登录：%1").arg(display));
             // 登录即拉组织架构（策略与建群数据源）与群列表（T3.4／T4.1）
             collab_engine_.query_org();
@@ -387,6 +400,8 @@ void MainWindow::wire_collab() {
   });
   connect(&collab_engine_, &CollabEngine::kicked, this,
           [this](const QString& reason, const QString& replaced_by) {
+            cross_end_all(); // T4.2：被踢即会话终点（此刻引擎尚未断开，
+                             // CROSS_LOG 帧随断开前队列刷出）
             collab_was_logged_in_ = false;
             act_collab_logout_->setEnabled(false);
             update_banner();
@@ -462,7 +477,9 @@ void MainWindow::login_collab(const QString& host, quint16 port,
 }
 
 void MainWindow::logout_collab() {
+  cross_end_all();          // T4.2：登出前闭环全部跨态会话（end 帧先于 LOGOUT）
   collab_engine_.logout();
+  direct_engine_.set_collab_account(""); // 登出即广播「未登录」（对端即时闭环）
   act_collab_logout_->setEnabled(false);
   collab_was_logged_in_ = false;
   update_banner();
@@ -529,10 +546,75 @@ bool MainWindow::send_in_current_chat(const QString& text) {
     show_status(QStringLiteral("发送失败：对端不可达"));
     return false;
   }
+  cross_touch(current_peer_); // T4.2：跨态会话首触即上报建立
   append_message(QString::fromStdString(direct_engine_.device_id()), text,
                  QDateTime::currentMSecsSinceEpoch(), true,
                  QStringLiteral("direct"));
   return true;
+}
+
+// —— T4.2 跨态互通 ——
+// 跨态＝恰一边登录协作态（我已登录而对端未登录，或反之）。对端登录态取
+// 自发现宣告的 account 字段（空=未登录；仅作显示与判定，不参与路由）。
+// 跨态会话固定标「未归档」且不可关闭（A7）；已登录端上报会话建立/结束
+// 日志（时间/双方/时长，无内容）——未登录端无通道，由对端上报。
+bool MainWindow::is_cross_state(const QString& device_id) const {
+  if (device_id.isEmpty()) return false;
+  const Peer p = direct_engine_.peer(device_id.toStdString());
+  if (p.device_id.empty()) return false; // 未发现：无从判定，不按跨态计
+  return collab_engine_.is_logged_in() != !p.account.empty();
+}
+
+// 会话首触（收／发第一条）：已登录端上报 start；表内已有即跳过（幂等）。
+void MainWindow::cross_touch(const QString& device_id) {
+  if (device_id.isEmpty() || cross_open_.contains(device_id)) return;
+  if (!collab_engine_.is_logged_in()) return;
+  const Peer p = direct_engine_.peer(device_id.toStdString());
+  if (p.device_id.empty() || !p.account.empty()) return; // 未发现／非跨态
+  const qint64 started_ms = QDateTime::currentMSecsSinceEpoch();
+  cross_open_.insert(device_id, started_ms);
+  const QString name = p.name.empty()
+                           ? QString::fromStdString(p.device_id).left(8)
+                           : QString::fromStdString(p.name);
+  collab_engine_.cross_log(QStringLiteral("start"), device_id, name,
+                           started_ms, 0);
+}
+
+// 会话闭环：上报 end 并出表。服务端按 (账号, 设备, 建立时刻) 匹配最早
+// 未结束行，对端名不参与匹配（离线后取不到名，传空即可）。
+void MainWindow::cross_end(const QString& device_id) {
+  const auto it = cross_open_.constFind(device_id);
+  if (it == cross_open_.cend()) return;
+  const qint64 started_ms = it.value();
+  cross_open_.remove(device_id);
+  if (!collab_engine_.is_logged_in()) return; // 通道已断，无法上报
+  collab_engine_.cross_log(QStringLiteral("end"), device_id, QString(),
+                           started_ms,
+                           QDateTime::currentMSecsSinceEpoch());
+}
+
+void MainWindow::cross_end_all() {
+  const QStringList keys = cross_open_.keys();
+  for (const QString& id : keys) cross_end(id);
+}
+
+// 发现表变化巡检：对端离线或对端已登录（不再跨态）→ 会话闭环上报。
+void MainWindow::cross_sweep() {
+  const QStringList keys = cross_open_.keys();
+  for (const QString& id : keys) {
+    const Peer p = direct_engine_.peer(id.toStdString());
+    if (p.device_id.empty() || !p.account.empty()) cross_end(id);
+  }
+}
+
+// 验收面：打开（或发起）与某局域网设备的直连会话。
+void MainWindow::open_direct_peer(const QString& device_id) {
+  if (device_id.isEmpty()) return;
+  open_chat(QStringLiteral("direct"), device_id);
+}
+
+bool MainWindow::has_direct_peer(const QString& device_id) const {
+  return !device_id.isEmpty() && direct_engine_.has_peer(device_id.toStdString());
 }
 
 // —— T3.4 策略开关（下发自服务端，按本人部门解析）——
@@ -1008,7 +1090,23 @@ void MainWindow::update_banner() {
   } else {
     banner_->setStyleSheet(QStringLiteral(
         "background:#fdeee2; color:#8a4a1f; font-size:12px; padding:6px 10px;"));
-    if (collab_was_logged_in_ && !collab_engine_.is_logged_in()) {
+    // T4.2 跨态会话（恰一边登录）：固定「未归档」标识，常驻不可关闭（A7）
+    bool cross = false;
+    if (current_kind_ == QStringLiteral("direct")) {
+      cross = is_cross_state(current_peer_);
+    } else if (current_kind_ == QStringLiteral("dgroup")) {
+      for (const QString& dev : dgroup_members_.value(current_peer_)) {
+        if (is_cross_state(dev)) {
+          cross = true;
+          break;
+        }
+      }
+    }
+    if (cross) {
+      banner_->setText(QStringLiteral(
+          "　⚠ 跨态会话 · 未归档：恰一边登录协作态，消息点对点传输不进归档"
+          "（与未登录终端的会话标记常驻不可关闭）"));
+    } else if (collab_was_logged_in_ && !collab_engine_.is_logged_in()) {
       banner_->setText(QStringLiteral(
           "　⚠ 已降级直连态：服务端不可达，消息不进归档"
           "（点对点传输，仅保存在双方本机）"));
@@ -1076,9 +1174,14 @@ void MainWindow::refresh_devices() {
     const QString id = QString::fromStdString(p.device_id);
     const QString name =
         p.name.empty() ? id.left(8) : QString::fromStdString(p.name);
-    item->setText(QStringLiteral("%1\n%2 · TCP %3")
+    // T4.2：对端登录账号入列表行（仅作显示；空=未登录）
+    const QString acct = p.account.empty()
+                             ? QString()
+                             : QStringLiteral(" · 协作账号 %1")
+                                   .arg(QString::fromStdString(p.account));
+    item->setText(QStringLiteral("%1\n%2 · TCP %3%4")
                       .arg(name, p.address.toString(),
-                           QString::number(p.tcp_port)));
+                           QString::number(p.tcp_port), acct));
     item->setData(Qt::UserRole, id);
     item->setData(Qt::UserRole + 1, QStringLiteral("direct"));
   }
@@ -1202,11 +1305,35 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
     const Peer p = direct_engine_.peer(id.toStdString());
     const QString name = p.name.empty() ? id.left(8) : QString::fromStdString(p.name);
     chat_title_->setText(name);
-    chat_meta_->setText(
-        QStringLiteral("%1 · 点对点直连 · TCP %2")
-            .arg(p.address.toString(), QString::number(p.tcp_port)));
+    // T4.2：跨态会话 meta 固定「跨态 · 未归档」前缀（与横幅同口径，A7）
+    if (is_cross_state(id)) {
+      chat_meta_->setText(
+          QStringLiteral("跨态 · 未归档 · %1 · TCP %2")
+              .arg(p.address.toString(), QString::number(p.tcp_port)));
+    } else {
+      chat_meta_->setText(
+          QStringLiteral("%1 · 点对点直连 · TCP %2")
+              .arg(p.address.toString(), QString::number(p.tcp_port)));
+    }
   }
   update_banner();
+
+  // T4.2 跨态会话固定标识（A7）＋归档起点提示（A8 客户端面）：
+  // 标识常驻不可关闭，无论历史空否都打。
+  if (kind == QStringLiteral("direct") && is_cross_state(id)) {
+    if (collab_engine_.is_logged_in()) {
+      append_system_line(QStringLiteral(
+          "跨态会话 · 未归档：与未登录终端点对点传输（标记常驻不可关闭）；"
+          "归档自 %1（本次协作态登录时刻，此前跨态直连消息不进归档）")
+                             .arg(QDateTime::fromMSecsSinceEpoch(collab_login_ms_)
+                                      .toString(QStringLiteral(
+                                          "yyyy-MM-dd HH:mm:ss"))));
+    } else {
+      append_system_line(QStringLiteral(
+          "跨态会话 · 未归档：对端已登录协作态，本机未登录——本机消息不进归档"
+          "（标记常驻不可关闭）"));
+    }
+  }
 
   const auto hist = direct_engine_.history(id);
   if (hist.isEmpty()) {

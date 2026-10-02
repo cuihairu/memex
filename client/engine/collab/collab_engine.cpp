@@ -282,6 +282,27 @@ void CollabEngine::query_groups() {
   send_frame(m);
 }
 
+// 跨态会话日志（T4.2）：登录端上报与未登录设备的会话起止（时间/双方/时长，
+// 无内容字段）。start 不带 ended_ms，end 带两端时刻——服务端按 (账号, 设备,
+// 建立时刻) 闭环最早一条未结束记录。
+void CollabEngine::cross_log(const QString& op, const QString& peer_device,
+                             const QString& peer_name, qint64 started_ms,
+                             qint64 ended_ms) {
+  if (!logged_in_ || peer_device.isEmpty() || started_ms <= 0) return;
+  Message m;
+  m.set_type(MsgType::CROSS_LOG);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* c = m.mutable_cross_log();
+  c->set_op(op.toStdString());
+  c->set_peer_device(peer_device.toStdString());
+  c->set_peer_name(peer_name.toStdString());
+  c->set_started_ms(started_ms);
+  if (op == QStringLiteral("end")) c->set_ended_ms(ended_ms);
+  send_frame(m);
+}
+
 void CollabEngine::send_frame(const Message& msg) {
   const std::string frame = memex::protocol::encode(msg);
   socket_->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));

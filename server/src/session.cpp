@@ -268,6 +268,24 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     send(memex::protocol::encode(out));
     break;
   }
+  case v1::CROSS_LOG: {
+    // 跨态会话日志（T4.2）：登录端上报与未登录设备的会话起止。
+    // 载荷只有时间/双方/时长——无内容字段，服务端也只落这三类（留痕纪律）。
+    if (!logged_in_ || !msg.has_cross_log()) break;
+    const auto& c = msg.cross_log();
+    if (c.op() == "start") {
+      server_.store().cross_log_start(account_, c.peer_device(), c.peer_name(),
+                                      c.started_ms());
+      log("跨态会话建立：" + c.peer_device());
+    } else if (c.op() == "end") {
+      if (server_.store().cross_log_end(account_, c.peer_device(),
+                                        c.started_ms(), c.ended_ms())) {
+        log("跨态会话结束：" + c.peer_device() + "（时长 " +
+            std::to_string(c.ended_ms() - c.started_ms()) + "ms）");
+      }
+    }
+    break;
+  }
   case v1::ACK:
     // 接收方回执：消息已收取，清离线队列
     if (logged_in_ && msg.has_ack() && !msg.ack().msg_id().empty()) {

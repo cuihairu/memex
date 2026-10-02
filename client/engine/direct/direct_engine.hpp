@@ -67,6 +67,10 @@ public:
   std::string status_text() const;
   const std::string& device_id() const { return device_id_; }
 
+  // 本端协作账号（T4.2）：登录／登出时同步进发现宣告（仅作对端显示与
+  // 跨态判定；空=未登录）。
+  void set_collab_account(const std::string& account);
+
 signals:
   void message_received(const QString& from_id, const QString& text, qint64 ts_ms);
   void text_delivered(quint64 seq, bool ok);

@@ -305,6 +305,25 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {
   q.limit = limit;
   const auto rows = store.search_messages(q);
 
+  // 归档起点（T4.2／A8）：显示为该账号「实际登录时间」——进入协作态才开始
+  // 归档，跨态直连会话不进服务端（无归档则如实显示）。
+  std::string archive_origin;
+  if (!account.empty()) {
+    const auto start_ms = store.archive_start_ms(account);
+    if (start_ms > 0) {
+      std::time_t secs = static_cast<std::time_t>(start_ms / 1000);
+      std::tm tm{};
+      localtime_r(&secs, &tm);
+      char when[24];
+      std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
+      archive_origin = std::string("归档自 ") + when +
+                       "（协作态登录起；此前直连会话不进归档）";
+    } else {
+      archive_origin = "归档自 —（该账号暂无归档消息）";
+    }
+    std::cout << archive_origin << '\n';
+  }
+
   // 过滤条件摘要（进查阅日志；只记条件，不记消息内容）
   std::string filters;
   auto append_filter = [&filters](const std::string& kv) {
@@ -347,6 +366,7 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {
     out << "# Memex 归档导出\n# 导出时间(ms)：" << now
         << "\n# 操作者：" << cli_operator() << "\n# 过滤条件："
         << (filters.empty() ? "（全部）" : filters) << "\n";
+    if (!archive_origin.empty()) out << "# " << archive_origin << "\n";
     for (const auto& m : rows) out << format_row(m) << '\n';
     out << "共 " << rows.size() << " 条\n";
   } else {
@@ -366,6 +386,33 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {
   audit.result_count = static_cast<int>(rows.size());
   audit.ts_ms = now;
   store.add_audit_read(audit);
+  return 0;
+}
+
+// cross [N]：跨态会话日志（T4.2）——时间/双方/时长，不含任何消息内容。
+// 状态：已结束（带时长）／进行中（登出等未闭环，时长 0）。
+int cmd_cross(int argc, char** argv, const std::string& db_path) {
+  int limit = 200;
+  if (argc >= 1) {
+    limit = std::atoi(argv[0]);
+    if (limit <= 0) {
+      std::cerr << "无效条数\n";
+      return 2;
+    }
+  }
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+  std::cout << "id\t账号\t对端设备\t对端名称\t建立时间(ms)\t结束时间(ms)\t"
+               "时长(ms)\t状态\n";
+  for (const auto& r : store.cross_logs(limit)) {
+    std::cout << r.id << '\t' << r.account << '\t' << r.peer_device << '\t'
+              << r.peer_name << '\t' << r.started_ms << '\t' << r.ended_ms
+              << '\t' << r.duration_ms << '\t'
+              << (r.ended_ms > 0 ? "已结束" : "进行中") << '\n';
+  }
   return 0;
 }
 
@@ -715,14 +762,15 @@ int main(int argc, char** argv) {
     if (cmd == "device") return cmd_device(sub_argc, sub_argv, db_path);
     if (cmd == "messages") return cmd_messages(sub_argc, sub_argv, db_path);
     if (cmd == "audit") return cmd_audit(sub_argc, sub_argv, db_path);
+    if (cmd == "cross") return cmd_cross(sub_argc, sub_argv, db_path);
     if (cmd == "org") return cmd_org(sub_argc, sub_argv, db_path);
     if (cmd == "policy") return cmd_policy(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
               << "用法：memex_server [serve [--port N] [--db P]] | account add … | "
                  "logins [账号] [--device 指纹前缀] | device … | "
                  "messages [账号] [--keyword K] [--since T] "
-                 "[--until T] [--limit N] [--export 文件] | audit [N] | org … | "
-                 "--version | --self-test\n";
+                 "[--until T] [--limit N] [--export 文件] | audit [N] | "
+                 "cross [N] | org … | --version | --self-test\n";
     return 2;
   }
   return cmd_serve(0, argv, kDefaultDb);

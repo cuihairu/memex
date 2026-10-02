@@ -62,4 +62,11 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_group PRIVATE memex_server_core)
   add_test(NAME group COMMAND test_group)
   set_tests_properties(group PROPERTIES TIMEOUT 60)
+
+  # T4.2 跨态互通验收：跨态会话日志闭环（时间/双方/时长，无内容）、
+  # 归档起点＝首条归档消息前最近一次成功登录时刻（A8）
+  add_executable(test_cross tests/test_cross.cpp)
+  target_link_libraries(test_cross PRIVATE memex_server_core)
+  add_test(NAME cross COMMAND test_cross)
+  set_tests_properties(cross PROPERTIES TIMEOUT 60)
 endif()
