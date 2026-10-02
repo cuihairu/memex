@@ -1,5 +1,6 @@
-// Memex 客户端入口（T0.4 骨架）。
+// Memex 客户端入口（T1.4 直连态界面）。
 // --smoke：烟测模式，起窗后自动退出（ctest 用，offscreen 平台）。
+// --screenshot <path>：起窗 4.5s（含设备发现窗口期）截图后退出。
 #include <QApplication>
 #include <QTimer>
 
@@ -18,6 +19,17 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  QString screenshot_path;
+  bool smoke = false;
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--smoke") {
+      smoke = true;
+    } else if (arg == "--screenshot" && i + 1 < argc) {
+      screenshot_path = QString::fromUtf8(argv[++i]);
+    }
+  }
+
   QApplication app(argc, argv);
   QApplication::setApplicationName("Memex");
   QApplication::setOrganizationName("memex");
@@ -25,8 +37,14 @@ int main(int argc, char** argv) {
   memex::client::MainWindow window;
   window.show();
 
-  if (argc > 1 && std::string_view(argv[1]) == "--smoke") {
+  if (smoke) {
     QTimer::singleShot(500, &app, &QApplication::quit);
+  }
+  if (!screenshot_path.isEmpty()) {
+    QTimer::singleShot(4500, &window, [&window, screenshot_path] {
+      window.grab().save(screenshot_path);
+      QApplication::quit();
+    });
   }
 
   return QApplication::exec();
