@@ -3,10 +3,11 @@
 内网物理隔离环境下的办公即时通讯系统，对标企业微信的沟通、办公、组织与归档检索能力。纯自研：不基于开源即时通讯软件二次开发，不集成 AGPL／SSPL 等强传染性许可组件。客户端 C++17 + Qt，服务端 C++。
 
 - 产品定义与分期依据：[docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
-- 产品定位一页纸：[docs/产品定位.md](docs/产品定位.md)
-- 需求与任务清单（R1–R18、四期拆解、验收口径）：[todo.md](todo.md)
-- 评审组决策清单（十五项 + 一项可选）：[docs/决策清单.md](docs/决策清单.md)
-- 文档站（界面预览、快速预览、架构与合规）：构建方式见 `docs/`（VitePress，部署于 GitHub Pages `/memex/`）
+- 产品定位一页纸：[docs/src/guide/product.md](docs/src/guide/product.md)
+- 需求与任务清单（R1–R19、四期拆解、验收口径）：[todo.md](todo.md)
+- 评审组决策清单（十五项 + 一项可选）：[docs/src/guide/decisions.md](docs/src/guide/decisions.md)
+- 文档站（界面预览、快速预览、架构与合规）：`docs/`（VitePress，构建 `pnpm docs:build`，部署于 GitHub Pages `/memex/`）
+- 原型设计稿：`docs/design/prototypes/`（桌面 7 屏 + 移动 4 屏），截图 `docs/src/public/screenshots/`
 
 ## 产品形态
 

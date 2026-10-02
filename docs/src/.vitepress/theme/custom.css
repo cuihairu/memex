@@ -1,0 +1,134 @@
+/**
+ * Memex 文档站主题 · 一站一主题
+ * 品牌色取自 logo 橙 #e16531；亮暗双套 token；
+ * 中文正文首行缩进 2em、行高 1.7–1.8。
+ */
+
+:root {
+  /* 品牌橙 · 亮色套 */
+  --vp-c-brand-1: #e16531;
+  --vp-c-brand-2: #c95524;
+  --vp-c-brand-3: #bc4c1f;
+  --vp-c-brand-soft: rgba(225, 101, 49, 0.14);
+
+  /* 暖中性色 · 亮色 */
+  --vp-c-bg: #ffffff;
+  --vp-c-bg-soft: #f7f5f3;
+  --vp-c-bg-mute: #efecea;
+  --vp-c-bg-elv: #faf9f7;
+  --vp-c-text: #262220;
+  --vp-c-text-2: #5c5651;
+  --vp-c-text-3: #8a837d;
+  --vp-c-divider: rgba(60, 50, 45, 0.12);
+
+  /* 形状 */
+  --vp-c-radius-sm: 4px;
+  --vp-c-radius-md: 8px;
+  --vp-c-radius-lg: 12px;
+
+  --vp-font-family-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  --vp-font-family-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, 'Liberation Mono',
+    Menlo, monospace;
+}
+
+.dark {
+  /* 品牌橙 · 暗色套（提亮保证对比度） */
+  --vp-c-brand-1: #f0854f;
+  --vp-c-brand-2: #e16531;
+  --vp-c-brand-3: #d05a2c;
+  --vp-c-brand-soft: rgba(240, 133, 79, 0.16);
+
+  /* 暖中性色 · 暗色 */
+  --vp-c-bg: #171310;
+  --vp-c-bg-soft: #1d1815;
+  --vp-c-bg-mute: #241e1a;
+  --vp-c-bg-elv: #201b17;
+  --vp-c-text: #ece7e3;
+  --vp-c-text-2: #b8b0aa;
+  --vp-c-text-3: #8a837d;
+  --vp-c-divider: rgba(236, 231, 227, 0.12);
+
+  --vp-code-block-bg: #1d1815;
+}
+
+/* ---------- 中文正文排版 ---------- */
+
+.vp-doc p {
+  text-indent: 2em;
+  line-height: 1.8;
+  letter-spacing: 0.01em;
+}
+
+/* 图片、图表、标注类段落不缩进 */
+.vp-doc p:not(:empty):has(> img),
+.vp-doc p:has(> a > img),
+.vp-doc blockquote p,
+.vp-doc li p {
+  text-indent: 0;
+}
+
+.vp-doc div[class*='language-'],
+.vp-doc .custom-block {
+  line-height: 1.7;
+}
+
+.vp-doc td,
+.vp-doc th {
+  line-height: 1.7;
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.vp-doc h4 {
+  line-height: 1.4;
+}
+
+/* ---------- 形状规则：8px 按钮 / 12px 卡片 / 4px 行内码 ---------- */
+
+.VPButton {
+  border-radius: var(--vp-c-radius-md) !important;
+}
+
+.VPButton .text {
+  border-radius: var(--vp-c-radius-md) !important;
+}
+
+.vp-doc :not(pre) > code {
+  border-radius: var(--vp-c-radius-sm);
+  font-weight: 500;
+}
+
+.vp-doc div[class*='language-'],
+.vp-doc pre {
+  border-radius: var(--vp-c-radius-lg);
+}
+
+.vp-doc .custom-block {
+  border-radius: var(--vp-c-radius-lg);
+}
+
+.VPHero .name,
+.VPHome .text {
+  letter-spacing: 0.02em;
+}
+
+/* 首页英雄区的橙色描边标题 */
+.VPHero .name .clip {
+  color: var(--vp-c-brand-1);
+}
+
+/* 主页特性卡片贴合品牌圆角 */
+.VPFeature {
+  border-radius: var(--vp-c-radius-lg);
+}
+
+/* 表格：品牌色表头底线 */
+.vp-doc th {
+  background: var(--vp-c-bg-soft);
+}
+
+.vp-doc tr:nth-child(2n) {
+  background: var(--vp-c-bg-soft);
+}
