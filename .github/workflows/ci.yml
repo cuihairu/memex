@@ -1,0 +1,60 @@
+# 主 CI 门禁：CMake 全量构建（含 Qt 客户端）+ ctest 全绿 + 覆盖率上传。
+# 覆盖率经 gcov 编译、gcovr 生成 coverage.xml；公共仓库免注册 tokenless
+# 上传 Codecov，覆盖率口径由根目录 codecov.yml 驱动（趋势信号，
+# 上传失败不阻断门禁——fail_ci_if_error: false）。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  cpp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libasio-dev qt6-base-dev libqt6sql6-sqlite qt6-base-dev-tools gcovr
+
+      - name: Configure
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DMEMEX_BUILD_CLIENT=ON -DCMAKE_CXX_FLAGS=--coverage
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Coverage report
+        run: |
+          gcovr --xml -o coverage.xml \
+            -f 'common/' -f 'server/' -f 'client/' \
+            -e 'third_party/' -e 'build/' -e 'tests/'
+          gcovr --filter 'common/' --filter 'server/' --filter 'client/' \
+            --exclude 'third_party/' --exclude 'build/' --exclude 'tests/' \
+            --txt-metric line --txt coverage-summary.txt
+          {
+            echo '### C++ 覆盖率（common / server / client）'
+            echo '```'
+            cat coverage-summary.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          retention-days: 7
+
+      # 公共仓库免注册 tokenless 上传（无 token secret）
+      - uses: codecov/codecov-action@v7
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false

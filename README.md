@@ -1,12 +1,17 @@
 <p align="center">
+  <img src="docs/src/public/logo.svg" alt="Memex" width="96" height="96" />
+</p>
+
+<h1 align="center">Memex · 内网办公即时通讯系统</h1>
+
+<p align="center">
   <a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov 覆盖率" /></a>
   <a href="https://cuihairu.github.io/memex/"><img src="https://img.shields.io/website?url=https%3A%2F%2Fcuihairu.github.io%2Fmemex%2F&up_message=%E5%9C%A8%E7%BA%BF&down_message=%E7%A6%BB%E7%BA%BF&label=%E6%96%87%E6%A1%A3%E7%AB%99&color=e16531" alt="文档站" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%E5%9B%BD%E4%BA%A7%20UOS%2F%E9%BA%92%E9%BA%9F-e16531" alt="平台支持" />
   <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
 </p>
-
-# Memex · 内网办公即时通讯系统
 
 内网物理隔离环境下的办公即时通讯系统，对标企业微信的沟通、办公、组织与归档检索能力。纯自研：不基于开源即时通讯软件二次开发，不集成 AGPL／SSPL 等强传染性许可组件。客户端 C++17 + Qt，服务端 C++。
 
