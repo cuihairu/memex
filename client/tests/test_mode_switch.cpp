@@ -127,6 +127,10 @@ int main(int argc, char** argv) {
                       QStringLiteral("alice"), QStringLiteral("pass-a"));
   CHECK(wait_until([&] { return window.collab_logged_in(); }, 8000));
 
+  // —— T3.1：登录后可拉取组织架构（ORG_QUERY→ORG_DATA 下发生效）——
+  window.request_org();
+  CHECK(wait_until([&] { return window.org_json().contains("bob"); }, 8000));
+
   // —— 协作会话：提示条切换为归档口径 ——
   window.open_collab_peer(QStringLiteral("bob"));
   CHECK(window.banner_text().contains(QStringLiteral("全量归档")));

@@ -50,6 +50,7 @@ bool ServerStore::ensure_schema() {
       "  display_name TEXT NOT NULL,"
       "  salt TEXT NOT NULL,"
       "  digest TEXT NOT NULL,"
+      "  role TEXT NOT NULL DEFAULT 'member',"
       "  created_ms INTEGER NOT NULL);"
       "CREATE TABLE IF NOT EXISTS login_records ("
       "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -107,17 +108,22 @@ bool ServerStore::ensure_schema() {
     sqlite3_free(err);
     return false;
   }
+  // 旧库迁移：补 role 列（已存在则忽略失败）
+  sqlite3_exec(db_, "ALTER TABLE accounts ADD COLUMN"
+                    " role TEXT NOT NULL DEFAULT 'member'",
+              nullptr, nullptr, nullptr);
   return true;
 }
 
 bool ServerStore::create_account(const std::string& account,
                                  const std::string& password,
-                                 const std::string& display_name) {
+                                 const std::string& display_name,
+                                 const std::string& role) {
   const std::string salt = random_salt_hex();
   if (salt.empty()) return false;
   const char* sql =
-      "INSERT INTO accounts(account, display_name, salt, digest, created_ms)"
-      " VALUES(?, ?, ?, ?, ?);";
+      "INSERT INTO accounts(account, display_name, salt, digest, role,"
+      " created_ms) VALUES(?, ?, ?, ?, ?, ?);";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
   // 摘要计算独立于语句，失败即放弃本次插入（盐只存在内存，无残留）
@@ -132,7 +138,9 @@ bool ServerStore::create_account(const std::string& account,
   sqlite3_bind_text(st, 2, display_name.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 3, salt.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 4, digest.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_int64(st, 5, now_ms());
+  sqlite3_bind_text(st, 5, (role == "admin") ? "admin" : "member", -1,
+                    SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 6, now_ms());
   const bool ok = sqlite3_step(st) == SQLITE_DONE;
   sqlite3_finalize(st);
   return ok; // 唯一键冲突（账号已存在）→ DONE 之外 → false
@@ -140,7 +148,8 @@ bool ServerStore::create_account(const std::string& account,
 
 std::optional<AccountRow> ServerStore::find_account(const std::string& account) {
   const char* sql =
-      "SELECT account, display_name, salt, digest FROM accounts WHERE account = ?;";
+      "SELECT account, display_name, salt, digest, role FROM accounts"
+      " WHERE account = ?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return std::nullopt;
   sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
@@ -151,10 +160,27 @@ std::optional<AccountRow> ServerStore::find_account(const std::string& account) 
     r.display_name = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
     r.salt_hex = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
     r.digest_hex = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    r.role = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
     row = r;
   }
   sqlite3_finalize(st);
   return row;
+}
+
+std::vector<std::pair<std::string, std::string>> ServerStore::account_list() {
+  std::vector<std::pair<std::string, std::string>> out;
+  const char* sql =
+      "SELECT account, display_name || '（' || role || '）' FROM accounts"
+      " ORDER BY account;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    out.emplace_back(
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 0)),
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 1)));
+  }
+  sqlite3_finalize(st);
+  return out;
 }
 
 bool ServerStore::add_login_record(const LoginRecord& rec) {
@@ -534,7 +560,7 @@ std::optional<MemberProfile> ServerStore::member_profile(
     const std::string& account) {
   const char* sql =
       "SELECT p.title, p.manager, p.department_id,"
-      " a.display_name FROM member_profiles p"
+      " a.display_name, a.role FROM member_profiles p"
       " JOIN accounts a ON a.account = p.account WHERE p.account = ?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
@@ -551,7 +577,37 @@ std::optional<MemberProfile> ServerStore::member_profile(
       m.department_path = department_path(sqlite3_column_int(st, 2));
     }
     m.display_name = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    m.role = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
     out = m;
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<MemberProfile> ServerStore::member_list() {
+  std::vector<MemberProfile> out;
+  const char* sql =
+      "SELECT a.account, a.display_name, a.role, p.title, p.manager,"
+      " p.department_id FROM accounts a"
+      " LEFT JOIN member_profiles p ON p.account = a.account"
+      " ORDER BY a.account;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    MemberProfile m;
+    m.account = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    m.display_name = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    m.role = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    if (sqlite3_column_type(st, 3) != SQLITE_NULL) {
+      m.title = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    }
+    if (sqlite3_column_type(st, 4) != SQLITE_NULL) {
+      m.manager = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    }
+    if (sqlite3_column_type(st, 5) != SQLITE_NULL) {
+      m.department_path = department_path(sqlite3_column_int(st, 5));
+    }
+    out.push_back(std::move(m));
   }
   sqlite3_finalize(st);
   return out;

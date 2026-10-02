@@ -8,6 +8,8 @@
 
 #include <algorithm>
 
+#include <nlohmann/json.hpp>
+
 #include <memex/protocol/messages.hpp>
 #include <core/local_store.hpp>
 
@@ -200,6 +202,19 @@ void CollabEngine::recall_text(const QString& to, const QString& msg_id) {
   send_frame(m);
 }
 
+void CollabEngine::query_org() {
+  if (!logged_in_) {
+    qWarning() << "[协作] 未登录，组织架构不可查";
+    return;
+  }
+  Message m;
+  m.set_type(MsgType::ORG_QUERY);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  send_frame(m);
+}
+
 void CollabEngine::send_frame(const Message& msg) {
   const std::string frame = memex::protocol::encode(msg);
   socket_->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
@@ -289,7 +304,27 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
       store_->mark_recalled(target);
     }
     emit message_recalled(QString::fromStdString(msg.from()),
-                           QString::fromStdString(target));
+                          QString::fromStdString(target));
+    break;
+  }
+  case MsgType::ORG_DATA: {
+    // 组织架构下发 → JSON 交给界面层（T3.1：管理端维护，客户端生效展示）
+    if (!msg.has_org_data()) return;
+    nlohmann::json j;
+    j["departments"] = nlohmann::json::array();
+    for (const auto& d : msg.org_data().departments()) {
+      j["departments"].push_back({{"path", d.path()}});
+    }
+    j["members"] = nlohmann::json::array();
+    for (const auto& m : msg.org_data().members()) {
+      j["members"].push_back({{"account", m.account()},
+                              {"display_name", m.display_name()},
+                              {"title", m.title()},
+                              {"department_path", m.department_path()},
+                              {"manager", m.manager()},
+                              {"role", m.role()}});
+    }
+    emit org_received(QString::fromStdString(j.dump()));
     break;
   }
   default:

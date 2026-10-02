@@ -21,6 +21,8 @@ enum MsgType {
   LOGIN_RESULT = 31; // 服务端 → 终端：登录结果（成功／失败原因）
   KICK = 32;         // 服务端 → 终端：单点在线互踢，收到即下线并提示
   LOGOUT = 33;       // 终端 → 服务端：主动登出（随后由终端断开连接）
+  ORG_QUERY = 34;    // 终端 → 服务端：请求组织架构（部门树＋成员资料，T3.1）
+  ORG_DATA = 35;     // 服务端 → 终端：组织架构数据（登录后可查）
 }
 
 message Hello {
@@ -84,6 +86,25 @@ message Kick {
 
 message Logout {}
 
+// 组织架构（T3.1）：部门树（全路径表达）＋成员资料（直属上级、部门、职务、角色）。
+message OrgDepartment {
+  string path = 1; // 部门全路径（"公司/研发部/客户端组"）
+}
+
+message OrgMember {
+  string account = 1;         // 账号
+  string display_name = 2;    // 展示名
+  string title = 3;           // 职务
+  string department_path = 4; // 部门全路径（空=未分配）
+  string manager = 5;         // 直属上级账号（空=无；每人至多一名）
+  string role = 6;            // 角色（admin／member）
+}
+
+message OrgData {
+  repeated OrgDepartment departments = 1;
+  repeated OrgMember members = 2;
+}
+
 // 信封：所有帧的载荷体。oneof 字段号 = 100 + 对应类型编号，便于读码对账。
 message Envelope {
   MsgType type = 1;
@@ -105,5 +126,6 @@ message Envelope {
     LoginResult login_result = 131;
     Kick kick = 132;
     Logout logout = 133;
+    OrgData org_data = 135;
   }
 }

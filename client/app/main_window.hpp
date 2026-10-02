@@ -34,6 +34,9 @@ public:
   void open_collab_peer(const QString& account);
   // 按当前会话形态路由发送；true=已受理（回执异步）。
   bool send_in_current_chat(const QString& text);
+  // 请求组织架构（登录后；结果缓存于 org_json，界面弹窗与验收共用）
+  void request_org();
+  QString org_json() const;
 
   // 状态断言面（验收测试）
   bool collab_logged_in() const;
@@ -56,11 +59,15 @@ private:
   void update_banner();          // 按当前形态切换归档提示条
   void seed_collab_peers();      // 登录后从本地库补入历史协作会话
   void show_collab_login_dialog();
+  void show_org_dialog();        // 菜单入口：查询＋组织架构弹窗（T3.1）
+  void build_org_tree(const QString& org_json); // 弹窗内构建部门/成员树
 
   QString current_peer_;      // 当前会话对端（设备标识或协作账号）
   QString current_kind_{QStringLiteral("direct")}; // 会话形态：direct／collab
   QSet<QString> collab_peers_; // 协作会话列表（登录后与本地库历史并集）
   bool collab_was_logged_in_{false}; // 上一轮登录态（降级提示去抖）
+  QString last_org_json_;     // 最近一次组织架构数据（T3.1）
+  bool org_dialog_pending_{false}; // 已请求组织架构、等待弹窗
   QMap<QString, quint64> file_sent_; // 文件名 → 最近一次进度字节（节流）
   bool chat_showing_guidance_{false}; // 聊天区当前是否为引导态
   QString status_hint_;               // 状态栏事件提示（引擎态前缀实时拼）

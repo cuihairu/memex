@@ -13,7 +13,12 @@
 #include <QScrollBar>
 #include <QSettings>
 #include <QStatusBar>
+#include <QTreeWidget>
 #include <QVBoxLayout>
+
+#include <map>
+
+#include <nlohmann/json.hpp>
 
 #include <core/local_store.hpp>
 
@@ -84,10 +89,12 @@ void MainWindow::build_ui() {
   // —— 菜单：协作态登录／登出（不重启切换形态，T2.4）——
   auto* collab_menu = menuBar()->addMenu(QStringLiteral("协作"));
   auto* act_login = collab_menu->addAction(QStringLiteral("登录协作态…"));
+  auto* act_org = collab_menu->addAction(QStringLiteral("组织架构…"));
   act_collab_logout_ = collab_menu->addAction(QStringLiteral("登出（回到直连态）"));
   act_collab_logout_->setEnabled(false);
   connect(act_login, &QAction::triggered, this,
           &MainWindow::show_collab_login_dialog);
+  connect(act_org, &QAction::triggered, this, &MainWindow::show_org_dialog);
   connect(act_collab_logout_, &QAction::triggered, this,
           &MainWindow::logout_collab);
 
@@ -358,6 +365,16 @@ void MainWindow::wire_collab() {
             show_status(ok ? QStringLiteral("协作消息已送达（seq %1）").arg(seq)
                            : QStringLiteral("协作消息送达超时（seq %1）").arg(seq));
           });
+  connect(&collab_engine_, &CollabEngine::org_received, this,
+          [this](const QString& org_json) {
+            last_org_json_ = org_json;
+            if (org_dialog_pending_) {
+              org_dialog_pending_ = false;
+              build_org_tree(org_json);
+            } else {
+              show_status(QStringLiteral("组织架构已更新"));
+            }
+          });
 }
 
 // —— T2.4 模式切换公共入口 ——
@@ -413,6 +430,101 @@ bool MainWindow::send_in_current_chat(const QString& text) {
 
 bool MainWindow::collab_logged_in() const {
   return collab_engine_.is_logged_in();
+}
+
+// —— T3.1 组织架构：登录后向服务端查询，管理端维护即生效到客户端 ——
+
+void MainWindow::request_org() {
+  if (collab_engine_.is_logged_in()) collab_engine_.query_org();
+}
+
+QString MainWindow::org_json() const { return last_org_json_; }
+
+void MainWindow::show_org_dialog() {
+  if (!collab_engine_.is_logged_in()) {
+    show_status(QStringLiteral("组织架构需登录协作态后查看"));
+    return;
+  }
+  org_dialog_pending_ = true;
+  collab_engine_.query_org();
+}
+
+// 组织架构弹窗：部门树（全路径逐级成树）＋成员挂部门（含直属上级、职务、角色）
+void MainWindow::build_org_tree(const QString& org_json) {
+  nlohmann::json j = nlohmann::json::parse(org_json.toStdString(),
+                                           nullptr, false);
+  if (j.is_discarded()) {
+    show_status(QStringLiteral("组织架构数据解析失败"));
+    return;
+  }
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("组织架构（服务端下发）"));
+  dlg.resize(560, 620);
+  auto* layout = new QVBoxLayout(&dlg);
+  auto* tree = new QTreeWidget(&dlg);
+  tree->setHeaderLabels({QStringLiteral("部门 / 成员"), QStringLiteral("职务"),
+                         QStringLiteral("直属上级")});
+  tree->setColumnWidth(0, 280);
+  layout->addWidget(tree);
+
+  // 部门：全路径逐级挂树（"公司/研发部/客户端组"）
+  std::map<QString, QTreeWidgetItem*> nodes;
+  auto* unassigned = new QTreeWidgetItem(tree);
+  unassigned->setText(0, QStringLiteral("（未分配部门）"));
+  if (j.contains("departments")) {
+    for (const auto& d : j["departments"]) {
+      const QString path =
+          QString::fromStdString(d.value("path", std::string{}));
+      if (path.isEmpty() || nodes.count(path)) continue;
+      const QStringList segs = path.split(QChar('/'));
+      QTreeWidgetItem* parent = nullptr;
+      QString prefix;
+      for (const QString& seg : segs) {
+        prefix = prefix.isEmpty() ? seg : prefix + QChar('/') + seg;
+        auto it = nodes.find(prefix);
+        if (it == nodes.end()) {
+          auto* item =
+              new QTreeWidgetItem(parent ? parent : tree->invisibleRootItem());
+          item->setText(0, seg);
+          it = nodes.emplace(prefix, item).first;
+        }
+        parent = it->second;
+      }
+    }
+  }
+  // 成员挂部门节点；显示名（账号）＋管理员标记
+  if (j.contains("members")) {
+    for (const auto& m : j["members"]) {
+      const QString dept =
+          QString::fromStdString(m.value("department_path", std::string{}));
+      const QString account =
+          QString::fromStdString(m.value("account", std::string{}));
+      const QString name =
+          QString::fromStdString(m.value("display_name", std::string{}));
+      const QString title =
+          QString::fromStdString(m.value("title", std::string{}));
+      const QString manager =
+          QString::fromStdString(m.value("manager", std::string{}));
+      const QString role =
+          QString::fromStdString(m.value("role", std::string{}));
+      auto it = nodes.find(dept);
+      QTreeWidgetItem* parent =
+          it != nodes.end() ? it->second : unassigned;
+      auto* item = new QTreeWidgetItem(parent);
+      item->setText(0, QStringLiteral("%1（%2）%3")
+                            .arg(name, account,
+                                 role == QStringLiteral("admin")
+                                     ? QStringLiteral("·管理员")
+                                     : QString{}));
+      item->setText(1, title);
+      item->setText(2, manager);
+    }
+  }
+  tree->expandAll();
+  auto* close = new QPushButton(QStringLiteral("关闭"), &dlg);
+  connect(close, &QPushButton::clicked, &dlg, &QDialog::accept);
+  layout->addWidget(close);
+  dlg.exec();
 }
 
 QString MainWindow::banner_text() const { return banner_->text(); }

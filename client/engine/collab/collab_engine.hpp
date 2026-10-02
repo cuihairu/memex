@@ -48,6 +48,8 @@ public slots:
   quint64 send_text(const QString& to, const QString& text);
   // 撤回一条协作态消息（服务端校验权限后全网标记，原文留痕不清）。
   void recall_text(const QString& to, const QString& msg_id);
+  // 请求组织架构（部门树＋成员资料，T3.1）；结果经 org_received 送达。
+  void query_org();
 
 signals:
   void logged_in(const QString& account, const QString& display_name);
@@ -64,6 +66,10 @@ signals:
   void text_delivered(quint64 seq, bool ok);
   // 一条协作消息被撤回（本地与对端副本都置标记，原文保留）。
   void message_recalled(const QString& from, const QString& msg_id);
+  // 组织架构数据（T3.1）：JSON——
+  // {"departments":[{"path":"公司/研发部"}],
+  //  "members":[{"account","display_name","title","department_path","manager","role"}]}
+  void org_received(const QString& org_json);
 
 private:
   // 在途／待补传消息（T2.5）：断线中断期本地暂存，恢复后按原 seq 补传，

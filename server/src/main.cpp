@@ -65,27 +65,48 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
 }
 
 int cmd_account(int argc, char** argv, const std::string& db_path) {
-  // account add <账号> <口令> [--name 显示名]
+  // account add <账号> <口令> [--name 显示名] [--role admin|member]
+  // account list：成员维护面（账号／展示名／角色）
+  if (argc >= 1 && std::string_view(argv[0]) == "list") {
+    memex::server::ServerStore store;
+    if (!store.open(db_path)) {
+      std::cerr << "本地库打开失败：" << db_path << "\n";
+      return 1;
+    }
+    std::cout << "账号\t展示名（角色）\n";
+    for (const auto& [acct, label] : store.account_list()) {
+      std::cout << acct << '\t' << label << '\n';
+    }
+    return 0;
+  }
   if (argc < 3 || std::string_view(argv[0]) != "add") {
-    std::cerr << "用法：memex_server account add <账号> <口令> [--name 显示名] [--db <库>]\n";
+    std::cerr << "用法：memex_server account add <账号> <口令> [--name 显示名] "
+                 "[--role admin|member] | account list [--db <库>]\n";
     return 2;
   }
   const std::string account = argv[1];
   const std::string password = argv[2];
   std::string display_name = account;
+  std::string role = "member";
   for (int i = 3; i + 1 < argc; ++i) {
-    if (std::string_view(argv[i]) == "--name") display_name = argv[++i];
+    const std::string_view opt = argv[i];
+    if (opt == "--name") {
+      display_name = argv[++i];
+    } else if (opt == "--role") {
+      role = argv[++i];
+    }
   }
   memex::server::ServerStore store;
   if (!store.open(db_path)) {
     std::cerr << "本地库打开失败：" << db_path << "\n";
     return 1;
   }
-  if (!store.create_account(account, password, display_name)) {
+  if (!store.create_account(account, password, display_name, role)) {
     std::cerr << "建号失败（账号已存在或写库失败）：" << account << "\n";
     return 1;
   }
-  std::cout << "已建号：" << account << "（" << display_name << "）\n";
+  std::cout << "已建号：" << account << "（" << display_name << "，" << role
+            << "）\n";
   return 0;
 }
 
@@ -188,8 +209,20 @@ int cmd_org(int argc, char** argv, const std::string& db_path) {
     return 2;
   }
 
-  if (sub == "member") {
-    if (argc < 2) {
+  if (sub == "list") {
+    // 全员一览（账号、展示名、部门、职务、直属上级、角色）
+    std::cout << "账号\t展示名\t部门\t职务\t直属上级\t角色\n";
+    for (const auto& m : store.member_list()) {
+      std::cout << m.account << '\t' << m.display_name << '\t'
+                << (m.department_path.empty() ? "（未分配）" : m.department_path)
+                << '\t' << (m.title.empty() ? "（无）" : m.title) << '\t'
+                << (m.manager.empty() ? "（无）" : m.manager) << '\t'
+                << (m.role.empty() ? "member" : m.role) << '\n';
+    }
+    return 0;
+  }
+
+  if (sub == "member") {    if (argc < 2) {
       std::cerr << "用法：org member <账号>\n";
       return 2;
     }

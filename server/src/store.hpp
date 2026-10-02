@@ -16,6 +16,7 @@ struct AccountRow {
   std::string display_name;
   std::string salt_hex;
   std::string digest_hex;
+  std::string role; // admin／member（权限分级，T3.1）
 };
 
 struct LoginRecord {
@@ -49,6 +50,7 @@ struct MemberProfile {
   std::string department_path; // 全路径（"公司/研发部/客户端组"），空=未分配
   std::string title;           // 职务
   std::string manager;         // 直属上级账号（空=无）
+  std::string role;            // admin／member（T3.1 角色分级）
 };
 
 // 批量导入行（CSV 解析后）与结果（错误行校验拒绝并报告行号）
@@ -79,10 +81,15 @@ public:
   bool is_open() const { return db_ != nullptr; }
 
   // 建账号：成功 true；账号已存在 false（幂等拒绝，不覆盖）。
+  // role：admin／member（默认 member）。
   bool create_account(const std::string& account, const std::string& password,
-                      const std::string& display_name);
+                      const std::string& display_name,
+                      const std::string& role = "member");
 
   std::optional<AccountRow> find_account(const std::string& account);
+
+  // 全部账号（账号、展示名、角色）——管理后台成员维护面（T3.1）
+  std::vector<std::pair<std::string, std::string>> account_list();
 
   // 登录记录：成功失败都记（result 区分）；全量可查（按账号过滤，空=全部）。
   bool add_login_record(const LoginRecord& rec);
@@ -132,6 +139,9 @@ public:
                           const std::string& manager);
   // 成员详情（含部门全路径与直属上级）；未建档返回 nullopt
   std::optional<MemberProfile> member_profile(const std::string& account);
+  // 全部成员（账号全量 LEFT JOIN 资料；未建档成员部门/职务为空）——
+  // 组织架构下发表（T3.1 ORG_DATA 数据源）
+  std::vector<MemberProfile> member_list();
   // 直属上级链路逐级上溯（不含本人，最近上级在前）；含环防御，遇环即止
   std::vector<std::string> manager_chain(const std::string& account);
 

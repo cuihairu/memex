@@ -116,6 +116,31 @@ void Session::handle_message(const memex::protocol::Message& msg) {
   case v1::LOGOUT:
     if (logged_in_) handle_logout();
     break;
+  case v1::ORG_QUERY: {
+    // 组织架构下发（T3.1）：登录后可查——部门树＋成员资料（含直属上级与角色）
+    if (!logged_in_) break;
+    memex::protocol::Message out;
+    out.set_type(v1::ORG_DATA);
+    out.set_from("server");
+    out.set_to(account_);
+    out.set_ts_ms(now_ms());
+    auto* data = out.mutable_org_data();
+    for (const auto& [id, path] : server_.store().department_list()) {
+      (void)id;
+      data->add_departments()->set_path(path);
+    }
+    for (const auto& m : server_.store().member_list()) {
+      auto* om = data->add_members();
+      om->set_account(m.account);
+      om->set_display_name(m.display_name);
+      om->set_title(m.title);
+      om->set_department_path(m.department_path);
+      om->set_manager(m.manager);
+      om->set_role(m.role);
+    }
+    send(memex::protocol::encode(out));
+    break;
+  }
   case v1::TEXT: {
     // 协作态消息路由：先入离线队列（至少一次投递），在线即投；
     // 接收方 ACK(msg_id) 清队列，未 ACK 的下次登录重投（接收端按 msg_id 去重）。

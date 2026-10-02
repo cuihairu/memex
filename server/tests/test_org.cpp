@@ -1,13 +1,24 @@
 // T2.6 组织架构验收：部门树、成员资料（直属上级独立字段，每人至多一名）、
 // 上级链路逐级上溯、批量导入 CSV（错误行校验拒绝并报告行号）。
-// 库级（ServerStore 直测）＋进程级（CLI org 子命令真跑）双层。
+// T3.1 管理后台骨架：角色分级（admin／member）＋组织架构经协议下发（ORG_QUERY→ORG_DATA）。
+// 库级（ServerStore 直测）＋进程级（CLI org 子命令真跑）＋协议级（真实连接）三层。
+#include <asio.hpp>
+
+#include <array>
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include <memex/protocol/messages.hpp>
+
+#include "cred.hpp"
+#include "server.hpp"
 #include "store.hpp"
 
 #ifndef MEMEX_SERVER_BIN
@@ -38,6 +49,46 @@ std::string run_cli(const std::string& args, int* exit_code = nullptr) {
   ss << f.rdbuf();
   return ss.str();
 }
+
+std::int64_t now_ms() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
+// 阻塞式协议客户端（与 test_archive 同款）
+class TestClient {
+public:
+  TestClient(asio::io_context& io, std::uint16_t port) {
+    socket_ = std::make_unique<asio::ip::tcp::socket>(io);
+    socket_->connect(asio::ip::tcp::endpoint(
+        asio::ip::make_address("127.0.0.1"), port));
+  }
+  ~TestClient() {
+    if (socket_) {
+      std::error_code ignore;
+      socket_->close(ignore);
+    }
+  }
+  void send(const memex::protocol::Message& msg) {
+    const std::string frame = memex::protocol::encode(msg);
+    asio::write(*socket_, asio::buffer(frame));
+  }
+  memex::protocol::Message read() {
+    std::array<char, 4> head{};
+    asio::read(*socket_, asio::buffer(head));
+    const std::uint32_t len = (std::uint8_t(head[0]) << 24) |
+                              (std::uint8_t(head[1]) << 16) |
+                              (std::uint8_t(head[2]) << 8) |
+                              std::uint8_t(head[3]);
+    std::string payload(len, '\0');
+    asio::read(*socket_, asio::buffer(payload));
+    return memex::protocol::decode_payload(payload);
+  }
+
+private:
+  std::unique_ptr<asio::ip::tcp::socket> socket_;
+};
 
 } // namespace
 
@@ -172,6 +223,62 @@ int main() {
   const std::string dept_out = run_cli("org dept list --db " + db);
   CHECK(dept_out.find("公司") != std::string::npos);
   CHECK(dept_out.find("公司/研发部/客户端组") != std::string::npos);
+
+  // —— T3.1 角色分级（admin）＋协议级组织架构下发（登录后可查）——
+  CHECK(run_cli("account add root pw --role admin --db " + db)
+            .find("admin") != std::string::npos);
+  {
+    memex::server::ServerStore srv_store;
+    CHECK(srv_store.open(db));
+    asio::io_context io;
+    memex::server::CollabServer server(io, srv_store, 0);
+    server.start_accept();
+    std::thread io_thread([&] { io.run(); });
+
+    TestClient c(io, server.port());
+    memex::protocol::Message login;
+    login.set_type(memex::protocol::v1::LOGIN);
+    login.set_from("pc-a");
+    login.set_to("server");
+    login.set_ts_ms(now_ms());
+    auto* in = login.mutable_login();
+    in->set_account("alice");
+    in->set_password("pw");
+    in->set_device_fingerprint(memex::server::sha256_hex("pc-a"));
+    in->set_device_kind("desktop");
+    in->set_device_name("pc-a");
+    in->set_client_version("0.1.0-test");
+    c.send(login);
+    CHECK(c.read().login_result().ok());
+
+    memex::protocol::Message q;
+    q.set_type(memex::protocol::v1::ORG_QUERY);
+    q.set_from("alice");
+    q.set_to("server");
+    q.set_ts_ms(now_ms());
+    c.send(q);
+    const auto data = c.read();
+    CHECK(data.type() == memex::protocol::v1::ORG_DATA);
+    CHECK(data.has_org_data());
+    bool has_dept = false, has_dave = false, has_admin = false;
+    const auto& od = data.org_data();
+    for (const auto& d : od.departments()) {
+      if (d.path() == "公司/研发部/客户端组") has_dept = true;
+    }
+    for (const auto& m : od.members()) {
+      if (m.account() == "dave") {
+        has_dave = m.manager() == "carol" &&
+                   m.department_path() == "公司/研发部/客户端组";
+      }
+      if (m.account() == "root" && m.role() == "admin") has_admin = true;
+    }
+    CHECK(has_dept);   // 部门树下发
+    CHECK(has_dave);   // 成员资料（直属上级）下发
+    CHECK(has_admin);  // 角色分级可见
+
+    io.stop();
+    io_thread.join();
+  }
 
   if (g_failures == 0) {
     std::cout << "org tests: all passed\n";
