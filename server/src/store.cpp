@@ -5,6 +5,7 @@
 #include <sqlite3.h>
 
 #include <chrono>
+#include <set>
 
 namespace memex::server {
 
@@ -85,7 +86,22 @@ bool ServerStore::ensure_schema() {
       "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
       "  msg_id TEXT NOT NULL,"
       "  by_account TEXT NOT NULL,"
-      "  ts_ms INTEGER NOT NULL);";
+      "  ts_ms INTEGER NOT NULL);"
+      // T2.6 组织架构：部门树（parent_id 成树）＋成员资料
+      //（直属上级为独立单列——每人至多一名，结构性约束）
+      "CREATE TABLE IF NOT EXISTS departments ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  name TEXT NOT NULL,"
+      "  parent_id INTEGER,"
+      "  created_ms INTEGER NOT NULL);"
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_departments_parent_name"
+      "  ON departments(parent_id, name);"
+      "CREATE TABLE IF NOT EXISTS member_profiles ("
+      "  account TEXT PRIMARY KEY,"
+      "  department_id INTEGER,"
+      "  title TEXT NOT NULL DEFAULT '',"
+      "  manager TEXT NOT NULL DEFAULT '',"
+      "  updated_ms INTEGER NOT NULL);";
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -380,6 +396,215 @@ std::size_t ServerStore::recall_event_count(const std::string& msg_id) {
   }
   sqlite3_finalize(st);
   return n;
+}
+
+// —— T2.6 组织架构 ——
+
+// 部门路径逐级创建："公司/研发部/客户端组" → 三级，已存在即复用
+int ServerStore::ensure_department_path(const std::string& path) {
+  if (path.empty()) return -1;
+  int parent_id = -1;
+  std::size_t start = 0;
+  while (start <= path.size()) {
+    const std::size_t slash = path.find('/', start);
+    const std::string seg =
+        path.substr(start, slash == std::string::npos ? std::string::npos
+                                                      : slash - start);
+    if (seg.empty()) return -1; // 连续斜杠／尾斜杠等非法路径
+    sqlite3_stmt* st = nullptr;
+    const char* sql = "SELECT id FROM departments WHERE name = ? AND"
+                      " ((parent_id IS NULL AND ? = -1) OR parent_id = ?);";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return -1;
+    sqlite3_bind_text(st, 1, seg.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 2, parent_id);
+    sqlite3_bind_int(st, 3, parent_id);
+    int id = -1;
+    if (sqlite3_step(st) == SQLITE_ROW) id = sqlite3_column_int(st, 0);
+    sqlite3_finalize(st);
+    if (id < 0) {
+      const char* ins =
+          "INSERT INTO departments(name, parent_id, created_ms)"
+          " VALUES(?, ?, ?);";
+      if (sqlite3_prepare_v2(db_, ins, -1, &st, nullptr) != SQLITE_OK) {
+        return -1;
+      }
+      sqlite3_bind_text(st, 1, seg.c_str(), -1, SQLITE_TRANSIENT);
+      if (parent_id < 0) {
+        sqlite3_bind_null(st, 2);
+      } else {
+        sqlite3_bind_int(st, 2, parent_id);
+      }
+      sqlite3_bind_int64(st, 3, now_ms());
+      if (sqlite3_step(st) != SQLITE_DONE) {
+        sqlite3_finalize(st);
+        return -1;
+      }
+      sqlite3_finalize(st);
+      id = static_cast<int>(sqlite3_last_insert_rowid(db_));
+    }
+    parent_id = id;
+    if (slash == std::string::npos) break;
+    start = slash + 1;
+  }
+  return parent_id;
+}
+
+std::vector<std::pair<int, std::string>> ServerStore::department_list() {
+  std::vector<std::pair<int, std::string>> out;
+  // 自底向上拼全路径（递归 CTE；SQLite ≥3.8.3）
+  const char* sql =
+      "WITH RECURSIVE tree(id, name, path) AS ("
+      " SELECT id, name, name FROM departments WHERE parent_id IS NULL"
+      " UNION ALL"
+      " SELECT d.id, d.name, tree.path || '/' || d.name"
+      "  FROM departments d JOIN tree ON d.parent_id = tree.id)"
+      " SELECT id, path FROM tree ORDER BY path;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    out.emplace_back(sqlite3_column_int(st, 0),
+                     reinterpret_cast<const char*>(sqlite3_column_text(st, 1)));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::string ServerStore::department_path(int id) {
+  sqlite3_stmt* st = nullptr;
+  const char* sql = "SELECT path FROM ("
+                    "WITH RECURSIVE tree(id, name, path) AS ("
+                    " SELECT id, name, name FROM departments WHERE parent_id IS NULL"
+                    " UNION ALL"
+                    " SELECT d.id, d.name, tree.path || '/' || d.name"
+                    "  FROM departments d JOIN tree ON d.parent_id = tree.id)"
+                    " SELECT id, path FROM tree) WHERE id = ?;";
+  std::string out;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int(st, 1, id);
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    out = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::set_member_profile(const std::string& account,
+                                     int department_id, const std::string& title,
+                                     const std::string& manager) {
+  if (!find_account(account)) return false;           // 账号不存在
+  if (manager == account) return false;               // 不得自为上级
+  if (!manager.empty() && !find_account(manager)) {
+    return false;                                     // 上级账号不存在
+  }
+  if (!manager.empty()) {
+    // 环校验：从拟设上级沿现有链路上溯，若回到本人则构成环
+    std::string cur = manager;
+    std::set<std::string> seen;
+    while (!cur.empty() && cur != account) {
+      if (!seen.insert(cur).second) break; // 既有环防御，止步
+      const auto p = member_profile(cur);
+      if (!p) break;
+      if (p->manager == account) return false; // 链路回到本人：环
+      cur = p->manager;
+    }
+  }
+  const char* sql =
+      "INSERT INTO member_profiles(account, department_id, title, manager,"
+      " updated_ms) VALUES(?, ?, ?, ?, ?)"
+      " ON CONFLICT(account) DO UPDATE SET department_id = excluded.department_id,"
+      " title = excluded.title, manager = excluded.manager,"
+      " updated_ms = excluded.updated_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  if (department_id < 0) {
+    sqlite3_bind_null(st, 2);
+  } else {
+    sqlite3_bind_int(st, 2, department_id);
+  }
+  sqlite3_bind_text(st, 3, title.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, manager.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, now_ms());
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::optional<MemberProfile> ServerStore::member_profile(
+    const std::string& account) {
+  const char* sql =
+      "SELECT p.title, p.manager, p.department_id,"
+      " a.display_name FROM member_profiles p"
+      " JOIN accounts a ON a.account = p.account WHERE p.account = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<MemberProfile> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    MemberProfile m;
+    m.account = account;
+    m.title = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    m.manager = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    if (sqlite3_column_type(st, 2) != SQLITE_NULL) {
+      m.department_path = department_path(sqlite3_column_int(st, 2));
+    }
+    m.display_name = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    out = m;
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<std::string> ServerStore::manager_chain(
+    const std::string& account) {
+  std::vector<std::string> chain;
+  std::set<std::string> seen{account};
+  std::string cur = account;
+  while (true) {
+    const auto p = member_profile(cur);
+    if (!p || p->manager.empty()) break;
+    if (!seen.insert(p->manager).second) break; // 环防御
+    chain.push_back(p->manager);
+    cur = p->manager;
+  }
+  return chain;
+}
+
+OrgImportResult ServerStore::import_members(
+    const std::vector<OrgImportRow>& rows) {
+  OrgImportResult result;
+  sqlite3_exec(db_, "BEGIN;", nullptr, nullptr, nullptr);
+  for (const OrgImportRow& r : rows) {
+    sqlite3_exec(db_, "SAVEPOINT imp;", nullptr, nullptr, nullptr);
+    int dept_id = -1;
+    std::string error;
+    if (!find_account(r.account)) {
+      error = "账号不存在";
+    } else if (r.manager == r.account) {
+      error = "不得自为直属上级";
+    } else if (!r.manager.empty() && !find_account(r.manager)) {
+      error = "直属上级账号不存在";
+    } else if (!r.dept.empty() && (dept_id = ensure_department_path(r.dept)) < 0) {
+      error = "部门路径非法";
+    }
+    if (error.empty() && !set_member_profile(r.account, dept_id, r.title,
+                                             r.manager)) {
+      error = "构成汇报环或写入失败";
+    }
+    if (error.empty()) {
+      sqlite3_exec(db_, "RELEASE imp;", nullptr, nullptr, nullptr);
+      ++result.imported;
+    } else {
+      sqlite3_exec(db_, "ROLLBACK TO imp;", nullptr, nullptr, nullptr);
+      sqlite3_exec(db_, "RELEASE imp;", nullptr, nullptr, nullptr);
+      result.errors.push_back("第 " + std::to_string(r.line_no) + " 行（" +
+                              r.account + "）被拒绝：" + error);
+    }
+  }
+  sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr);
+  return result;
 }
 
 } // namespace memex::server

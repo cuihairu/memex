@@ -42,5 +42,13 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_archive tests/test_archive.cpp)
   target_link_libraries(test_archive PRIVATE memex_server_core)
   add_test(NAME archive COMMAND test_archive)
+
+  # T2.6 组织架构验收：部门树、成员资料（直属上级独立字段）、
+  # 上级链路逐级上溯、CSV 批量导入错误行校验拒绝（库级＋CLI 进程级）
+  add_executable(test_org tests/test_org.cpp)
+  target_link_libraries(test_org PRIVATE memex_server_core)
+  target_compile_definitions(test_org PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME org COMMAND test_org)
   set_tests_properties(archive PROPERTIES TIMEOUT 60)
 endif()
