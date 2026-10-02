@@ -40,10 +40,19 @@ for sub in platforms sqldrivers imageformats styles iconengines; do
   fi
 done
 
+# Qt 运行库所在目录（vcpkg_installed/<triplet>/lib，与插件目录同树推导）：
+# 收集阶段的 ldd 解析链必须带上它。插件自身的 RUNPATH（$ORIGIN/../../../lib）
+# 按 Qt 上游安装布局算，在本包布局下指向包外——不带 vcpkg 树则 libQt6XcbQpa
+# 等"主二进制不直接链接"的 Qt 库会落到系统缓存（混入异构 Qt，启动即崩）。
+VCPKG_LIB="$QT_PLUGINS_DIR/../../lib"   # <root>/vcpkg_installed/<triplet>/lib
+[ -d "$VCPKG_LIB" ] || VCPKG_LIB=""
+
 # 递归收集动态依赖；Qt 插件由 dlopen 加载，其依赖树必须一并随包，
-# 否则目标机上 xcb 等平台插件起不来。解析时把包内 lib/ 前置到
-# LD_LIBRARY_PATH——插件副本无 RPATH，不加则 ldd 会命中系统 Qt 并覆盖
-# 随包版本（版本错位即崩）。glibc 核心运行时不随包（目标机必备，随包反而冲突）。
+# 否则目标机上 xcb 等平台插件起不来。解析时把包内 lib/ 与 vcpkg 安装树
+# 前置到 LD_LIBRARY_PATH——只留包内 lib/ 不够：处理插件时其 Qt 依赖尚未
+# 全部入包，会命中系统 Qt 并覆盖随包版本（版本错位即崩）。
+# glibc 核心运行时不随包（目标机必备，随包反而冲突）。
+RESOLVE_PATH="$PKG/lib${VCPKG_LIB:+:$VCPKG_LIB}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 declare -A visited=()
 queue=("$BIN")
 for plug in "$PKG"/plugins/*/*.so; do
@@ -63,9 +72,9 @@ while [ ${#queue[@]} -gt 0 ]; do
     cp -L "$dep" "$PKG/lib/"
     while read -r d2; do
       [ -n "${visited[$d2]:-}" ] || queue+=("$d2")
-    done < <(LD_LIBRARY_PATH="$PKG/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    done < <(LD_LIBRARY_PATH="$RESOLVE_PATH" \
              ldd "$dep" 2>/dev/null | awk '$3 ~ /^\// {print $3}')
-  done < <(LD_LIBRARY_PATH="$PKG/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  done < <(LD_LIBRARY_PATH="$RESOLVE_PATH" \
            ldd "$cur" 2>/dev/null | awk '$3 ~ /^\// {print $3}')
 done
 
