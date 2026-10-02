@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 跨态会话与撤回语义</title>
+<link rel="stylesheet" href="prototypes.css">
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <img class="logo" src="../../public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span class="state-badge collab"><i class="dot"></i>协作态</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-full"></span></div>
+  </div>
+
+  <div class="app-body">
+    <aside class="sidebar" style="width:232px">
+      <div class="side-head">
+        <span class="side-title" style="font-size:14px">跨态会话示例</span>
+        <div style="font-size:11.5px;color:var(--text-2);margin-top:6px;line-height:1.7">与未登录同事的会话：点对点直达，界面固定标注，<b style="color:var(--warn)">标识不可关闭</b>。</div>
+      </div>
+      <div class="side-list">
+        <div class="row active">
+          <div class="avatar v6">王<i class="presence off"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">王芳</span></div>
+            <div class="r-sub">14:02 起已登录，转入归档</div>
+          </div>
+          <div class="r-badges"><span class="noarch">未归档</span></div>
+        </div>
+        <div class="row">
+          <div class="avatar v9">访<i class="presence on"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">临时访客-0471</span></div>
+            <div class="r-sub">纯直连 · 双方本机保存</div>
+          </div>
+          <div class="r-badges"><span class="noarch">未归档</span></div>
+        </div>
+        <div class="row">
+          <div class="avatar v3">李<i class="presence on"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">李明</span></div>
+            <div class="r-sub">全程已登录 · 全量归档</div>
+          </div>
+        </div>
+      </div>
+      <div style="padding:10px 14px 14px;border-top:1px solid var(--line)">
+        <div style="font-size:11px;color:var(--text-3);line-height:1.7">跨态会话的建立会向服务端上报事件日志（时间、双方、时长），<b>不含消息内容</b>，用于察觉异常频繁的跨态通信。</div>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="chat-head">
+        <div class="avatar v6 sm">王</div>
+        <div>
+          <div class="ch-name">王芳 <span class="noarch" style="transform:translateY(-1px)">未归档</span></div>
+          <div class="ch-meta">市场部 · 13:40 前未登录（直连直达） · 14:02 起已登录</div>
+        </div>
+        <div class="ch-actions">
+          <button class="icon-btn" title="文件"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+          <button class="icon-btn" title="会话信息"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/></svg></button>
+        </div>
+      </header>
+
+      <div class="chat-banner">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5m0 3h.01"/></svg>
+        本会话 13:40–14:02 为跨态：消息点对点直达、不经服务端、不进入归档。14:02 对方登录后，新消息正常归档。
+      </div>
+
+      <div class="chat-scroll">
+        <div class="day-divider">今天 13:38</div>
+
+        <div class="msg">
+          <div class="avatar v6 sm">王</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="sender-name">王芳</span><span>13:38</span></div>
+            <div class="bubble">预算表我刚改完，你要最新版还是等明天复审后？</div>
+          </div>
+        </div>
+
+        <div class="msg mine">
+          <div class="avatar sm">张</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="read-receipt read">已读</span><span>13:40</span></div>
+            <div class="bubble">先发我看结构，明天按你复审版定稿。</div>
+          </div>
+        </div>
+
+        <div class="sys-hint"><span class="pill">以上消息为跨态直达 · <b>服务端无记录</b></span></div>
+
+        <div class="day-divider" style="margin-top:20px">今天 14:02 · 王芳已登录</div>
+        <div class="sys-hint"><span class="pill archived-since" style="border-style:solid">归档自此时刻 · 14:02:17（服务端记录）</span></div>
+
+        <div class="msg">
+          <div class="avatar v6 sm">王</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="sender-name">王芳</span><span>14:03</span></div>
+            <div class="bubble">我登录了，后面的消息都正常留档。</div>
+          </div>
+        </div>
+
+        <div class="msg mine">
+          <div class="avatar sm">张</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="read-receipt read">已读</span><span>14:05</span></div>
+            <div class="bubble file-card">
+              <span class="f-icon">表</span>
+              <span>
+                <div style="font-weight:700">Q4 预算表_v3.xlsx</div>
+                <div class="f-meta">6.8 MB · 直传 · 传输元数据已入归档</div>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="avatar v6 sm">王</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="sender-name">王芳</span><span>14:07</span></div>
+            <div class="bubble">发错版本了，我撤回一下，重传 v4。</div>
+          </div>
+        </div>
+
+        <div class="recalled">
+          <span class="pill">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>
+            王芳 撤回了一条消息（14:08）
+          </span>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:5px">撤回仅影响显示 · 服务端归档保留原文与撤回事件</div>
+        </div>
+
+        <div class="msg">
+          <div class="avatar v6 sm">王</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="sender-name">王芳</span><span>14:09</span></div>
+            <div class="bubble file-card">
+              <span class="f-icon">表</span>
+              <span>
+                <div style="font-weight:700">Q4 预算表_v4.xlsx</div>
+                <div class="f-meta">7.1 MB · 直传 · 传输元数据已入归档</div>
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-input">
+        <div class="input-note">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5m0 3h.01"/></svg>
+          本会话当前为跨态直达：你发出的消息不进入归档。此说明固定显示，不可关闭。
+        </div>
+        <div class="input-toolbar">
+          <button class="icon-btn brand"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v12H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+          <button class="icon-btn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5s1.3 1.8 3.5 1.8 3.5-1.8 3.5-1.8M9 9.5h.01M15 9.5h.01"/></svg></button>
+          <button class="icon-btn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+          <span class="spacer"></span>
+          <span class="hint">Enter 发送</span>
+        </div>
+        <div class="input-area"><textarea placeholder="输入消息…"></textarea></div>
+        <div class="input-foot">
+          <span class="pill-outline" style="color:var(--warn);border-color:rgba(183,121,31,.45)">当前消息：不归档</span>
+          <button class="send-btn">发送</button>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

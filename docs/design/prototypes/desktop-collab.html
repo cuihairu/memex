@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 登录协作态（会话列表）</title>
+<link rel="stylesheet" href="prototypes.css">
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <img class="logo" src="../../public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span class="state-badge collab"><i class="dot"></i>协作态 · 消息全量归档</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-full"></span></div>
+  </div>
+
+  <div class="app-body">
+    <nav class="rail">
+      <button class="rail-item active"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H7l-4 3v-4.5A8.5 8.5 0 1 1 21 11.5z"/></svg></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.6c2.7.3 4.7 1.9 5.4 4.4"/></svg><span class="tip">组织架构</span></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="tip">文件</span></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18"/></svg><span class="tip">共享空间（只读）</span></button>
+      <span class="spacer"></span>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="3.2"/><path d="M5 20c.9-3.4 3.7-5.2 7-5.2s6.1 1.8 7 5.2"/></svg></button>
+      <div class="avatar" style="width:34px;height:34px;border-radius:10px;font-size:13px;position:relative">张<span style="position:absolute;right:-3px;bottom:-3px;width:11px;height:11px;border-radius:50%;background:var(--ok);border:2px solid var(--panel-2)"></span></div>
+    </nav>
+
+    <aside class="sidebar">
+      <div class="side-head">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="side-title">消息</span>
+          <button class="icon-btn brand" style="margin-left:auto;width:26px;height:26px" title="发起单聊"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+        </div>
+        <div class="search"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input placeholder="搜索消息 / 联系人 / 群聊"></div>
+      </div>
+
+      <div class="side-list">
+        <div class="side-group" style="padding-top:4px">置顶</div>
+        <div class="row active">
+          <div class="avatar v3">李<i class="presence on"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">李明</span><span class="r-time">10:24</span></div>
+            <div class="r-sub">王工：合同扫描件已归档，可直接检索</div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="avatar v2" style="border-radius:12px">产<i class="presence on"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">产品研发部</span><span class="r-time">10:02</span></div>
+            <div class="r-sub">周航：<span style="color:var(--brand-deep);font-weight:600">@张伟</span> 联调环境已就绪</div>
+          </div>
+          <div class="r-badges"><span class="n-count">12</span></div>
+        </div>
+
+        <div class="side-group">最近联系</div>
+        <div class="row">
+          <div class="avatar v6">王<i class="presence off"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">王芳</span><span class="r-time">09:58</span></div>
+            <div class="r-sub">[文件] Q4 预算表_v3.xlsx</div>
+          </div>
+          <div class="r-badges"><span class="n-count">3</span><span class="archived-since">归档自 09:41</span></div>
+        </div>
+        <div class="row">
+          <div class="avatar v9">访<i class="presence on"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">临时访客-0471（未登录）</span><span class="r-time">09:41</span></div>
+            <div class="r-sub">今天调试完就走，麻烦多关照</div>
+          </div>
+          <div class="r-badges"><span class="noarch">未归档</span></div>
+        </div>
+        <div class="row">
+          <div class="avatar v4" style="border-radius:12px">项<i class="presence on"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">MES 二期项目群</span><span class="r-time">09:30</span></div>
+            <div class="r-sub">[公告] 本周四 14:00 里程碑评审</div>
+          </div>
+          <div class="r-badges"><span class="muted-badge">已读</span></div>
+        </div>
+        <div class="row">
+          <div class="avatar v7">赵<i class="presence on"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">赵强</span><span class="r-time">昨天</span></div>
+            <div class="r-sub">部署包 release-2.3.1 已传共享空间</div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="avatar v8">陈<i class="presence off"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">陈静</span><span class="r-time">昨天</span></div>
+            <div class="r-sub">考勤口径已同步行政部</div>
+          </div>
+          <div class="r-badges"><span class="muted-badge">已读</span></div>
+        </div>
+        <div class="row">
+          <div class="avatar v5">刘<i class="presence dnd"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">刘洋（总经理）</span><span class="r-time">周三</span></div>
+            <div class="r-sub">方案我看了，按第二版推进</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="chat-head">
+        <div class="avatar v3 sm">李</div>
+        <div>
+          <div class="ch-name">李明</div>
+          <div class="ch-meta">财务部 · 财务专员 · 直属上级：孙洁（财务经理）</div>
+        </div>
+        <div class="ch-actions">
+          <button class="icon-btn" title="语音通话"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg></button>
+          <button class="icon-btn brand" title="常用联系人"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 3.6l2.5 5.1 5.6.8-4 4 .9 5.6-5-2.7-5 2.7.9-5.6-4-4 5.6-.8z"/></svg></button>
+          <button class="icon-btn" title="会话设置"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></button>
+        </div>
+      </header>
+
+      <div class="chat-scroll">
+        <div class="day-divider">今天 09:40</div>
+
+        <div class="msg">
+          <div class="avatar v3 sm">李</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="sender-name">李明</span><span>09:40</span></div>
+            <div class="bubble">王工，季度合同的扫描件你那边有存档吗？审计要调 8 月那批。</div>
+          </div>
+        </div>
+
+        <div class="msg mine">
+          <div class="avatar sm">张</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="read-receipt read">已读</span><span>09:42</span></div>
+            <div class="bubble">有的。协作态消息都在服务端归档里，我直接检索给你。</div>
+          </div>
+        </div>
+
+        <div class="msg mine">
+          <div class="avatar sm">张</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="read-receipt read">已读</span><span>09:44</span></div>
+            <div class="bubble"><span class="quote">引用 李明 09:40：季度合同的扫描件你那边有存档吗…</span>检索到了 6 条，含一份撤回过的（原文仍在归档）。已发你邮箱，这里也传一份。</div>
+            <div class="bubble file-card">
+              <span class="f-icon">P</span>
+              <span>
+                <div style="font-weight:700">合同扫描_202608.pdf</div>
+                <div class="f-meta">18.2 MB · 点对点直传 · 元数据已入归档</div>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="avatar v3 sm">李</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="sender-name">李明</span><span>10:24</span></div>
+            <div class="bubble">王工：合同扫描件已归档，可直接检索 👌</div>
+          </div>
+        </div>
+
+        <div class="sys-hint" style="margin-top:2px"><span class="pill">本会话双方均已登录 · <span style="color:var(--brand-deep)">全部消息进入服务端归档</span></span></div>
+      </div>
+
+      <div class="chat-input">
+        <div class="input-note collab">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          协作态：消息经服务端中转并全量归档，可按权限检索（留存期限由管理侧策略下发）
+        </div>
+        <div class="input-toolbar">
+          <button class="icon-btn brand" title="截图与标注"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v12H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+          <button class="icon-btn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5s1.3 1.8 3.5 1.8 3.5-1.8 3.5-1.8M9 9.5h.01M15 9.5h.01"/></svg></button>
+          <button class="icon-btn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+          <button class="icon-btn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="18" cy="6" r="2.6"/><circle cx="7" cy="12" r="2.6"/><circle cx="17" cy="17" r="2.6"/><path d="m9.3 10.8 6.4-3.5M9.4 13.2l5.3 3"/></svg></button>
+          <span class="spacer"></span>
+          <span class="hint">Enter 发送 · <span class="kbd">Ctrl</span>+<span class="kbd">Shift</span>+<span class="kbd">A</span> 截图</span>
+        </div>
+        <div class="input-area"><textarea placeholder="输入消息…"></textarea></div>
+        <div class="input-foot">
+          <span class="pill-outline">已归档</span>
+          <button class="send-btn">发送</button>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 组织架构与汇报关系</title>
+<link rel="stylesheet" href="prototypes.css">
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <img class="logo" src="../../public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span class="state-badge collab"><i class="dot"></i>协作态</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-full"></span></div>
+  </div>
+
+  <div class="app-body">
+    <nav class="rail">
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H7l-4 3v-4.5A8.5 8.5 0 1 1 21 11.5z"/></svg></button>
+      <button class="rail-item active"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.6c2.7.3 4.7 1.9 5.4 4.4"/></svg></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+      <span class="spacer"></span>
+      <div class="avatar" style="width:34px;height:34px;border-radius:10px;font-size:13px">张</div>
+    </nav>
+
+    <div class="org-layout">
+      <aside class="dept-tree">
+        <div class="search" style="margin:4px 6px 10px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input placeholder="搜索部门 / 成员" value=""></div>
+        <div class="tree-node"><span class="tw">▾</span>华信制造集团<span class="cnt">312</span></div>
+        <div class="tree-node child"><span class="tw">▾</span>总经理办公室<span class="cnt">5</span></div>
+        <div class="tree-node child"><span class="tw">▾</span>信息技术部<span class="cnt">18</span></div>
+        <div class="tree-node child active"><span class="tw">▾</span>产品研发部<span class="cnt">41</span></div>
+        <div class="tree-node child" style="padding-left:52px"><span class="tw">·</span>研发一组<span class="cnt">14</span></div>
+        <div class="tree-node child" style="padding-left:52px"><span class="tw">·</span>研发二组<span class="cnt">12</span></div>
+        <div class="tree-node child" style="padding-left:52px"><span class="tw">·</span>测试组<span class="cnt">9</span></div>
+        <div class="tree-node child" style="padding-left:52px"><span class="tw">·</span>产品组<span class="cnt">6</span></div>
+        <div class="tree-node child"><span class="tw">▸</span>财务部<span class="cnt">12</span></div>
+        <div class="tree-node child"><span class="tw">▸</span>市场部<span class="cnt">16</span></div>
+        <div class="tree-node child"><span class="tw">▸</span>人事行政部<span class="cnt">9</span></div>
+        <div class="tree-node child" style="color:var(--text-3)"><span class="tw">🔒</span>机要室（不可见）</div>
+        <div style="margin:14px 10px 0;padding:10px 12px;border:1px dashed var(--line-strong);border-radius:10px;font-size:11px;color:var(--text-3);line-height:1.7">
+          通讯录可见性按部门策略下发：被隐藏的部门与成员不出现在此处、不可被搜索；受限部门只能看到本部门。
+        </div>
+      </aside>
+
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0;background:var(--bg)">
+        <div class="side-head" style="border-bottom:1px solid var(--line);background:var(--panel)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span class="side-title">产品研发部 · 41 人</span>
+            <span class="pill-outline">部门负责人：周航</span>
+            <button class="btn primary" style="flex:none;margin-left:auto;padding:7px 18px">发起群聊</button>
+          </div>
+        </div>
+        <div class="member-grid">
+          <div class="person-card"><div class="avatar v2 lg" style="width:44px;height:44px;font-size:16px">周</div><div class="p-main"><div class="p-name">周航</div><div class="p-title">产品研发部部长</div></div><span class="presence on" style="margin-left:auto;position:static"></span></div>
+          <div class="person-card" style="border-color:rgba(225,101,49,.5);background:var(--brand-softer)"><div class="avatar lg" style="width:44px;height:44px;font-size:16px">张</div><div class="p-main"><div class="p-name">张伟（我）</div><div class="p-title">研发一组 · 后端开发</div></div></div>
+          <div class="person-card"><div class="avatar v3 lg" style="width:44px;height:44px;font-size:16px">李</div><div class="p-main"><div class="p-name">李文</div><div class="p-title">研发一组 · 组长</div></div><span class="presence on" style="margin-left:auto;position:static"></span></div>
+          <div class="person-card"><div class="avatar v6 lg" style="width:44px;height:44px;font-size:16px">王</div><div class="p-main"><div class="p-name">王倩</div><div class="p-title">研发一组 · 前端开发</div></div><span class="presence off" style="margin-left:auto;position:static"></span></div>
+          <div class="person-card"><div class="avatar v7 lg" style="width:44px;height:44px;font-size:16px">赵</div><div class="p-main"><div class="p-name">赵磊</div><div class="p-title">研发二组 · 组长</div></div><span class="presence on" style="margin-left:auto;position:static"></span></div>
+          <div class="person-card"><div class="avatar v5 lg" style="width:44px;height:44px;font-size:16px">刘</div><div class="p-main"><div class="p-name">刘畅</div><div class="p-title">测试组 · 测试工程师</div></div><span class="presence on" style="margin-left:auto;position:static"></span></div>
+          <div class="person-card"><div class="avatar v8 lg" style="width:44px;height:44px;font-size:16px">陈</div><div class="p-main"><div class="p-name">陈晨</div><div class="p-title">产品组 · 产品经理</div></div><span class="presence dnd" style="margin-left:auto;position:static"></span></div>
+          <div class="person-card"><div class="avatar v9 lg" style="width:44px;height:44px;font-size:16px">孙</div><div class="p-main"><div class="p-name">孙宇</div><div class="p-title">测试组 · 自动化测试</div></div><span class="presence on" style="margin-left:auto;position:static"></span></div>
+        </div>
+      </div>
+
+      <aside class="profile-side">
+        <div class="avatar v3" style="width:64px;height:64px;font-size:24px;border-radius:18px">李</div>
+        <div class="p-name">李文</div>
+        <div class="p-duties">研发一组 · 组长 · 工号 2043</div>
+        <div style="display:flex;gap:6px;margin-top:2px">
+          <span class="state-badge ok"><i class="dot"></i>在线</span>
+          <span class="pill-outline">同网段设备已广播</span>
+        </div>
+
+        <div class="chain" style="margin-top:18px">
+          <h4 style="font-size:12px;color:var(--text-3);font-weight:700;letter-spacing:.04em">汇报链路</h4>
+          <div class="chain-item"><div class="avatar v5">刘</div><div><div style="font-size:12.5px;font-weight:700">刘建国（总经理）</div><div class="c-role">总经理办公室</div></div></div>
+          <div class="chain-line"></div>
+          <div class="chain-item"><div class="avatar v2">周</div><div><div style="font-size:12.5px;font-weight:700">周航</div><div class="c-role">产品研发部部长 · 李文的直属上级</div></div></div>
+          <div class="chain-line"></div>
+          <div class="chain-item"><div class="avatar v3">李</div><div><div style="font-size:12.5px;font-weight:700">李文</div><div class="c-role">研发一组 · 组长</div></div></div>
+        </div>
+
+        <div style="width:100%;margin-top:14px">
+          <div class="kv"><span class="k">直属上级</span><span class="v brand">周航</span></div>
+          <div class="kv"><span class="k">部门</span><span class="v">产品研发部 / 研发一组</span></div>
+          <div class="kv"><span class="k">职务</span><span class="v">组长</span></div>
+          <div class="kv"><span class="k">办公位置</span><span class="v">B 座 3F · 3-042</span></div>
+          <div class="kv"><span class="k">手机</span><span class="v" style="color:var(--text-3)">（该成员已隐藏）</span></div>
+        </div>
+
+        <div class="profile-actions">
+          <button class="btn primary">发消息</button>
+          <button class="btn ghost-brand">设为常用联系人</button>
+        </div>
+        <div style="font-size:10.5px;color:var(--text-3);line-height:1.6">直属上级为独立数据字段，由管理后台维护（可批量导入），不从部门归属推导。</div>
+      </aside>
+    </div>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

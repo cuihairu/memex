@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 移动 · 初始化（服务器地址）</title>
+<link rel="stylesheet" href="prototypes.css">
+</head>
+<body>
+<div class="phone">
+  <div class="statusbar">
+    <span>09:41</span>
+    <span class="sb-right">
+      <svg width="15" height="11" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".35"/></svg>
+      <svg width="20" height="11" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x="1" y="1" width="20" height="10" rx="3" stroke-width="1.4"/><rect x="3" y="3" width="13" height="6" rx="1.5" fill="currentColor" stroke="none"/><path d="M23 4v4" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </span>
+  </div>
+
+  <div class="wizard">
+    <img class="w-logo" src="../../public/logo.svg" alt="Memex">
+    <div class="w-title">欢迎使用 Memex</div>
+    <div class="w-sub">内网办公即时通讯系统<br>移动端连接企业协作服务后使用</div>
+
+    <div class="w-steps"><i class="on"></i><i></i><i></i></div>
+    <div style="text-align:center;font-size:11px;color:var(--text-3)">第 1 步，共 3 步 · 连接服务器</div>
+
+    <div class="w-field">
+      <label>服务器地址 <span style="color:var(--brand-deep)">*</span>　必填</label>
+      <div class="w-input">
+        <span class="prefix">https://</span>
+        <input value="memex.corp.local" placeholder="域名或内网 IP">
+        <span class="check state-badge ok" style="padding:2px 8px"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-11"/></svg>已连通</span>
+      </div>
+      <div class="w-hint ok">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-11"/></svg>
+        连接成功 · 服务版本 1.0 · 组织：华信制造集团 · 延迟 3 ms
+      </div>
+    </div>
+
+    <div class="w-field">
+      <label>说明</label>
+      <div class="w-hint" style="margin-top:0">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/></svg>
+        地址由 IT 部门提供。填写后本机将校验连通性并记住该服务；全部消息经此服务归档，可按权限检索。
+      </div>
+    </div>
+
+    <div class="w-required">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="flex:none;margin-top:2px"><path d="M12 3 4 6v6c0 5 3.4 8.4 8 9 4.6-.6 8-4 8-9V6z"/><path d="M12 8v4m0 3h.01"/></svg>
+      <span><b>初始化必须完成：</b>移动端不提供免登录使用。未设置服务器地址前，无法进入主界面，也没有任何聊天功能。</span>
+    </div>
+
+    <button class="w-btn">下一步 · 登录账号</button>
+    <div class="w-skip-note">没有服务器地址？请联系本单位 IT 部门获取</div>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

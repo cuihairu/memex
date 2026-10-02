@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 群聊</title>
+<link rel="stylesheet" href="prototypes.css">
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <img class="logo" src="../../public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span class="state-badge collab"><i class="dot"></i>协作态</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-full"></span></div>
+  </div>
+
+  <div class="app-body">
+    <nav class="rail">
+      <button class="rail-item active"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H7l-4 3v-4.5A8.5 8.5 0 1 1 21 11.5z"/></svg></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.6c2.7.3 4.7 1.9 5.4 4.4"/></svg></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+      <span class="spacer"></span>
+      <div class="avatar" style="width:34px;height:34px;border-radius:10px;font-size:13px">张</div>
+    </nav>
+
+    <aside class="sidebar" style="width:236px">
+      <div class="side-head"><span class="side-title" style="font-size:14px">群聊</span></div>
+      <div class="side-list">
+        <div class="row active">
+          <div class="avatar v4" style="border-radius:12px">项</div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">MES 二期项目群</span></div>
+            <div class="r-sub">23 人 · 群公告已更新</div>
+          </div>
+          <div class="r-badges"><span class="n-count">5</span></div>
+        </div>
+        <div class="row">
+          <div class="avatar v2" style="border-radius:12px">产</div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">产品研发部</span></div>
+            <div class="r-sub">部门群 · 41 人</div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="avatar v7" style="border-radius:12px">运</div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">值班与告警</span></div>
+            <div class="r-sub">8 人 · 机器人推送群</div>
+          </div>
+        </div>
+        <div class="row" style="opacity:.7">
+          <div class="avatar v5" style="border-radius:12px">临</div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">B 区临时协调（直连临时群）</span></div>
+            <div class="r-sub">免服务端 · 仅本网段 · 不归档</div>
+          </div>
+          <div class="r-badges"><span class="noarch">未归档</span></div>
+        </div>
+      </div>
+    </aside>
+
+    <section class="main">
+      <header class="chat-head">
+        <div class="avatar v4 sm" style="border-radius:9px">项</div>
+        <div>
+          <div class="ch-name">MES 二期项目群</div>
+          <div class="ch-meta">23 人 · 群主：周航 · 全量归档</div>
+        </div>
+        <div class="ch-actions">
+          <button class="icon-btn" title="群公告"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v3a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M14 8.5a5 5 0 0 1 0 7"/></svg></button>
+          <button class="icon-btn" title="群文件"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+          <button class="icon-btn brand" title="成员"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 19.5c.8-3 3.2-4.7 6-4.7s5.2 1.7 6 4.7"/><path d="M17 8h5m-2.5-2.5v5"/></svg></button>
+        </div>
+      </header>
+
+      <div class="chat-banner collab-ok">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 4v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V7z"/><path d="m9 12 2 2 4-4"/></svg>
+        群公告（周航 更新于 09:30）：本周四 14:00 里程碑评审，B 区会议室，请提前准备联调数据。@全体成员
+      </div>
+
+      <div class="chat-scroll">
+        <div class="day-divider">今天 09:52</div>
+
+        <div class="msg">
+          <div class="avatar v2 sm">周</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="sender-name">周航 <span class="role" style="font-size:10px;color:var(--brand-deep)">群主</span></span><span>09:52</span></div>
+            <div class="bubble"><span style="color:var(--brand-deep);font-weight:700">@张伟</span> 联调环境今天 10 点前就绪，报文样例在群文件「联调/样例报文」。</div>
+          </div>
+        </div>
+
+        <div class="msg mine">
+          <div class="avatar sm">张</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="read-receipt">已读 12/23</span><span>09:55</span></div>
+            <div class="bubble"><span class="quote">引用 周航 09:52：联调环境今天 10 点前就绪…</span>收到。样例里签到接口的字段名和文档对不上，我标注了一份对比表。</div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="avatar v3 sm">李</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="sender-name">李明</span><span>09:58</span></div>
+            <div class="bubble">财务侧接口人确认是我，评审会我带对账口径。</div>
+          </div>
+        </div>
+
+        <div class="msg mine">
+          <div class="avatar sm">张</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="read-receipt">已读 18/23</span><span>10:02</span></div>
+            <div class="bubble"><span style="color:var(--brand-deep);font-weight:700">@李明</span> <span style="color:var(--brand-deep);font-weight:700">@周航</span> 对比表放群文件了：「联调/签到接口字段对比_v1.xlsx」。</div>
+            <div class="bubble file-card">
+              <span class="f-icon">表</span>
+              <span>
+                <div style="font-weight:700">签到接口字段对比_v1.xlsx</div>
+                <div class="f-meta">86 KB · 已存群文件 · 传输元数据已入归档</div>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="avatar v6 sm">王</div>
+          <div class="msg-col">
+            <div class="msg-meta"><span class="sender-name">王芳</span><span>10:05</span></div>
+            <div class="bubble">收到 +1，评审材料我今天下班前齐。</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-input">
+        <div class="input-toolbar">
+          <button class="icon-btn brand"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v12H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+          <button class="icon-btn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5s1.3 1.8 3.5 1.8 3.5-1.8 3.5-1.8M9 9.5h.01M15 9.5h.01"/></svg></button>
+          <button class="icon-btn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="18" cy="6" r="2.6"/><circle cx="7" cy="12" r="2.6"/><circle cx="17" cy="17" r="2.6"/><path d="m9.3 10.8 6.4-3.5M9.4 13.2l5.3 3"/></svg></button>
+          <button class="icon-btn"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button>
+          <span class="spacer"></span>
+          <span class="hint"><span class="kbd">@</span> 唤起成员选择</span>
+        </div>
+        <div class="input-area"><textarea placeholder="输入消息，@ 成员可加提醒…"></textarea></div>
+        <div class="input-foot">
+          <span class="pill-outline">群消息全量归档</span>
+          <button class="send-btn">发送</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="infopanel">
+      <h4>群成员 · 23</h4>
+      <div class="member-row"><div class="avatar v2">周</div><span>周航</span><span class="role">群主</span></div>
+      <div class="member-row"><div class="avatar sm" style="background:var(--brand)">张</div><span>张伟（我）</span></div>
+      <div class="member-row"><div class="avatar v3">李</div><span>李明</span></div>
+      <div class="member-row"><div class="avatar v6">王</div><span>王芳</span></div>
+      <div class="member-row"><div class="avatar v7">赵</div><span>赵强</span><span class="role">管理员</span></div>
+      <div class="member-row"><div class="avatar v8">陈</div><span>陈静</span></div>
+      <div style="font-size:11.5px;color:var(--text-3);text-align:center;padding:6px 0">查看全部 23 人</div>
+
+      <h4>群文件</h4>
+      <div class="member-row"><span style="font-size:15px">📄</span><span style="font-size:12px">联调/样例报文.zip</span></div>
+      <div class="member-row"><span style="font-size:15px">📄</span><span style="font-size:12px">联调/签到接口字段对比_v1.xlsx</span></div>
+      <div class="member-row"><span style="font-size:15px">📄</span><span style="font-size:12px">评审/MES二期里程碑材料.pptx</span></div>
+
+      <div style="margin-top:auto;padding:10px 12px;border:1px dashed var(--line-strong);border-radius:10px;font-size:11px;color:var(--text-3);line-height:1.7">
+        群消息与群文件元数据全量归档，可按群成员与关键词检索。直连临时群（见列表）不经服务端、不归档。
+      </div>
+    </aside>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>
