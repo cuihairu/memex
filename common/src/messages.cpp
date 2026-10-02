@@ -41,6 +41,12 @@ const char* msg_type_name(MsgType t) {
   case v1::LOGIN_RESULT: return "login_result";
   case v1::KICK: return "kick";
   case v1::LOGOUT: return "logout";
+  case v1::ORG_QUERY: return "org_query";
+  case v1::ORG_DATA: return "org_data";
+  case v1::GROUP_CMD: return "group_cmd";
+  case v1::GROUP_RESULT: return "group_result";
+  case v1::GROUP_QUERY: return "group_query";
+  case v1::GROUP_DATA: return "group_data";
   case v1::MSG_TYPE_UNSPECIFIED: break;
   }
   return "unknown";

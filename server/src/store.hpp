@@ -107,6 +107,16 @@ struct PolicyRow {
   bool new_device_approval{false};
 };
 
+// 群聊（T4.1）：群消息走既有 TEXT（to="group:<群号>"），
+// 归档 to_account 即 "group:<群号>"，按成员账号检索时一并联入。
+struct GroupInfo {
+  std::uint64_t group_id{0};
+  std::string name;
+  std::string owner;
+  std::string announcement;        // 空=未设
+  std::vector<std::string> members; // 含群主
+};
+
 class ServerStore {
 public:
   ServerStore() = default;
@@ -157,7 +167,8 @@ public:
   bool queue_offline(const std::string& msg_id, const std::string& to_account,
                      const std::string& envelope_blob);
   std::vector<std::string> pending_offline(const std::string& account);
-  bool ack_offline(const std::string& msg_id);
+  // 接收方回执清队列（按接收方清：群扇出时同一条消息对每名成员各一行）
+  bool ack_offline(const std::string& msg_id, const std::string& account);
   std::size_t offline_count(const std::string& account);
 
   // T2.3 消息归档：协作态消息全量落库（msg_id 唯一；重复消息忽略）。
@@ -221,6 +232,28 @@ public:
   // 按账号解析生效策略：本人部门 → 逐级上级部门 → 全局 → 内置默认
   //（未配置任何行时：允许免登录、允许跨态、新设备免审批）。
   PolicyRow resolve_policy(const std::string& account);
+
+  // —— T4.1 群聊 ——
+  // 建群：群主（owner）自动入群；members 须全部为已建账号（含去重）。
+  // 返回群号（>0）；任何成员账号不存在返回 0。
+  std::uint64_t create_group(const std::string& name,
+                             const std::string& owner,
+                             const std::vector<std::string>& members);
+  // 群详情；不存在返回 nullopt
+  std::optional<GroupInfo> group_info(std::uint64_t group_id);
+  // 某账号加入的全部群
+  std::vector<GroupInfo> groups_of(const std::string& account);
+  // 是否群成员
+  bool is_group_member(std::uint64_t group_id, const std::string& account);
+  // 拉人（成员须为已建账号且不在群里）
+  bool group_invite(std::uint64_t group_id, const std::string& account);
+  // 退群（群主退群=解散：删成员表记录；群号与归档保留）
+  bool group_leave(std::uint64_t group_id, const std::string& account);
+  // 群公告（仅群主可设；空串=清除）
+  bool group_announce(std::uint64_t group_id, const std::string& owner,
+                      const std::string& announcement);
+  // 群成员账号列表（群不存在返回空）
+  std::vector<std::string> group_members(std::uint64_t group_id);
 
 private:
   bool ensure_schema();

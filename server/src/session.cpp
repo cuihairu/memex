@@ -152,20 +152,43 @@ void Session::handle_message(const memex::protocol::Message& msg) {
   case v1::TEXT: {
     // 协作态消息路由：先入离线队列（至少一次投递），在线即投；
     // 接收方 ACK(msg_id) 清队列，未 ACK 的下次登录重投（接收端按 msg_id 去重）。
+    // 群消息（to="group:<群号>"，T4.1）：成员校验后全量归档一次、按成员扇出。
     if (!logged_in_ || !msg.has_text()) break;
     const std::string msg_id =
         sha256_hex(msg.from() + ":" + std::to_string(msg.seq()));
     memex::protocol::Message out = msg;
     out.set_msg_id(msg_id);
     const std::string blob = out.SerializeAsString();
-    server_.store().queue_offline(msg_id, msg.to(), blob);
-    // T2.3 全量归档：协作态消息原样落服务端归档库（本地缓存另行存于客户端）
+
+    // 收件人集合：单聊一人；群聊＝群成员（不含发送者）
+    std::vector<std::string> recipients;
+    const bool is_group = msg.to().rfind("group:", 0) == 0;
+    if (is_group) {
+      const auto gid = static_cast<std::uint64_t>(
+          std::strtoull(msg.to().c_str() + 6, nullptr, 10));
+      if (!server_.store().is_group_member(gid, account_)) {
+        log("非群成员发群消息被拒：" + msg.to());
+        break;
+      }
+      for (const auto& m : server_.store().group_members(gid)) {
+        if (m != account_) recipients.push_back(m);
+      }
+    } else {
+      recipients.push_back(msg.to());
+    }
+
+    for (const auto& to : recipients) {
+      server_.store().queue_offline(msg_id, to, blob);
+    }
+    // T2.3 全量归档：协作态消息原样落服务端归档库（群消息 to=群标识，一次）
     server_.store().store_message(msg_id, msg.from(), msg.to(),
                                   static_cast<int>(msg.type()),
                                   msg.text().text(), msg.ts_ms());
-    // 在线即投（桌面＋手机都在则都投，任一端 ACK 即清队列）
-    for (const auto& target : server_.online_sessions(msg.to())) {
-      target->deliver_frame(blob);
+    // 在线即投（桌面＋手机都在则都投，任一端 ACK 即清该端队列）
+    for (const auto& to : recipients) {
+      for (const auto& target : server_.online_sessions(to)) {
+        target->deliver_frame(blob);
+      }
     }
     // 发送方受理回执（原 seq）：消息已被服务端接收并负责投递
     memex::protocol::Message ack;
@@ -175,10 +198,80 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     send(memex::protocol::encode(ack));
     break;
   }
+  case v1::GROUP_CMD: {
+    // 群管理（T4.1）：建群／拉人／退群／群公告；结果经 GROUP_RESULT 回执
+    if (!logged_in_ || !msg.has_group_cmd()) break;
+    const auto& cmd = msg.group_cmd();
+    bool ok = false;
+    std::string reason;
+    std::uint64_t gid = cmd.group_id();
+    if (cmd.op() == "create") {
+      std::vector<std::string> members(cmd.members().begin(),
+                                       cmd.members().end());
+      gid = server_.store().create_group(cmd.name(), account_, members);
+      ok = gid > 0;
+      if (!ok) reason = "建群失败（群名空或成员账号不存在）";
+    } else if (cmd.op() == "invite") {
+      // 拉人者须为本群成员（防外部账号凭群号塞人）
+      if (!server_.store().is_group_member(cmd.group_id(), account_)) {
+        ok = false;
+        reason = "拉人失败（仅群成员可拉人）";
+      } else {
+        ok = true;
+        for (const auto& m : cmd.members()) {
+          if (!server_.store().group_invite(cmd.group_id(), m)) {
+            ok = false;
+            reason = "拉人失败（群不存在／账号不存在／已在群里）：" + m;
+            break;
+          }
+        }
+      }
+    } else if (cmd.op() == "leave") {
+      ok = server_.store().group_leave(cmd.group_id(), account_);
+      if (!ok) reason = "退群失败（群不存在或不在群里）";
+    } else if (cmd.op() == "announce") {
+      ok = server_.store().group_announce(cmd.group_id(), account_,
+                                          cmd.announcement());
+      if (!ok) reason = "公告设置失败（仅群主可设）";
+    } else {
+      break;
+    }
+    log(std::string("群命令 ") + cmd.op() + (ok ? " 成功" : " 失败：" + reason));
+    memex::protocol::Message result;
+    result.set_type(v1::GROUP_RESULT);
+    result.set_to(account_);
+    result.set_ts_ms(now_ms());
+    auto* r = result.mutable_group_result();
+    r->set_ok(ok);
+    r->set_reason(reason);
+    r->set_op(cmd.op());
+    r->set_group_id(gid);
+    send(memex::protocol::encode(result));
+    break;
+  }
+  case v1::GROUP_QUERY: {
+    // 我加入的群（T4.1）：登录后可查，客户端群列表与公告数据源
+    if (!logged_in_) break;
+    memex::protocol::Message out;
+    out.set_type(v1::GROUP_DATA);
+    out.set_to(account_);
+    out.set_ts_ms(now_ms());
+    auto* data = out.mutable_group_data();
+    for (const auto& g : server_.store().groups_of(account_)) {
+      auto* gi = data->add_groups();
+      gi->set_group_id(g.group_id);
+      gi->set_name(g.name);
+      gi->set_owner(g.owner);
+      gi->set_announcement(g.announcement);
+      for (const auto& m : g.members) gi->add_members(m);
+    }
+    send(memex::protocol::encode(out));
+    break;
+  }
   case v1::ACK:
     // 接收方回执：消息已收取，清离线队列
     if (logged_in_ && msg.has_ack() && !msg.ack().msg_id().empty()) {
-      server_.store().ack_offline(msg.ack().msg_id());
+      server_.store().ack_offline(msg.ack().msg_id(), account_);
     }
     break;
   case v1::RECALL: {

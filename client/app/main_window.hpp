@@ -4,6 +4,7 @@
 // 历史按 source 字段合并展示；服务端不可达回落直连态并常驻提示「消息不进归档」。
 #pragma once
 
+#include <QHash>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -11,6 +12,7 @@
 #include <QMap>
 #include <QSet>
 #include <QPushButton>
+#include <QStringList>
 #include <QTextBrowser>
 
 #include <engine/direct/direct_engine.hpp>
@@ -37,6 +39,10 @@ public:
   // 请求组织架构（登录后；结果缓存于 org_json，界面弹窗与验收共用）
   void request_org();
   QString org_json() const;
+  // —— T4.1 群聊（验收面）——
+  QString groups_json() const; // 最近一次群列表数据
+  void create_group_dialog();  // 服务端群：建群后全量归档
+  void open_group(const QString& group_key); // group_key 形如 "group:7"
 
   // 状态断言面（验收测试）
   bool collab_logged_in() const;
@@ -65,8 +71,30 @@ private:
   // 直连发送是否被策略放行：免登录使用／跨态通信两项开关（T3.4）
   bool direct_send_allowed();
 
-  QString current_peer_;      // 当前会话对端（设备标识或协作账号）
-  QString current_kind_{QStringLiteral("direct")}; // 会话形态：direct／collab
+  // —— T4.1 群聊 ——
+  struct GroupEntry {
+    QString name;
+    QString owner;
+    QString announcement; // 空=未设
+    QStringList members;  // 含群主
+  };
+  // 群列表数据到达（GROUP_DATA）：解析入 groups_ 并刷新列表／当前会话标题
+  void apply_groups(const QString& groups_json);
+  // 群条目右键菜单：拉人／公告／退群（服务端群）；解散（临时群）
+  void show_group_menu(const QPoint& pos);
+  // 当前会话为服务端群时返回群号与其条目；否则 0／nullptr
+  quint64 current_group_id() const;
+  GroupEntry* current_group();
+  // 拉人进群／设置群公告弹窗（成员数据源：组织架构成员）
+  void group_invite_dialog(quint64 group_id);
+  void group_announce_dialog(quint64 group_id);
+  // 免服务端临时群（直连态多选设备扇出，不进归档）
+  void dgroup_dialog();
+  QString dgroup_title(const QString& dgroup_id) const; // 「临时群 N」标题
+  QStringList org_accounts() const; // 组织架构全部账号（建群/拉人数据源）
+
+  QString current_peer_;      // 当前会话对端（设备标识或协作账号或群键）
+  QString current_kind_{QStringLiteral("direct")}; // 会话形态：direct／collab／group／dgroup
   QSet<QString> collab_peers_; // 协作会话列表（登录后与本地库历史并集）
   bool collab_was_logged_in_{false}; // 上一轮登录态（降级提示去抖）
   QString last_org_json_;     // 最近一次组织架构数据（T3.1）
@@ -76,6 +104,11 @@ private:
   QMap<QString, quint64> file_sent_; // 文件名 → 最近一次进度字节（节流）
   bool chat_showing_guidance_{false}; // 聊天区当前是否为引导态
   QString status_hint_;               // 状态栏事件提示（引擎态前缀实时拼）
+
+  QString last_groups_json_;          // 最近一次群列表数据（T4.1）
+  QMap<quint64, GroupEntry> groups_;  // 群号 → 条目（登录后 query_groups 拉取）
+  QHash<QString, QStringList> dgroup_members_; // 临时群 id → 成员设备（本机视图）
+  int next_dgroup_{1};                // 临时群序号（标题与 id 用）
 
   DirectEngine direct_engine_;
   CollabEngine collab_engine_;

@@ -23,6 +23,10 @@ enum MsgType {
   LOGOUT = 33;       // 终端 → 服务端：主动登出（随后由终端断开连接）
   ORG_QUERY = 34;    // 终端 → 服务端：请求组织架构（部门树＋成员资料，T3.1）
   ORG_DATA = 35;     // 服务端 → 终端：组织架构数据（登录后可查）
+  GROUP_CMD = 36;    // 终端 → 服务端：群管理命令（建群/拉人/退群/公告，T4.1）
+  GROUP_RESULT = 37; // 服务端 → 终端：群命令回执
+  GROUP_QUERY = 38;  // 终端 → 服务端：查询我加入的群
+  GROUP_DATA = 39;   // 服务端 → 终端：群列表（含成员与公告）
 }
 
 message Hello {
@@ -114,6 +118,36 @@ message OrgData {
   repeated OrgPolicy policies = 3; // 策略开关（T3.4，随组织架构一并下发）
 }
 
+// —— 群聊（T4.1）——
+// 群管理命令（op 取值："create" 建群｜"invite" 拉人｜"leave" 退群｜"announce" 群公告）。
+// 群消息走既有 TEXT：to = "group:<群号>"，服务端按成员扇出并全量归档。
+message GroupCmd {
+  string op = 1;              // create／invite／leave／announce
+  string name = 2;            // 群名（create）
+  repeated string members = 3; // 成员账号（create／invite；create 时建群者自动入群）
+  uint64 group_id = 4;        // 群号（invite／leave／announce）
+  string announcement = 5;    // 公告内容（announce）
+}
+
+message GroupResult {
+  bool ok = 1;
+  string reason = 2;   // 失败原因（群不存在／非成员／账号不存在…）
+  string op = 3;       // 回执对应的命令
+  uint64 group_id = 4; // 成功建群时回填群号
+}
+
+message GroupInfo {
+  uint64 group_id = 1;
+  string name = 2;
+  string owner = 3;          // 群主（建群者）
+  string announcement = 4;   // 群公告（空=未设）
+  repeated string members = 5; // 成员账号（含群主）
+}
+
+message GroupData {
+  repeated GroupInfo groups = 1; // 我加入的全部群
+}
+
 // 信封：所有帧的载荷体。oneof 字段号 = 100 + 对应类型编号，便于读码对账。
 message Envelope {
   MsgType type = 1;
@@ -136,5 +170,8 @@ message Envelope {
     Kick kick = 132;
     Logout logout = 133;
     OrgData org_data = 135;
+    GroupCmd group_cmd = 136;
+    GroupResult group_result = 137;
+    GroupData group_data = 139;
   }
 }

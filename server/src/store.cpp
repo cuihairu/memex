@@ -5,6 +5,7 @@
 #include <sqlite3.h>
 
 #include <chrono>
+#include <algorithm>
 #include <map>
 #include <set>
 
@@ -76,10 +77,11 @@ bool ServerStore::ensure_schema() {
       "  last_seen_ms INTEGER NOT NULL);"
       "CREATE TABLE IF NOT EXISTS offline_messages ("
       "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
-      "  msg_id TEXT NOT NULL UNIQUE,"
+      "  msg_id TEXT NOT NULL,"
       "  to_account TEXT NOT NULL,"
       "  envelope BLOB NOT NULL,"
-      "  queued_ms INTEGER NOT NULL);"
+      "  queued_ms INTEGER NOT NULL,"
+      "  UNIQUE(msg_id, to_account));" // 群扇出一人多列（T4.1），按接收方 ACK
       "CREATE INDEX IF NOT EXISTS idx_offline_to"
       "  ON offline_messages(to_account, id);"
       "CREATE TABLE IF NOT EXISTS messages ("
@@ -126,7 +128,19 @@ bool ServerStore::ensure_schema() {
       "  department_path TEXT PRIMARY KEY,"
       "  allow_anonymous INTEGER NOT NULL,"
       "  allow_cross_state INTEGER NOT NULL,"
-      "  new_device_approval INTEGER NOT NULL);";
+      "  new_device_approval INTEGER NOT NULL);"
+      // T4.1 群聊：群表＋成员表（群主退群=解散，成员记录清除、群号与归档保留）
+      "CREATE TABLE IF NOT EXISTS groups ("
+      "  group_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  name TEXT NOT NULL,"
+      "  owner TEXT NOT NULL,"
+      "  announcement TEXT NOT NULL DEFAULT '',"
+      "  created_ms INTEGER NOT NULL);"
+      "CREATE TABLE IF NOT EXISTS group_members ("
+      "  group_id INTEGER NOT NULL,"
+      "  account TEXT NOT NULL,"
+      "  joined_ms INTEGER NOT NULL,"
+      "  PRIMARY KEY(group_id, account));";
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -439,11 +453,15 @@ std::vector<std::string> ServerStore::pending_offline(const std::string& account
   return out;
 }
 
-bool ServerStore::ack_offline(const std::string& msg_id) {
-  const char* sql = "DELETE FROM offline_messages WHERE msg_id = ?;";
+bool ServerStore::ack_offline(const std::string& msg_id,
+                              const std::string& account) {
+  // 群扇出场景：同一条群消息对每名成员各有一行，仅清本接收方那份
+  const char* sql =
+      "DELETE FROM offline_messages WHERE msg_id = ? AND to_account = ?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
   sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, account.c_str(), -1, SQLITE_TRANSIENT);
   const bool ok = sqlite3_step(st) == SQLITE_DONE;
   sqlite3_finalize(st);
   return ok;
@@ -483,44 +501,14 @@ bool ServerStore::store_message(const std::string& msg_id, const std::string& fr
   return ok; // 唯一键冲突（消息已存在）→ DONE 之外 → false
 }
 
-// 消息检索：账号为空=全部；非空=该账号收发两侧都命中（管理员检索面）
+// 消息检索：账号为空=全部；非空=该账号收发两侧＋其所在群的群消息都命中
+//（管理员检索面；T4.1 起群消息 to="group:<群号>" 联入成员检索面）
 std::vector<ArchivedMessage> ServerStore::messages(const std::string& account,
                                                    int limit) {
-  std::vector<ArchivedMessage> out;
-  const std::string sql =
-      account.empty()
-          ? std::string("SELECT msg_id, from_account, to_account, type, text,"
-                        " ts_ms, recall FROM messages"
-                        " ORDER BY id DESC LIMIT ?;")
-          : std::string("SELECT msg_id, from_account, to_account, type, text,"
-                        " ts_ms, recall FROM messages"
-                        " WHERE from_account = ? OR to_account = ?"
-                        " ORDER BY id DESC LIMIT ?;");
-  sqlite3_stmt* st = nullptr;
-  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
-    return out;
-  }
-  int idx = 1;
-  if (!account.empty()) {
-    sqlite3_bind_text(st, idx++, account.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, idx++, account.c_str(), -1, SQLITE_TRANSIENT);
-  }
-  sqlite3_bind_int(st, idx, limit);
-  while (sqlite3_step(st) == SQLITE_ROW) {
-    ArchivedMessage m;
-    m.msg_id = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
-    m.from_account = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
-    m.to_account = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
-    m.type = sqlite3_column_int(st, 3);
-    const char* text_ptr =
-        reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
-    m.text = text_ptr ? text_ptr : "";
-    m.ts_ms = sqlite3_column_int64(st, 5);
-    m.recalled = sqlite3_column_int(st, 6) != 0;
-    out.push_back(std::move(m));
-  }
-  sqlite3_finalize(st);
-  return out;
+  MessageSearch q;
+  q.account = account;
+  q.limit = limit;
+  return search_messages(q);
 }
 
 // T3.2 条件检索：账号（收发双侧）／时间窗（含端点）／关键词（子串，LIKE 转义）AND 组合
@@ -530,7 +518,12 @@ std::vector<ArchivedMessage> ServerStore::search_messages(
   std::string sql =
       "SELECT msg_id, from_account, to_account, type, text, ts_ms, recall"
       " FROM messages WHERE 1=1";
-  if (!q.account.empty()) sql += " AND (from_account = ? OR to_account = ?)";
+  if (!q.account.empty()) {
+    // 收发双侧 ＋ 该账号所在群的群消息（to="group:<群号>"）
+    sql += " AND (from_account = ? OR to_account = ? OR to_account IN"
+           " (SELECT 'group:' || group_id FROM group_members"
+           "  WHERE account = ?))";
+  }
   // 关键词子串匹配：%／_／转义符先转义，避免用户输入被当通配符
   std::string like;
   if (!q.keyword.empty()) {
@@ -551,6 +544,7 @@ std::vector<ArchivedMessage> ServerStore::search_messages(
   }
   int idx = 1;
   if (!q.account.empty()) {
+    sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
   }
@@ -1006,6 +1000,194 @@ PolicyRow ServerStore::resolve_policy(const std::string& account) {
   if (const auto it = all.find(""); it != all.end()) return it->second;
   PolicyRow fallback; // 内置默认：宽松（免登录可用、跨态可通、新设备免审批）
   return fallback;
+}
+
+// —— T4.1 群聊 ——
+
+std::uint64_t ServerStore::create_group(const std::string& name,
+                                        const std::string& owner,
+                                        const std::vector<std::string>& members) {
+  if (name.empty() || owner.empty()) return 0;
+  // 成员账号存在性校验（建群者一并校验）；去重
+  std::vector<std::string> uniq;
+  for (const auto& a : members) {
+    if (std::find(uniq.begin(), uniq.end(), a) == uniq.end()) uniq.push_back(a);
+  }
+  for (const auto& a : uniq) {
+    if (!find_account(a).has_value()) return 0;
+  }
+  if (std::find(uniq.begin(), uniq.end(), owner) == uniq.end()) {
+    uniq.push_back(owner);
+  }
+
+  sqlite3_exec(db_, "BEGIN;", nullptr, nullptr, nullptr);
+  const char* sql =
+      "INSERT INTO groups(name, owner, announcement, created_ms)"
+      " VALUES(?, ?, '', ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+    return 0;
+  }
+  sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, owner.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, now_ms());
+  if (sqlite3_step(st) != SQLITE_DONE) {
+    sqlite3_finalize(st);
+    sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+    return 0;
+  }
+  sqlite3_finalize(st);
+  const std::uint64_t gid =
+      static_cast<std::uint64_t>(sqlite3_last_insert_rowid(db_));
+  for (const auto& a : uniq) {
+    sqlite3_stmt* ms = nullptr;
+    if (sqlite3_prepare_v2(db_,
+                           "INSERT OR IGNORE INTO group_members(group_id,"
+                           " account, joined_ms) VALUES(?, ?, ?);",
+                           -1, &ms, nullptr) != SQLITE_OK) {
+      continue;
+    }
+    sqlite3_bind_int64(ms, 1, static_cast<sqlite3_int64>(gid));
+    sqlite3_bind_text(ms, 2, a.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(ms, 3, now_ms());
+    sqlite3_step(ms);
+    sqlite3_finalize(ms);
+  }
+  sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr);
+  return gid;
+}
+
+std::vector<std::string> ServerStore::group_members(std::uint64_t group_id) {
+  std::vector<std::string> out;
+  const char* sql =
+      "SELECT account FROM group_members WHERE group_id = ?"
+      " ORDER BY joined_ms ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    if (p) out.emplace_back(p);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::optional<GroupInfo> ServerStore::group_info(std::uint64_t group_id) {
+  const char* sql =
+      "SELECT group_id, name, owner, announcement FROM groups"
+      " WHERE group_id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  std::optional<GroupInfo> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    GroupInfo g;
+    g.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
+    const auto text_of = [&st](int col) {
+      const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, col));
+      return p ? std::string(p) : std::string{};
+    };
+    g.name = text_of(1);
+    g.owner = text_of(2);
+    g.announcement = text_of(3);
+    g.members = group_members(group_id);
+    out = std::move(g);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<GroupInfo> ServerStore::groups_of(const std::string& account) {
+  std::vector<GroupInfo> out;
+  const char* sql =
+      "SELECT group_id FROM group_members WHERE account = ?"
+      " ORDER BY group_id ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  std::vector<std::uint64_t> ids;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    ids.push_back(static_cast<std::uint64_t>(sqlite3_column_int64(st, 0)));
+  }
+  sqlite3_finalize(st);
+  for (const auto id : ids) {
+    if (auto g = group_info(id)) out.push_back(std::move(*g));
+  }
+  return out;
+}
+
+bool ServerStore::is_group_member(std::uint64_t group_id,
+                                  const std::string& account) {
+  for (const auto& a : group_members(group_id)) {
+    if (a == account) return true;
+  }
+  return false;
+}
+
+bool ServerStore::group_invite(std::uint64_t group_id,
+                               const std::string& account) {
+  if (!group_info(group_id).has_value()) return false;
+  if (!find_account(account).has_value()) return false;
+  if (is_group_member(group_id, account)) return false;
+  const char* sql =
+      "INSERT INTO group_members(group_id, account, joined_ms)"
+      " VALUES(?, ?, ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, now_ms());
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::group_leave(std::uint64_t group_id,
+                              const std::string& account) {
+  const auto info = group_info(group_id);
+  if (!info.has_value() || !is_group_member(group_id, account)) return false;
+  sqlite3_exec(db_, "BEGIN;", nullptr, nullptr, nullptr);
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "DELETE FROM group_members WHERE group_id = ?"
+                         " AND account = ?;",
+                         -1, &st, nullptr) == SQLITE_OK) {
+    sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+    sqlite3_bind_text(st, 2, account.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+  }
+  if (info->owner == account) {
+    // 群主退群＝解散：清完整张成员表（群号与历史归档保留，留痕纪律）
+    if (sqlite3_prepare_v2(db_,
+                           "DELETE FROM group_members WHERE group_id = ?;",
+                           -1, &st, nullptr) == SQLITE_OK) {
+      sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+      sqlite3_step(st);
+      sqlite3_finalize(st);
+    }
+  }
+  sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr);
+  return true;
+}
+
+bool ServerStore::group_announce(std::uint64_t group_id,
+                                 const std::string& owner,
+                                 const std::string& announcement) {
+  const auto info = group_info(group_id);
+  if (!info.has_value() || info->owner != owner) return false;
+  const char* sql = "UPDATE groups SET announcement = ? WHERE group_id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, announcement.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 2, static_cast<sqlite3_int64>(group_id));
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
 }
 
 } // namespace memex::server

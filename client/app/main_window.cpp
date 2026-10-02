@@ -8,8 +8,12 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QMenuBar>
+#include <QMenu>
+#include <QMessageBox>
+#include <QRegularExpression>
 #include <QScrollBar>
 #include <QSettings>
 #include <QStatusBar>
@@ -39,12 +43,31 @@ QString hhmm(qint64 ts_ms) {
   return QDateTime::fromMSecsSinceEpoch(ts_ms).toString(QStringLiteral("HH:mm"));
 }
 
-// 气泡行：外出＝品牌橙靠右，来访＝浅灰靠左（QTextBrowser 富文本子集，不用圆角）
+// 气泡行：外出＝品牌橙靠右，来访＝浅灰靠左（QTextBrowser 富文本子集，不用圆角）。
+// at_mode=true（群聊）：@账号 标记整体包品牌橙加粗。
 QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
-                    bool outgoing) {
+                    bool outgoing, bool at_mode = false) {
   const QString meta =
       QStringLiteral("<span style=\"color:#9b8f86; font-size:small;\">%1 %2</span>")
           .arg(esc(name), hhmm(ts_ms));
+  QString content = esc(text);
+  if (at_mode) {
+    static const QRegularExpression at_re(
+        QStringLiteral("@[A-Za-z0-9_.\\-]+"));
+    QString highlighted;
+    qsizetype pos = 0;
+    auto it = at_re.globalMatch(content);
+    while (it.hasNext()) {
+      const auto m = it.next();
+      highlighted += content.mid(pos, m.capturedStart() - pos);
+      highlighted += QStringLiteral(
+                          "<span style=\"color:#e16531; font-weight:600;\">%1</span>")
+                          .arg(m.captured());
+      pos = m.capturedEnd();
+    }
+    highlighted += content.mid(pos);
+    content = std::move(highlighted);
+  }
   const QString body = QStringLiteral(
                            "<table cellspacing=\"0\" cellpadding=\"6\"><tr><td "
                            "bgcolor=\"%1\"><span style=\"color:%2;\">%3</span></td>"
@@ -53,7 +76,7 @@ QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
                                          : QStringLiteral("#f0ebe5"),
                                 outgoing ? QStringLiteral("#ffffff")
                                          : QStringLiteral("#332b24"),
-                                esc(text));
+                                content);
   if (outgoing) {
     return QStringLiteral(
                "<div>%1</div><table width=\"100%\" cellspacing=\"0\"><tr>"
@@ -86,17 +109,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 void MainWindow::build_ui() {
-  // —— 菜单：协作态登录／登出（不重启切换形态，T2.4）——
+  // —— 菜单：协作态登录／登出（不重启切换形态，T2.4）；群聊（T4.1）——
   auto* collab_menu = menuBar()->addMenu(QStringLiteral("协作"));
   auto* act_login = collab_menu->addAction(QStringLiteral("登录协作态…"));
   auto* act_org = collab_menu->addAction(QStringLiteral("组织架构…"));
   act_collab_logout_ = collab_menu->addAction(QStringLiteral("登出（回到直连态）"));
   act_collab_logout_->setEnabled(false);
+  collab_menu->addSeparator();
+  auto* act_group_new =
+      collab_menu->addAction(QStringLiteral("新建群聊…"));
+  auto* act_dgroup_new =
+      collab_menu->addAction(QStringLiteral("新建临时群（直连，不进归档）…"));
   connect(act_login, &QAction::triggered, this,
           &MainWindow::show_collab_login_dialog);
   connect(act_org, &QAction::triggered, this, &MainWindow::show_org_dialog);
   connect(act_collab_logout_, &QAction::triggered, this,
           &MainWindow::logout_collab);
+  connect(act_group_new, &QAction::triggered, this,
+          [this] { create_group_dialog(); });
+  connect(act_dgroup_new, &QAction::triggered, this, [this] { dgroup_dialog(); });
 
   // —— 左侧：局域网设备列表（直连态以设备替代联系人）——
   auto* side = new QWidget(this);
@@ -122,6 +153,10 @@ void MainWindow::build_ui() {
   device_list_ = new QListWidget(side);
   device_list_->setFrameShape(QFrame::NoFrame);
   device_list_->setSelectionMode(QAbstractItemView::SingleSelection);
+  // 群条目右键菜单（T4.1）：拉人／公告／退群／解散
+  device_list_->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(device_list_, &QListWidget::customContextMenuRequested, this,
+          [this](const QPoint& pos) { show_group_menu(pos); });
   device_list_->setStyleSheet(QStringLiteral(
       "QListWidget { background:#faf7f3; border:1px solid #e8e0d6; "
       "border-radius:8px; }"
@@ -233,6 +268,12 @@ void MainWindow::build_ui() {
       show_status(QStringLiteral("先选择设备再发送文件"));
       return;
     }
+    if (current_kind_ == QStringLiteral("group") ||
+        current_kind_ == QStringLiteral("dgroup")) {
+      // 群文件传输不在本期范围：文件仍走点对点直连（单聊）
+      show_status(QStringLiteral("群会话暂不支持文件发送（文件走单聊点对点）"));
+      return;
+    }
     if (current_kind_ != QStringLiteral("collab") &&
         !direct_send_allowed()) { // T3.4 策略闸门（文件与文字同口径）
       return;
@@ -313,6 +354,9 @@ void MainWindow::wire_collab() {
                                "全量归档")
                     .arg(esc(display)));
             show_status(QStringLiteral("协作态已登录：%1").arg(display));
+            // 登录即拉组织架构（策略与建群数据源）与群列表（T3.4／T4.1）
+            collab_engine_.query_org();
+            collab_engine_.query_groups();
           });
   connect(&collab_engine_, &CollabEngine::login_failed, this,
           [this](const QString& reason) {
@@ -380,6 +424,33 @@ void MainWindow::wire_collab() {
               show_status(QStringLiteral("组织架构已更新"));
             }
           });
+  // —— T4.1 群聊 ——
+  connect(&collab_engine_, &CollabEngine::group_result, this,
+          [this](bool ok, const QString& reason, const QString& op,
+                 quint64 group_id) {
+            if (ok) {
+              show_status(QStringLiteral("群操作成功（%1，群 %2）")
+                              .arg(op, QString::number(group_id)));
+            } else {
+              show_status(QStringLiteral("群操作失败（%1）：%2").arg(op, reason));
+            }
+          });
+  connect(&collab_engine_, &CollabEngine::groups_received, this,
+          [this](const QString& groups_json) { apply_groups(groups_json); });
+  connect(&collab_engine_, &CollabEngine::group_message_received, this,
+          [this](const QString& group_key, const QString& sender,
+                 const QString& text, qint64 ts_ms, const QString& /*msg_id*/) {
+            if (current_kind_ == QStringLiteral("group") &&
+                group_key == current_peer_) {
+              append_message(sender, text, ts_ms, false,
+                             QStringLiteral("collab"));
+            } else {
+              const QString gname = groups_.value(group_key.mid(6).toULongLong())
+                                        .name;
+              show_status(QStringLiteral("来自群「%1」%2 的消息")
+                              .arg(gname.isEmpty() ? group_key : gname, sender));
+            }
+          });
 }
 
 // —— T2.4 模式切换公共入口 ——
@@ -403,6 +474,10 @@ void MainWindow::logout_collab() {
 
 void MainWindow::open_collab_peer(const QString& account) {
   if (account.isEmpty()) return;
+  if (account.startsWith(QStringLiteral("group:"))) { // 历史群会话键
+    open_group(account);
+    return;
+  }
   collab_peers_.insert(account);
   refresh_devices();
   open_chat(QStringLiteral("collab"), account);
@@ -410,7 +485,9 @@ void MainWindow::open_collab_peer(const QString& account) {
 
 bool MainWindow::send_in_current_chat(const QString& text) {
   if (text.isEmpty() || current_peer_.isEmpty()) return false;
-  if (current_kind_ == QStringLiteral("collab")) {
+  // 协作单聊与服务端群聊同一口径：to=账号或 "group:<群号>"，均经服务端归档
+  if (current_kind_ == QStringLiteral("collab") ||
+      current_kind_ == QStringLiteral("group")) {
     const quint64 seq = collab_engine_.send_text(current_peer_, text);
     if (seq == 0) {
       show_status(QStringLiteral(
@@ -420,6 +497,30 @@ bool MainWindow::send_in_current_chat(const QString& text) {
     append_message(collab_engine_.account(), text,
                    QDateTime::currentMSecsSinceEpoch(), true,
                    QStringLiteral("collab"));
+    return true;
+  }
+  // 免服务端临时群（直连态）：逐设备点对点扇出，不进归档
+  if (current_kind_ == QStringLiteral("dgroup")) {
+    if (!direct_send_allowed()) return false; // T3.4 策略闸门（与直连同口径）
+    const QStringList members = dgroup_members_.value(current_peer_);
+    int sent = 0;
+    for (const QString& dev : members) {
+      if (direct_engine_.send_text(dev.toStdString(), text.toStdString()) > 0) {
+        ++sent;
+      }
+    }
+    if (sent == 0) {
+      show_status(QStringLiteral("临时群发送失败：无可达成员"));
+      return false;
+    }
+    append_message(QString::fromStdString(direct_engine_.device_id()), text,
+                   QDateTime::currentMSecsSinceEpoch(), true,
+                   QStringLiteral("direct"));
+    if (sent < members.size()) {
+      show_status(QStringLiteral("临时群部分送达：%1/%2 台设备")
+                      .arg(sent)
+                      .arg(members.size()));
+    }
     return true;
   }
   if (!direct_send_allowed()) return false; // T3.4 策略闸门
@@ -499,6 +600,294 @@ void MainWindow::apply_policy(const QString& org_json) {
 
 bool MainWindow::collab_logged_in() const {
   return collab_engine_.is_logged_in();
+}
+
+// —— T4.1 群聊 ——
+
+QString MainWindow::groups_json() const { return last_groups_json_; }
+
+// 组织架构全部账号（建群／拉人数据源；未拉到组织架构时为空，弹窗走手输）
+QStringList MainWindow::org_accounts() const {
+  QStringList out;
+  nlohmann::json j = nlohmann::json::parse(last_org_json_.toStdString(),
+                                           nullptr, false);
+  if (j.is_discarded() || !j.contains("members")) return out;
+  for (const auto& m : j["members"]) {
+    const QString a =
+        QString::fromStdString(m.value("account", std::string{}));
+    if (!a.isEmpty()) out << a;
+  }
+  return out;
+}
+
+// 建群（服务端群）：群名＋成员多选（组织架构账号＋手输补位）
+void MainWindow::create_group_dialog() {
+  if (!collab_engine_.is_logged_in()) {
+    show_status(QStringLiteral("建群需登录协作态（群消息经服务端扇出并归档）"));
+    return;
+  }
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("新建群聊"));
+  dlg.resize(380, 520);
+  auto* form = new QFormLayout(&dlg);
+  auto* name = new QLineEdit(&dlg);
+  name->setPlaceholderText(QStringLiteral("例如：研发部日常"));
+  form->addRow(QStringLiteral("群名"), name);
+  auto* members = new QListWidget(&dlg);
+  const QString me = collab_engine_.account();
+  for (const QString& a : org_accounts()) {
+    if (a == me) continue;
+    auto* item = new QListWidgetItem(a, members);
+    item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+    item->setCheckState(Qt::Unchecked);
+  }
+  form->addRow(QStringLiteral("成员"), members);
+  auto* extra = new QLineEdit(&dlg);
+  extra->setPlaceholderText(QStringLiteral("其他账号，逗号分隔（可空）"));
+  form->addRow(QString(), extra);
+  auto* buttons = new QDialogButtonBox(
+      QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+  form->addRow(buttons);
+  QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  if (dlg.exec() != QDialog::Accepted) return;
+  const QString gname = name->text().trimmed();
+  if (gname.isEmpty()) {
+    show_status(QStringLiteral("建群取消：群名不能为空"));
+    return;
+  }
+  QStringList picked;
+  for (int i = 0; i < members->count(); ++i) {
+    if (members->item(i)->checkState() == Qt::Checked) {
+      picked << members->item(i)->text();
+    }
+  }
+  for (const QString& part :
+       extra->text().split(QChar(','), Qt::SkipEmptyParts)) {
+    const QString a = part.trimmed();
+    if (!a.isEmpty() && !picked.contains(a)) picked << a;
+  }
+  collab_engine_.create_group(gname, picked);
+  show_status(QStringLiteral("建群请求已发送（%1 名成员）").arg(picked.size()));
+}
+
+// 打开群会话（group_key 形如 "group:7"）
+void MainWindow::open_group(const QString& group_key) {
+  if (group_key.isEmpty()) return;
+  const quint64 gid =
+      group_key.mid(QStringLiteral("group:").size()).toULongLong();
+  if (!groups_.contains(gid)) {
+    show_status(QStringLiteral("群 %1 不在列表（可能已退群／解散）").arg(gid));
+    return;
+  }
+  open_chat(QStringLiteral("group"), group_key);
+}
+
+// 群列表数据到达：解析入 groups_，刷新列表与当前群会话标题
+void MainWindow::apply_groups(const QString& groups_json) {
+  last_groups_json_ = groups_json;
+  nlohmann::json j = nlohmann::json::parse(groups_json.toStdString(),
+                                           nullptr, false);
+  if (j.is_discarded() || !j.is_array()) {
+    show_status(QStringLiteral("群列表数据解析失败"));
+    return;
+  }
+  groups_.clear();
+  for (const auto& g : j) {
+    GroupEntry e;
+    e.name = QString::fromStdString(g.value("name", std::string{}));
+    e.owner = QString::fromStdString(g.value("owner", std::string{}));
+    e.announcement =
+        QString::fromStdString(g.value("announcement", std::string{}));
+    if (g.contains("members")) {
+      for (const auto& m : g["members"]) {
+        e.members << QString::fromStdString(m.get<std::string>());
+      }
+    }
+    groups_.insert(g.value("group_id", 0), std::move(e));
+  }
+  // 当前打开的群：标题与 meta 随最新数据刷新；群没了则收尾提示
+  if (current_kind_ == QStringLiteral("group")) {
+    if (GroupEntry* g = current_group()) {
+      chat_title_->setText(g->name);
+      QString meta = QStringLiteral("%1 人 · 群 %2 · 协作态 · 消息进入服务端归档")
+                         .arg(g->members.size())
+                         .arg(current_group_id());
+      if (!g->announcement.isEmpty()) {
+        meta.prepend(QStringLiteral("公告：%1　·　").arg(g->announcement));
+      }
+      chat_meta_->setText(meta);
+    } else {
+      append_system_line(
+          QStringLiteral("该群已退出或已解散：本会话仅供查看历史"));
+    }
+  }
+  refresh_devices();
+}
+
+quint64 MainWindow::current_group_id() const {
+  if (current_kind_ != QStringLiteral("group")) return 0;
+  return current_peer_.mid(QStringLiteral("group:").size()).toULongLong();
+}
+
+MainWindow::GroupEntry* MainWindow::current_group() {
+  const quint64 gid = current_group_id();
+  auto it = groups_.find(gid);
+  return gid > 0 && it != groups_.end() ? &it.value() : nullptr;
+}
+
+// 群条目右键菜单：服务端群（拉人／公告／退群）与临时群（解散）
+void MainWindow::show_group_menu(const QPoint& pos) {
+  auto* item = device_list_->itemAt(pos);
+  if (!item) return;
+  const QString kind = item->data(Qt::UserRole + 1).toString();
+  const QString id = item->data(Qt::UserRole).toString();
+  QMenu menu(this);
+  if (kind == QStringLiteral("group")) {
+    const quint64 gid = id.mid(QStringLiteral("group:").size()).toULongLong();
+    auto* act_invite = menu.addAction(QStringLiteral("拉人进群…"));
+    auto* act_ann = menu.addAction(QStringLiteral("设置群公告…"));
+    menu.addSeparator();
+    auto* act_leave = menu.addAction(QStringLiteral("退出群聊"));
+    connect(act_invite, &QAction::triggered, this,
+            [this, gid] { group_invite_dialog(gid); });
+    connect(act_ann, &QAction::triggered, this,
+            [this, gid] { group_announce_dialog(gid); });
+    connect(act_leave, &QAction::triggered, this, [this, gid] {
+      if (QMessageBox::question(
+              this, QStringLiteral("退出群聊"),
+              QStringLiteral("确认退出该群？（群主退群＝解散该群）")) !=
+          QMessageBox::Yes) {
+        return;
+      }
+      collab_engine_.leave_group(gid);
+    });
+    menu.exec(device_list_->mapToGlobal(pos));
+  } else if (kind == QStringLiteral("dgroup")) {
+    auto* act_del = menu.addAction(QStringLiteral("解散临时群"));
+    connect(act_del, &QAction::triggered, this, [this, id] {
+      dgroup_members_.remove(id);
+      if (current_peer_ == id) {
+        current_kind_ = QStringLiteral("direct");
+        current_peer_.clear();
+      }
+      refresh_devices();
+      show_status(QStringLiteral("临时群已解散（本就不进归档，无服务端动作）"));
+    });
+    menu.exec(device_list_->mapToGlobal(pos));
+  }
+}
+
+// 拉人进群（成员数据源同建群；服务端校验账号存在且不在群里）
+void MainWindow::group_invite_dialog(quint64 group_id) {
+  if (!groups_.contains(group_id)) return;
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("拉人进群（群 %1）").arg(group_id));
+  dlg.resize(380, 480);
+  auto* layout = new QVBoxLayout(&dlg);
+  auto* members = new QListWidget(&dlg);
+  const QString me = collab_engine_.account();
+  const QStringList in_group = groups_.value(group_id).members;
+  for (const QString& a : org_accounts()) {
+    if (a == me || in_group.contains(a)) continue;
+    auto* item = new QListWidgetItem(a, members);
+    item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+    item->setCheckState(Qt::Unchecked);
+  }
+  auto* extra = new QLineEdit(&dlg);
+  extra->setPlaceholderText(QStringLiteral("其他账号，逗号分隔（可空）"));
+  auto* buttons = new QDialogButtonBox(
+      QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+  QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  layout->addWidget(members);
+  layout->addWidget(extra);
+  layout->addWidget(buttons);
+  if (dlg.exec() != QDialog::Accepted) return;
+  QStringList picked;
+  for (int i = 0; i < members->count(); ++i) {
+    if (members->item(i)->checkState() == Qt::Checked) {
+      picked << members->item(i)->text();
+    }
+  }
+  for (const QString& part :
+       extra->text().split(QChar(','), Qt::SkipEmptyParts)) {
+    const QString a = part.trimmed();
+    if (!a.isEmpty() && !picked.contains(a)) picked << a;
+  }
+  if (picked.isEmpty()) {
+    show_status(QStringLiteral("拉人取消：未选择账号"));
+    return;
+  }
+  collab_engine_.invite_group(group_id, picked);
+  show_status(QStringLiteral("拉人请求已发送（%1 人）").arg(picked.size()));
+}
+
+// 群公告（仅群主可设；服务端校验并回执结果）
+void MainWindow::group_announce_dialog(quint64 group_id) {
+  const auto it = groups_.find(group_id);
+  if (it == groups_.end()) return;
+  bool ok = false;
+  const QString text = QInputDialog::getMultiLineText(
+      this, QStringLiteral("设置群公告（群 %1）").arg(group_id),
+      QStringLiteral("群主专属；留空＝清除公告"), it->announcement, &ok);
+  if (!ok) return;
+  collab_engine_.announce_group(group_id, text.trimmed());
+  show_status(QStringLiteral("群公告设置请求已发送"));
+}
+
+// 免服务端临时群（直连态）：从已发现设备多选，发送＝逐设备点对点扇出。
+// 不经服务端——不进归档（界面分组与提示条明示）。
+void MainWindow::dgroup_dialog() {
+  const auto peers = direct_engine_.peers();
+  if (peers.isEmpty()) {
+    show_status(QStringLiteral("未发现局域网设备，无法建临时群"));
+    return;
+  }
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("新建临时群（点对点扇出，不进归档）"));
+  dlg.resize(400, 440);
+  auto* layout = new QVBoxLayout(&dlg);
+  auto* list = new QListWidget(&dlg);
+  for (const Peer& p : peers) {
+    const QString id = QString::fromStdString(p.device_id);
+    const QString name =
+        p.name.empty() ? id.left(8) : QString::fromStdString(p.name);
+    auto* item = new QListWidgetItem(
+        QStringLiteral("%1\n%2 · TCP %3")
+            .arg(name, p.address.toString(), QString::number(p.tcp_port)),
+        list);
+    item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+    item->setCheckState(Qt::Unchecked);
+    item->setData(Qt::UserRole, id);
+  }
+  auto* buttons = new QDialogButtonBox(
+      QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+  QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  layout->addWidget(list);
+  layout->addWidget(buttons);
+  if (dlg.exec() != QDialog::Accepted) return;
+  QStringList picked;
+  for (int i = 0; i < list->count(); ++i) {
+    if (list->item(i)->checkState() == Qt::Checked) {
+      picked << list->item(i)->data(Qt::UserRole).toString();
+    }
+  }
+  if (picked.isEmpty()) {
+    show_status(QStringLiteral("建临时群取消：未选择设备"));
+    return;
+  }
+  const QString id = QStringLiteral("dgroup:%1").arg(next_dgroup_++);
+  dgroup_members_.insert(id, picked);
+  refresh_devices();
+  open_chat(QStringLiteral("dgroup"), id);
+  show_status(QStringLiteral("临时群已建立（%1 台设备）· 不进归档").arg(picked.size()));
+}
+
+QString MainWindow::dgroup_title(const QString& dgroup_id) const {
+  return QStringLiteral("临时群 %1")
+      .arg(dgroup_id.mid(QStringLiteral("dgroup:").size()));
 }
 
 // —— T3.1 组织架构：登录后向服务端查询，管理端维护即生效到客户端 ——
@@ -605,8 +994,10 @@ QString MainWindow::chat_html() const { return chat_view_->toHtml(); }
 // 归档提示条（常驻不可关）：协作态显示归档口径；直连／降级态必须明示
 // 「消息不进归档」——切换与降级共用这一条提示（A7、A11 界面口径）。
 void MainWindow::update_banner() {
+  // 协作单聊与服务端群聊都走服务端转发归档（T4.1 后者同口径）
   const bool collab_session =
-      current_kind_ == QStringLiteral("collab") &&
+      (current_kind_ == QStringLiteral("collab") ||
+       current_kind_ == QStringLiteral("group")) &&
       collab_engine_.is_logged_in();
   if (collab_session) {
     banner_->setStyleSheet(QStringLiteral(
@@ -629,11 +1020,14 @@ void MainWindow::update_banner() {
   }
 }
 
-// 登录后把本地库里的历史协作会话补进列表（换机／重启后会话入口不丢）
+// 登录后把本地库里的历史协作会话补进列表（换机／重启后会话入口不丢）。
+// 群会话（"group:N"）不入单聊列表——群列表由 GROUP_DATA 单独维护（T4.1）。
 void MainWindow::seed_collab_peers() {
   if (LocalStore* store = direct_engine_.store()) {
     const QStringList hist = store->peers(QStringLiteral("collab"));
-    for (const QString& p : hist) collab_peers_.insert(p);
+    for (const QString& p : hist) {
+      if (!p.startsWith(QStringLiteral("group:"))) collab_peers_.insert(p);
+    }
   }
 }
 
@@ -703,6 +1097,39 @@ void MainWindow::refresh_devices() {
       item->setData(Qt::UserRole + 1, QStringLiteral("collab"));
     }
   }
+
+  // 群聊分组（T4.1）：服务端群，消息经服务端扇出并全量归档
+  if (collab_engine_.is_logged_in() && !groups_.isEmpty()) {
+    auto* header = new QListWidgetItem(QStringLiteral("群聊 · 服务端归档"));
+    header->setFlags(Qt::NoItemFlags);
+    device_list_->addItem(header);
+    for (auto it = groups_.constBegin(); it != groups_.constEnd(); ++it) {
+      auto* item = new QListWidgetItem(device_list_);
+      item->setText(QStringLiteral("%1\n%2 人 · 群 %3 · 已归档")
+                        .arg(it->name)
+                        .arg(it->members.size())
+                        .arg(it.key()));
+      item->setData(Qt::UserRole,
+                    QStringLiteral("group:%1").arg(it.key()));
+      item->setData(Qt::UserRole + 1, QStringLiteral("group"));
+    }
+  }
+
+  // 免服务端临时群（直连态，T4.1）：点对点扇出，不进归档
+  if (!dgroup_members_.isEmpty()) {
+    auto* header = new QListWidgetItem(QStringLiteral("临时群 · 不进归档"));
+    header->setFlags(Qt::NoItemFlags);
+    device_list_->addItem(header);
+    for (auto it = dgroup_members_.constBegin(); it != dgroup_members_.constEnd();
+         ++it) {
+      auto* item = new QListWidgetItem(device_list_);
+      item->setText(QStringLiteral("%1\n%2 台设备 · 点对点扇出 · 不归档")
+                        .arg(dgroup_title(it.key()))
+                        .arg(it->size()));
+      item->setData(Qt::UserRole, it.key());
+      item->setData(Qt::UserRole + 1, QStringLiteral("dgroup"));
+    }
+  }
   device_list_->blockSignals(false);
   device_count_->setText(peers.isEmpty()
                              ? QStringLiteral("未发现设备")
@@ -743,12 +1170,34 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
   chat_view_->clear();
 
   const bool collab = kind == QStringLiteral("collab");
-  const QString my_id = collab ? collab_engine_.account()
-                               : QString::fromStdString(direct_engine_.device_id());
+  const bool group = kind == QStringLiteral("group");
+  const QString my_id = (collab || group)
+                             ? collab_engine_.account()
+                             : QString::fromStdString(direct_engine_.device_id());
   if (collab) {
     chat_title_->setText(id);
     chat_meta_->setText(QStringLiteral("%1 · 协作态 · 消息进入服务端归档")
                             .arg(id));
+  } else if (group) {
+    // 服务端群会话（T4.1）：标题群名，公告与成员数入 meta
+    const quint64 gid = id.mid(QStringLiteral("group:").size()).toULongLong();
+    const GroupEntry g = groups_.value(gid);
+    chat_title_->setText(g.name.isEmpty()
+                             ? QStringLiteral("群 %1").arg(gid)
+                             : g.name);
+    QString meta = QStringLiteral("%1 人 · 群 %2 · 协作态 · 消息进入服务端归档")
+                       .arg(g.members.size())
+                       .arg(gid);
+    if (!g.announcement.isEmpty()) {
+      meta.prepend(QStringLiteral("公告：%1　·　").arg(g.announcement));
+    }
+    chat_meta_->setText(meta);
+  } else if (kind == QStringLiteral("dgroup")) {
+    chat_title_->setText(dgroup_title(id));
+    chat_meta_->setText(
+        QStringLiteral("%1 台设备 · 点对点扇出 · 消息不进归档；对端回复落在"
+                       "与其的单聊会话")
+            .arg(dgroup_members_.value(id).size()));
   } else {
     const Peer p = direct_engine_.peer(id.toStdString());
     const QString name = p.name.empty() ? id.left(8) : QString::fromStdString(p.name);
@@ -765,6 +1214,16 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
       append_system_line(
           QStringLiteral("已与 %1 建立协作会话 · 消息经服务端转发并全量归档")
               .arg(esc(id)));
+    } else if (group) {
+      append_system_line(
+          QStringLiteral("已打开群「%1」· 消息经服务端按成员扇出并全量归档")
+              .arg(esc(chat_title_->text())));
+    } else if (kind == QStringLiteral("dgroup")) {
+      append_system_line(
+          QStringLiteral("已建立临时群「%1」（%2 台设备）· 点对点扇出，"
+                         "本会话不进归档")
+              .arg(esc(chat_title_->text()))
+              .arg(dgroup_members_.value(id).size()));
     } else {
       append_system_line(
           QStringLiteral("已与 %1 建立点对点会话 · 本对话不归档")
@@ -784,8 +1243,9 @@ void MainWindow::append_message(const QString& from_id, const QString& text,
                                 const QString& source) {
   QString name = from_id;
   if (!outgoing) {
-    if (current_kind_ == QStringLiteral("collab")) {
-      name = from_id; // 协作会话对端即账号
+    if (current_kind_ == QStringLiteral("collab") ||
+        current_kind_ == QStringLiteral("group")) {
+      name = from_id; // 协作单聊／群聊对端即账号（群内显账号便于 @）
     } else {
       const Peer p = direct_engine_.peer(from_id.toStdString());
       if (!p.name.empty()) name = QString::fromStdString(p.name);
@@ -798,7 +1258,9 @@ void MainWindow::append_message(const QString& from_id, const QString& text,
       source == QStringLiteral("collab")
           ? QStringLiteral(" · 协作·已归档")
           : QStringLiteral(" · 直连·仅本机");
-  chat_view_->append(bubble_html(name + tag, text, ts_ms, outgoing));
+  // 群聊启用 @成员 高亮（T4.1）
+  chat_view_->append(bubble_html(name + tag, text, ts_ms, outgoing,
+                                 current_kind_ == QStringLiteral("group")));
   auto* bar = chat_view_->verticalScrollBar();
   bar->setValue(bar->maximum());
 }

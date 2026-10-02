@@ -50,6 +50,12 @@ public slots:
   void recall_text(const QString& to, const QString& msg_id);
   // 请求组织架构（部门树＋成员资料，T3.1）；结果经 org_received 送达。
   void query_org();
+  // —— 群聊（T4.1）：命令走 GROUP_CMD，回执经 group_result；群列表 query_groups ——
+  void create_group(const QString& name, const QStringList& members);
+  void invite_group(quint64 group_id, const QStringList& members);
+  void leave_group(quint64 group_id);
+  void announce_group(quint64 group_id, const QString& announcement);
+  void query_groups();
 
 signals:
   void logged_in(const QString& account, const QString& display_name);
@@ -72,6 +78,15 @@ signals:
   //  "policies":[{"department_path":"","allow_anonymous":true,
   //              "allow_cross_state":true,"new_device_approval":false}]}（T3.4）
   void org_received(const QString& org_json);
+  // 群命令回执（T4.1）：op（create/invite/leave/announce）、ok、reason、群号
+  void group_result(bool ok, const QString& reason, const QString& op,
+                    quint64 group_id);
+  // 群列表（T4.1）：JSON [{"group_id":N,"name","owner","announcement","members":[…]}]
+  void groups_received(const QString& groups_json);
+  // 收到群消息：群键（"group:N"）、发送者账号、正文、时间、msg_id
+  void group_message_received(const QString& group_key, const QString& sender,
+                              const QString& text, qint64 ts_ms,
+                              const QString& msg_id);
 
 private:
   // 在途／待补传消息（T2.5）：断线中断期本地暂存，恢复后按原 seq 补传，

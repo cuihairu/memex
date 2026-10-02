@@ -54,5 +54,12 @@ if(MEMEX_BUILD_TESTS)
   target_compile_definitions(test_org PRIVATE
     MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
   add_test(NAME org COMMAND test_org)
-  set_tests_properties(archive PROPERTIES TIMEOUT 60)
+  set_tests_properties(org PROPERTIES TIMEOUT 60)
+
+  # T4.1 群聊验收：建群／拉人／公告／退群（群主退群＝解散）、成员扇出、
+  # 全量归档一次、按成员检索联入、离线补投、非成员被拒不归档
+  add_executable(test_group tests/test_group.cpp)
+  target_link_libraries(test_group PRIVATE memex_server_core)
+  add_test(NAME group COMMAND test_group)
+  set_tests_properties(group PROPERTIES TIMEOUT 60)
 endif()

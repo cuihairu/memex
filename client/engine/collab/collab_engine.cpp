@@ -215,6 +215,73 @@ void CollabEngine::query_org() {
   send_frame(m);
 }
 
+// —— T4.1 群聊 ——
+
+void CollabEngine::create_group(const QString& name, const QStringList& members) {
+  if (!logged_in_) return;
+  Message m;
+  m.set_type(MsgType::GROUP_CMD);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* c = m.mutable_group_cmd();
+  c->set_op("create");
+  c->set_name(name.toStdString());
+  for (const QString& a : members) c->add_members(a.toStdString());
+  send_frame(m);
+}
+
+void CollabEngine::invite_group(quint64 group_id, const QStringList& members) {
+  if (!logged_in_) return;
+  Message m;
+  m.set_type(MsgType::GROUP_CMD);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* c = m.mutable_group_cmd();
+  c->set_op("invite");
+  c->set_group_id(group_id);
+  for (const QString& a : members) c->add_members(a.toStdString());
+  send_frame(m);
+}
+
+void CollabEngine::leave_group(quint64 group_id) {
+  if (!logged_in_) return;
+  Message m;
+  m.set_type(MsgType::GROUP_CMD);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* c = m.mutable_group_cmd();
+  c->set_op("leave");
+  c->set_group_id(group_id);
+  send_frame(m);
+}
+
+void CollabEngine::announce_group(quint64 group_id, const QString& announcement) {
+  if (!logged_in_) return;
+  Message m;
+  m.set_type(MsgType::GROUP_CMD);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* c = m.mutable_group_cmd();
+  c->set_op("announce");
+  c->set_group_id(group_id);
+  c->set_announcement(announcement.toStdString());
+  send_frame(m);
+}
+
+void CollabEngine::query_groups() {
+  if (!logged_in_) return;
+  Message m;
+  m.set_type(MsgType::GROUP_QUERY);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  send_frame(m);
+}
+
 void CollabEngine::send_frame(const Message& msg) {
   const std::string frame = memex::protocol::encode(msg);
   socket_->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
@@ -334,6 +401,32 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
     emit org_received(QString::fromStdString(j.dump()));
     break;
   }
+  case MsgType::GROUP_RESULT: {
+    // 群命令回执（T4.1）：失败理由上抛；成功操作顺带刷新群列表
+    if (!msg.has_group_result()) return;
+    const auto& r = msg.group_result();
+    emit group_result(r.ok(), QString::fromStdString(r.reason()),
+                      QString::fromStdString(r.op()), r.group_id());
+    if (r.ok()) query_groups();
+    break;
+  }
+  case MsgType::GROUP_DATA: {
+    // 群列表（T4.1）：JSON 交给界面层，见 groups_received 注释
+    if (!msg.has_group_data()) return;
+    nlohmann::json j = nlohmann::json::array();
+    for (const auto& g : msg.group_data().groups()) {
+      nlohmann::json gj;
+      gj["group_id"] = g.group_id();
+      gj["name"] = g.name();
+      gj["owner"] = g.owner();
+      gj["announcement"] = g.announcement();
+      gj["members"] = nlohmann::json::array();
+      for (const auto& m : g.members()) gj["members"].push_back(m);
+      j.push_back(std::move(gj));
+    }
+    emit groups_received(QString::fromStdString(j.dump()));
+    break;
+  }
   default:
     break;
   }
@@ -342,11 +435,15 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
 void CollabEngine::handle_text(const Message& msg) {
   const qint64 ts =
       msg.ts_ms() > 0 ? msg.ts_ms() : QDateTime::currentMSecsSinceEpoch();
+  // 群消息（to="group:N"，T4.1）：本地归到群会话（peer=群键），
+  // 上抛 group_message_received；单聊维持原路径
+  const bool is_group = msg.to().rfind("group:", 0) == 0;
+  const std::string peer = is_group ? msg.to() : msg.from();
   bool inserted = true;
   if (store_) {
     memex::client::StoredMessage sm;
     sm.seq = msg.seq();
-    sm.peer = msg.from();
+    sm.peer = peer;
     sm.from = msg.from();
     sm.to = msg.to();
     sm.ts_ms = ts;
@@ -365,10 +462,19 @@ void CollabEngine::handle_text(const Message& msg) {
     send_frame(ack);
   }
   if (inserted) {
-    emit message_received(QString::fromStdString(msg.from()),
-                          QString::fromStdString(msg.has_text() ? msg.text().text()
-                                                                : std::string{}),
-                          ts, QString::fromStdString(msg.msg_id()));
+    if (is_group) {
+      emit group_message_received(
+          QString::fromStdString(msg.to()), QString::fromStdString(msg.from()),
+          QString::fromStdString(msg.has_text() ? msg.text().text()
+                                                : std::string{}),
+          ts, QString::fromStdString(msg.msg_id()));
+    } else {
+      emit message_received(QString::fromStdString(msg.from()),
+                            QString::fromStdString(msg.has_text()
+                                                       ? msg.text().text()
+                                                       : std::string{}),
+                            ts, QString::fromStdString(msg.msg_id()));
+    }
   } else {
     qInfo() << "[协作] 重复补投，按 msg_id 去重：" << QString::fromStdString(msg.msg_id());
   }
