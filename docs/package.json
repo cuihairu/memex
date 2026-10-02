@@ -9,5 +9,10 @@
   },
   "devDependencies": {
     "vitepress": "^1.6.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": "^0.25.0"
+    }
   }
 }

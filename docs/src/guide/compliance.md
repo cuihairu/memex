@@ -16,6 +16,17 @@
 
 交付时本清单随包一并提供，即为 A22 交付物。
 
+## 依赖安全公告处理（dependabot）
+
+2026-10-03 处置记录（`gh api .../dependabot/alerts`，4 条）：
+
+| 公告 | 包 | 处置 |
+| --- | --- | --- |
+| GHSA-67mh-4wv8-2f99（esbuild ≤0.24.2） | esbuild 0.21.5 | 已修：`docs/package.json` 加 `pnpm.overrides.esbuild ^0.25.0` → 0.25.12，`docs:build` 绿 |
+| GHSA-4w7w-66w2-5vf9 / GHSA-fx2h-pf6j-xcff / GHSA-v6wh-96g9-6wx3（vite ≤6.4.1/≤6.4.2） | vite 5.4.21 | 受理降级：三条均为 dev server 专属（开发时 `vitepress dev` 的 CORS／文件访问），线上产物是 GitHub Pages 静态文件，不携带 dev server；升级需 vitepress 2.0 alpha（vite ^8），暂不盲跟 alpha。待 vitepress 稳定版升 vite 6+ 再跟进 |
+
+复审周期：每季度或 vitepress 正式版发版时重核。
+
 ## A23 系统标识一致性核查
 
 对照评审报告 V10.0 第五章第六节「表 14 系统标识与命名清单」逐项核查当前产物：
