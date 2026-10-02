@@ -129,6 +129,14 @@ struct CrossLogRow {
   std::int64_t duration_ms{0}; // 结束后 = ended - started；进行中为 0
 };
 
+// 已读回执（T4.3）：接收方上报已读，服务端留痕（msg_id, 已读方）。
+// 发送方在线即推送 READ_NOTICE；离线则仅留痕（上线后查库可见）。
+struct ReadRow {
+  std::string msg_id;
+  std::string reader; // 已读方账号
+  std::int64_t read_ms{0}; // 服务端受理时刻
+};
+
 class ServerStore {
 public:
   ServerStore() = default;
@@ -282,6 +290,14 @@ public:
   // 进入协作态、归档开始的时刻；无归档返回 0；有归档但无登录记录
   //（旧库数据）退化为首条归档消息时刻。
   std::int64_t archive_start_ms(const std::string& account);
+
+  // —— T4.3 已读回执 ——
+  // 已读上报：仅归档库存在的 msg_id 才留痕（防伪造 msg_id 灌库）；
+  // 同 (msg_id, 已读方) 重复上报幂等（首条为准，返回 true）。
+  bool record_read(const std::string& msg_id, const std::string& reader,
+                   std::int64_t read_ms);
+  // 某条消息的全部已读行（按上报序）
+  std::vector<ReadRow> readers_for(const std::string& msg_id);
 
 private:
   bool ensure_schema();

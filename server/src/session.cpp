@@ -292,6 +292,52 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       server_.store().ack_offline(msg.ack().msg_id(), account_);
     }
     break;
+  case v1::READ: {
+    // 已读上报（T4.3）：接收方已读某条归档消息。留痕后若原发送方在线，
+    // 推送 READ_NOTICE（发送方离线则仅留痕，不补投——已读态下次可查）。
+    if (!logged_in_ || !msg.has_read() || msg.read().msg_id().empty()) break;
+    const std::string target = msg.read().msg_id();
+    const std::string original_from = server_.store().message_from(target);
+    if (original_from.empty()) break; // 非归档消息（伪造 msg_id）不留痕
+    // 重复上报幂等：已记过该读者的不再重发 NOTICE（发送方已知已读）
+    bool is_new = true;
+    for (const auto& r : server_.store().readers_for(target)) {
+      if (r.reader == account_) {
+        is_new = false;
+        break;
+      }
+    }
+    const std::int64_t rms = now_ms(); // 留痕与通知共用同一时刻
+    if (!server_.store().record_read(target, account_, rms)) break;
+    if (!is_new) break;
+    memex::protocol::Message out;
+    out.set_type(v1::READ_NOTICE);
+    out.set_from("server");
+    out.set_ts_ms(rms);
+    auto* n = out.mutable_read_notice();
+    n->set_msg_id(target);
+    n->set_reader(account_);
+    n->set_read_ms(rms);
+    // deliver_frame 入参为纯 Envelope 字节（其内部加长度前缀）
+    const std::string blob = out.SerializeAsString();
+    for (const auto& s : server_.online_sessions(original_from)) {
+      s->deliver_frame(blob);
+    }
+    break;
+  }
+  case v1::PRESENCE_QUERY: {
+    // 在线账号表查询（T4.3）：登录后可查；变更推送由服务端主动广播
+    if (!logged_in_) break;
+    memex::protocol::Message out;
+    out.set_type(v1::PRESENCE_DATA);
+    out.set_from("server");
+    out.set_to(account_);
+    out.set_ts_ms(now_ms());
+    auto* p = out.mutable_presence_data();
+    for (const auto& a : server_.online_accounts()) p->add_accounts(a);
+    send(memex::protocol::encode(out));
+    break;
+  }
   case v1::RECALL: {
     // 撤回：仅置标记不清正文；事件独立留痕；转发给对端会话（本地展示标记）。
     if (!logged_in_ || !msg.has_recall()) break;

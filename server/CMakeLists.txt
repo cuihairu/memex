@@ -69,4 +69,11 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_cross PRIVATE memex_server_core)
   add_test(NAME cross COMMAND test_cross)
   set_tests_properties(cross PROPERTIES TIMEOUT 60)
+
+  # T4.3 消息状态与多端验收（服务端面）：已读上报留痕（伪造拒绝／幂等）、
+  # READ_NOTICE 在线路由、在线表查询与登录/登出/断开变更推送
+  add_executable(test_read_presence tests/test_read_presence.cpp)
+  target_link_libraries(test_read_presence PRIVATE memex_server_core)
+  add_test(NAME read_presence COMMAND test_read_presence)
+  set_tests_properties(read_presence PROPERTIES TIMEOUT 60)
 endif()

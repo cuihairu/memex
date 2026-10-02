@@ -42,6 +42,13 @@ public:
   std::vector<std::shared_ptr<Session>> online_sessions(
       const std::string& account);
 
+  // 当前在线账号表（排序后；T4.3 在线状态）。
+  std::vector<std::string> online_accounts();
+
+  // 在线表变化即广播 PRESENCE_DATA（登录／登出／互踢／意外断开；
+  // 在线者都收到，含自己——客户端以此刷新在线标识）。
+  void broadcast_presence();
+
   ServerStore& store() { return store_; }
 
 private:

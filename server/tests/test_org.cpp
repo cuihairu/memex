@@ -74,16 +74,21 @@ public:
     const std::string frame = memex::protocol::encode(msg);
     asio::write(*socket_, asio::buffer(frame));
   }
+  // T4.3 在线推送（PRESENCE_DATA）与本文件验收特性无关，自动跳过——
+  // 在线表语义由 test_read_presence 显式验收。
   memex::protocol::Message read() {
-    std::array<char, 4> head{};
-    asio::read(*socket_, asio::buffer(head));
-    const std::uint32_t len = (std::uint8_t(head[0]) << 24) |
-                              (std::uint8_t(head[1]) << 16) |
-                              (std::uint8_t(head[2]) << 8) |
-                              std::uint8_t(head[3]);
-    std::string payload(len, '\0');
-    asio::read(*socket_, asio::buffer(payload));
-    return memex::protocol::decode_payload(payload);
+    for (;;) {
+      std::array<char, 4> head{};
+      asio::read(*socket_, asio::buffer(head));
+      const std::uint32_t len = (std::uint8_t(head[0]) << 24) |
+                                (std::uint8_t(head[1]) << 16) |
+                                (std::uint8_t(head[2]) << 8) |
+                                std::uint8_t(head[3]);
+      std::string payload(len, '\0');
+      asio::read(*socket_, asio::buffer(payload));
+      auto msg = memex::protocol::decode_payload(payload);
+      if (msg.type() != memex::protocol::v1::PRESENCE_DATA) return msg;
+    }
   }
 
 private:

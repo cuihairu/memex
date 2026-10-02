@@ -55,16 +55,22 @@ public:
     const std::string frame = memex::protocol::encode(msg);
     asio::write(*socket_, asio::buffer(frame));
   }
+  // T4.3 在线推送（PRESENCE_DATA）与本文件验收特性无关，自动跳过——
+  // 在线表语义由 test_read_presence 显式验收。此处跳过可防他人上线／
+  // 下线推送串扰后续帧断言（登录回执／群回执／PONG 探测都不含推送）。
   memex::protocol::Message read() {
-    std::array<char, 4> head{};
-    asio::read(*socket_, asio::buffer(head));
-    const std::uint32_t len = (std::uint8_t(head[0]) << 24) |
-                              (std::uint8_t(head[1]) << 16) |
-                              (std::uint8_t(head[2]) << 8) |
-                              std::uint8_t(head[3]);
-    std::string payload(len, '\0');
-    asio::read(*socket_, asio::buffer(payload));
-    return memex::protocol::decode_payload(payload);
+    for (;;) {
+      std::array<char, 4> head{};
+      asio::read(*socket_, asio::buffer(head));
+      const std::uint32_t len = (std::uint8_t(head[0]) << 24) |
+                                (std::uint8_t(head[1]) << 16) |
+                                (std::uint8_t(head[2]) << 8) |
+                                std::uint8_t(head[3]);
+      std::string payload(len, '\0');
+      asio::read(*socket_, asio::buffer(payload));
+      auto msg = memex::protocol::decode_payload(payload);
+      if (msg.type() != memex::protocol::v1::PRESENCE_DATA) return msg;
+    }
   }
   // 同步点：PING/PONG 往返后，服务端已处理完此前发来的全部帧
   //（单线程 io，按序处理）——用于「发送后立刻查库」前消除竞态。
@@ -78,7 +84,7 @@ public:
     memex::protocol::Message r = read();
     CHECK(r.type() == memex::protocol::v1::PONG);
   }
-  // 登录并确认成功
+  // 登录并确认成功（T4.3 起成功登录伴随 PRESENCE_DATA 推送，先于回执）
   void login(const std::string& account, const std::string& fp_seed) {
     memex::protocol::Message m;
     m.set_type(memex::protocol::v1::LOGIN);
@@ -93,7 +99,15 @@ public:
     in->set_device_name(fp_seed);
     in->set_client_version("0.1.0-test");
     send(m);
-    CHECK(read().login_result().ok());
+    for (int i = 0; i < 8; ++i) {
+      memex::protocol::Message r = read();
+      if (r.type() == memex::protocol::v1::LOGIN_RESULT) {
+        CHECK(r.login_result().ok());
+        return;
+      }
+      CHECK(r.type() == memex::protocol::v1::PRESENCE_DATA);
+    }
+    CHECK(false);
   }
   // 群命令；返回回执
   memex::protocol::Message group_cmd(const std::string& op,
@@ -298,7 +312,7 @@ int main() {
       qd.keyword = "外部塞话";
       CHECK(s.search_messages(qd).empty()); // 不归档
       CHECK(s.offline_count("bob") == 0);   // 也不入任何成员队列
-    }
+    } // d 析构断开（下线推送由 read() 自动跳过，不串扰）
 
     // 离线成员补投：carol 被拉群后未登录，alice 发第二条 → 重登补投
     memex::protocol::Message t2;
@@ -315,7 +329,7 @@ int main() {
 
     TestClient c(io, server.port());
     c.account_ = "carol";
-    c.login("carol", "pc-c"); // read() 已吃掉 LOGIN_RESULT
+    c.login("carol", "pc-c"); // read() 已吃掉 LOGIN_RESULT（推送自动跳过）
     const auto replay = c.read();
     CHECK(replay.type() == v1::TEXT);
     CHECK(replay.to() == "group:" + std::to_string(gid));

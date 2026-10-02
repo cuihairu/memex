@@ -55,17 +55,34 @@ public:
     asio::write(*socket_, asio::buffer(frame));
   }
 
+  // T4.3 在线推送（PRESENCE_DATA）与本文件验收特性无关，自动跳过——
+  // 在线表语义由 test_read_presence 显式验收。
   memex::protocol::Message read() {
-    std::array<char, 4> head{};
-    asio::read(*socket_, asio::buffer(head));
-    const std::uint32_t len = (std::uint8_t(head[0]) << 24) |
-                              (std::uint8_t(head[1]) << 16) |
-                              (std::uint8_t(head[2]) << 8) |
-                              std::uint8_t(head[3]);
-    CHECK(len > 0 && len < memex::protocol::kMaxFrameSize);
-    std::string payload(len, '\0');
-    asio::read(*socket_, asio::buffer(payload));
-    return memex::protocol::decode_payload(payload);
+    for (;;) {
+      std::array<char, 4> head{};
+      asio::read(*socket_, asio::buffer(head));
+      const std::uint32_t len = (std::uint8_t(head[0]) << 24) |
+                                (std::uint8_t(head[1]) << 16) |
+                                (std::uint8_t(head[2]) << 8) |
+                                std::uint8_t(head[3]);
+      CHECK(len > 0 && len < memex::protocol::kMaxFrameSize);
+      std::string payload(len, '\0');
+      asio::read(*socket_, asio::buffer(payload));
+      auto msg = memex::protocol::decode_payload(payload);
+      if (msg.type() != memex::protocol::v1::PRESENCE_DATA) return msg;
+    }
+  }
+
+  // 读到 LOGIN_RESULT 为止（T4.3 起成功登录伴随 PRESENCE_DATA 推送，
+  // 先于回执；失败登录无推送，直接回回执——两种都兼容）
+  memex::protocol::Message read_login_result() {
+    for (int i = 0; i < 8; ++i) {
+      auto r = read();
+      if (r.type() == memex::protocol::v1::LOGIN_RESULT) return r;
+      CHECK(r.type() == memex::protocol::v1::PRESENCE_DATA);
+    }
+    CHECK(false);
+    return read();
   }
 
   // 对端关闭后读到 EOF（asio::read 抛 system_error）
@@ -126,10 +143,10 @@ void test_login_and_kick(ServerStore& store) {
   std::thread io_thread([&] { io.run(); });
   const std::uint16_t port = server.port();
 
-  // 第一台桌面登录成功
+  // 第一台桌面登录成功（推送＋回执一起吃）
   TestClient a(io, port);
   a.send(make_login("bob", "secret-9", "workstation-A"));
-  const auto r1 = a.read();
+  const auto r1 = a.read_login_result();
   CHECK(r1.type() == memex::protocol::v1::LOGIN_RESULT);
   CHECK(r1.has_login_result());
   CHECK(r1.login_result().ok());
@@ -146,9 +163,10 @@ void test_login_and_kick(ServerStore& store) {
   CHECK(pong.seq() == 7);
 
   // 第二台同账号桌面登录：第一台被原子化踢出并收到 KICK 提示
+  //（上线推送由 read() 自动跳过，此处直达 KICK）
   TestClient b(io, port);
   b.send(make_login("bob", "secret-9", "workstation-B"));
-  const auto r2 = b.read();
+  const auto r2 = b.read_login_result();
   CHECK(r2.login_result().ok());
   const auto kick = a.read();
   CHECK(kick.type() == memex::protocol::v1::KICK);
@@ -164,14 +182,14 @@ void test_login_and_kick(ServerStore& store) {
   // 口令不符：拒绝且留痕
   TestClient c(io, port);
   c.send(make_login("bob", "wrong", "workstation-C"));
-  const auto r3 = c.read();
+  const auto r3 = c.read_login_result();
   CHECK(!r3.login_result().ok());
   CHECK(r3.login_result().reason() == "口令不符");
 
   // 不存在的账号：拒绝且留痕
   TestClient d(io, port);
   d.send(make_login("ghost", "x", "workstation-D"));
-  const auto r4 = d.read();
+  const auto r4 = d.read_login_result();
   CHECK(!r4.login_result().ok());
   CHECK(r4.login_result().reason() == "账号不存在");
 
@@ -221,7 +239,7 @@ void test_devices(const std::string& db_path) {
   {
     TestClient c(io, port);
     c.send(make_login("alice", "pass-123", "pc-dev1"));
-    CHECK(c.read().login_result().ok());
+    CHECK(c.read_login_result().login_result().ok());
   }
   auto devices = store.device_list();
   CHECK(devices.size() == 1);
@@ -243,7 +261,7 @@ void test_devices(const std::string& db_path) {
   {
     TestClient c(io, port);
     c.send(make_login("alice", "pass-123", "pc-dev1"));
-    const auto r = c.read();
+    const auto r = c.read_login_result();
     CHECK(!r.login_result().ok());
     CHECK(r.login_result().reason().find("设备已停用") != std::string::npos);
   }
@@ -263,7 +281,7 @@ void test_devices(const std::string& db_path) {
   {
     TestClient c(io, port);
     c.send(make_login("alice", "pass-123", "pc-dev1"));
-    CHECK(c.read().login_result().ok());
+    CHECK(c.read_login_result().login_result().ok());
   }
 
   // 解绑：清责任人并停用 → 再拒
@@ -275,7 +293,7 @@ void test_devices(const std::string& db_path) {
   {
     TestClient c(io, port);
     c.send(make_login("alice", "pass-123", "pc-dev1"));
-    CHECK(!c.read().login_result().ok());
+    CHECK(!c.read_login_result().login_result().ok());
   }
 
   io.stop();

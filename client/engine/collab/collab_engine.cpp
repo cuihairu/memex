@@ -303,6 +303,29 @@ void CollabEngine::cross_log(const QString& op, const QString& peer_device,
   send_frame(m);
 }
 
+// —— T4.3 已读回执与在线状态 ——
+
+void CollabEngine::mark_read(const QString& msg_id) {
+  if (!logged_in_ || msg_id.isEmpty()) return;
+  Message m;
+  m.set_type(MsgType::READ);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  m.mutable_read()->set_msg_id(msg_id.toStdString());
+  send_frame(m);
+}
+
+void CollabEngine::query_presence() {
+  if (!logged_in_) return;
+  Message m;
+  m.set_type(MsgType::PRESENCE_QUERY);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  send_frame(m);
+}
+
 void CollabEngine::send_frame(const Message& msg) {
   const std::string frame = memex::protocol::encode(msg);
   socket_->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
@@ -448,6 +471,25 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
     emit groups_received(QString::fromStdString(j.dump()));
     break;
   }
+  case MsgType::READ_NOTICE: {
+    // 我发出的协作消息被已读（T4.3）：发送方视角的「对方已读」
+    if (!msg.has_read_notice()) return;
+    const auto& n = msg.read_notice();
+    emit message_read(QString::fromStdString(n.msg_id()),
+                      QString::fromStdString(n.reader()), n.read_ms());
+    break;
+  }
+  case MsgType::PRESENCE_DATA: {
+    // 在线账号表（T4.3）：查询回执与登录/登出/互踢变更推送共用
+    if (!msg.has_presence_data()) return;
+    QStringList accounts;
+    for (const auto& a : msg.presence_data().accounts()) {
+      accounts.push_back(QString::fromStdString(a));
+    }
+    online_accounts_ = accounts;
+    emit presence_changed(accounts);
+    break;
+  }
   default:
     break;
   }
@@ -573,6 +615,7 @@ void CollabEngine::flush_pending_sends() {
 void CollabEngine::teardown(bool unexpected) {
   logged_in_ = false;
   kicking_ = false;
+  online_accounts_.clear(); // 在线表随会话失效（T4.3；重登后推送刷新）
   stop_heartbeat();
   if (unexpected) {
     // 意外断开：在途消息转待补传（可能已达服务端——重发按 msg_id 幂等）

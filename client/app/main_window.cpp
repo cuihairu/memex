@@ -336,8 +336,9 @@ void MainWindow::wire_engines() {
           });
   connect(&direct_engine_, &DirectEngine::text_delivered, this,
           [this](quint64 seq, bool ok) {
-            show_status(ok ? QStringLiteral("消息已送达（seq %1）").arg(seq)
-                           : QStringLiteral("消息送达失败（seq %1）").arg(seq));
+            set_delivery_state(
+                ok ? QStringLiteral("已送达（seq %1）").arg(seq)
+                   : QStringLiteral("送达失败（seq %1）").arg(seq));
           });
   connect(&direct_engine_, &DirectEngine::file_progress, this,
           [this](const QString& /*id*/, quint64 done, quint64 total) {
@@ -379,6 +380,9 @@ void MainWindow::wire_collab() {
             collab_login_ms_ = QDateTime::currentMSecsSinceEpoch(); // A8 归档起点
             act_collab_logout_->setEnabled(true);
             collab_was_logged_in_ = true;
+            kick_text_.clear(); // T4.3：新会话清除旧互踢提示
+            // 在线表以服务端推送为准（登录广播先于 LOGIN_RESULT 到达，
+            // 推送已含自己——此处不清，否则会擦掉刚收到的推送）。
             seed_collab_peers();
             update_banner();
             refresh_devices();
@@ -416,7 +420,9 @@ void MainWindow::wire_collab() {
           });
   connect(&collab_engine_, &CollabEngine::connection_lost, this, [this] {
     collab_was_logged_in_ = false;
+    online_accounts_.clear(); // 断线即未知在线态（重连推送后刷新）
     update_banner();
+    refresh_devices();
     show_status(QStringLiteral(
         "服务端连接断开，直连态仍可用：消息不进归档（自动重连中）"));
   });
@@ -431,20 +437,41 @@ void MainWindow::wire_collab() {
             cross_end_all(); // T4.2：被踢即会话终点（此刻引擎尚未断开，
                              // CROSS_LOG 帧随断开前队列刷出）
             collab_was_logged_in_ = false;
+            online_accounts_.clear(); // 在线表随会话失效（重登后推送刷新）
             act_collab_logout_->setEnabled(false);
-            update_banner();
-            refresh_devices();
-            show_status(QStringLiteral("已被顶替下线（%1）：%2")
-                            .arg(replaced_by, reason));
+            // kicked 信号先于引擎 logged_in_=false 到达：横幅与列表刷新
+            // 排队到状态落定后（否则仍按登录态渲染协作横幅，状态说谎）。
+            QMetaObject::invokeMethod(
+                this,
+                [this] {
+                  update_banner();
+                  refresh_devices();
+                },
+                Qt::QueuedConnection);
+            // T4.3 桌面单点在线提示：常驻文案（测试断言面）＋非模态弹窗
+            //（模态会阻塞自动化验收；关闭按钮常驻可查）。
+            kick_text_ = QStringLiteral("已被顶替下线（%1）：%2")
+                             .arg(replaced_by, reason);
+            set_delivery_state(kick_text_);
+            auto* box = new QMessageBox(
+                QMessageBox::Warning, QStringLiteral("已被顶替下线"),
+                kick_text_ + QStringLiteral("\n同账号在另一台设备登录，"
+                                            "本机会话已断开（消息不进归档）。"),
+                QMessageBox::Ok, this);
+            box->setAttribute(Qt::WA_DeleteOnClose);
+            box->setModal(false);
+            box->show();
           });
   connect(&collab_engine_, &CollabEngine::message_received, this,
           [this](const QString& from, const QString& text, qint64 ts_ms,
-                 const QString& /*msg_id*/) {
+                 const QString& msg_id) {
             if (current_kind_ == QStringLiteral("collab") &&
                 from == current_peer_) {
               // 本地库已由引擎落库（同库），这里只做界面渲染
               append_message(from, text, ts_ms, false,
                              QStringLiteral("collab"));
+              // T4.3：当前会话开着=已读，立即上报（发送方收 READ_NOTICE）
+              if (!msg_id.isEmpty()) collab_engine_.mark_read(msg_id);
             } else {
               show_status(QStringLiteral("来自 %1 的协作消息").arg(from));
             }
@@ -453,8 +480,11 @@ void MainWindow::wire_collab() {
           });
   connect(&collab_engine_, &CollabEngine::text_delivered, this,
           [this](quint64 seq, bool ok) {
-            show_status(ok ? QStringLiteral("协作消息已送达（seq %1）").arg(seq)
-                           : QStringLiteral("协作消息送达超时（seq %1）").arg(seq));
+            // 已读是终态：后到的受理回执不回退状态（自发自收回环时先已读后回执）
+            if (delivery_text_.contains(QStringLiteral("已读"))) return;
+            set_delivery_state(
+                ok ? QStringLiteral("协作消息已送达（seq %1）").arg(seq)
+                   : QStringLiteral("协作消息送达超时（seq %1）").arg(seq));
           });
   connect(&collab_engine_, &CollabEngine::org_received, this,
           [this](const QString& org_json) {
@@ -482,17 +512,34 @@ void MainWindow::wire_collab() {
           [this](const QString& groups_json) { apply_groups(groups_json); });
   connect(&collab_engine_, &CollabEngine::group_message_received, this,
           [this](const QString& group_key, const QString& sender,
-                 const QString& text, qint64 ts_ms, const QString& /*msg_id*/) {
+                 const QString& text, qint64 ts_ms, const QString& msg_id) {
             if (current_kind_ == QStringLiteral("group") &&
                 group_key == current_peer_) {
               append_message(sender, text, ts_ms, false,
                              QStringLiteral("collab"));
+              // T4.3：群会话开着=已读（发送方按读者逐条收 READ_NOTICE）
+              if (!msg_id.isEmpty()) collab_engine_.mark_read(msg_id);
             } else {
               const QString gname = groups_.value(group_key.mid(6).toULongLong())
                                         .name;
               show_status(QStringLiteral("来自群「%1」%2 的消息")
                               .arg(gname.isEmpty() ? group_key : gname, sender));
             }
+          });
+  // —— T4.3 已读回执与在线状态 ——
+  connect(&collab_engine_, &CollabEngine::message_read, this,
+          [this](const QString& /*msg_id*/, const QString& reader,
+                 qint64 /*read_ms*/) {
+            // READ_NOTICE 只发给原发送方：在此处即「对方已读我发出的消息」
+            set_delivery_state(
+                QStringLiteral("对方已读 ✓✓（%1）").arg(reader));
+          });
+  connect(&collab_engine_, &CollabEngine::presence_changed, this,
+          [this](const QStringList& accounts) {
+            // 逐个插入（不依赖 QSet 区间构造的可移植性）
+            online_accounts_.clear();
+            for (const QString& a : accounts) online_accounts_.insert(a);
+            refresh_devices(); // 协作会话行在线标识随推送刷新
           });
 }
 
@@ -510,6 +557,8 @@ void MainWindow::logout_collab() {
   direct_engine_.set_collab_account(""); // 登出即广播「未登录」（对端即时闭环）
   act_collab_logout_->setEnabled(false);
   collab_was_logged_in_ = false;
+  online_accounts_.clear(); // T4.3：登出即未知在线态
+  delivery_text_.clear();   // T4.3：发送状态随会话失效
   update_banner();
   append_system_line(QStringLiteral(
       "已登出协作态，回到直连态：消息不进归档（本地历史保留，合并展示）"));
@@ -542,6 +591,7 @@ bool MainWindow::send_in_current_chat(const QString& text) {
     append_message(collab_engine_.account(), text,
                    QDateTime::currentMSecsSinceEpoch(), true,
                    QStringLiteral("collab"));
+    set_delivery_state(QStringLiteral("发送中…（seq %1）").arg(seq));
     return true;
   }
   // 免服务端临时群（直连态）：逐设备点对点扇出，不进归档
@@ -566,6 +616,9 @@ bool MainWindow::send_in_current_chat(const QString& text) {
                       .arg(sent)
                       .arg(members.size()));
     }
+    set_delivery_state(QStringLiteral("临时群已扇出（%1/%2 台设备）")
+                           .arg(sent)
+                           .arg(members.size()));
     return true;
   }
   if (!direct_send_allowed()) return false; // T3.4 策略闸门
@@ -578,6 +631,7 @@ bool MainWindow::send_in_current_chat(const QString& text) {
   append_message(QString::fromStdString(direct_engine_.device_id()), text,
                  QDateTime::currentMSecsSinceEpoch(), true,
                  QStringLiteral("direct"));
+  set_delivery_state(QStringLiteral("发送中…（直连点对点）"));
   return true;
 }
 
@@ -1134,6 +1188,19 @@ QString MainWindow::status_text() const { return statusBar()->currentMessage(); 
 
 QString MainWindow::chat_html() const { return chat_view_->toHtml(); }
 
+// —— T4.3 消息状态与多端（验收面）——
+QString MainWindow::delivery_text() const { return delivery_text_; }
+QString MainWindow::kick_text() const { return kick_text_; }
+QStringList MainWindow::online_accounts() const {
+  QStringList out = online_accounts_.values(); // values() 直取，避免区间构造歧义
+  out.sort();
+  return out;
+}
+void MainWindow::set_delivery_state(const QString& text) {
+  delivery_text_ = text;
+  show_status(text); // 状态栏同步（最近一条发出消息的状态常驻可查）
+}
+
 // 归档提示条（常驻不可关）：协作态显示归档口径；直连／降级态必须明示
 // 「消息不进归档」——切换与降级共用这一条提示（A7、A11 界面口径）。
 void MainWindow::update_banner() {
@@ -1256,7 +1323,11 @@ void MainWindow::refresh_devices() {
     sorted.sort();
     for (const QString& account : sorted) {
       auto* item = new QListWidgetItem(device_list_);
-      item->setText(QStringLiteral("%1\n协作态 · 已归档").arg(account));
+      // T4.3：在线标识随服务端推送刷新（在线表含自己；未登录不显示本分组）
+      const QString presence = online_accounts_.contains(account)
+                                   ? QStringLiteral("●在线")
+                                   : QStringLiteral("○离线");
+      item->setText(QStringLiteral("%1\n协作态 · 已归档 · %2").arg(account, presence));
       item->setData(Qt::UserRole, account);
       item->setData(Qt::UserRole + 1, QStringLiteral("collab"));
     }
@@ -1423,6 +1494,16 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
                    QString::fromStdString(m.text), m.ts_ms,
                    m.from == my_id.toStdString(),
                    QString::fromStdString(m.source));
+  }
+  // T4.3：打开协作单聊=已读历史——对最近一条收到的协作消息上报已读
+  //（打开前到达的消息此前未上报；逐条全报是噪音，只报最新一条）。
+  if (collab) {
+    for (auto it = hist.crbegin(); it != hist.crend(); ++it) {
+      if (it->from == id.toStdString() && !it->msg_id.empty()) {
+        collab_engine_.mark_read(QString::fromStdString(it->msg_id));
+        break;
+      }
+    }
   }
 }
 

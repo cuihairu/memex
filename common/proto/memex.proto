@@ -28,6 +28,10 @@ enum MsgType {
   GROUP_QUERY = 38;  // 终端 → 服务端：查询我加入的群
   GROUP_DATA = 39;   // 服务端 → 终端：群列表（含成员与公告）
   CROSS_LOG = 40;    // 终端 → 服务端：跨态会话日志上报（时间/双方/时长，T4.2）
+  READ = 41;         // 接收方 → 服务端：已读上报（msg_id，T4.3）
+  READ_NOTICE = 42;  // 服务端 → 发送方：某条消息已被接收方已读（T4.3）
+  PRESENCE_QUERY = 43; // 终端 → 服务端：请求在线账号表（T4.3）
+  PRESENCE_DATA = 44;  // 服务端 → 终端：在线账号表（查询回执＋登录/登出/互踢推送，T4.3）
 }
 
 message Hello {
@@ -160,6 +164,25 @@ message CrossLog {
   int64 ended_ms = 5;     // 会话结束时刻（end 时有效；时长 = 结束 − 建立）
 }
 
+// —— 已读回执与在线状态（T4.3）——
+// 已读上报由消息接收方发出（仅协作态单聊／群聊归档消息；直连态无服务端不涉及）。
+// 服务端记 message_reads 後，若原发送方在线即推送 READ_NOTICE。
+message Read {
+  string msg_id = 1; // 服务端分配的消息标识（归档去重键）
+}
+
+message ReadNotice {
+  string msg_id = 1; // 被已读的消息
+  string reader = 2; // 已读方账号
+  int64 read_ms = 3; // 已读时刻（服务端受理时刻）
+}
+
+// 在线账号表：查询回执与变更推送共用。推送点=登录成功／登出／互踢／
+// 意外断开（服务端在线表变化即广播，在线者都收到，含自己）。
+message PresenceData {
+  repeated string accounts = 1; // 当前在线账号（排序后）
+}
+
 // 信封：所有帧的载荷体。oneof 字段号 = 100 + 对应类型编号，便于读码对账。
 message Envelope {
   MsgType type = 1;
@@ -186,5 +209,8 @@ message Envelope {
     GroupResult group_result = 137;
     GroupData group_data = 139;
     CrossLog cross_log = 140;
+    Read read = 141;
+    ReadNotice read_notice = 142;
+    PresenceData presence_data = 144;
   }
 }

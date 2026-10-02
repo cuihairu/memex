@@ -101,6 +101,17 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # T4.3 客户端半边验收：已读上报→发送方 message_read、在线表推送刷新、
+  # 同账号第二台桌面登录互踢（桌面单点在线，T2.1 合并验收）
+  add_executable(test_client_read_presence engine/collab/tests/test_read_presence.cpp)
+  target_link_libraries(test_client_read_presence PRIVATE memex_engine_collab)
+  target_compile_definitions(test_client_read_presence PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME client_read_presence COMMAND test_client_read_presence)
+  set_tests_properties(client_read_presence PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # T2.4 模式切换与降级验收：不重启切换、历史合并展示（来源字段）、
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch

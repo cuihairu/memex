@@ -141,6 +141,12 @@ bool ServerStore::ensure_schema() {
       "  account TEXT NOT NULL,"
       "  joined_ms INTEGER NOT NULL,"
       "  PRIMARY KEY(group_id, account));"
+      // T4.3 已读回执：(msg_id, 已读方) 复合主键天然幂等
+      "CREATE TABLE IF NOT EXISTS message_reads ("
+      "  msg_id TEXT NOT NULL,"
+      "  reader TEXT NOT NULL,"
+      "  read_ms INTEGER NOT NULL,"
+      "  PRIMARY KEY(msg_id, reader));"
       // T4.2 跨态会话日志：时间/双方/时长，不含内容（ended_ms=0 进行中）
       "CREATE TABLE IF NOT EXISTS cross_state_logs ("
       "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -1326,6 +1332,52 @@ std::vector<CrossLogRow> ServerStore::cross_logs(int limit) {
 
 // 归档起点（A8）：首条归档消息（含其所在群消息）之前最近一次成功登录时刻。
 // 跨态直连会话不进归档——故归档起点＝进入协作态的实际登录时间。
+// 已读上报只给归档库存在的消息留痕（伪造 msg_id 灌库直接拒绝）；
+// 同 (msg_id, 已读方) 重复上报幂等——首条为准，仍返回 true。
+bool ServerStore::record_read(const std::string& msg_id,
+                              const std::string& reader,
+                              std::int64_t read_ms) {
+  if (msg_id.empty() || reader.empty() || read_ms <= 0) return false;
+  sqlite3_stmt* st = nullptr;
+  const char* exists = "SELECT 1 FROM messages WHERE msg_id = ? LIMIT 1;";
+  if (sqlite3_prepare_v2(db_, exists, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  const bool known = sqlite3_step(st) == SQLITE_ROW;
+  sqlite3_finalize(st);
+  if (!known) return false;
+  const char* sql =
+      "INSERT OR IGNORE INTO message_reads(msg_id, reader, read_ms)"
+      " VALUES(?, ?, ?);";
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, reader.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, read_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ReadRow> ServerStore::readers_for(const std::string& msg_id) {
+  std::vector<ReadRow> out;
+  sqlite3_stmt* st = nullptr;
+  const char* sql =
+      "SELECT msg_id, reader, read_ms FROM message_reads WHERE msg_id = ?"
+      " ORDER BY read_ms ASC;";
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    ReadRow r;
+    r.msg_id = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    r.reader = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.read_ms = sqlite3_column_int64(st, 2);
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
 std::int64_t ServerStore::archive_start_ms(const std::string& account) {
   if (account.empty()) return 0;
   std::int64_t first_msg = 0;

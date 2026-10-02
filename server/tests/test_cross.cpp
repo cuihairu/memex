@@ -91,7 +91,16 @@ public:
     in->set_device_name(fp_seed);
     in->set_client_version("0.1.0-test");
     send(m);
-    CHECK(read().login_result().ok());
+    // T4.3 起登录成功伴随 PRESENCE_DATA 推送（先于 LOGIN_RESULT）
+    for (int i = 0; i < 8; ++i) {
+      memex::protocol::Message r = read();
+      if (r.type() == memex::protocol::v1::LOGIN_RESULT) {
+        CHECK(r.login_result().ok());
+        return;
+      }
+      CHECK(r.type() == memex::protocol::v1::PRESENCE_DATA);
+    }
+    CHECK(false);
   }
   // 跨态会话日志上报（start/end）；服务端不回帧，用 sync() 确认处理完
   void cross_log(const std::string& op, const std::string& peer_device,

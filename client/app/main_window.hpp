@@ -62,6 +62,10 @@ public:
   QString banner_text() const;   // 归档提示条文案（直连／协作两态）
   QString status_text() const;   // 状态栏当前文案（降级提示在此）
   QString chat_html() const;     // 聊天区富文本（合并展示断言）
+  // —— T4.3 消息状态与多端（验收面）——
+  QString delivery_text() const; // 最近一条发出消息的状态（发送中／已送达／失败／已读）
+  QString kick_text() const;     // 最近一次互踢提示（空=本会话未被踢）
+  QStringList online_accounts() const; // 最近一次在线账号表（推送即刷新）
 
 private:
   void build_ui();
@@ -139,6 +143,12 @@ private:
   QHash<QString, QString> shot_paths_; // 截图传输 id → PNG 路径（发送完成后清理）
 
   ScreenshotTool screenshot_tool_;
+
+  // —— T4.3 消息状态与多端 ——
+  QString delivery_text_;             // 最近一条发出消息的状态（测试断言面）
+  QString kick_text_;                 // 最近一次互踢提示（测试断言面）
+  QSet<QString> online_accounts_;      // 在线账号表（服务端推送，含自己）
+  void set_delivery_state(const QString& text); // 同步状态面＋状态栏提示
 
   // T4.2 跨态会话表：设备 id → 会话建立时刻（已上报 start、未闭环）
   QHash<QString, qint64> cross_open_;

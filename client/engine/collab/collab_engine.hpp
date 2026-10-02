@@ -6,6 +6,7 @@
 #include <QList>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QTcpSocket>
 #include <QTimer>
 
@@ -30,6 +31,7 @@ public:
 
   bool is_logged_in() const { return logged_in_; }
   QString account() const { return account_; }
+  QStringList online_accounts() const { return online_accounts_; }
   std::string status_text() const;
 
   // 设置心跳参数：interval_ms（PING 间隔）、missed_max（连续丢包阈值，触发判死重连）。
@@ -60,6 +62,11 @@ public slots:
   // 只上报时间、双方与时长，不含任何消息内容；须登录态。
   void cross_log(const QString& op, const QString& peer_device,
                  const QString& peer_name, qint64 started_ms, qint64 ended_ms);
+  // —— 已读回执与在线状态（T4.3）——
+  // 上报某条收到的协作消息已读（服务端留痕＋通知发送方）；须登录态。
+  void mark_read(const QString& msg_id);
+  // 主动拉取在线账号表（登录/登出/互踢变更由服务端推送，无需轮询）。
+  void query_presence();
 
 signals:
   void logged_in(const QString& account, const QString& display_name);
@@ -91,6 +98,10 @@ signals:
   void group_message_received(const QString& group_key, const QString& sender,
                               const QString& text, qint64 ts_ms,
                               const QString& msg_id);
+  // 已读回执（T4.3）：我发出的协作消息被接收方已读——msg_id、已读方、已读时刻
+  void message_read(const QString& msg_id, const QString& reader, qint64 read_ms);
+  // 在线账号表（T4.3）：登录/登出/互踢/断开变更即推送，含自己
+  void presence_changed(const QStringList& online_accounts);
 
 private:
   // 在途／待补传消息（T2.5）：断线中断期本地暂存，恢复后按原 seq 补传，
@@ -140,6 +151,8 @@ private:
   QHash<quint64, PendingSend> inflight_; // seq -> 在途消息（已发未回执；超时转待补传）
   QList<PendingSend> pending_reconnect_; // 断线中断期暂存，恢复后补传
   QTimer delivery_timer_;
+
+  QStringList online_accounts_; // 最近一次在线账号表（T4.3；推送即刷新）
 
   static constexpr qint64 kDeliveryTimeoutMs = 10000;
   static constexpr int kMaxBackoffMs = 30000;

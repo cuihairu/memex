@@ -1,6 +1,9 @@
 #include "server.hpp"
 
+#include <algorithm>
 #include <iostream>
+
+#include <memex/protocol/messages.hpp>
 
 #include "session.hpp"
 
@@ -53,6 +56,7 @@ std::shared_ptr<Session> CollabServer::register_online(
   } else {
     by_kind.emplace(device_kind, std::move(session));
   }
+  broadcast_presence(); // 在线表变化即推送（新登录者也收到，含自己）
   return kicked;
 }
 
@@ -64,8 +68,11 @@ void CollabServer::unregister_online(const std::string& account,
   const auto kit = it->second.find(device_kind);
   if (kit != it->second.end() && kit->second.get() == session) {
     it->second.erase(kit);
+  } else {
+    return; // 不是当前在线会话——无变化，不推送
   }
   if (it->second.empty()) online_.erase(it);
+  broadcast_presence(); // 登出／互踢旧会话退出／意外断开即推送
 }
 
 std::vector<std::shared_ptr<Session>> CollabServer::online_sessions(
@@ -76,6 +83,30 @@ std::vector<std::shared_ptr<Session>> CollabServer::online_sessions(
     for (const auto& [kind, session] : it->second) out.push_back(session);
   }
   return out;
+}
+
+std::vector<std::string> CollabServer::online_accounts() {
+  std::vector<std::string> out;
+  for (const auto& [account, by_kind] : online_) {
+    if (!by_kind.empty()) out.push_back(account);
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+void CollabServer::broadcast_presence() {
+  memex::protocol::Message m;
+  m.set_type(memex::protocol::v1::PRESENCE_DATA);
+  m.set_from("server");
+  m.set_to("");
+  auto* p = m.mutable_presence_data();
+  for (const auto& a : online_accounts()) p->add_accounts(a);
+  // deliver_frame 入参为纯 Envelope 字节（其内部加长度前缀）——此处传
+  // SerializeAsString 而非 encode（后者自带前缀，会造成双重成帧）。
+  const std::string blob = m.SerializeAsString();
+  for (const auto& [account, by_kind] : online_) {
+    for (const auto& [kind, session] : by_kind) session->deliver_frame(blob);
+  }
 }
 
 } // namespace memex::server
