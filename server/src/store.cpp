@@ -102,7 +102,15 @@ bool ServerStore::ensure_schema() {
       "  department_id INTEGER,"
       "  title TEXT NOT NULL DEFAULT '',"
       "  manager TEXT NOT NULL DEFAULT '',"
-      "  updated_ms INTEGER NOT NULL);";
+      "  updated_ms INTEGER NOT NULL);"
+      // T3.2 查阅日志：检索／导出动作逐次落一条（只附加，不删改）
+      "CREATE TABLE IF NOT EXISTS audit_reads ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  op_account TEXT NOT NULL,"
+      "  action TEXT NOT NULL,"
+      "  filters TEXT NOT NULL DEFAULT '',"
+      "  result_count INTEGER NOT NULL,"
+      "  ts_ms INTEGER NOT NULL);";
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -351,6 +359,104 @@ std::vector<ArchivedMessage> ServerStore::messages(const std::string& account,
     m.ts_ms = sqlite3_column_int64(st, 5);
     m.recalled = sqlite3_column_int(st, 6) != 0;
     out.push_back(std::move(m));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// T3.2 条件检索：账号（收发双侧）／时间窗（含端点）／关键词（子串，LIKE 转义）AND 组合
+std::vector<ArchivedMessage> ServerStore::search_messages(
+    const MessageSearch& q) {
+  std::vector<ArchivedMessage> out;
+  std::string sql =
+      "SELECT msg_id, from_account, to_account, type, text, ts_ms, recall"
+      " FROM messages WHERE 1=1";
+  if (!q.account.empty()) sql += " AND (from_account = ? OR to_account = ?)";
+  // 关键词子串匹配：%／_／转义符先转义，避免用户输入被当通配符
+  std::string like;
+  if (!q.keyword.empty()) {
+    like.reserve(q.keyword.size() + 8);
+    for (const char c : q.keyword) {
+      if (c == '%' || c == '_' || c == '\\') like += '\\';
+      like += c;
+    }
+    sql += " AND text LIKE ? ESCAPE '\\'";
+  }
+  if (q.since_ms > 0) sql += " AND ts_ms >= ?";
+  if (q.until_ms > 0) sql += " AND ts_ms <= ?";
+  sql += " ORDER BY id DESC LIMIT ?;";
+
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    return out;
+  }
+  int idx = 1;
+  if (!q.account.empty()) {
+    sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
+  }
+  if (!like.empty()) {
+    const std::string pat = "%" + like + "%";
+    sqlite3_bind_text(st, idx++, pat.c_str(), -1, SQLITE_TRANSIENT);
+  }
+  if (q.since_ms > 0) sqlite3_bind_int64(st, idx++, q.since_ms);
+  if (q.until_ms > 0) sqlite3_bind_int64(st, idx++, q.until_ms);
+  sqlite3_bind_int(st, idx, q.limit);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    ArchivedMessage m;
+    m.msg_id = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    m.from_account = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    m.to_account = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    m.type = sqlite3_column_int(st, 3);
+    const char* text_ptr =
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    m.text = text_ptr ? text_ptr : "";
+    m.ts_ms = sqlite3_column_int64(st, 5);
+    m.recalled = sqlite3_column_int(st, 6) != 0;
+    out.push_back(std::move(m));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// 查阅留痕：只附加
+bool ServerStore::add_audit_read(const AuditReadRow& rec) {
+  const char* sql =
+      "INSERT INTO audit_reads(op_account, action, filters, result_count, ts_ms)"
+      " VALUES(?, ?, ?, ?, ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, rec.op_account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, rec.action.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, rec.filters.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 4, rec.result_count);
+  sqlite3_bind_int64(st, 5, rec.ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<AuditReadRow> ServerStore::audit_reads(int limit) {
+  std::vector<AuditReadRow> out;
+  const char* sql =
+      "SELECT id, op_account, action, filters, result_count, ts_ms"
+      " FROM audit_reads ORDER BY id DESC LIMIT ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int(st, 1, limit);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    AuditReadRow r;
+    r.id = sqlite3_column_int64(st, 0);
+    const auto text_of = [&st](int col) {
+      const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, col));
+      return p ? std::string(p) : std::string{};
+    };
+    r.op_account = text_of(1);
+    r.action = text_of(2);
+    r.filters = text_of(3);
+    r.result_count = sqlite3_column_int(st, 4);
+    r.ts_ms = sqlite3_column_int64(st, 5);
+    out.push_back(std::move(r));
   }
   sqlite3_finalize(st);
   return out;

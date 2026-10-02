@@ -1,12 +1,17 @@
 // T2.3 服务端半边验收：协作态消息全量落归档库、撤回仅置标记不清正文、
 // 撤回事件独立留痕、越权撤回拒绝、接收端收到 RECALL 转发帧；
 // 本地缓存（客户端 SQLite）与服务端归档分离：任何一侧删除不影响另一侧。
-// 服务端核心库直链运行（io 线程驱动，不起进程）。
+// T3.2 检索与导出：按人／时间窗／关键词检索（撤回原文照常可查）、
+// 导出留证、检索／导出逐次落查阅日志（audit）。
+// 服务端核心库直链运行（io 线程驱动，不起进程）＋CLI 进程级验证。
 #include <asio.hpp>
 
 #include <cassert>
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <thread>
 
 #include <memex/protocol/messages.hpp>
@@ -196,8 +201,121 @@ int main() {
   CHECK(recall_frame.type() == memex::protocol::v1::RECALL);
   CHECK(recall_frame.recall().msg_id() == msg_id);
 
+  // —— T3.2 条件检索（库级）：按人／时间窗／关键词，AND 组合 ——
+  store.create_account("carol", "pc-1", "Carol");
+  store.create_account("dave", "pd-1", "Dave");
+  constexpr std::int64_t kHourMs = 3600 * 1000;
+  const std::int64_t t0 = now_ms();
+  CHECK(store.store_message("mid-2", "bob", "alice", 10, "发票已开", t0 - 2 * kHourMs));
+  CHECK(store.store_message("mid-3", "carol", "dave", 10, "周末团建报名", t0 - kHourMs));
+  CHECK(store.store_message("mid-4", "alice", "carol", 10, "合同扫描件已发", t0 - kHourMs / 2));
+  CHECK(store.store_message("mid-5", "bob", "carol", 10, "进度 100% 了", t0 - kHourMs / 4));
+
+  { // 关键词：命中一条
+    memex::server::MessageSearch q;
+    q.keyword = "合同";
+    const auto hits = store.search_messages(q);
+    CHECK(hits.size() == 1);
+    if (!hits.empty()) CHECK(hits[0].msg_id == "mid-4");
+  }
+  { // 撤回消息照常命中：原文保留、标记可见
+    memex::server::MessageSearch q;
+    q.keyword = "留痕";
+    const auto hits = store.search_messages(q);
+    CHECK(hits.size() == 1);
+    if (!hits.empty()) {
+      CHECK(hits[0].recalled);
+      CHECK(hits[0].text == "可留痕的这一条");
+    }
+  }
+  { // 按人：收发双侧都算（alice 参与 3 条）
+    memex::server::MessageSearch q;
+    q.account = "alice";
+    CHECK(store.search_messages(q).size() == 3);
+  }
+  { // 时间窗（含端点）：只取窗内两条
+    memex::server::MessageSearch q;
+    q.since_ms = t0 - 90 * 60 * 1000;
+    q.until_ms = t0 - 20 * 60 * 1000;
+    const auto hits = store.search_messages(q);
+    CHECK(hits.size() == 2);
+    if (hits.size() == 2) {
+      CHECK(hits[1].msg_id == "mid-3" || hits[0].msg_id == "mid-4");
+    }
+  }
+  { // 组合：人＋关键词交集
+    memex::server::MessageSearch q;
+    q.account = "bob";
+    q.keyword = "发票";
+    CHECK(store.search_messages(q).size() == 1);
+  }
+  { // LIKE 元字符按字面匹配：100% 命中、下划线不当通配符
+    memex::server::MessageSearch q;
+    q.keyword = "100%";
+    CHECK(store.search_messages(q).size() == 1);
+    q.keyword = "合同_";
+    CHECK(store.search_messages(q).empty());
+  }
+
   io.stop();
   io_thread.join();
+
+  // —— T3.2 CLI 级：检索／导出留证／查阅日志 ——
+  const auto run_cli = [](const std::string& args) {
+    const std::string out_path = "/tmp/memex-archive-test-out.txt";
+    const std::string cmd = std::string("\"" MEMEX_SERVER_BIN "\" ") + args +
+                            " > " + out_path + " 2>&1";
+    const int rc = std::system(cmd.c_str());
+    (void)rc;
+    std::ifstream f(out_path);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+  };
+  const auto read_file = [](const std::string& path) {
+    std::ifstream f(path);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+  };
+
+  const std::string db2 = "/tmp/memex-archive-cli.db";
+  const std::string export_path = "/tmp/memex-archive-export.txt";
+  std::remove(db2.c_str());
+  std::remove(export_path.c_str());
+  {
+    ServerStore seed;
+    CHECK(seed.open(db2));
+    CHECK(seed.create_account("alice", "pa-1", "Alice"));
+    CHECK(seed.create_account("bob", "pb-1", "Bob"));
+    CHECK(seed.store_message("mid-x1", "alice", "bob", 10, "合同评审通过", now_ms() - 60000));
+    CHECK(seed.store_message("mid-x2", "alice", "bob", 10, "明天放假", now_ms() - 30000));
+    CHECK(seed.recall_message("mid-x1")); // 撤回的那条含关键词：导出面仍须完整
+    seed.close();
+  }
+  { // 关键词检索＋导出留证
+    const std::string out = run_cli("messages --keyword 合同 --export " + export_path +
+                                    " --db " + db2);
+    CHECK(out.find("共 1 条") != std::string::npos);
+    CHECK(out.find("已导出至：" + export_path) != std::string::npos);
+    const std::string file = read_file(export_path);
+    CHECK(file.find("合同评审通过") != std::string::npos); // 原文在导出面
+    CHECK(file.find("已撤回") != std::string::npos);        // 撤回标记可见
+    CHECK(file.find("明天放假") == std::string::npos);      // 未命中不进导出
+    CHECK(file.find("# 过滤条件：关键词=合同") != std::string::npos);
+  }
+  { // 按人＋时间：日期粒度端点语义
+    const std::string out =
+        run_cli("messages alice --since 2000-01-01 --until 2999-01-01 --db " + db2);
+    CHECK(out.find("共 2 条") != std::string::npos);
+  }
+  { // 查阅日志：检索与导出逐次落痕、条件与命中数可对账
+    const std::string out = run_cli("audit 10 --db " + db2);
+    CHECK(out.find("导出") != std::string::npos);
+    CHECK(out.find("关键词=合同") != std::string::npos);
+    CHECK(out.find("检索") != std::string::npos);
+    CHECK(out.find("账号=alice") != std::string::npos);
+  }
 
   if (g_failures == 0) {
     std::cout << "archive tests: all passed\n";

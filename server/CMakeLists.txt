@@ -41,6 +41,8 @@ if(MEMEX_BUILD_TESTS)
   # T2.3 消息归档验收：全量落库、撤回仅置标记不清正文、撤回事件独立留痕、越权拒绝
   add_executable(test_archive tests/test_archive.cpp)
   target_link_libraries(test_archive PRIVATE memex_server_core)
+  target_compile_definitions(test_archive PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
   add_test(NAME archive COMMAND test_archive)
 
   # T2.6 组织架构验收：部门树、成员资料（直属上级独立字段）、

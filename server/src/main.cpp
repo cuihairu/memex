@@ -2,11 +2,13 @@
 // 管理后台（T3.1）接管运维面之前，账号开通与记录查询走本 CLI。
 #include <asio.hpp>
 
+#include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -130,9 +132,45 @@ int cmd_logins(int argc, char** argv, const std::string& db_path) {
   return 0;
 }
 
-// messages [账号] [--limit N]：管理员检索归档（T2.5 验收面；T3.2 扩展导出）
+// 时间参数解析（T3.2）："YYYY-MM-DD" 或 "YYYY-MM-DD HH:MM[:SS]"（本地时区）。
+// date_only 端补零点／当日末秒，使日期粒度的开闭区间语义正确。失败返回 -1。
+std::int64_t parse_time_arg(const std::string& text, bool end_of_day) {
+  std::tm tm{};
+  const char* fmts[] = {"%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"};
+  bool ok = false;
+  for (const char* f : fmts) {
+    if (strptime(text.c_str(), f, &tm) != nullptr) {
+      ok = true;
+      break;
+    }
+  }
+  if (!ok) return -1;
+  if (end_of_day) {
+    if (tm.tm_hour == 0 && tm.tm_min == 0 && tm.tm_sec == 0) {
+      tm.tm_hour = 23;
+      tm.tm_min = 59;
+      tm.tm_sec = 59;
+    }
+  }
+  tm.tm_isdst = -1;
+  return static_cast<std::int64_t>(mktime(&tm)) * 1000;
+}
+
+// 查阅操作者：管理 CLI 由运维在本机执行，取系统用户名留痕；拿不到记 "cli"。
+std::string cli_operator() {
+  const char* user = std::getenv("USER");
+  if (!user || !*user) user = std::getenv("LOGNAME");
+  return (user && *user) ? std::string(user) : std::string("cli");
+}
+
+// messages [账号] [--keyword K] [--since 时刻] [--until 时刻] [--limit N]
+//          [--export 文件]：管理员检索归档（T3.2：条件检索＋导出留证＋查阅日志）。
 // 撤回消息原文照常可见并标「已撤回」——留痕纪律：撤回仅置标记不清正文。
-int cmd_messages(int argc, char** argv, const std::string& db_path) {  std::string account;
+int cmd_messages(int argc, char** argv, const std::string& db_path) {
+  std::string account;
+  std::string keyword;
+  std::string export_path;
+  std::int64_t since_ms = 0, until_ms = 0;
   int limit = 200;
   for (int i = 0; i < argc; ++i) {
     const std::string_view arg = argv[i];
@@ -140,6 +178,22 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {  std::stri
       limit = std::atoi(argv[++i]);
       if (limit <= 0) {
         std::cerr << "无效 limit\n";
+        return 2;
+      }
+    } else if (arg == "--keyword" && i + 1 < argc) {
+      keyword = argv[++i];
+    } else if (arg == "--export" && i + 1 < argc) {
+      export_path = argv[++i];
+    } else if (arg == "--since" && i + 1 < argc) {
+      since_ms = parse_time_arg(argv[++i], false);
+      if (since_ms < 0) {
+        std::cerr << "无效 --since（应为 YYYY-MM-DD[ HH:MM[:SS]]）\n";
+        return 2;
+      }
+    } else if (arg == "--until" && i + 1 < argc) {
+      until_ms = parse_time_arg(argv[++i], true);
+      if (until_ms < 0) {
+        std::cerr << "无效 --until（应为 YYYY-MM-DD[ HH:MM[:SS]]）\n";
         return 2;
       }
     } else {
@@ -151,21 +205,104 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {  std::stri
     std::cerr << "本地库打开失败：" << db_path << "\n";
     return 1;
   }
-  const auto rows = store.messages(account, limit);
-  std::cout << "msg_id\t发送方\t接收方\t类型\t状态\t时间\t正文\n";
-  for (const auto& m : rows) {
+  memex::server::MessageSearch q;
+  q.account = account;
+  q.keyword = keyword;
+  q.since_ms = since_ms;
+  q.until_ms = until_ms;
+  q.limit = limit;
+  const auto rows = store.search_messages(q);
+
+  // 过滤条件摘要（进查阅日志；只记条件，不记消息内容）
+  std::string filters;
+  auto append_filter = [&filters](const std::string& kv) {
+    if (!filters.empty()) filters += " ";
+    filters += kv;
+  };
+  if (!account.empty()) append_filter("账号=" + account);
+  if (!keyword.empty()) append_filter("关键词=" + keyword);
+  if (since_ms > 0) append_filter("起=" + std::to_string(since_ms));
+  if (until_ms > 0) append_filter("止=" + std::to_string(until_ms));
+
+  auto format_row = [](const memex::server::ArchivedMessage& m) {
     std::time_t secs = static_cast<std::time_t>(m.ts_ms / 1000);
     std::tm tm{};
     localtime_r(&secs, &tm);
     char when[24];
     std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
-    std::cout << m.msg_id << '\t' << m.from_account << '\t' << m.to_account
-              << '\t' << memex::protocol::msg_type_name(
-                             static_cast<memex::protocol::MsgType>(m.type))
-              << '\t' << (m.recalled ? "已撤回" : "正常") << '\t' << when
-              << '\t' << m.text << '\n';
+    std::ostringstream line;
+    line << m.msg_id << '\t' << m.from_account << '\t' << m.to_account << '\t'
+         << memex::protocol::msg_type_name(
+                static_cast<memex::protocol::MsgType>(m.type))
+         << '\t' << (m.recalled ? "已撤回" : "正常") << '\t' << when << '\t'
+         << m.text;
+    return line.str();
+  };
+
+  const std::string header = "msg_id\t发送方\t接收方\t类型\t状态\t时间\t正文";
+  const std::string action = export_path.empty() ? "检索" : "导出";
+  const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::system_clock::now().time_since_epoch())
+                       .count();
+
+  if (!export_path.empty()) {
+    // 导出留证：完整结果写文件（含导出时间／操作者／条件，便于对账）
+    std::ofstream out(export_path, std::ios::trunc);
+    if (!out) {
+      std::cerr << "导出文件无法写入：" << export_path << "\n";
+      return 1;
+    }
+    out << "# Memex 归档导出\n# 导出时间(ms)：" << now
+        << "\n# 操作者：" << cli_operator() << "\n# 过滤条件："
+        << (filters.empty() ? "（全部）" : filters) << "\n";
+    for (const auto& m : rows) out << format_row(m) << '\n';
+    out << "共 " << rows.size() << " 条\n";
+  } else {
+    std::cout << header << '\n';
+    for (const auto& m : rows) std::cout << format_row(m) << '\n';
   }
   std::cout << "共 " << rows.size() << " 条\n";
+  if (!export_path.empty()) {
+    std::cout << "已导出至：" << export_path << "\n";
+  }
+
+  // 查阅行为记日志（每次检索／导出都落一条；audit 子命令可查）
+  memex::server::AuditReadRow audit;
+  audit.op_account = cli_operator();
+  audit.action = action;
+  audit.filters = filters;
+  audit.result_count = static_cast<int>(rows.size());
+  audit.ts_ms = now;
+  store.add_audit_read(audit);
+  return 0;
+}
+
+// audit [N]：查阅日志（倒序）——谁、何时、检索还是导出、用了什么条件、命中几条
+int cmd_audit(int argc, char** argv, const std::string& db_path) {
+  int limit = 100;
+  if (argc >= 1) {
+    limit = std::atoi(argv[0]);
+    if (limit <= 0) {
+      std::cerr << "无效条数\n";
+      return 2;
+    }
+  }
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+  std::cout << "时间\t操作者\t动作\t过滤条件\t命中条数\n";
+  for (const auto& r : store.audit_reads(limit)) {
+    std::time_t secs = static_cast<std::time_t>(r.ts_ms / 1000);
+    std::tm tm{};
+    localtime_r(&secs, &tm);
+    char when[24];
+    std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
+    std::cout << when << '\t' << r.op_account << '\t' << r.action << '\t'
+              << (r.filters.empty() ? "（全部）" : r.filters) << '\t'
+              << r.result_count << '\n';
+  }
   return 0;
 }
 
@@ -380,10 +517,12 @@ int main(int argc, char** argv) {
     if (cmd == "account") return cmd_account(sub_argc, sub_argv, db_path);
     if (cmd == "logins") return cmd_logins(sub_argc, sub_argv, db_path);
     if (cmd == "messages") return cmd_messages(sub_argc, sub_argv, db_path);
+    if (cmd == "audit") return cmd_audit(sub_argc, sub_argv, db_path);
     if (cmd == "org") return cmd_org(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
               << "用法：memex_server [serve [--port N] [--db P]] | account add … | "
-                 "logins [账号] | messages [账号] [--limit N] | org … | "
+                 "logins [账号] | messages [账号] [--keyword K] [--since T] "
+                 "[--until T] [--limit N] [--export 文件] | audit [N] | org … | "
                  "--version | --self-test\n";
     return 2;
   }

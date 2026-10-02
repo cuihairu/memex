@@ -67,6 +67,25 @@ struct OrgImportResult {
   std::vector<std::string> errors; // 行号 + 拒绝原因
 };
 
+// 检索条件（T3.2）：全部字段可空——空=不过滤；组合为 AND。
+struct MessageSearch {
+  std::string account;  // 该账号收发两侧都命中；空=全部
+  std::string keyword;  // 正文包含（子串）；空=不过滤
+  std::int64_t since_ms{0}; // 起始时间（含），0=不限
+  std::int64_t until_ms{0}; // 截止时间（含），0=不限
+  int limit{200};
+};
+
+// 查阅日志（T3.2）：每次检索／导出都落一条——谁、何时、用了什么条件、命中几条。
+struct AuditReadRow {
+  std::int64_t id{0};
+  std::string op_account; // 操作者（CLI 侧取系统用户）
+  std::string action;     // 检索／导出
+  std::string filters;    // 过滤条件摘要（不含消息内容）
+  int result_count{0};
+  std::int64_t ts_ms{0};
+};
+
 class ServerStore {
 public:
   ServerStore() = default;
@@ -112,6 +131,13 @@ public:
   // （管理员检索面，T2.5 补传验收经 CLI 同口径查询）。
   std::vector<ArchivedMessage> messages(const std::string& account,
                                         int limit = 200);
+  // T3.2 条件检索：按人（收发双侧）／时间窗（含端点）／关键词（子串），
+  // 条件 AND 组合、倒序、限量。撤回消息照常命中（原文保留、带标记）。
+  std::vector<ArchivedMessage> search_messages(const MessageSearch& q);
+
+  // 查阅留痕：检索／导出动作逐次落日志（只附加，不删改）。
+  bool add_audit_read(const AuditReadRow& rec);
+  std::vector<AuditReadRow> audit_reads(int limit = 100);
   // 撤回仅置标记，正文不清（留痕纪律）。
   bool recall_message(const std::string& msg_id);
   bool is_recalled(const std::string& msg_id);
