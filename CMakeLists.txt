@@ -27,6 +27,6 @@ add_subdirectory(common)
 add_subdirectory(server)
 
 if(MEMEX_BUILD_CLIENT)
-  find_package(Qt6 6.6 REQUIRED COMPONENTS Widgets Sql)
+  find_package(Qt6 6.6 REQUIRED COMPONENTS Widgets Sql Network)
   add_subdirectory(client)
 endif()
