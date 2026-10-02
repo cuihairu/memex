@@ -240,8 +240,15 @@ void Session::handle_login(const memex::protocol::Message& msg) {
     const std::string digest =
         pbkdf2_sha256_hex(in.password(), row->salt_hex, 60000);
     if (digest == row->digest_hex) {
-      ok = true;
-      rec.result = "ok";
+      // T3.3 设备台账：已停用设备拒绝登录（启停即时生效）
+      const auto dev = server_.store().find_device(device_fingerprint_);
+      if (dev && !dev->enabled) {
+        reason = "设备已停用：请联系管理员";
+        rec.result = "device_disabled";
+      } else {
+        ok = true;
+        rec.result = "ok";
+      }
     } else {
       reason = "口令不符";
       rec.result = "bad_password";
@@ -260,6 +267,9 @@ void Session::handle_login(const memex::protocol::Message& msg) {
         server_.register_online(account_, kind_, shared_from_this());
     (void)kicked;
     logged_in_ = true;
+    // 首登建档、再登刷新活跃时间（T3.3 台账随使用自动生长）
+    server_.store().upsert_device(device_fingerprint_, kind_, device_name_,
+                                  now_ms());
     result.mutable_login_result()->set_ok(true);
     result.mutable_login_result()->set_display_name(
         row->display_name);

@@ -1,11 +1,16 @@
 // T2.1 验收：账号表＋密码摘要登录、设备指纹留档、登录记录全量可查、
 // 桌面端单点在线互踢（第二台登录后第一台收到 KICK 下线提示）。
+// T3.3 设备台账：首登自动建档、责任人登记、停用拒绝登录（启停即时生效）、
+// 启用恢复、解绑（清责任人并停用）、登录记录按设备过滤；CLI 进程级验证。
 // 服务端核心库直链运行（io 线程驱动，不起进程）。
 #include <asio.hpp>
 
 #include <cassert>
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <thread>
 
 #include <memex/protocol/messages.hpp>
@@ -198,6 +203,114 @@ void test_login_and_kick(ServerStore& store) {
   io_thread.join();
 }
 
+// —— T3.3 设备台账（库级＋协议级＋CLI 级）——
+void test_devices(const std::string& db_path) {
+  std::remove(db_path.c_str());
+  ServerStore store;
+  CHECK(store.open(db_path));
+  CHECK(store.create_account("alice", "pass-123", "Alice"));
+
+  asio::io_context io;
+  CollabServer server(io, store, 0);
+  server.start_accept();
+  std::thread io_thread([&] { io.run(); });
+  const std::uint16_t port = server.port();
+
+  const std::string fp = memex::server::sha256_hex("pc-dev1");
+  // 首登：台账自动建档（指纹／类型／名称／启用态）
+  {
+    TestClient c(io, port);
+    c.send(make_login("alice", "pass-123", "pc-dev1"));
+    CHECK(c.read().login_result().ok());
+  }
+  auto devices = store.device_list();
+  CHECK(devices.size() == 1);
+  if (!devices.empty()) {
+    CHECK(devices[0].fingerprint == fp);
+    CHECK(devices[0].kind == "desktop");
+    CHECK(devices[0].name == "pc-dev1");
+    CHECK(devices[0].enabled);
+    CHECK(devices[0].owner_account.empty()); // 未登记
+  }
+
+  // 责任人登记（账号不存在拒绝）
+  CHECK(store.set_device_owner(fp, "alice"));
+  CHECK(!store.set_device_owner(fp, "ghost"));
+  CHECK(store.find_device(fp)->owner_account == "alice");
+
+  // 停用：登录即拒、留痕 device_disabled
+  CHECK(store.set_device_enabled(fp, false));
+  {
+    TestClient c(io, port);
+    c.send(make_login("alice", "pass-123", "pc-dev1"));
+    const auto r = c.read();
+    CHECK(!r.login_result().ok());
+    CHECK(r.login_result().reason().find("设备已停用") != std::string::npos);
+  }
+  // 登录记录按设备（指纹前缀）过滤：最新一条即被拒记录
+  const auto dev_rows = store.login_records("", fp.substr(0, 12));
+  CHECK(dev_rows.size() >= 2);
+  if (!dev_rows.empty()) CHECK(dev_rows[0].result == "device_disabled");
+
+  // 指纹前缀定位：命中／过短拒绝
+  const auto [hit, ambiguous] = store.device_by_prefix(fp.substr(0, 10));
+  CHECK(!ambiguous && hit == fp);
+  const auto [short_hit, short_ambiguous] = store.device_by_prefix(fp.substr(0, 4));
+  CHECK(short_hit.empty() && !short_ambiguous);
+
+  // 启用：登录恢复
+  CHECK(store.set_device_enabled(fp, true));
+  {
+    TestClient c(io, port);
+    c.send(make_login("alice", "pass-123", "pc-dev1"));
+    CHECK(c.read().login_result().ok());
+  }
+
+  // 解绑：清责任人并停用 → 再拒
+  CHECK(store.unbind_device(fp));
+  const auto after_unbind = store.find_device(fp);
+  CHECK(after_unbind.has_value());
+  CHECK(after_unbind->owner_account.empty());
+  CHECK(!after_unbind->enabled);
+  {
+    TestClient c(io, port);
+    c.send(make_login("alice", "pass-123", "pc-dev1"));
+    CHECK(!c.read().login_result().ok());
+  }
+
+  io.stop();
+  io_thread.join();
+  store.close();
+
+  // CLI 级：台账面／责任人登记／启用／登录记录按设备过滤
+  const auto run_cli = [](const std::string& args) {
+    const std::string out_path = "/tmp/memex-accounts-test-out.txt";
+    const std::string cmd = std::string("\"" MEMEX_SERVER_BIN "\" ") + args +
+                            " > " + out_path + " 2>&1";
+    const int rc = std::system(cmd.c_str());
+    (void)rc;
+    std::ifstream f(out_path);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+  };
+  const std::string prefix = fp.substr(0, 12);
+  const std::string listing = run_cli("device list --db " + db_path);
+  CHECK(listing.find("pc-dev1") != std::string::npos);
+  CHECK(listing.find("停用") != std::string::npos); // 解绑后为停用态
+  CHECK(run_cli("device set " + prefix + " --owner alice --db " + db_path)
+            .find("已登记责任人") != std::string::npos);
+  CHECK(run_cli("device enable " + prefix + " --db " + db_path)
+            .find("已启用") != std::string::npos);
+  CHECK(run_cli("device list --db " + db_path).find("alice") !=
+        std::string::npos);
+  CHECK(run_cli("logins --device " + prefix + " --db " + db_path)
+            .find("device_disabled") != std::string::npos);
+  // 坏用法：过短前缀拒绝
+  CHECK(run_cli("device disable ab --db " + db_path).find("过短") !=
+        std::string::npos);
+}
+
 } // namespace
 
 int main() {
@@ -208,6 +321,8 @@ int main() {
   memex::server::ServerStore store2;
   CHECK(store2.open(":memory:"));
   test_login_and_kick(store2);
+
+  test_devices("/tmp/memex-accounts-devices.db");
 
   if (g_failures == 0) {
     std::cout << "accounts tests: all passed\n";

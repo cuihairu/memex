@@ -27,8 +27,20 @@ struct LoginRecord {
   std::string name;        // 设备名（主机名）
   std::string source_ip;   // 来源地址
   std::string version;     // 客户端版本
-  std::string result;      // ok／bad_password／no_account
+  std::string result;      // ok／bad_password／no_account／device_disabled
   std::int64_t ts_ms{0};
+};
+
+// 设备台账（T3.3）：设备首次成功登录自动建档；启停对登录即时生效
+//（停用＝拒绝登录，解绑＝清责任人并停用）。
+struct DeviceRow {
+  std::string fingerprint;
+  std::string kind;
+  std::string name;
+  std::string owner_account; // 责任人（管理端登记；空=未登记）
+  bool enabled{true};
+  std::int64_t first_seen_ms{0};
+  std::int64_t last_seen_ms{0};
 };
 
 // 已归档消息（T2.3／T2.5：全量落库、撤回只置标记、按账号检索面）
@@ -110,10 +122,26 @@ public:
   // 全部账号（账号、展示名、角色）——管理后台成员维护面（T3.1）
   std::vector<std::pair<std::string, std::string>> account_list();
 
-  // 登录记录：成功失败都记（result 区分）；全量可查（按账号过滤，空=全部）。
+  // 登录记录：成功失败都记（result 区分）；全量可查（按账号／设备指纹前缀
+  // 过滤，空=全部）。
   bool add_login_record(const LoginRecord& rec);
   std::vector<LoginRecord> login_records(const std::string& account,
+                                         const std::string& fp_prefix = "",
                                          int limit = 200);
+
+  // —— T3.3 设备台账 ——
+  // 首次成功登录建档、再次登录刷新 last_seen（台账随使用自动生长）。
+  bool upsert_device(const std::string& fingerprint, const std::string& kind,
+                     const std::string& name, std::int64_t ts_ms);
+  std::optional<DeviceRow> find_device(const std::string& fingerprint);
+  std::vector<DeviceRow> device_list(); // 按最近活跃倒序
+  // 指纹前缀定位（CLI 易用）：前缀≥8 位；返回 {完整指纹, 是否多义}。
+  std::pair<std::string, bool> device_by_prefix(const std::string& prefix);
+  // 责任人登记（账号须已存在）；启停；解绑（清责任人并停用）。
+  bool set_device_owner(const std::string& fingerprint,
+                        const std::string& owner_account);
+  bool set_device_enabled(const std::string& fingerprint, bool enabled);
+  bool unbind_device(const std::string& fingerprint);
 
   // 离线消息队列（投递语义：先入队，在线即投，接收方 ACK(msg_id) 后删除；
   // 未 ACK 前重复投递无害——接收端按 msg_id 去重）。归档库（T2.3）另行落表。

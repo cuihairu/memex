@@ -64,6 +64,15 @@ bool ServerStore::ensure_schema() {
       "  ts_ms INTEGER NOT NULL);"
       "CREATE INDEX IF NOT EXISTS idx_login_records_account"
       "  ON login_records(account, ts_ms);"
+      // T3.3 设备台账：首登建档、责任人登记、启停（停用拒绝登录）
+      "CREATE TABLE IF NOT EXISTS devices ("
+      "  fingerprint TEXT PRIMARY KEY,"
+      "  kind TEXT NOT NULL,"
+      "  name TEXT NOT NULL,"
+      "  owner_account TEXT NOT NULL DEFAULT '',"
+      "  enabled INTEGER NOT NULL DEFAULT 1,"
+      "  first_seen_ms INTEGER NOT NULL,"
+      "  last_seen_ms INTEGER NOT NULL);"
       "CREATE TABLE IF NOT EXISTS offline_messages ("
       "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
       "  msg_id TEXT NOT NULL UNIQUE,"
@@ -211,13 +220,20 @@ bool ServerStore::add_login_record(const LoginRecord& rec) {
 }
 
 std::vector<LoginRecord> ServerStore::login_records(const std::string& account,
+                                                    const std::string& fp_prefix,
                                                     int limit) {
   std::vector<LoginRecord> out;
   const char* sql =
       "SELECT id, account, fingerprint, kind, name, source_ip, version, result,"
       " ts_ms FROM login_records";
   std::string query = sql;
-  if (!account.empty()) query += " WHERE account = ?";
+  std::string where;
+  if (!account.empty()) where += "account = ?";
+  if (!fp_prefix.empty()) {
+    if (!where.empty()) where += " AND ";
+    where += "fingerprint LIKE ? || '%'";
+  }
+  if (!where.empty()) query += " WHERE " + where;
   query += " ORDER BY ts_ms DESC, id DESC LIMIT ?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, query.c_str(), -1, &st, nullptr) != SQLITE_OK) {
@@ -226,6 +242,9 @@ std::vector<LoginRecord> ServerStore::login_records(const std::string& account,
   int idx = 1;
   if (!account.empty()) {
     sqlite3_bind_text(st, idx++, account.c_str(), -1, SQLITE_TRANSIENT);
+  }
+  if (!fp_prefix.empty()) {
+    sqlite3_bind_text(st, idx++, fp_prefix.c_str(), -1, SQLITE_TRANSIENT);
   }
   sqlite3_bind_int(st, idx, limit);
   while (sqlite3_step(st) == SQLITE_ROW) {
@@ -243,6 +262,139 @@ std::vector<LoginRecord> ServerStore::login_records(const std::string& account,
   }
   sqlite3_finalize(st);
   return out;
+}
+
+// —— T3.3 设备台账 ——
+
+// 首登建档（INSERT OR IGNORE 保首见时间）、再登刷新 last_seen
+bool ServerStore::upsert_device(const std::string& fingerprint,
+                                const std::string& kind,
+                                const std::string& name,
+                                std::int64_t ts_ms) {
+  const char* sql =
+      "INSERT INTO devices(fingerprint, kind, name, first_seen_ms, last_seen_ms)"
+      " VALUES(?, ?, ?, ?, ?)"
+      " ON CONFLICT(fingerprint) DO UPDATE SET"
+      " kind = excluded.kind, name = excluded.name,"
+      " last_seen_ms = excluded.last_seen_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, fingerprint.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, kind.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, name.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, ts_ms);
+  sqlite3_bind_int64(st, 5, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::optional<DeviceRow> ServerStore::find_device(
+    const std::string& fingerprint) {
+  const char* sql =
+      "SELECT fingerprint, kind, name, owner_account, enabled,"
+      " first_seen_ms, last_seen_ms FROM devices WHERE fingerprint = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return std::nullopt;
+  sqlite3_bind_text(st, 1, fingerprint.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<DeviceRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    DeviceRow d;
+    const auto text_of = [&st](int col) {
+      const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, col));
+      return p ? std::string(p) : std::string{};
+    };
+    d.fingerprint = text_of(0);
+    d.kind = text_of(1);
+    d.name = text_of(2);
+    d.owner_account = text_of(3);
+    d.enabled = sqlite3_column_int(st, 4) != 0;
+    d.first_seen_ms = sqlite3_column_int64(st, 5);
+    d.last_seen_ms = sqlite3_column_int64(st, 6);
+    out = std::move(d);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<DeviceRow> ServerStore::device_list() {
+  std::vector<DeviceRow> out;
+  const char* sql =
+      "SELECT fingerprint, kind, name, owner_account, enabled,"
+      " first_seen_ms, last_seen_ms FROM devices"
+      " ORDER BY last_seen_ms DESC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    DeviceRow d;
+    const auto text_of = [&st](int col) {
+      const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, col));
+      return p ? std::string(p) : std::string{};
+    };
+    d.fingerprint = text_of(0);
+    d.kind = text_of(1);
+    d.name = text_of(2);
+    d.owner_account = text_of(3);
+    d.enabled = sqlite3_column_int(st, 4) != 0;
+    d.first_seen_ms = sqlite3_column_int64(st, 5);
+    d.last_seen_ms = sqlite3_column_int64(st, 6);
+    out.push_back(std::move(d));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// 指纹前缀定位：≥8 位防误配；多义时 second=true（CLI 拒绝并提示补长）
+std::pair<std::string, bool> ServerStore::device_by_prefix(
+    const std::string& prefix) {
+  if (prefix.size() < 8) return {"", false};
+  std::vector<std::string> hits;
+  for (const auto& d : device_list()) {
+    if (d.fingerprint.compare(0, prefix.size(), prefix) == 0) {
+      hits.push_back(d.fingerprint);
+    }
+  }
+  if (hits.size() == 1) return {hits[0], false};
+  return {"", hits.size() > 1};
+}
+
+// 责任人登记：账号须已存在（防拼错挂空名）
+bool ServerStore::set_device_owner(const std::string& fingerprint,
+                                   const std::string& owner_account) {
+  if (!find_account(owner_account).has_value()) return false;
+  const char* sql = "UPDATE devices SET owner_account = ? WHERE fingerprint = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, owner_account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, fingerprint.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::set_device_enabled(const std::string& fingerprint,
+                                     bool enabled) {
+  const char* sql = "UPDATE devices SET enabled = ? WHERE fingerprint = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int(st, 1, enabled ? 1 : 0);
+  sqlite3_bind_text(st, 2, fingerprint.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+// 解绑：清责任人并停用（该设备须重新启用并登记责任人才可用）
+bool ServerStore::unbind_device(const std::string& fingerprint) {
+  const char* sql =
+      "UPDATE devices SET owner_account = '', enabled = 0"
+      " WHERE fingerprint = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, fingerprint.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
 }
 
 bool ServerStore::queue_offline(const std::string& msg_id,

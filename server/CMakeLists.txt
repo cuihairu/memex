@@ -29,6 +29,8 @@ if(MEMEX_BUILD_TESTS)
   # T2.1 账号与设备验收：登录校验、单点在线互踢、登录记录全量可查
   add_executable(test_accounts tests/test_accounts.cpp)
   target_link_libraries(test_accounts PRIVATE memex_server_core)
+  target_compile_definitions(test_accounts PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
   add_test(NAME accounts COMMAND test_accounts)
   set_tests_properties(accounts PROPERTIES TIMEOUT 60)
 

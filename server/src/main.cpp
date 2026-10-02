@@ -113,15 +113,22 @@ int cmd_account(int argc, char** argv, const std::string& db_path) {
 }
 
 int cmd_logins(int argc, char** argv, const std::string& db_path) {
-  // logins [账号]：全量可查（不带账号=全部，倒序）
+  // logins [账号] [--device 指纹前缀]：全量可查（不带账号=全部，倒序）
   std::string account;
-  if (argc >= 1) account = argv[0];
+  std::string fp_prefix;
+  for (int i = 0; i < argc; ++i) {
+    if (std::string_view(argv[i]) == "--device" && i + 1 < argc) {
+      fp_prefix = argv[++i];
+    } else {
+      account = argv[i];
+    }
+  }
   memex::server::ServerStore store;
   if (!store.open(db_path)) {
     std::cerr << "本地库打开失败：" << db_path << "\n";
     return 1;
   }
-  const auto rows = store.login_records(account);
+  const auto rows = store.login_records(account, fp_prefix);
   std::cout << "id\t账号\t结果\t设备类型\t设备名\t指纹前8\t来源\t版本\t时间(ms)\n";
   for (const auto& r : rows) {
     std::cout << r.id << '\t' << r.account << '\t' << r.result << '\t'
@@ -130,6 +137,91 @@ int cmd_logins(int argc, char** argv, const std::string& db_path) {
               << r.version << '\t' << r.ts_ms << '\n';
   }
   return 0;
+}
+
+// device 子命令族（T3.3 设备台账）：
+//   device list                          台账（指纹／类型／名称／责任人／状态／活跃）
+//   device set <指纹前缀> --owner 账号    责任人登记
+//   device disable <指纹前缀>            停用（该设备登录即拒）
+//   device enable <指纹前缀>             重新启用
+//   device unbind <指纹前缀>             解绑（清责任人并停用）
+int cmd_device(int argc, char** argv, const std::string& db_path) {
+  if (argc < 1) {
+    std::cerr << "用法：memex_server device list | set <指纹前缀> --owner 账号 | "
+                 "disable <前缀> | enable <前缀> | unbind <前缀> [--db <库>]\n";
+    return 2;
+  }
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+  const std::string_view sub = argv[0];
+
+  if (sub == "list") {
+    std::cout << "指纹(前16)\t类型\t名称\t责任人\t状态\t首见(ms)\t最近活跃(ms)\n";
+    for (const auto& d : store.device_list()) {
+      std::cout << d.fingerprint.substr(0, 16) << '\t' << d.kind << '\t'
+                << d.name << '\t'
+                << (d.owner_account.empty() ? "（未登记）" : d.owner_account)
+                << '\t' << (d.enabled ? "启用" : "停用") << '\t'
+                << d.first_seen_ms << '\t' << d.last_seen_ms << '\n';
+    }
+    return 0;
+  }
+
+  // 其余子命令都要指纹前缀；统一解析（≥8 位，多义拒绝并提示补长）
+  if (argc < 2) {
+    std::cerr << "用法：memex_server device set <前缀> --owner 账号 | "
+                 "disable <前缀> | enable <前缀> | unbind <前缀>\n";
+    return 2;
+  }
+  const std::string prefix = argv[1];
+  const auto [fp, ambiguous] = store.device_by_prefix(prefix);
+  if (fp.empty()) {
+    if (ambiguous) {
+      std::cerr << "指纹前缀多义，请补长后重试：" << prefix << "\n";
+      return 1;
+    }
+    std::cerr << "前缀过短（≥8 位）或无此设备：" << prefix << "\n";
+    return 1;
+  }
+
+  if (sub == "set") {
+    std::string owner;
+    for (int i = 2; i + 1 < argc; ++i) {
+      if (std::string_view(argv[i]) == "--owner") owner = argv[++i];
+    }
+    if (owner.empty()) {
+      std::cerr << "用法：device set <前缀> --owner <账号>\n";
+      return 2;
+    }
+    if (!store.set_device_owner(fp, owner)) {
+      std::cerr << "责任人登记失败（账号不存在或设备不存在）：" << owner << "\n";
+      return 1;
+    }
+    std::cout << "已登记责任人：" << fp.substr(0, 16) << "… → " << owner << "\n";
+    return 0;
+  }
+  if (sub == "disable" || sub == "enable") {
+    const bool enable = sub == "enable";
+    if (!store.set_device_enabled(fp, enable)) {
+      std::cerr << (enable ? "启用" : "停用") << "失败（设备不存在）\n";
+      return 1;
+    }
+    std::cout << (enable ? "已启用：" : "已停用：") << fp.substr(0, 16) << "…\n";
+    return 0;
+  }
+  if (sub == "unbind") {
+    if (!store.unbind_device(fp)) {
+      std::cerr << "解绑失败（设备不存在）\n";
+      return 1;
+    }
+    std::cout << "已解绑并停用：" << fp.substr(0, 16) << "…\n";
+    return 0;
+  }
+  std::cerr << "未知 device 子命令：" << sub << "\n";
+  return 2;
 }
 
 // 时间参数解析（T3.2）："YYYY-MM-DD" 或 "YYYY-MM-DD HH:MM[:SS]"（本地时区）。
@@ -516,12 +608,14 @@ int main(int argc, char** argv) {
     if (cmd == "serve") return cmd_serve(sub_argc, sub_argv, db_path);
     if (cmd == "account") return cmd_account(sub_argc, sub_argv, db_path);
     if (cmd == "logins") return cmd_logins(sub_argc, sub_argv, db_path);
+    if (cmd == "device") return cmd_device(sub_argc, sub_argv, db_path);
     if (cmd == "messages") return cmd_messages(sub_argc, sub_argv, db_path);
     if (cmd == "audit") return cmd_audit(sub_argc, sub_argv, db_path);
     if (cmd == "org") return cmd_org(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
               << "用法：memex_server [serve [--port N] [--db P]] | account add … | "
-                 "logins [账号] | messages [账号] [--keyword K] [--since T] "
+                 "logins [账号] [--device 指纹前缀] | device … | "
+                 "messages [账号] [--keyword K] [--since T] "
                  "[--until T] [--limit N] [--export 文件] | audit [N] | org … | "
                  "--version | --self-test\n";
     return 2;
