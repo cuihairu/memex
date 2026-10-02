@@ -126,6 +126,10 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     out.set_msg_id(msg_id);
     const std::string blob = out.SerializeAsString();
     server_.store().queue_offline(msg_id, msg.to(), blob);
+    // T2.3 全量归档：协作态消息原样落服务端归档库（本地缓存另行存于客户端）
+    server_.store().store_message(msg_id, msg.from(), msg.to(),
+                                  static_cast<int>(msg.type()),
+                                  msg.text().text(), msg.ts_ms());
     // 在线即投（桌面＋手机都在则都投，任一端 ACK 即清队列）
     for (const auto& target : server_.online_sessions(msg.to())) {
       target->deliver_frame(blob);
@@ -144,8 +148,38 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       server_.store().ack_offline(msg.ack().msg_id());
     }
     break;
+  case v1::RECALL: {
+    // 撤回：仅置标记不清正文；事件独立留痕；转发给对端会话（本地展示标记）。
+    if (!logged_in_ || !msg.has_recall()) break;
+    const std::string target = msg.recall().msg_id();
+    if (target.empty()) break;
+    const std::string original_from = server_.store().message_from(target);
+    if (original_from.empty()) {
+      log("撤回目标不存在：" + target);
+      break;
+    }
+    if (original_from != account_) {
+      log("越权撤回被拒：目标发送方为 " + original_from);
+      break;
+    }
+    server_.store().recall_message(target);
+    server_.store().record_recall_event(target, account_, now_ms());
+    log("撤回留痕：" + target);
+    // 转发给消息会话双方的在线会话（不含本会话），客户端按 msg_id 标记本地副本
+    for (const auto& s : server_.online_sessions(msg.to())) {
+      memex::protocol::Message out = msg;
+      out.set_msg_id(target);
+      s->deliver_frame(out.SerializeAsString());
+    }
+    for (const auto& s : server_.online_sessions(account_)) {
+      if (s.get() == this) continue;
+      memex::protocol::Message out = msg;
+      out.set_msg_id(target);
+      s->deliver_frame(out.SerializeAsString());
+    }
+    break;
+  }
   default:
-    // 归档落库在 T2.3 接入
     break;
   }
 }

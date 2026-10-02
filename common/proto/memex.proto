@@ -40,6 +40,7 @@ message Ack {
 
 message Recall {
   string target_seq = 1; // 被撤回消息的发送序号（十进制字符串）
+  string msg_id = 2;     // 被撤回消息的服务端标识（协作态首选定位键）
 }
 
 message FileMeta {

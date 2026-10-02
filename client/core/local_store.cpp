@@ -62,6 +62,7 @@ bool LocalStore::ensure_schema() {
           " text TEXT NOT NULL,"
           " source TEXT NOT NULL,"
           " msg_id TEXT NOT NULL DEFAULT '',"
+          " recalled INTEGER NOT NULL DEFAULT 0,"
           " UNIQUE(from_id, seq))"));
   if (!ok) {
     qWarning() << "[本地库] 建表失败：" << q.lastError().text();
@@ -69,6 +70,8 @@ bool LocalStore::ensure_schema() {
   }
   // 旧库迁移：补 msg_id 列（已存在则忽略失败）
   q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN msg_id TEXT NOT NULL DEFAULT ''"));
+  // 旧库迁移：补 recalled 列
+  q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN recalled INTEGER NOT NULL DEFAULT 0"));
   // msg_id 去重索引（部分索引：直连消息 msg_id 为空不参与）
   if (!q.exec(QStringLiteral("CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_msg_id "
                              "ON messages(msg_id) WHERE msg_id != ''"))) {
@@ -85,8 +88,8 @@ bool LocalStore::append(const StoredMessage& msg, bool* inserted) {
   QSqlQuery q(QSqlDatabase::database(connection_name_));
   q.prepare(QStringLiteral(
       "INSERT OR IGNORE INTO messages"
-      " (peer, from_id, to_id, seq, ts_ms, text, source, msg_id)"
-      " VALUES (?, ?, ?, ?, ?, ?, ?, ?)"));
+      " (peer, from_id, to_id, seq, ts_ms, text, source, msg_id, recalled)"
+      " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"));
   q.bindValue(0, QString::fromStdString(msg.peer));
   q.bindValue(1, QString::fromStdString(msg.from));
   q.bindValue(2, QString::fromStdString(msg.to));
@@ -95,6 +98,7 @@ bool LocalStore::append(const StoredMessage& msg, bool* inserted) {
   q.bindValue(5, QString::fromStdString(msg.text));
   q.bindValue(6, QString::fromStdString(msg.source));
   q.bindValue(7, QString::fromStdString(msg.msg_id));
+  q.bindValue(8, msg.recalled ? 1 : 0);
   if (!q.exec()) {
     qWarning() << "[本地库] 写入失败：" << q.lastError().text();
     if (inserted) *inserted = false;
@@ -110,7 +114,7 @@ QList<StoredMessage> LocalStore::history(const QString& peer, int limit) const {
   QSqlQuery q(QSqlDatabase::database(connection_name_));
   // limit 取最近 N 条，整体按时间正序返回（聊天窗渲染方向）
   q.prepare(QStringLiteral(
-      "SELECT id, peer, from_id, to_id, seq, ts_ms, text, source, msg_id FROM ("
+      "SELECT id, peer, from_id, to_id, seq, ts_ms, text, source, msg_id, recalled FROM ("
       " SELECT * FROM messages WHERE peer = ?"
       " ORDER BY ts_ms DESC, id DESC LIMIT ?)"
       " ORDER BY ts_ms ASC, id ASC"));
@@ -131,9 +135,23 @@ QList<StoredMessage> LocalStore::history(const QString& peer, int limit) const {
     m.text = q.value(6).toString().toStdString();
     m.source = q.value(7).toString().toStdString();
     m.msg_id = q.value(8).toString().toStdString();
+    m.recalled = q.value(9).toInt() != 0;
     out.push_back(std::move(m));
   }
   return out;
+}
+
+bool LocalStore::mark_recalled(const std::string& msg_id) {
+  if (!open_ || msg_id.empty()) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "UPDATE messages SET recalled = 1 WHERE msg_id = ?"));
+  q.addBindValue(QString::fromStdString(msg_id));
+  if (!q.exec()) {
+    qWarning() << "[本地库] 撤回标记失败：" << q.lastError().text();
+    return false;
+  }
+  return q.numRowsAffected() > 0;
 }
 
 } // namespace memex::client

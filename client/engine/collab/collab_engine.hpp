@@ -45,6 +45,8 @@ public slots:
   void logout();
   // 发送文本消息（协作态）：返回本地序列号（sent 回执以此 seq 关联）。
   quint64 send_text(const QString& to, const QString& text);
+  // 撤回一条协作态消息（服务端校验权限后全网标记，原文留痕不清）。
+  void recall_text(const QString& to, const QString& msg_id);
 
 signals:
   void logged_in(const QString& account, const QString& display_name);
@@ -59,6 +61,8 @@ signals:
                         const QString& msg_id);
   // 发送方受理回执：seq（本地 send_text 返回值）、ok（服务端已接收并入队）。
   void text_delivered(quint64 seq, bool ok);
+  // 一条协作消息被撤回（本地与对端副本都置标记，原文保留）。
+  void message_recalled(const QString& from, const QString& msg_id);
 
 private:
   void send_login_frame();

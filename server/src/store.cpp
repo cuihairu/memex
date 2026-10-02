@@ -80,7 +80,12 @@ bool ServerStore::ensure_schema() {
       "  ts_ms INTEGER NOT NULL,"
       "  recall INTEGER NOT NULL DEFAULT 0);"
       "CREATE INDEX IF NOT EXISTS idx_messages_to"
-      "  ON messages(to_account, id);";
+      "  ON messages(to_account, id);"
+      "CREATE TABLE IF NOT EXISTS recall_events ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  msg_id TEXT NOT NULL,"
+      "  by_account TEXT NOT NULL,"
+      "  ts_ms INTEGER NOT NULL);";
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -316,6 +321,49 @@ bool ServerStore::is_recalled(const std::string& msg_id) {
   }
   sqlite3_finalize(st);
   return recalled;
+}
+
+// 查某消息的发送方（撤回权限判定：只能撤回自己发的）
+std::string ServerStore::message_from(const std::string& msg_id) {
+  const char* sql = "SELECT from_account FROM messages WHERE msg_id = ?;";
+  sqlite3_stmt* st = nullptr;
+  std::string out;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    out = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// 撤回事件独立记录（原文与序得在此表对账；只附加，不删改）
+bool ServerStore::record_recall_event(const std::string& msg_id,
+                                      const std::string& by_account,
+                                      std::int64_t ts_ms) {
+  const char* sql =
+      "INSERT INTO recall_events(msg_id, by_account, ts_ms) VALUES(?, ?, ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, by_account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::size_t ServerStore::recall_event_count(const std::string& msg_id) {
+  const char* sql = "SELECT COUNT(*) FROM recall_events WHERE msg_id = ?;";
+  sqlite3_stmt* st = nullptr;
+  std::size_t n = 0;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    n = static_cast<std::size_t>(sqlite3_column_int64(st, 0));
+  }
+  sqlite3_finalize(st);
+  return n;
 }
 
 } // namespace memex::server

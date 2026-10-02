@@ -73,6 +73,13 @@ public:
   // 撤回仅置标记，正文不清（留痕纪律）。
   bool recall_message(const std::string& msg_id);
   bool is_recalled(const std::string& msg_id);
+  // 某消息发送方（撤回权限判定）；不存在返回空串。
+  std::string message_from(const std::string& msg_id);
+  // 撤回事件独立留痕（只附加、不删改）。
+  bool record_recall_event(const std::string& msg_id,
+                           const std::string& by_account,
+                           std::int64_t ts_ms);
+  std::size_t recall_event_count(const std::string& msg_id);
 
 private:
   bool ensure_schema();

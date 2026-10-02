@@ -174,6 +174,17 @@ quint64 CollabEngine::send_text(const QString& to, const QString& text) {
   return seq;
 }
 
+void CollabEngine::recall_text(const QString& to, const QString& msg_id) {
+  if (!logged_in_ || to.isEmpty() || msg_id.isEmpty()) return;
+  Message m;
+  m.set_type(MsgType::RECALL);
+  m.set_from(account_.toStdString());
+  m.set_to(to.toStdString());
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  m.mutable_recall()->set_msg_id(msg_id.toStdString());
+  send_frame(m);
+}
+
 void CollabEngine::send_frame(const Message& msg) {
   const std::string frame = memex::protocol::encode(msg);
   socket_->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
@@ -255,6 +266,15 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
   case MsgType::ACK:
     handle_ack(msg);
     break;
+  case MsgType::RECALL: {
+    const std::string target = msg.has_recall() ? msg.recall().msg_id() : std::string{};
+    if (!target.empty() && store_) {
+      store_->mark_recalled(target);
+    }
+    emit message_recalled(QString::fromStdString(msg.from()),
+                           QString::fromStdString(target));
+    break;
+  }
   default:
     break;
   }

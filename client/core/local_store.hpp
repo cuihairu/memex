@@ -23,6 +23,8 @@ struct StoredMessage {
   // 消息标识（协作态：服务端分配；直连态为空）。按其去重：离线补投重复
   // 投递、断线补传重传同一消息都不产生第二条本地记录。
   std::string msg_id;
+  // 撤回标记（仅界面展示用，原文保留在本地与服务端归档）。
+  bool recalled{false};
 };
 
 class LocalStore {
@@ -41,6 +43,9 @@ public:
   // 幂等插入（from+seq 与 msg_id 唯一约束去重）。
   // inserted 非空时回报是否真正插入（false=命中已有记录，重复消息）。
   bool append(const StoredMessage& msg, bool* inserted = nullptr);
+
+  // 按 msg_id 置撤回标记（服务端撤回事件到达后调用）。
+  bool mark_recalled(const std::string& msg_id);
 
   // 某对端的本地历史：取最近 limit 条，按时间正序返回。
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;

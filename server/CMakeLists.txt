@@ -37,4 +37,10 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_gateway PRIVATE memex_server_core)
   add_test(NAME gateway COMMAND test_gateway)
   set_tests_properties(gateway PROPERTIES TIMEOUT 60)
+
+  # T2.3 消息归档验收：全量落库、撤回仅置标记不清正文、撤回事件独立留痕、越权拒绝
+  add_executable(test_archive tests/test_archive.cpp)
+  target_link_libraries(test_archive PRIVATE memex_server_core)
+  add_test(NAME archive COMMAND test_archive)
+  set_tests_properties(archive PROPERTIES TIMEOUT 60)
 endif()
