@@ -72,3 +72,7 @@ Testing/
 
 # 本地打包验证产物（scripts/nightly 在仓库根输出）
 dist/
+
+# 服务端本地库（serve 默认落当前目录）
+*.db
+!*.proto
