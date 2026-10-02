@@ -68,11 +68,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # autoconf 链为 gperf（qtbase 依赖）源码构建所需，runner 镜像未预装
+      # autoconf 链为 gperf（qtbase 依赖）源码构建所需、libltdl-dev 为 libxcrypt 端口源码构建所需，runner 镜像均未预装
       - name: 安装工具与系统依赖
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ninja-build autoconf autoconf-archive automake libtool \
+          sudo apt-get install -y -qq ninja-build autoconf autoconf-archive automake libtool libltdl-dev \
             ${{ matrix.sys_pkgs }}
 
       # 导出 Actions 缓存凭据，vcpkg 才能使用原生 x-gha 二进制缓存
