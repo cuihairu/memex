@@ -24,11 +24,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # vcpkg 不代管 X11/GL 等系统库；qtbase 构建所需系统包在此安装
+      # vcpkg 不代管 X11/GL 等系统库；qtbase 构建所需系统包在此安装。
+      # autoconf 链为 gperf（qtbase 依赖）源码构建所需，runner 镜像未预装
       - name: 安装工具与 qtbase 系统依赖
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq gcovr ninja-build \
+            autoconf autoconf-archive automake libtool \
             libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
             libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev \
             libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev \

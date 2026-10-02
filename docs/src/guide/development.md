@@ -5,6 +5,7 @@
 - CMake 4.x、C++20 编译器（GCC 15 或 MSVC）
 - [vcpkg](https://github.com/microsoft/vcpkg)：所有第三方依赖经 manifest 管理
 - Linux 编译 Qt 客户端所需的系统开发包（vcpkg 不代管 X11/GL 等系统库；Ubuntu 参考：
+  `autoconf autoconf-archive automake libtool`（gperf 等 autotools 端口源码构建所需，缺则 qtbase 依赖链在 gperf 处失败）；
   `libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev libxcb-icccm4-dev libxcb-util-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-glx0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev libfontconfig1-dev libfreetype-dev libdbus-1-dev libicu-dev`；
   与 CI 工作流的安装清单一致）
 - 文档站：Node 22 + pnpm
