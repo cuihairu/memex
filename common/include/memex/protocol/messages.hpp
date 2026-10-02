@@ -20,7 +20,9 @@ enum class MsgType : std::uint16_t {
   kText = 10,     // 文本消息
   kAck = 11,      // 消息回执
   kRecall = 12,   // 撤回（仅显示层；服务端保留原文并记录撤回事件）
-  kFileMeta = 20, // 文件元数据（文件字节流旁路，不经服务端）
+  kFileMeta = 20,   // 文件元数据（文件字节流旁路，不经服务端）
+  kFileResume = 21, // 文件续传偏移协商（接收方 → 发送方）
+  kFileDone = 22,   // 文件终态：落盘完成与否 + 整文件 SHA-256 校验结果
 };
 
 // 编解码错误类型 ProtocolError 定义于 frame.hpp。

@@ -45,6 +45,9 @@ signals:
   void text_received(const QString& from_id, const QString& to_id,
                      quint64 seq, qint64 ts_ms, const QString& text);
   void delivered(quint64 seq, bool ok);
+  // 文件连接移交（T1.3）：kFileMeta 已解出，socket 所有权随之移交
+  // （父对象置空、本类槽位断开），此后字节流由文件服务按块处理。
+  void file_incoming(QTcpSocket* socket, const memex::protocol::Message& meta);
 
 private:
   struct Pending {

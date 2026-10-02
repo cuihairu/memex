@@ -1,19 +1,23 @@
-// 直连引擎（T1.1／T1.2）：未登录零配置直连态。
-// UDP 广播发现 + TCP 点对点文本（送达确认）+ 本地 SQLite 历史（source="direct"）。
-// 文件传输按 T1.3 接入。
+// 直连引擎（T1.1／T1.2／T1.3）：未登录零配置直连态。
+// UDP 广播发现 + TCP 点对点文本（送达确认）+ 文件传输（分块、断点续传、
+// SHA-256 校验）+ 本地 SQLite 历史（source="direct"）。
 #pragma once
 
 #include <QList>
 #include <QString>
 
 #include <atomic>
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <core/local_store.hpp>
 
 #include "direct_transport.hpp"
 #include "discovery.hpp"
+#include "file_transfer.hpp"
 
 namespace memex::client {
 
@@ -38,6 +42,22 @@ public:
   // 异步发送文本；结果经 text_delivered(seq, ok)。失败返回 false（seq=0）。
   quint64 send_text(const std::string& peer_device_id, const std::string& text);
 
+  // 异步发送文件；返回传输 ID（失败为空）。进度与终态经 file_progress /
+  // file_finished 回报。须在 start() 前设置接收目录（set_download_dir）。
+  std::string send_file(const std::string& peer_device_id,
+                        const QString& local_path);
+
+  // 目录传输：遍历（含子目录）按相对路径逐文件串行发送；返回作业 ID
+  // （＝根目录绝对路径，失败为空）。终态经 directory_finished 回报。
+  QString send_directory(const std::string& peer_device_id,
+                         const QString& dir_path);
+
+  // 中止发送中的文件或目录作业；对端保留部分文件，重发自动续传。
+  void cancel_transfer(const std::string& transfer_id);
+
+  // 接收落地目录（默认 应用数据目录/files，可启动前覆盖）
+  void set_download_dir(const QString& dir);
+
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;
 
   std::string status_text() const;
@@ -47,14 +67,33 @@ signals:
   void message_received(const QString& from_id, const QString& text, qint64 ts_ms);
   void text_delivered(quint64 seq, bool ok);
   void peers_changed();
+  void file_progress(const QString& transfer_id, quint64 bytes_done,
+                     quint64 bytes_total);
+  void file_finished(const QString& transfer_id, bool ok, const QString& error);
+  // 接收侧：文件完整落地
+  void file_received(const QString& transfer_id, const QString& final_path);
+  void directory_finished(const QString& job_id, bool ok);
 
 private:
+  struct DirJob {
+    std::string peer_id;
+    QString root;
+    std::vector<std::pair<QString, QString>> files; // {本地路径, 相对路径}
+    std::size_t index{0};
+  };
+
+  void send_next_dir_file(const QString& job_id);
+
   std::string device_id_;
   std::string device_name_;
   QString db_path_;
+  QString download_dir_;
   std::unique_ptr<LocalStore> store_;
   std::unique_ptr<DirectTransport> transport_;
   std::unique_ptr<DiscoveryService> discovery_;
+  std::unique_ptr<FileTransferService> file_service_;
+  std::map<QString, DirJob> dir_jobs_;            // 作业 ID → 目录作业
+  std::map<std::string, QString> transfer_job_;   // 在途传输 ID → 作业 ID
   std::atomic<std::uint64_t> seq_counter_{0};
   bool running_{false};
 };

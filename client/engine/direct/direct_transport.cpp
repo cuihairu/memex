@@ -43,8 +43,12 @@ void DirectTransport::stop() {
     }
   }
   pending_.clear();
-  const auto sockets = server_.findChildren<QTcpSocket*>();
-  for (QTcpSocket* s : sockets) s->abort();
+  // 只清理仍在帧解码阶段的入站连接；文件连接已移交文件服务，由其自管
+  for (auto& [socket, decoder] : inbound_decoders_) {
+    socket->disconnect(this);
+    socket->abort();
+    socket->deleteLater();
+  }
   inbound_decoders_.clear();
   server_.close();
 }
@@ -79,6 +83,7 @@ void DirectTransport::on_inbound_ready(QTcpSocket* socket) {
     return;
   }
   for (const auto& payload : payloads) {
+    if (!inbound_decoders_.contains(socket)) return; // 已移交或清理
     handle_payload(socket, payload);
   }
 }
@@ -117,8 +122,15 @@ void DirectTransport::handle_payload(QTcpSocket* socket, const std::string& payl
   case MsgType::kAck:
     // 入站连接不承载发送确认（确认走各自出站连接）
     break;
+  case MsgType::kFileMeta:
+    // T1.3：文件连接整体移交文件服务（此后为二进制块流，不走帧解码）
+    inbound_decoders_.erase(socket);
+    socket->disconnect(this);
+    socket->setParent(nullptr);
+    emit file_incoming(socket, msg);
+    return;
   default:
-    // 其余类型（文件元数据等）由后续任务接入
+    // 其余类型由后续任务接入
     break;
   }
 }

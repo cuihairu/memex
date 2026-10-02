@@ -3,10 +3,14 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
+#include <QDir>
+#include <QDirIterator>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QSysInfo>
 #include <QUuid>
+
+#include <algorithm>
 
 namespace memex::client {
 
@@ -33,6 +37,9 @@ DirectEngine::DirectEngine(const std::string& device_id, const QString& db_path,
         QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     db_path_ = data_dir + QStringLiteral("/memex-local.db");
   }
+  download_dir_ =
+      QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+      QStringLiteral("/files");
 }
 
 DirectEngine::~DirectEngine() { stop(); }
@@ -56,10 +63,16 @@ bool DirectEngine::start() {
     return false;
   }
 
+  FileTransferOptions fopts;
+  fopts.download_dir = download_dir_;
+  file_service_ = std::make_unique<FileTransferService>(fopts);
+  file_service_->set_device_id(device_id_);
+
   discovery_ = std::make_unique<DiscoveryService>(device_id_, device_name_);
   discovery_->set_tcp_port(transport_->port());
   if (!discovery_->start()) {
     discovery_.reset();
+    file_service_.reset();
     transport_->stop();
     transport_.reset();
     store_.reset();
@@ -90,6 +103,39 @@ bool DirectEngine::start() {
   connect(transport_.get(), &DirectTransport::delivered, this,
           [this](quint64 seq, bool ok) { emit text_delivered(seq, ok); });
 
+  // 文件传输：连接移交与信号转发（QString 化），目录作业链在 file_finished 驱动
+  connect(transport_.get(), &DirectTransport::file_incoming, this,
+          [this](QTcpSocket* socket, const memex::protocol::Message& meta) {
+            file_service_->handle_incoming(socket, meta);
+          });
+  connect(file_service_.get(), &FileTransferService::file_progress, this,
+          [this](const std::string& id, quint64 done, quint64 total) {
+            emit file_progress(QString::fromStdString(id), done, total);
+          });
+  connect(file_service_.get(), &FileTransferService::file_received, this,
+          [this](const std::string& id, const QString& path) {
+            emit file_received(QString::fromStdString(id), path);
+          });
+  connect(file_service_.get(), &FileTransferService::file_finished, this,
+          [this](const std::string& id, bool ok, const QString& error) {
+            // 目录作业链：成功续发下一文件，失败终止整作业（部分文件保留供续传）
+            const auto tj = transfer_job_.find(id);
+            if (tj == transfer_job_.end()) {
+              emit file_finished(QString::fromStdString(id), ok, error);
+              return;
+            }
+            const QString job_id = tj->second;
+            transfer_job_.erase(tj);
+            const auto job_it = dir_jobs_.find(job_id);
+            if (job_it != dir_jobs_.end() && !ok) {
+              dir_jobs_.erase(job_it);
+            } else if (job_it != dir_jobs_.end()) {
+              ++job_it->second.index;
+              send_next_dir_file(job_id);
+            }
+            emit file_finished(QString::fromStdString(id), ok, error);
+          });
+
   running_ = true;
   qDebug().noquote() << QString::fromStdString("[直连引擎] 启动：设备 " + device_id_ +
                                                "，TCP " +
@@ -102,9 +148,13 @@ void DirectEngine::stop() {
   running_ = false;
   if (discovery_) discovery_->stop();
   if (transport_) transport_->stop();
+  if (file_service_) file_service_->stop();
   if (store_) store_->close();
+  dir_jobs_.clear();
+  transfer_job_.clear();
   discovery_.reset();
   transport_.reset();
+  file_service_.reset();
   store_.reset();
 }
 
@@ -156,6 +206,95 @@ quint64 DirectEngine::send_text(const std::string& peer_device_id,
 
 QList<StoredMessage> DirectEngine::history(const QString& peer, int limit) const {
   return store_ ? store_->history(peer, limit) : QList<StoredMessage>{};
+}
+
+std::string DirectEngine::send_file(const std::string& peer_device_id,
+                                    const QString& local_path) {
+  if (!running_ || !file_service_) return {};
+  const Peer target = peer(peer_device_id);
+  if (target.device_id.empty() || target.tcp_port == 0) {
+    qWarning() << "[直连引擎] 对端不可达："
+               << QString::fromStdString(peer_device_id);
+    return {};
+  }
+  return file_service_->send_file(target.address, target.tcp_port,
+                                  peer_device_id, local_path, {});
+}
+
+QString DirectEngine::send_directory(const std::string& peer_device_id,
+                                     const QString& dir_path) {
+  if (!running_ || !file_service_) return {};
+  const Peer target = peer(peer_device_id);
+  if (target.device_id.empty() || target.tcp_port == 0) {
+    qWarning() << "[直连引擎] 对端不可达："
+               << QString::fromStdString(peer_device_id);
+    return {};
+  }
+  const QDir root(dir_path);
+  if (!root.exists()) return {};
+  const QString root_abs = root.absolutePath();
+
+  DirJob job;
+  job.peer_id = peer_device_id;
+  job.root = root_abs;
+  QDirIterator it(root_abs, QDir::Files, QDirIterator::Subdirectories);
+  while (it.hasNext()) {
+    const QString local = it.next();
+    job.files.emplace_back(local, root.relativeFilePath(local));
+  }
+  if (job.files.empty()) return {};
+  std::sort(job.files.begin(), job.files.end(),
+            [](const auto& a, const auto& b) { return a.second < b.second; });
+
+  dir_jobs_.emplace(root_abs, std::move(job));
+  send_next_dir_file(root_abs);
+  return root_abs;
+}
+
+void DirectEngine::send_next_dir_file(const QString& job_id) {
+  const auto job_it = dir_jobs_.find(job_id);
+  if (job_it == dir_jobs_.end()) return;
+  DirJob& job = job_it->second;
+  if (job.index >= job.files.size()) {
+    dir_jobs_.erase(job_it);
+    emit directory_finished(job_id, true);
+    return;
+  }
+  const Peer target = peer(job.peer_id);
+  if (target.device_id.empty() || target.tcp_port == 0) {
+    dir_jobs_.erase(job_it);
+    emit directory_finished(job_id, false);
+    return;
+  }
+  const auto& [local, rel] = job.files[job.index];
+  const std::string tid = file_service_->send_file(
+      target.address, target.tcp_port, job.peer_id, local, rel);
+  if (tid.empty()) {
+    dir_jobs_.erase(job_it);
+    emit directory_finished(job_id, false);
+    return;
+  }
+  transfer_job_[tid] = job_id;
+}
+
+void DirectEngine::cancel_transfer(const std::string& transfer_id) {
+  if (!file_service_) return;
+  // 作业 ID 亦可作取消目标：止其当前在途文件，失败链自动终止整作业
+  const auto job_it = dir_jobs_.find(QString::fromStdString(transfer_id));
+  if (job_it != dir_jobs_.end()) {
+    for (const auto& [tid, jid] : transfer_job_) {
+      if (jid == job_it->first) {
+        file_service_->cancel(tid);
+        return;
+      }
+    }
+    return;
+  }
+  file_service_->cancel(transfer_id);
+}
+
+void DirectEngine::set_download_dir(const QString& dir) {
+  download_dir_ = dir;
 }
 
 std::string DirectEngine::status_text() const {

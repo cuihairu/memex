@@ -10,7 +10,8 @@ target_link_libraries(memex_core PUBLIC Qt6::Core Qt6::Sql)
 add_library(memex_engine_direct STATIC
   engine/direct/direct_engine.cpp
   engine/direct/discovery.cpp
-  engine/direct/direct_transport.cpp)
+  engine/direct/direct_transport.cpp
+  engine/direct/file_transfer.cpp)
 target_include_directories(memex_engine_direct PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(memex_engine_direct PUBLIC memex_core memex_common Qt6::Core Qt6::Network)
 
@@ -52,4 +53,12 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(direct_chat PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     TIMEOUT 60)
+
+  # T1.3 直连文件验收：≥100MB 文件与多层目录、进度、中断续传、哈希一致
+  add_executable(test_direct_file engine/direct/tests/test_direct_file.cpp)
+  target_link_libraries(test_direct_file PRIVATE memex_engine_direct)
+  add_test(NAME direct_file COMMAND test_direct_file)
+  set_tests_properties(direct_file PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 240)
 endif()

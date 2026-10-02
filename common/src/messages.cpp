@@ -70,6 +70,8 @@ const char* msg_type_name(MsgType t) {
   case MsgType::kAck: return "ack";
   case MsgType::kRecall: return "recall";
   case MsgType::kFileMeta: return "file_meta";
+  case MsgType::kFileResume: return "file_resume";
+  case MsgType::kFileDone: return "file_done";
   }
   return "unknown";
 }
