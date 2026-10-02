@@ -29,7 +29,9 @@ export default defineConfig({
           { text: '需求与验收', link: '/guide/requirements' },
           { text: '四期规划', link: '/guide/roadmap' },
           { text: '决策清单', link: '/guide/decisions' },
-          { text: '评审报告摘要', link: '/guide/report' }
+          { text: '评审报告摘要', link: '/guide/report' },
+          { text: '合规与命名一致性', link: '/guide/compliance' },
+          { text: '备份恢复', link: '/guide/backup-restore' }
         ]
       },
       {
