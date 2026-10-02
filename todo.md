@@ -42,13 +42,13 @@
 
 ### 阶段 0：工程骨架
 
-- [ ] T0.1 monorepo 聚合 CMake：client／server／common／admin 目录与开关（`MEMEX_BUILD_CLIENT`），顶层构建、ctest 通过。
+- [x] T0.1 monorepo 聚合 CMake：client／server／common／admin 目录与开关（`MEMEX_BUILD_CLIENT`），顶层构建、ctest 通过。
   验收：空工程 `cmake --build build && ctest` 全绿。
-- [ ] T0.2 协议骨架（common）：帧格式（长度前缀 + JSON 载荷）、消息类型枚举、序列化往返单测。
+- [x] T0.2 协议骨架（common）：帧格式（长度前缀 + JSON 载荷）、消息类型枚举、序列化往返单测。
   验收：协议单测覆盖编解码往返与畸形输入不崩溃。
-- [ ] T0.3 服务端骨架：asio TCP 监听、连接接入、握手与心跳、优雅退出、日志（前缀 `[MEMEX]`）。
+- [x] T0.3 服务端骨架：asio TCP 监听、连接接入、握手与心跳、优雅退出、日志（前缀 `[MEMEX]`）。
   验收：集成测试起服务端、客户端连接完成握手、ctest 绿。
-- [ ] T0.4 客户端骨架：Qt6 Widgets 空主窗口可启动，双引擎类骨架（DirectEngine／CollabEngine）注册进主窗口，offscreen 冒烟测试。
+- [x] T0.4 客户端骨架：Qt6 Widgets 空主窗口可启动，双引擎类骨架（DirectEngine／CollabEngine）注册进主窗口，offscreen 冒烟测试。
   验收：offscreen 启动主窗口，引擎状态机单测绿。
 
 ### 阶段 1：直连态（对应验收 A1、A2、A11、A13 的直连半边）
