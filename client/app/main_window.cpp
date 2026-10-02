@@ -63,10 +63,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
   build_ui();
 
-  // 两套引擎同起：协作引擎未登录只待机，直连引擎默认可用
+  // 直连引擎默认可用；协作引擎待登录（T2.4 接入登录界面与形态切换）
   wire_engines();
   direct_engine_.start();
-  collab_engine_.start();
 
   refresh_devices();
   show_status(QStringLiteral("就绪"));

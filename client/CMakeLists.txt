@@ -18,7 +18,8 @@ target_link_libraries(memex_engine_direct PUBLIC memex_core memex_common Qt6::Co
 add_library(memex_engine_collab STATIC
   engine/collab/collab_engine.cpp)
 target_include_directories(memex_engine_collab PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(memex_engine_collab PUBLIC Qt6::Core)
+target_link_libraries(memex_engine_collab PUBLIC memex_common Qt6::Core Qt6::Network)
+target_compile_definitions(memex_engine_collab PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 
 qt_add_executable(memex_client
   app/main.cpp
@@ -67,4 +68,14 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(direct_file PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 240)
+
+  # T2.1 协作登录验收：真实服务端进程 + 双引擎互踢 + 登录记录查询
+  add_executable(test_collab_login engine/collab/tests/test_collab_login.cpp)
+  target_link_libraries(test_collab_login PRIVATE memex_engine_collab)
+  target_compile_definitions(test_collab_login PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME collab_login COMMAND test_collab_login)
+  set_tests_properties(collab_login PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
 endif()

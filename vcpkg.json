@@ -16,6 +16,14 @@
     {
       "name": "protobuf",
       "$comment": "协议载荷单一事实源（common/proto/memex.proto）：libprotobuf 运行时 + protoc 生成工具，双端共用"
+    },
+    {
+      "name": "sqlite3",
+      "$comment": "服务端本地库（账号／设备／登录记录，后续消息归档同库）"
+    },
+    {
+      "name": "openssl",
+      "$comment": "服务端凭据口令 PBKDF2-HMAC-SHA256 与设备指纹 SHA-256（仅 libcrypto）"
     }
   ],
   "default-features": [],

@@ -1,19 +1,17 @@
-// Memex 协作服务端骨架（T0.3）：
-// 监听 TCP 端口，接受长连接，回显心跳；SIGINT／SIGTERM 优雅退出。
-// 归档、路由等模块按 todo 阶段 2 逐步接入。
+// MemexServer 入口：serve（默认）与账号／登录记录管理子命令。
+// 管理后台（T3.1）接管运维面之前，账号开通与记录查询走本 CLI。
 #include <asio.hpp>
 
-#include <array>
-#include <chrono>
 #include <csignal>
 #include <cstdlib>
-#include <deque>
 #include <iostream>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include <memex/protocol/messages.hpp>
+
+#include "server.hpp"
+#include "store.hpp"
 
 #ifndef MEMEX_VERSION
 #define MEMEX_VERSION "dev"
@@ -21,153 +19,15 @@
 
 namespace {
 
-using asio::ip::tcp;
-
 // 服务端默认监听端口。评审报告只固定了直连态端口段（UDP 2425–2436／TCP 2426–2437），
 // 服务端监听端口未钉死，此默认值待与网络管理侧确认后写入部署文档。
 constexpr std::uint16_t kDefaultPort = 24360;
+constexpr const char* kDefaultDb = "memex-server.db";
 
-class Session : public std::enable_shared_from_this<Session> {
-public:
-  explicit Session(tcp::socket socket) : socket_(std::move(socket)) {}
-
-  void start() {
-    log("接入");
-    do_read();
-  }
-
-private:
-  void do_read() {
-    auto self = shared_from_this();
-    socket_.async_read_some(
-        asio::buffer(read_buf_),
-        [this, self](std::error_code ec, std::size_t n) {
-          if (ec) {
-            log(std::string{"断开："} + ec.message());
-            return;
-          }
-          handle_bytes(n);
-          if (!closed_) do_read();
-        });
-  }
-
-  void handle_bytes(std::size_t n) {
-    std::vector<std::string> frames;
-    const auto st = decoder_.feed(std::string_view(read_buf_.data(), n), frames);
-    if (st == memex::protocol::DecodeStatus::kZeroLength ||
-        st == memex::protocol::DecodeStatus::kTooLarge) {
-      log(std::string{"非法帧："} + memex::protocol::decode_status_name(st));
-      close();
-      return;
-    }
-    for (const auto& f : frames) {
-      try {
-        const auto msg = memex::protocol::decode_payload(f);
-        log(std::string{"收到 "} + memex::protocol::msg_type_name(msg.type()));
-        if (msg.type() == memex::protocol::v1::PING) {
-          memex::protocol::Message pong;
-          pong.set_type(memex::protocol::v1::PONG);
-          pong.set_seq(msg.seq());
-          pong.set_from("server");
-          pong.set_to(msg.from());
-          pong.set_ts_ms(std::chrono::duration_cast<std::chrono::milliseconds>(
-                             std::chrono::system_clock::now().time_since_epoch())
-                             .count());
-          write_queue_.push_back(memex::protocol::encode(pong));
-        }
-      } catch (const memex::protocol::ProtocolError& e) {
-        log(std::string{"协议错误："} + e.what());
-      }
-    }
-    if (!write_queue_.empty()) do_write();
-  }
-
-  void do_write() {
-    auto self = shared_from_this();
-    asio::async_write(socket_, asio::buffer(write_queue_.front()),
-                      [this, self](std::error_code ec, std::size_t) {
-                        if (ec) {
-                          close();
-                          return;
-                        }
-                        write_queue_.pop_front();
-                        if (!write_queue_.empty()) do_write();
-                      });
-  }
-
-  void close() {
-    closed_ = true;
-    std::error_code ignore;
-    socket_.shutdown(tcp::socket::shutdown_both, ignore);
-    socket_.close(ignore);
-  }
-
-  void log(const std::string& what) const {
-    std::cout << "[MEMEX][session " << remote_ << "] " << what << std::endl;
-  }
-
-  tcp::socket socket_;
-  std::string remote_{
-      [&] {
-        try {
-          return socket_.remote_endpoint().address().to_string();
-        } catch (...) {
-          return std::string{"?"};
-        }
-      }()};
-  memex::protocol::FrameDecoder decoder_;
-  std::array<char, 65536> read_buf_{};
-  std::deque<std::string> write_queue_;
-  bool closed_{false};
-};
-
-class Server {
-public:
-  Server(asio::io_context& io, std::uint16_t port)
-      : acceptor_(io, tcp::endpoint(tcp::v4(), port)) {}
-
-  void run() {
-    std::cout << "[MEMEX] MemexServer 监听 0.0.0.0:" << acceptor_.local_endpoint().port()
-              << std::endl;
-    do_accept();
-  }
-
-private:
-  void do_accept() {
-    acceptor_.async_accept([this](std::error_code ec, tcp::socket socket) {
-      if (!ec) {
-        std::make_shared<Session>(std::move(socket))->start();
-      }
-      do_accept();
-    });
-  }
-
-  tcp::acceptor acceptor_;
-};
-
-int self_test() {
-  asio::io_context io;
-  tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
-  std::cout << "self-test ok: listen 127.0.0.1:" << a.local_endpoint().port()
-            << ", protocol " << memex::protocol::msg_type_name(
-                                   memex::protocol::v1::HELLO)
-            << std::endl;
-  return 0;
-}
-
-} // namespace
-
-int main(int argc, char** argv) {
+// db_path 由 main 统一解析（--db 剥离会就地改写 argv，不能再从 argv 复读）
+int cmd_serve(int argc, char** argv, const std::string& db_path) {
   std::uint16_t port = kDefaultPort;
-
-  if (argc > 1 && std::string_view(argv[1]) == "--version") {
-    std::cout << "memex-server " << MEMEX_VERSION << std::endl;
-    return 0;
-  }
-  if (argc > 1 && std::string_view(argv[1]) == "--self-test") {
-    return self_test();
-  }
-  for (int i = 1; i < argc; ++i) {
+  for (int i = 0; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--port" && i + 1 < argc) {
       port = static_cast<std::uint16_t>(std::atoi(argv[++i]));
@@ -178,20 +38,115 @@ int main(int argc, char** argv) {
     }
   }
 
-  asio::io_context io;
-  asio::signal_set signals(io, SIGINT, SIGTERM);
-  signals.async_wait([&](std::error_code, int sig) {
-    std::cout << "[MEMEX] 收到信号 " << sig << "，退出" << std::endl;
-    io.stop();
-  });
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
 
   try {
-    Server server(io, port);
-    server.run();
+    asio::io_context io;
+    memex::server::CollabServer server(io, store, port);
+    asio::signal_set signals(io, SIGINT, SIGTERM);
+    signals.async_wait([&](std::error_code, int sig) {
+      std::cout << "[MEMEX] 收到信号 " << sig << "，退出" << std::endl;
+      io.stop();
+    });
+    server.start_accept();
     io.run();
   } catch (const std::exception& e) {
     std::cerr << "服务端异常退出：" << e.what() << std::endl;
     return 1;
   }
   return 0;
+}
+
+int cmd_account(int argc, char** argv, const std::string& db_path) {
+  // account add <账号> <口令> [--name 显示名]
+  if (argc < 3 || std::string_view(argv[0]) != "add") {
+    std::cerr << "用法：memex_server account add <账号> <口令> [--name 显示名] [--db <库>]\n";
+    return 2;
+  }
+  const std::string account = argv[1];
+  const std::string password = argv[2];
+  std::string display_name = account;
+  for (int i = 3; i + 1 < argc; ++i) {
+    if (std::string_view(argv[i]) == "--name") display_name = argv[++i];
+  }
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+  if (!store.create_account(account, password, display_name)) {
+    std::cerr << "建号失败（账号已存在或写库失败）：" << account << "\n";
+    return 1;
+  }
+  std::cout << "已建号：" << account << "（" << display_name << "）\n";
+  return 0;
+}
+
+int cmd_logins(int argc, char** argv, const std::string& db_path) {
+  // logins [账号]：全量可查（不带账号=全部，倒序）
+  std::string account;
+  if (argc >= 1) account = argv[0];
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+  const auto rows = store.login_records(account);
+  std::cout << "id\t账号\t结果\t设备类型\t设备名\t指纹前8\t来源\t版本\t时间(ms)\n";
+  for (const auto& r : rows) {
+    std::cout << r.id << '\t' << r.account << '\t' << r.result << '\t'
+              << r.kind << '\t' << r.name << '\t'
+              << r.fingerprint.substr(0, 8) << '\t' << r.source_ip << '\t'
+              << r.version << '\t' << r.ts_ms << '\n';
+  }
+  return 0;
+}
+
+int self_test() {
+  asio::io_context io;
+  asio::ip::tcp::acceptor a(
+      io, asio::ip::tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
+  std::cout << "self-test ok: listen 127.0.0.1:" << a.local_endpoint().port()
+            << ", protocol " << memex::protocol::msg_type_name(
+                                   memex::protocol::v1::HELLO)
+            << std::endl;
+  return 0;
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+  if (argc > 1) {
+    const std::string_view cmd = argv[1];
+    if (cmd == "--version") {
+      std::cout << "memex-server " << MEMEX_VERSION << std::endl;
+      return 0;
+    }
+    if (cmd == "--self-test") return self_test();
+
+    // 子命令统一支持 --db 覆盖库路径
+    std::string db_path = kDefaultDb;
+    int sub_argc = 0;
+    char** sub_argv = argv + 2;
+    char** sub_end = argv + argc;
+    for (char** p = sub_argv; p < sub_end; ++p) {
+      if (std::string_view(*p) == "--db" && p + 1 < sub_end) {
+        db_path = *++p;
+      } else {
+        sub_argv[sub_argc++] = *p;
+      }
+    }
+
+    if (cmd == "serve") return cmd_serve(sub_argc, sub_argv, db_path);
+    if (cmd == "account") return cmd_account(sub_argc, sub_argv, db_path);
+    if (cmd == "logins") return cmd_logins(sub_argc, sub_argv, db_path);
+    std::cerr << "未知子命令：" << cmd << "\n"
+              << "用法：memex_server [serve [--port N] [--db P]] | account add … | logins [账号] | --version | --self-test\n";
+    return 2;
+  }
+  return cmd_serve(0, argv, kDefaultDb);
 }
