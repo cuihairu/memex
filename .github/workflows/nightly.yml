@@ -1,9 +1,14 @@
-# 每日构建（nightly）：编译当前可构建面 → 产物压缩包 → 滚动 nightly Release。
+# 每日构建（nightly）：编译当前可构建面 → 三平台产物（tar/zip + 安装包）→
+# 滚动 nightly Release。
 # 分发口径：Actions artifacts 只是中间物，nightly Release 是交付面——
 # tag 固定 nightly，资产清旧传新；48 小时无新提交当日跳过（手动触发不受此限）。
-# 产物矩阵先收 Linux x86-64（服务端 + 客户端）；Windows / macOS / UOS / 麒麟
-# 待各平台构建打通后逐个补入。
-# 依赖由 vcpkg manifest 管理，CI 使用 vcpkg 二进制缓存加速。
+# 产物矩阵：
+#   Linux x86-64   服务端+客户端 tar.gz ＋ deb/rpm 安装包（客户端+服务端）
+#   Windows x64    客户端 zip（便携）＋ setup.exe 安装器（Inno，GUI 子系统）
+#   macOS arm64    客户端 dmg（Memex.app）＋ 服务端 dmg（内含 pkg 引导安装）
+# 依赖：Linux 走 vcpkg（含 Qt）；Windows/macOS 用官方 Qt（install-qt-action，
+# windeployqt/macdeployqt 同源）＋ vcpkg 管 Qt 以外依赖（Windows 动态 / macOS 静态）。
+# install.sh / install.ps1 直链取件对应固定名资产（deb/rpm/setup/dmg）。
 name: nightly
 
 on:
@@ -47,7 +52,8 @@ jobs:
   build:
     needs: gate
     if: needs.gate.outputs.build == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
     # vcpkg 二进制缓存（x-gha）须对 configure 步骤（toolchain 触发安装）可见，
     # 故放 job 级 env 而非单步
     env:
@@ -56,26 +62,67 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - target: server
+          - os: ubuntu-latest
+            plat: linux-x64
+            target: server
             preset: server-release
-            # asio / nlohmann-json 均 header-only，vcpkg 全量提供，无系统包
-            sys_pkgs: ""
-          - target: client
+            # asio / nlohmann-json / protobuf 均 vcpkg 提供，无系统包
+            sys_pkgs: "rpm"
+          - os: ubuntu-latest
+            plat: linux-x64
+            target: client
             preset: client-release
-            # vcpkg 不代管 X11/GL 等系统库；qtbase 构建所需系统包在此安装
-            sys_pkgs: "libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev libxcb-icccm4-dev libxcb-util-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-glx0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev libfontconfig1-dev libfreetype-dev libdbus-1-dev libicu-dev"
-    name: build ${{ matrix.target }} · linux-x64
+            # vcpkg 不代管 X11/GL 等系统库；qtbase 构建所需系统包在此安装；
+            # rpm 提供 rpmbuild（Linux 安装包矩阵）
+            sys_pkgs: "rpm libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev libxcb-icccm4-dev libxcb-util-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-rand0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-glx0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev libfontconfig1-dev libfreetype-dev libdbus-1-dev libicu-dev"
+          - os: windows-latest
+            plat: windows-x64
+            target: client
+            preset: client-release-win
+            sys_pkgs: ""
+          - os: macos-latest
+            plat: macos-arm64
+            target: server
+            preset: server-release-mac
+            sys_pkgs: ""
+          - os: macos-latest
+            plat: macos-arm64
+            target: client
+            preset: client-release-mac
+            sys_pkgs: ""
+    name: build ${{ matrix.target }} · ${{ matrix.plat }}
     steps:
       - uses: actions/checkout@v4
 
       # autoconf 链为 gperf（qtbase 依赖）源码构建所需、libltdl-dev 为 libxcrypt 端口源码构建所需、
       # libsm/libice/libegl1-mesa 为 qtbase xcb_sm 与 xcb GL 的系统头，runner 镜像均未预装
-      - name: 安装工具与系统依赖
+      - name: 安装工具与系统依赖（Linux）
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ninja-build autoconf autoconf-archive automake libtool libltdl-dev \
             libsm-dev libice-dev libegl1-mesa-dev \
             ${{ matrix.sys_pkgs }}
+
+      - name: 安装 Ninja（Windows/macOS）
+        if: runner.os != 'Linux'
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      # Windows 锁 MSVC：Ninja 需要显式选中 VS 工具链（不走默认生成器探测）
+      - name: 配置 MSVC 环境（Windows）
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # Windows/macOS 用官方 Qt 二进制（vcpkg 侧只装 Qt 以外依赖，避免源码重建
+      # Qt 的 1.5h+；windeployqt / macdeployqt 与官方运行库天然同源）。
+      # 6.10.3：Xcode 26 SDK 移除 AGL.framework，Qt ≤6.8.3 链接报错（QTBUG-137687）
+      - name: 安装 Qt（Windows/macOS）
+        if: runner.os != 'Linux'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.10.3"
+          cache: true
+          cache-key-prefix: "memex-qt-6103"
 
       # 导出 Actions 缓存凭据，vcpkg 才能使用原生 x-gha 二进制缓存
       - name: 导出 Actions 缓存凭据
@@ -99,41 +146,199 @@ jobs:
         with:
           vcpkgGitCommitId: '10541e317a660f4165ba4ac2851ab54a8d4577b1'
 
+      # Windows/macOS：Qt 取官方树（install-qt-action 缓存），vcpkg 清空 client
+      # feature（preset 已置空），CMAKE_PREFIX_PATH 显式指到官方 Qt 防 vcpkg 树抢先
       - name: 配置与编译（Release，preset ${{ matrix.preset }}）
         run: |
-          cmake --preset ${{ matrix.preset }}
+          EXTRA=""
+          if [ "${{ runner.os }}" != "Linux" ]; then
+            EXTRA="-DCMAKE_PREFIX_PATH=$QT_ROOT_DIR"
+          fi
+          # shellcheck disable=SC2086
+          cmake --preset ${{ matrix.preset }} $EXTRA
           cmake --build --preset ${{ matrix.preset }}
 
-      - name: 打包
+      # ===================== Linux：tar.gz + deb + rpm =====================
+      - name: 打包（Linux：tar.gz ＋ deb/rpm）
         id: pkg
+        if: runner.os == 'Linux'
         run: |
           DATE=$(TZ=Asia/Shanghai date +%Y%m%d)
           SHA="${GITHUB_SHA::7}"
+          VERSION=$(grep -m1 -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | awk '{print $2}')
           mkdir -p dist
           if [ "${{ matrix.target }}" = "server" ]; then
             asset=$(bash scripts/nightly/package-server.sh build-server/server/memex_server dist "$DATE" "$SHA")
           else
-            asset=$(bash scripts/nightly/package-client.sh build-client/client/memex_client dist "$DATE" "$SHA")
+            asset=$(bash scripts/nightly/package-client.sh build-client/client/memex_client dist "$DATE" "$SHA" "$VERSION")
           fi
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
+          # 安装包（固定资产名，install.sh 直链取件；内容与 tar 同源不漂移）
+          bash scripts/nightly/package-linux-pkg.sh deb "${{ matrix.target }}" "dist/$asset" dist "$VERSION"
+          bash scripts/nightly/package-linux-pkg.sh rpm "${{ matrix.target }}" "dist/$asset" dist "$VERSION"
 
-      - name: 解包冒烟（与取件验证同款动作）
+      - name: 解包冒烟＋安装包真装走查（Linux）
+        if: runner.os == 'Linux'
         run: |
+          TARGET="${{ matrix.target }}"
           rm -rf /tmp/verify && mkdir -p /tmp/verify
           tar -xzf "dist/${{ steps.pkg.outputs.asset }}" -C /tmp/verify
-          if [ "${{ matrix.target }}" = "server" ]; then
+          if [ "$TARGET" = "server" ]; then
             /tmp/verify/memex-server-linux-x64-*/memex-server --version
             /tmp/verify/memex-server-linux-x64-*/memex-server --self-test
           else
-            /tmp/verify/memex-client-linux-x64-*/memex-client --version
+            /tmp/verify/MemexClient-*-linux-x64-*/memex-client --version
             QT_QPA_PLATFORM=offscreen \
-              /tmp/verify/memex-client-linux-x64-*/memex-client.sh --smoke
+              /tmp/verify/MemexClient-*-linux-x64-*/memex-client.sh --smoke
+          fi
+          # deb 真装走查：安装 → --version（客户端再走 --smoke）→ 卸载
+          sudo dpkg -i "dist/memex-$TARGET-linux-x64.deb"
+          /usr/bin/memex-$TARGET --version
+          if [ "$TARGET" = "server" ]; then
+            /usr/bin/memex-$TARGET --self-test
+          else
+            QT_QPA_PLATFORM=offscreen /usr/bin/memex-$TARGET --smoke
+          fi
+          sudo dpkg -r "memex-$TARGET"
+          # rpm 真装走查（同口径；--replacepkgs 兼容与 deb 的先后并存）
+          sudo rpm -ivh --replacepkgs "dist/memex-$TARGET-linux-x64.rpm"
+          /usr/bin/memex-$TARGET --version
+          sudo rpm -e "memex-$TARGET"
+
+      # ===================== Windows：zip ＋ setup.exe =====================
+      - name: 打包（Windows：zip ＋ Inno 安装器）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $stage = Join-Path $env:RUNNER_TEMP 'memex-stage'
+          New-Item -ItemType Directory -Force -Path $stage, dist | Out-Null
+          Copy-Item build-client-win/client/memex_client.exe $stage/
+
+          # windeployqt：Qt DLL + 平台/风格/图像/SQL 驱动插件随包
+          #（缺 platforms/qwindows.dll 时 GUI 无法启动）
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations "$stage/memex-client.exe"
+          if ($LASTEXITCODE -ne 0) { Write-Error 'windeployqt failed'; exit 1 }
+
+          # vcpkg 动态依赖（openssl/sqlite3/protobuf/zlib——windeployqt 只管 Qt 面）
+          $vbin = 'vcpkg_installed-win/x64-windows/bin'
+          if (Test-Path $vbin) {
+            Copy-Item "$vbin/*.dll" $stage/ -Force
+          } else {
+            Write-Error "vcpkg DLL directory not found: $vbin"
+            exit 1
+          }
+
+          # MSVC CRT：目标机器未装 VC++ Redistributable 时避免缺 vcruntime140 系
+          #（runner 的 VS 目录布局会漂移，System32 兜底——装过 VS 的机器必有同版本）
+          $crtDirs = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory -ErrorAction SilentlyContinue
+          if (-not $crtDirs) {
+            $crtDirs = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft Visual Studio\*\*\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory -ErrorAction SilentlyContinue
+          }
+          if ($crtDirs) {
+            $crtDir = $crtDirs | Sort-Object FullName -Descending | Select-Object -First 1
+            Copy-Item "$($crtDir.FullName)/*.dll" $stage/ -Force
+          } else {
+            foreach ($f in @('vcruntime140.dll','vcruntime140_1.dll','msvcp140.dll','msvcp140_1.dll','msvcp140_2.dll')) {
+              $p = Join-Path $env:SystemRoot "System32/$f"
+              if (Test-Path $p) { Copy-Item $p $stage/ -Force }
+            }
+          }
+
+          # 关键文件面检查（出包前快速失败）
+          foreach ($f in @('memex-client.exe','Qt6Core.dll','Qt6Widgets.dll','platforms/qwindows.dll','vcruntime140.dll')) {
+            if (-not (Test-Path (Join-Path $stage $f))) { Write-Error "missing in stage: $f"; exit 1 }
+          }
+
+          # 便携 zip（解包即用面）
+          Compress-Archive -Path "$stage/*" -DestinationPath dist/memex-client-windows-x64.zip
+
+          # Inno 安装器（windows-latest 预装 6.x；缺失 choco 兜底）
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc "/DAppVersion=$version" "/DStageDir=$stage" "/O$PWD/dist" 'packaging/windows/memex.iss'
+          if ($LASTEXITCODE -ne 0) { Write-Error "ISCC failed with exit $LASTEXITCODE"; exit 1 }
+          Get-ChildItem dist | Select-Object Name, Length
+
+      - name: 冒烟（Windows：GUI 子系统＋--version＋安装器真装走查）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # ① GUI 子系统验证：双击启动不弹控制台（WIN32_EXECUTABLE 生效实证）
+          $exe = 'build-client-win/client/memex_client.exe'
+          $pe = [IO.File]::ReadAllBytes($exe)
+          $off = [BitConverter]::ToInt32($pe, 0x3C)
+          $sub = [BitConverter]::ToUInt16($pe, $off + 92)
+          Write-Host "PE subsystem = $sub (2 = GUI, no console)"
+          if ($sub -ne 2) { Write-Error 'expected PE subsystem 2 (GUI)'; exit 1 }
+
+          # ② --version（GUI 子系统经句柄重定向捕获；QApplication 之前返回）
+          $vf = Join-Path $env:RUNNER_TEMP 'ver.txt'
+          $p = Start-Process $exe -ArgumentList '--version' -Wait -PassThru -RedirectStandardOutput $vf
+          $t = Get-Content $vf -Raw
+          if ($p.ExitCode -ne 0 -or $t -notmatch 'memex-client') {
+            Write-Error "--version verification failed (exit=$($p.ExitCode), output=$t)"
+            exit 1
+          }
+          Write-Host "version: $($t.Trim())"
+
+          # ③ 安装器真装走查：静默装到 Program Files → 装后 --version → 快捷方式
+          $setup = 'dist/memex-windows-x64-setup.exe'
+          if (-not (Test-Path $setup)) { Write-Error "installer not found: $setup"; exit 1 }
+          $p = Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Write-Error "installer exited with $($p.ExitCode)"; exit 1 }
+          $app = Join-Path $env:ProgramFiles 'Memex\memex-client.exe'
+          if (-not (Test-Path $app)) { Write-Error "not installed: $app"; exit 1 }
+          $vf2 = Join-Path $env:RUNNER_TEMP 'ver2.txt'
+          $p2 = Start-Process $app -ArgumentList '--version' -Wait -PassThru -RedirectStandardOutput $vf2
+          $t2 = Get-Content $vf2 -Raw
+          if ($p2.ExitCode -ne 0 -or $t2 -notmatch 'memex-client') {
+            Write-Error "installed --version failed (exit=$($p2.ExitCode), output=$t2)"
+            exit 1
+          }
+          $lnk = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Memex\Memex.lnk'
+          if (-not (Test-Path $lnk)) { Write-Error "start menu shortcut missing: $lnk"; exit 1 }
+          Write-Host "installed + verified: $($t2.Trim())"
+
+      # ===================== macOS：dmg（客户端）＋ dmg 内 pkg（服务端） =====================
+      - name: 打包与冒烟（macOS）
+        if: runner.os == 'macOS'
+        run: |
+          VERSION=$(grep -m1 -oE 'VERSION [0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | awk '{print $2}')
+          mkdir -p dist
+          if [ "${{ matrix.target }}" = "server" ]; then
+            BIN=build-server-mac/server/memex_server
+            "$BIN" --version
+            "$BIN" --self-test
+            bash scripts/nightly/package-macos.sh server "$BIN" dist "$VERSION"
+            # pkg 真装走查：dmg 挂载 → installer 安装 → 装后自检 → 清理
+            MNT="$(mktemp -d)"
+            hdiutil attach dist/memex-server-macos-arm64.dmg -nobrowse -readonly -mountpoint "$MNT" >/dev/null
+            sudo installer -pkg "$MNT/memex-server-macos-arm64.pkg" -target /
+            hdiutil detach "$MNT" -quiet
+            /usr/local/bin/memex-server --version
+            /usr/local/bin/memex-server --self-test
+            sudo rm -f /usr/local/bin/memex-server
+          else
+            APP=build-client-mac/client/Memex.app
+            if [ ! -d "$APP" ]; then
+              echo "错误：未找到 .app：$APP"; ls build-client-mac/client; exit 1
+            fi
+            "$APP/Contents/MacOS/Memex" --version
+            bash scripts/nightly/package-macos.sh client "$APP" dist "$VERSION"
+            # dmg 往返走查：挂载 → .app 内二进制 --version → 卸载
+            MNT="$(mktemp -d)"
+            hdiutil attach dist/memex-client-macos-arm64.dmg -nobrowse -readonly -mountpoint "$MNT" >/dev/null
+            "$MNT/Memex.app/Contents/MacOS/Memex" --version
+            hdiutil detach "$MNT" -quiet
           fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.target }}
-          path: dist/*.tar.gz
+          name: dist-${{ matrix.plat }}-${{ matrix.target }}
+          path: dist/*
           retention-days: 7
 
   release:
@@ -150,14 +355,64 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: 校验和与发布说明
+      - name: 校验和、验证指南与发布说明
         run: |
           cd dist
-          sha256sum *.tar.gz > SHA256SUMS.txt
-          cd ..
+          # SHA256SUMS 覆盖全部产物（自身与 VERIFY.md 除外）
+          find . -maxdepth 1 -type f ! -name 'SHA256SUMS.txt' ! -name 'VERIFY.md' \
+            -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS.txt
+
           updated=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M')
           sha7="${GITHUB_SHA::7}"
           subject=$(git log -1 --format=%s)
+
+          # —— 取件验证指南（三平台逐资产；随 Release 分发）——
+          {
+            echo "# Memex Nightly 取件验证（$updated · $sha7）"
+            echo
+            echo "## 总则"
+            echo
+            echo "    sha256sum -c SHA256SUMS.txt   # 校验和（覆盖全部资产）"
+            echo
+            echo "## Linux（x86-64 · ubuntu-latest 构建，glibc 目标机需 ≥ 构建基线）"
+            echo
+            echo "| 资产 | 形态 | 验证 |"
+            echo "| --- | --- | --- |"
+            echo "| \`memex-server-linux-x64-<日期>-<SHA>.tar.gz\` | 解包即用（随包动态依赖） | 解包后 \`./memex-server-*/memex-server.sh --self-test\` |"
+            echo "| \`MemexClient-<版本>-linux-x64-<日期>-<SHA>.tar.gz\` | 解包即用（随包 Qt） | \`QT_QPA_PLATFORM=offscreen ./MemexClient-*/memex-client.sh --smoke\` |"
+            echo "| \`memex-server-linux-x64.deb/.rpm\` | 系统安装包（/opt/memex 自包含） | 安装后 \`memex-server --version\` |"
+            echo "| \`memex-client-linux-x64.deb/.rpm\` | 系统安装包（含 .desktop 菜单项） | 安装后 \`memex-client --version\` |"
+            echo
+            echo "    # deb 系（Debian/UOS 等）：sudo dpkg -i memex-client-linux-x64.deb"
+            echo "    # rpm 系（RHEL/麒麟/openKylin 等）：sudo rpm -ivh memex-server-linux-x64.rpm"
+            echo "    # 一键安装（自动选包格式）：curl -fsSL https://raw.githubusercontent.com/cuihairu/memex/main/install.sh | bash"
+            echo
+            echo "## Windows（x64）"
+            echo
+            echo "| 资产 | 形态 | 验证 |"
+            echo "| --- | --- | --- |"
+            echo "| \`memex-windows-x64-setup.exe\` | Inno 安装器（Program Files＋开始菜单＋卸载入口；GUI 子系统无控制台弹窗） | 安装后开始菜单启动，或 \`& \"\$env:ProgramFiles\Memex\memex-client.exe\" --version\` |"
+            echo "| \`memex-client-windows-x64.zip\` | 便携解包即用（随包 Qt/CRT） | 解包后双击 \`memex-client.exe\` |"
+            echo
+            echo "    # PowerShell 一键安装：irm https://raw.githubusercontent.com/cuihairu/memex/main/install.ps1 | iex"
+            echo
+            echo "## macOS（Apple Silicon / arm64）"
+            echo
+            echo "| 资产 | 形态 | 验证 |"
+            echo "| --- | --- | --- |"
+            echo "| \`memex-client-macos-arm64.dmg\` | 磁盘映像（内含 Memex.app，拖入 Applications） | \`/Applications/Memex.app/Contents/MacOS/Memex --version\` |"
+            echo "| \`memex-server-macos-arm64.dmg\` | 磁盘映像（内含 pkg，双击引导安装到 /usr/local/bin） | 安装后 \`memex-server --version\` |"
+            echo
+            echo "    # 首次打开前清 Gatekeeper 隔离属性（每日构建未做开发者证书签名）："
+            echo "    xattr -cr /Applications/Memex.app"
+            echo
+            echo "## 说明"
+            echo
+            echo "- 安装包为固定资产名（直链恒可达，install 脚本按此取件）；tar/zip 保留日期-短SHA 版本名。"
+            echo "- 重装/重跑安装脚本 = 升级（deb/rpm 包管理器幂等、setup.exe 固定 AppId 覆盖安装、dmg 覆盖拷贝）。"
+          } > VERIFY.md
+
+          cd ..
           {
             echo "## Memex Nightly（每日构建）"
             echo
@@ -165,34 +420,32 @@ jobs:
             echo "- 提交：$sha7 $subject"
             echo "- 基线：main @ $GITHUB_SHA"
             echo
-            echo "## 产物"
+            echo "## 产物（三平台：Linux tar/deb/rpm · Windows setup/zip · macOS dmg）"
             echo
             echo "| 产物 | 大小 |"
             echo "| --- | --- |"
-            for f in dist/*.tar.gz; do
+            for f in dist/*; do
               echo "| $(basename "$f") | $(du -h "$f" | cut -f1) |"
             done
-            echo "| SHA256SUMS.txt | 全部产物校验和 |"
+            echo
+            echo "## 一键安装"
+            echo
+            echo "    # Linux / macOS（自动检测 OS/架构与包格式）"
+            echo "    curl -fsSL https://raw.githubusercontent.com/cuihairu/memex/main/install.sh | bash"
+            echo "    # 服务端：… | bash -s -- --server"
+            echo "    # Windows（PowerShell）"
+            echo "    irm https://raw.githubusercontent.com/cuihairu/memex/main/install.ps1 | iex"
             echo
             echo "## 取件验证"
             echo
-            echo "    # 1. 校验和"
-            echo "    sha256sum -c SHA256SUMS.txt"
-            echo "    # 2. 服务端解包自检"
-            echo "    tar xzf memex-server-linux-x64-*.tar.gz"
-            echo "    ./memex-server-linux-x64-*/memex-server --version"
-            echo "    ./memex-server-linux-x64-*/memex-server --self-test"
-            echo "    # 3. 客户端解包冒烟（无界面环境）"
-            echo "    tar xzf memex-client-linux-x64-*.tar.gz"
-            echo "    QT_QPA_PLATFORM=offscreen ./memex-client-linux-x64-*/memex-client.sh --smoke"
+            echo "分平台逐资产验证步骤见 **VERIFY.md**（随资产分发）；先 \`sha256sum -c SHA256SUMS.txt\`。"
             echo
             echo "## 说明"
             echo
             echo "- 滚动发布：tag 固定 nightly，资产随最新 main 清旧传新；48 小时无新提交当日跳过。"
-            echo "- 基于 ubuntu-latest 构建（较新 glibc）；Windows / macOS / 国产 UOS / 麒麟包待各平台构建打通后补入矩阵。"
-            echo "- 客户端包自带 Qt 运行库与插件，入口脚本 memex-client.sh 解包即用。"
-            echo "- 安装包形态（deb / rpm / Windows 安装器）随后补入。"
-            echo "- 依赖管理：vcpkg manifest（vcpkg.json + CMakePresets.json），本地构建见文档 development.md。"
+            echo "- Linux 基于 ubuntu-latest 构建（较新 glibc）；Windows/macOS 分别基于 windows-latest / macos-latest（Apple Silicon）。"
+            echo "- Windows 客户端为 GUI 子系统（启动无控制台弹窗）；macOS 未做开发者证书签名，首次打开前执行 xattr -cr（见 VERIFY.md）。"
+            echo "- 依赖管理：vcpkg manifest（vcpkg.json + CMakePresets.json）＋ 官方 Qt（win/mac），本地构建见文档 development.md。"
           } > NOTES.md
 
       - name: 更新 nightly Release（资产清旧传新）
@@ -210,8 +463,7 @@ jobs:
               [ -n "$a" ] && gh release delete-asset "$TAG" "$a" \
                 --repo "$GITHUB_REPOSITORY" --yes
             done
-          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" \
-            dist/*.tar.gz dist/SHA256SUMS.txt
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" dist/*
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
             --title "Nightly · 每日构建" --notes-file NOTES.md \
             --prerelease --latest=false

@@ -48,6 +48,38 @@
       }
     },
     {
+      "name": "client-release-win",
+      "inherits": "client-release",
+      "displayName": "客户端 Release（Windows x64：官方 Qt + vcpkg 非 Qt 依赖）",
+      "binaryDir": "${sourceDir}/build-client-win",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "VCPKG_MANIFEST_FEATURES": "",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed-win"
+      }
+    },
+    {
+      "name": "client-release-mac",
+      "inherits": "client-release",
+      "displayName": "客户端 Release（macOS arm64：官方 Qt + vcpkg 静态非 Qt 依赖）",
+      "binaryDir": "${sourceDir}/build-client-mac",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "VCPKG_MANIFEST_FEATURES": "",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed-mac"
+      }
+    },
+    {
+      "name": "server-release-mac",
+      "inherits": "server-release",
+      "displayName": "服务端 Release（macOS arm64：vcpkg 静态依赖，单二进制分发）",
+      "binaryDir": "${sourceDir}/build-server-mac",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed-mac-server"
+      }
+    },
+    {
       "name": "ci",
       "inherits": "base",
       "displayName": "CI 门禁（Debug+覆盖率 · 服务端+客户端+测试）",
@@ -64,6 +96,9 @@
     { "name": "dev", "configurePreset": "dev" },
     { "name": "server-release", "configurePreset": "server-release" },
     { "name": "client-release", "configurePreset": "client-release" },
+    { "name": "client-release-win", "configurePreset": "client-release-win" },
+    { "name": "client-release-mac", "configurePreset": "client-release-mac" },
+    { "name": "server-release-mac", "configurePreset": "server-release-mac" },
     { "name": "ci", "configurePreset": "ci" }
   ],
   "testPresets": [

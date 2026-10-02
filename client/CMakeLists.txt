@@ -35,6 +35,21 @@ target_link_libraries(memex_client PRIVATE
   Qt6::Widgets
   Qt6::Sql)
 
+# 分发体属性：Windows GUI 子系统（双击启动不弹控制台；--version 等控制台面经
+# 句柄重定向仍可用）；macOS .app bundle（dmg 分发体，Info.plist 由 CMake 生成）。
+set_target_properties(memex_client PROPERTIES
+  WIN32_EXECUTABLE TRUE
+  MACOSX_BUNDLE TRUE)
+if(APPLE)
+  # .app 与内含可执行名统一 Memex（dmg 面向用户展示；Linux/Windows 产物名不变）
+  set_target_properties(memex_client PROPERTIES
+    OUTPUT_NAME "Memex"
+    MACOSX_BUNDLE_BUNDLE_NAME "Memex"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "site.cuihairu.memex"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
+endif()
+
 if(MEMEX_BUILD_TESTS)
   # 测试环境隔离：offscreen 无头渲染 + XDG_CACHE_HOME 指向构建树。
   # fontconfig 缓存必须隔离——用户机既有缓存与随链 Qt 携带的 fontconfig

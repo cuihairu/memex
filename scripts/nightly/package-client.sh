@@ -2,15 +2,18 @@
 # Qt 桌面客户端每日构建产物打包：Linux x86-64 压缩包，随包 Qt 运行库与插件。
 # 布局：memex-client（二进制）+ lib/（递归收集的动态依赖）+ plugins/（Qt 插件）
 #       + memex-client.sh（入口脚本，LD_LIBRARY_PATH / QT_PLUGIN_PATH 指向随包内容）。
-# 用法：package-client.sh <memex_client 二进制路径> <输出目录> <日期YYYYMMDD> <短SHA>
+# 用法：package-client.sh <memex_client 二进制路径> <输出目录> <日期YYYYMMDD> <短SHA> [版本x.y.z]
+# 资产名口径（A23）：MemexClient-x.y.z-linux-x64-<日期>-<短SHA>.tar.gz。
+# 版本未传时取 0.1.0（与根 CMakeLists PROJECT_VERSION 同源，nightly 显式传入）。
 set -euo pipefail
 
 BIN="$1"
 OUT="$2"
 DATE="$3"
 SHA="$4"
+VERSION="${5:-0.1.0}"
 
-NAME="memex-client-linux-x64-${DATE}-${SHA}"
+NAME="MemexClient-${VERSION}-linux-x64-${DATE}-${SHA}"
 
 # 暂存独立于调用目录（mktemp + 退出清理），避免旧暂存物混入产物
 STAGE="$(mktemp -d)"
