@@ -1,11 +1,17 @@
 #include "main_window.hpp"
 
+#include <QAction>
 #include <QDateTime>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenuBar>
 #include <QScrollBar>
+#include <QSettings>
 #include <QStatusBar>
 #include <QVBoxLayout>
 
@@ -63,15 +69,28 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
   build_ui();
 
-  // 直连引擎默认可用；协作引擎待登录（T2.4 接入登录界面与形态切换）
   wire_engines();
   direct_engine_.start();
+  // 双态共用同一份本地库：协作消息与直连消息同库，界面按 source 合并展示
+  collab_engine_.attach_store(direct_engine_.store());
+  wire_collab();
 
   refresh_devices();
   show_status(QStringLiteral("就绪"));
+  update_banner();
 }
 
 void MainWindow::build_ui() {
+  // —— 菜单：协作态登录／登出（不重启切换形态，T2.4）——
+  auto* collab_menu = menuBar()->addMenu(QStringLiteral("协作"));
+  auto* act_login = collab_menu->addAction(QStringLiteral("登录协作态…"));
+  act_collab_logout_ = collab_menu->addAction(QStringLiteral("登出（回到直连态）"));
+  act_collab_logout_->setEnabled(false);
+  connect(act_login, &QAction::triggered, this,
+          &MainWindow::show_collab_login_dialog);
+  connect(act_collab_logout_, &QAction::triggered, this,
+          &MainWindow::logout_collab);
+
   // —— 左侧：局域网设备列表（直连态以设备替代联系人）——
   auto* side = new QWidget(this);
   auto* side_layout = new QVBoxLayout(side);
@@ -130,13 +149,12 @@ void MainWindow::build_ui() {
   head_layout->addStretch();
   head_layout->addWidget(local_badge);
 
-  // 「未归档」语义标记：常驻不可关（留痕铁律的界面表达）
-  auto* banner = new QLabel(
-      QStringLiteral("　⚠ 直连态会话：消息点对点传输，不经过服务器，服务端无任何"
-                     "记录（仅保存在双方本机）"),
-      chat);
-  banner->setWordWrap(true);
-  banner->setStyleSheet(QStringLiteral(
+  // 「未归档」语义标记：常驻不可关（留痕铁律的界面表达）；
+  // 文案随形态切换（T2.4）：直连／降级态必须出现「消息不进归档」。
+  banner_ = new QLabel(chat);
+  banner_->setObjectName(QStringLiteral("mode_banner"));
+  banner_->setWordWrap(true);
+  banner_->setStyleSheet(QStringLiteral(
       "background:#fdeee2; color:#8a4a1f; font-size:12px; padding:6px 10px;"));
 
   chat_view_ = new QTextBrowser(chat);
@@ -166,7 +184,7 @@ void MainWindow::build_ui() {
   input_layout->addWidget(send_btn_);
 
   chat_layout->addWidget(head);
-  chat_layout->addWidget(banner);
+  chat_layout->addWidget(banner_);
   chat_layout->addWidget(chat_view_, 1);
   chat_layout->addWidget(input_row);
 
@@ -192,19 +210,14 @@ void MainWindow::build_ui() {
   connect(device_list_, &QListWidget::itemSelectionChanged, this, [this] {
     auto* item = device_list_->currentItem();
     if (!item) return;
-    open_peer(item->data(Qt::UserRole).toString());
+    const QString id = item->data(Qt::UserRole).toString();
+    if (id.isEmpty()) return; // 分组标题行不可选
+    open_chat(item->data(Qt::UserRole + 1).toString(), id);
   });
   connect(send_btn_, &QPushButton::clicked, this, [this] {
     const QString text = input_box_->text().trimmed();
     if (text.isEmpty() || current_peer_.isEmpty()) return;
-    const std::string peer = current_peer_.toStdString();
-    if (direct_engine_.send_text(peer, text.toStdString()) == 0) {
-      show_status(QStringLiteral("发送失败：对端不可达"));
-      return;
-    }
-    append_message(QString::fromStdString(direct_engine_.device_id()), text,
-                   QDateTime::currentMSecsSinceEpoch(), true);
-    input_box_->clear();
+    if (send_in_current_chat(text)) input_box_->clear();
   });
   connect(input_box_, &QLineEdit::returnPressed, this,
           [this] { send_btn_->click(); });
@@ -236,8 +249,10 @@ void MainWindow::wire_engines() {
   });
   connect(&direct_engine_, &DirectEngine::message_received, this,
           [this](const QString& from, const QString& text, qint64 ts_ms) {
-            if (from == current_peer_) {
-              append_message(from, text, ts_ms, false);
+            if (from == current_peer_ &&
+                current_kind_ == QStringLiteral("direct")) {
+              append_message(from, text, ts_ms, false,
+                             QStringLiteral("direct"));
             } else {
               show_status(QStringLiteral("来自 %1 的新消息").arg(from));
             }
@@ -271,6 +286,211 @@ void MainWindow::wire_engines() {
           });
 }
 
+// 协作信号接入界面（T2.4）：形态切换提示、降级提示、协作消息渲染。
+// 降级口径：服务端不可达＝回落直连态，必须明示「消息不进归档」（A11）。
+void MainWindow::wire_collab() {
+  connect(&collab_engine_, &CollabEngine::logged_in, this,
+          [this](const QString& account, const QString& display) {
+            (void)account;
+            act_collab_logout_->setEnabled(true);
+            collab_was_logged_in_ = true;
+            seed_collab_peers();
+            update_banner();
+            refresh_devices();
+            append_system_line(
+                QStringLiteral("已切换协作态（%1）：此后消息经服务端转发并"
+                               "全量归档")
+                    .arg(esc(display)));
+            show_status(QStringLiteral("协作态已登录：%1").arg(display));
+          });
+  connect(&collab_engine_, &CollabEngine::login_failed, this,
+          [this](const QString& reason) {
+            act_collab_logout_->setEnabled(false);
+            update_banner();
+            if (reason == QStringLiteral("无法连接服务器")) {
+              // 降级：服务端不可达 → 停留直连态，明示归档缺口
+              append_system_line(QStringLiteral(
+                  "服务端不可达：已回落直连态，消息不进归档"
+                  "（点对点传输，仍可正常收发）"));
+              show_status(
+                  QStringLiteral("服务端不可达，已回落直连态：消息不进归档"));
+            } else {
+              show_status(QStringLiteral("协作登录失败：%1").arg(reason));
+            }
+          });
+  connect(&collab_engine_, &CollabEngine::connection_lost, this, [this] {
+    collab_was_logged_in_ = false;
+    update_banner();
+    show_status(QStringLiteral(
+        "服务端连接断开，直连态仍可用：消息不进归档（自动重连中）"));
+  });
+  connect(&collab_engine_, &CollabEngine::reconnected, this, [this] {
+    collab_was_logged_in_ = true;
+    update_banner();
+    refresh_devices();
+    show_status(QStringLiteral("协作态已恢复：消息重新进入归档"));
+  });
+  connect(&collab_engine_, &CollabEngine::kicked, this,
+          [this](const QString& reason, const QString& replaced_by) {
+            collab_was_logged_in_ = false;
+            act_collab_logout_->setEnabled(false);
+            update_banner();
+            refresh_devices();
+            show_status(QStringLiteral("已被顶替下线（%1）：%2")
+                            .arg(replaced_by, reason));
+          });
+  connect(&collab_engine_, &CollabEngine::message_received, this,
+          [this](const QString& from, const QString& text, qint64 ts_ms,
+                 const QString& /*msg_id*/) {
+            if (current_kind_ == QStringLiteral("collab") &&
+                from == current_peer_) {
+              // 本地库已由引擎落库（同库），这里只做界面渲染
+              append_message(from, text, ts_ms, false,
+                             QStringLiteral("collab"));
+            } else {
+              show_status(QStringLiteral("来自 %1 的协作消息").arg(from));
+            }
+            collab_peers_.insert(from);
+            refresh_devices();
+          });
+  connect(&collab_engine_, &CollabEngine::text_delivered, this,
+          [this](quint64 seq, bool ok) {
+            show_status(ok ? QStringLiteral("协作消息已送达（seq %1）").arg(seq)
+                           : QStringLiteral("协作消息送达超时（seq %1）").arg(seq));
+          });
+}
+
+// —— T2.4 模式切换公共入口 ——
+
+void MainWindow::login_collab(const QString& host, quint16 port,
+                              const QString& account,
+                              const QString& password) {
+  collab_engine_.login(host, port, account, password);
+}
+
+void MainWindow::logout_collab() {
+  collab_engine_.logout();
+  act_collab_logout_->setEnabled(false);
+  collab_was_logged_in_ = false;
+  update_banner();
+  append_system_line(QStringLiteral(
+      "已登出协作态，回到直连态：消息不进归档（本地历史保留，合并展示）"));
+  show_status(QStringLiteral("协作态已登出：当前直连态，消息不进归档"));
+  refresh_devices();
+}
+
+void MainWindow::open_collab_peer(const QString& account) {
+  if (account.isEmpty()) return;
+  collab_peers_.insert(account);
+  refresh_devices();
+  open_chat(QStringLiteral("collab"), account);
+}
+
+bool MainWindow::send_in_current_chat(const QString& text) {
+  if (text.isEmpty() || current_peer_.isEmpty()) return false;
+  if (current_kind_ == QStringLiteral("collab")) {
+    const quint64 seq = collab_engine_.send_text(current_peer_, text);
+    if (seq == 0) {
+      show_status(QStringLiteral(
+          "发送失败：协作态未登录（可先登录协作态；当前消息不进归档）"));
+      return false;
+    }
+    append_message(collab_engine_.account(), text,
+                   QDateTime::currentMSecsSinceEpoch(), true,
+                   QStringLiteral("collab"));
+    return true;
+  }
+  const std::string peer = current_peer_.toStdString();
+  if (direct_engine_.send_text(peer, text.toStdString()) == 0) {
+    show_status(QStringLiteral("发送失败：对端不可达"));
+    return false;
+  }
+  append_message(QString::fromStdString(direct_engine_.device_id()), text,
+                 QDateTime::currentMSecsSinceEpoch(), true,
+                 QStringLiteral("direct"));
+  return true;
+}
+
+bool MainWindow::collab_logged_in() const {
+  return collab_engine_.is_logged_in();
+}
+
+QString MainWindow::banner_text() const { return banner_->text(); }
+
+QString MainWindow::status_text() const { return statusBar()->currentMessage(); }
+
+QString MainWindow::chat_html() const { return chat_view_->toHtml(); }
+
+// 归档提示条（常驻不可关）：协作态显示归档口径；直连／降级态必须明示
+// 「消息不进归档」——切换与降级共用这一条提示（A7、A11 界面口径）。
+void MainWindow::update_banner() {
+  const bool collab_session =
+      current_kind_ == QStringLiteral("collab") &&
+      collab_engine_.is_logged_in();
+  if (collab_session) {
+    banner_->setStyleSheet(QStringLiteral(
+        "background:#eaf3e7; color:#3f6b3a; font-size:12px; padding:6px 10px;"));
+    banner_->setText(QStringLiteral(
+        "　✔ 协作态会话：消息经服务端转发并全量归档；撤回仅改显示，"
+        "服务端保留原文与撤回记录"));
+  } else {
+    banner_->setStyleSheet(QStringLiteral(
+        "background:#fdeee2; color:#8a4a1f; font-size:12px; padding:6px 10px;"));
+    if (collab_was_logged_in_ && !collab_engine_.is_logged_in()) {
+      banner_->setText(QStringLiteral(
+          "　⚠ 已降级直连态：服务端不可达，消息不进归档"
+          "（点对点传输，仅保存在双方本机）"));
+    } else {
+      banner_->setText(QStringLiteral(
+          "　⚠ 直连态会话：消息点对点传输，不经过服务器——消息不进归档"
+          "（服务端无任何记录，仅保存在双方本机）"));
+    }
+  }
+}
+
+// 登录后把本地库里的历史协作会话补进列表（换机／重启后会话入口不丢）
+void MainWindow::seed_collab_peers() {
+  if (LocalStore* store = direct_engine_.store()) {
+    const QStringList hist = store->peers(QStringLiteral("collab"));
+    for (const QString& p : hist) collab_peers_.insert(p);
+  }
+}
+
+void MainWindow::show_collab_login_dialog() {
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("登录协作态"));
+  auto* form = new QFormLayout(&dlg);
+  QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
+  auto* host = new QLineEdit(
+      settings.value(QStringLiteral("host"), QStringLiteral("127.0.0.1"))
+          .toString(),
+      &dlg);
+  auto* port = new QLineEdit(
+      settings.value(QStringLiteral("port"), QStringLiteral("24360")).toString(),
+      &dlg);
+  auto* account = new QLineEdit(
+      settings.value(QStringLiteral("account")).toString(), &dlg);
+  auto* password = new QLineEdit(&dlg);
+  password->setEchoMode(QLineEdit::Password);
+  form->addRow(QStringLiteral("服务器地址"), host);
+  form->addRow(QStringLiteral("端口"), port);
+  form->addRow(QStringLiteral("账号"), account);
+  form->addRow(QStringLiteral("口令"), password);
+  auto* buttons = new QDialogButtonBox(
+      QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+  form->addRow(buttons);
+  QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  if (dlg.exec() != QDialog::Accepted) return;
+  if (account->text().trimmed().isEmpty()) return;
+  settings.setValue(QStringLiteral("host"), host->text().trimmed());
+  settings.setValue(QStringLiteral("port"), port->text().trimmed());
+  settings.setValue(QStringLiteral("account"), account->text().trimmed());
+  login_collab(host->text().trimmed(),
+               static_cast<quint16>(port->text().toUInt()),
+               account->text().trimmed(), password->text());
+}
+
 void MainWindow::refresh_devices() {
   const QString selected = current_peer_;
   device_list_->blockSignals(true);
@@ -285,6 +505,22 @@ void MainWindow::refresh_devices() {
                       .arg(name, p.address.toString(),
                            QString::number(p.tcp_port)));
     item->setData(Qt::UserRole, id);
+    item->setData(Qt::UserRole + 1, QStringLiteral("direct"));
+  }
+
+  // 协作会话分组（登录后出现；本地历史 + 本会话窗口期的对端）
+  if (collab_engine_.is_logged_in() && !collab_peers_.isEmpty()) {
+    auto* header = new QListWidgetItem(QStringLiteral("协作会话 · 服务端归档"));
+    header->setFlags(Qt::NoItemFlags); // 分组标题：不可选（空 id 不进会话）
+    device_list_->addItem(header);
+    QStringList sorted(collab_peers_.begin(), collab_peers_.end());
+    sorted.sort();
+    for (const QString& account : sorted) {
+      auto* item = new QListWidgetItem(device_list_);
+      item->setText(QStringLiteral("%1\n协作态 · 已归档").arg(account));
+      item->setData(Qt::UserRole, account);
+      item->setData(Qt::UserRole + 1, QStringLiteral("collab"));
+    }
   }
   device_list_->blockSignals(false);
   device_count_->setText(peers.isEmpty()
@@ -314,39 +550,74 @@ void MainWindow::refresh_devices() {
 }
 
 void MainWindow::open_peer(const QString& device_id) {
-  current_peer_ = device_id;
+  open_chat(QStringLiteral("direct"), device_id);
+}
+
+// 打开会话（kind=direct 设备 / collab 账号）：历史取自共享本地库——
+// 直连与协作消息同库合并，按 source 字段标注来源（T2.4 合并展示）。
+void MainWindow::open_chat(const QString& kind, const QString& id) {
+  current_kind_ = kind;
+  current_peer_ = id;
   chat_showing_guidance_ = false;
   chat_view_->clear();
-  const Peer p = direct_engine_.peer(device_id.toStdString());
-  const QString name =
-      p.name.empty() ? device_id.left(8) : QString::fromStdString(p.name);
-  chat_title_->setText(name);
-  chat_meta_->setText(
-      QStringLiteral("%1 · 点对点直连 · TCP %2")
-          .arg(p.address.toString(), QString::number(p.tcp_port)));
 
-  const auto hist = direct_engine_.history(device_id);
+  const bool collab = kind == QStringLiteral("collab");
+  const QString my_id = collab ? collab_engine_.account()
+                               : QString::fromStdString(direct_engine_.device_id());
+  if (collab) {
+    chat_title_->setText(id);
+    chat_meta_->setText(QStringLiteral("%1 · 协作态 · 消息进入服务端归档")
+                            .arg(id));
+  } else {
+    const Peer p = direct_engine_.peer(id.toStdString());
+    const QString name = p.name.empty() ? id.left(8) : QString::fromStdString(p.name);
+    chat_title_->setText(name);
+    chat_meta_->setText(
+        QStringLiteral("%1 · 点对点直连 · TCP %2")
+            .arg(p.address.toString(), QString::number(p.tcp_port)));
+  }
+  update_banner();
+
+  const auto hist = direct_engine_.history(id);
   if (hist.isEmpty()) {
-    append_system_line(
-        QStringLiteral("已与 %1 建立点对点会话 · 本对话不归档").arg(esc(name)));
+    if (collab) {
+      append_system_line(
+          QStringLiteral("已与 %1 建立协作会话 · 消息经服务端转发并全量归档")
+              .arg(esc(id)));
+    } else {
+      append_system_line(
+          QStringLiteral("已与 %1 建立点对点会话 · 本对话不归档")
+              .arg(esc(chat_title_->text())));
+    }
   }
   for (const StoredMessage& m : hist) {
     append_message(QString::fromStdString(m.from),
                    QString::fromStdString(m.text), m.ts_ms,
-                   m.from == direct_engine_.device_id());
+                   m.from == my_id.toStdString(),
+                   QString::fromStdString(m.source));
   }
 }
 
 void MainWindow::append_message(const QString& from_id, const QString& text,
-                                qint64 ts_ms, bool outgoing) {
+                                qint64 ts_ms, bool outgoing,
+                                const QString& source) {
   QString name = from_id;
   if (!outgoing) {
-    const Peer p = direct_engine_.peer(from_id.toStdString());
-    if (!p.name.empty()) name = QString::fromStdString(p.name);
+    if (current_kind_ == QStringLiteral("collab")) {
+      name = from_id; // 协作会话对端即账号
+    } else {
+      const Peer p = direct_engine_.peer(from_id.toStdString());
+      if (!p.name.empty()) name = QString::fromStdString(p.name);
+    }
   } else {
     name = QStringLiteral("我");
   }
-  chat_view_->append(bubble_html(name, text, ts_ms, outgoing));
+  // 来源字段（合并展示）：直连＝仅本机；协作＝服务端归档
+  const QString tag =
+      source == QStringLiteral("collab")
+          ? QStringLiteral(" · 协作·已归档")
+          : QStringLiteral(" · 直连·仅本机");
+  chat_view_->append(bubble_html(name + tag, text, ts_ms, outgoing));
   auto* bar = chat_view_->verticalScrollBar();
   bar->setValue(bar->maximum());
 }
@@ -370,7 +641,7 @@ void MainWindow::show_guidance() {
       "请确认对方已安装 Memex 且与本机同一局域网；<br>"
       "直连发现使用 UDP 2425、点对点传输使用 TCP 2426–2437，"
       "请检查终端防火墙放行。<br><br>"
-      "如需组织架构、云端历史与归档检索，请登录协作态（左上角菜单，阶段 2 接入）。"
+      "如需组织架构、云端历史与归档检索，请经左上角「协作」菜单登录协作态。"
       "</span></div>"));
 }
 

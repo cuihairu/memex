@@ -88,4 +88,20 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(collab_chat PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
+
+  # T2.4 模式切换与降级验收：不重启切换、历史合并展示（来源字段）、
+  # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
+  add_executable(test_mode_switch
+    tests/test_mode_switch.cpp
+    app/main_window.cpp)
+  target_include_directories(test_mode_switch PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_mode_switch PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+  target_compile_definitions(test_mode_switch PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME mode_switch COMMAND test_mode_switch)
+  set_tests_properties(mode_switch PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
 endif()

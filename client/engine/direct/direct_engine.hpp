@@ -60,6 +60,10 @@ public:
 
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;
 
+  // 本地库（start() 后有效）。双态共用同一份本地库：协作引擎挂接同一库，
+  // 界面按 source 字段合并展示直连与协作历史（T2.4 模式切换）。
+  LocalStore* store() const { return store_.get(); }
+
   std::string status_text() const;
   const std::string& device_id() const { return device_id_; }
 

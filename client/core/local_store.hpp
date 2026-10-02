@@ -5,6 +5,7 @@
 
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 #include <cstdint>
 #include <string>
@@ -49,6 +50,10 @@ public:
 
   // 某对端的本地历史：取最近 limit 条，按时间正序返回。
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;
+
+  // 有历史的对端列表（按最近消息时间倒序）。source 过滤：
+  // 空=全部，"collab"=协作会话（T2.4 会话列表），"direct"=直连会话。
+  QStringList peers(const QString& source = {}) const;
 
 private:
   bool ensure_schema();

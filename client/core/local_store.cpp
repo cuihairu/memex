@@ -141,6 +141,29 @@ QList<StoredMessage> LocalStore::history(const QString& peer, int limit) const {
   return out;
 }
 
+QStringList LocalStore::peers(const QString& source) const {
+  QStringList out;
+  if (!open_) return out;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  // 每对端取最近一条的时间排序（会话列表口径）
+  if (source.isEmpty()) {
+    q.prepare(QStringLiteral(
+        "SELECT peer FROM messages GROUP BY peer"
+        " ORDER BY MAX(ts_ms) DESC, peer ASC"));
+  } else {
+    q.prepare(QStringLiteral(
+        "SELECT peer FROM messages WHERE source = ?"
+        " GROUP BY peer ORDER BY MAX(ts_ms) DESC, peer ASC"));
+    q.addBindValue(source);
+  }
+  if (!q.exec()) {
+    qWarning() << "[本地库] 对端列表查询失败：" << q.lastError().text();
+    return out;
+  }
+  while (q.next()) out.push_back(q.value(0).toString());
+  return out;
+}
+
 bool LocalStore::mark_recalled(const std::string& msg_id) {
   if (!open_ || msg_id.empty()) return false;
   QSqlQuery q(QSqlDatabase::database(connection_name_));
