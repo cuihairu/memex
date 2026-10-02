@@ -315,6 +315,7 @@ bool ServerStore::is_recalled(const std::string& msg_id) {
   const char* sql = "SELECT recall FROM messages WHERE msg_id = ?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
   bool recalled = false;
   if (sqlite3_step(st) == SQLITE_ROW) {
     recalled = sqlite3_column_int(st, 0) != 0;
