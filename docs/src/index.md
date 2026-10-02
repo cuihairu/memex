@@ -83,20 +83,23 @@ memex/
 ├── common/               # 双端共用：协议定义、序列化、公共工具
 ├── admin/                # 管理后台（第一期第四阶段起）
 ├── docs/                 # 文档站（VitePress）、评审报告、原型
-└── third_party/          # 第三方组件清单与许可核验
+└── third_party/          # 第三方组件清单与许可核验（依赖经 vcpkg 管理）
 ```
 
 ### 构建
 
-```bash
-# 服务端与公共库（C++，依赖 asio）
-cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-ctest --test-dir build --output-on-failure
+依赖（asio / nlohmann-json / Qt6）经 vcpkg manifest 管理，构建入口为 CMake Presets：
 
-# 客户端（需 Qt 6）
-cmake -B build -S . -DMEMEX_BUILD_CLIENT=ON
-cmake --build build
+```bash
+# 准备 vcpkg（一次性）
+git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
+~/vcpkg/bootstrap-vcpkg.sh
+export VCPKG_ROOT="$HOME/vcpkg"
+
+# 开发构建（Release · 服务端+客户端+测试）
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
 ```
 
 更多内容：[产品定位](/guide/product) · [需求与验收](/guide/requirements) · [四期规划](/guide/roadmap) · [决策清单](/guide/decisions) · [评审报告摘要](/guide/report) · [克隆与构建](/guide/development)

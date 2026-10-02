@@ -1,0 +1,36 @@
+{
+  "name": "memex",
+  "version-string": "0.1.0",
+  "description": "Memex 内网办公即时通讯系统",
+  "builtin-baseline": "10541e317a660f4165ba4ac2851ab54a8d4577b1",
+  "$comment": "顶层唯一依赖清单：默认（无 feature）只装服务端依赖；带 Qt 桌面的构建启用 client feature",
+  "dependencies": [
+    {
+      "name": "asio",
+      "$comment": "服务端网络 I/O（header-only）；需锁版本的包写进下方 overrides"
+    },
+    {
+      "name": "nlohmann-json",
+      "version>=": "3.11.3"
+    }
+  ],
+  "default-features": [],
+  "features": {
+    "client": {
+      "description": "Qt 桌面客户端依赖（本地 dev/ci 与每日构建客户端产物启用）",
+      "dependencies": [
+        {
+          "name": "qtbase",
+          "$comment": "Qt6（Widgets/Sql/Network 由代码 find_package 消费）。Linux 默认 features 已含 gui/widgets/network/sql-sqlite/xcb；glib 为桌面 Linux 标配（xcb 插件引用其事件分发器，缺则 XcbQpa 符号缺失），xkb/xkbcommon-x11 供打包分发后键盘输入",
+          "features": [
+            "glib",
+            "xkb",
+            "xkbcommon-x11"
+          ]
+        }
+      ]
+    }
+  },
+  "overrides": [],
+  "supports": "!uwp"
+}

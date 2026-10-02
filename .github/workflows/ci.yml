@@ -2,6 +2,8 @@
 # 覆盖率经 gcov 编译、gcovr 生成 coverage.xml；公共仓库免注册 tokenless
 # 上传 Codecov，覆盖率口径由根目录 codecov.yml 驱动（趋势信号，
 # 上传失败不阻断门禁——fail_ci_if_error: false）。
+# 依赖由 vcpkg manifest（vcpkg.json + builtin-baseline）管理：
+# x-gha 二进制缓存跨 run 复用编译产物，actions/cache 整取安装树二次加速。
 name: ci
 
 on:
@@ -15,30 +17,69 @@ permissions:
 jobs:
   cpp:
     runs-on: ubuntu-latest
+    # vcpkg 二进制缓存（x-gha）须对 configure 步骤（toolchain 触发安装）可见，
+    # 故放 job 级 env 而非单步
+    env:
+      VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      # vcpkg 不代管 X11/GL 等系统库；qtbase 构建所需系统包在此安装
+      - name: 安装工具与 qtbase 系统依赖
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libasio-dev qt6-base-dev libqt6sql6-sqlite qt6-base-dev-tools gcovr
+          sudo apt-get install -y -qq gcovr ninja-build \
+            libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
+            libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev \
+            libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev \
+            libxcb-icccm4-dev libxcb-util-dev libxcb-image0-dev libxcb-keysyms1-dev \
+            libxcb-randr0-dev libxcb-render0-dev libxcb-render-util0-dev \
+            libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-glx0-dev \
+            libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev \
+            libxcb-xinput-dev \
+            libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev \
+            libfontconfig1-dev libfreetype-dev libdbus-1-dev libicu-dev
 
-      - name: Configure
-        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DMEMEX_BUILD_CLIENT=ON -DCMAKE_CXX_FLAGS=--coverage
+      # 导出 Actions 缓存凭据，vcpkg 才能使用原生 x-gha 二进制缓存
+      - name: 导出 Actions 缓存凭据
+        uses: actions/github-script@v9
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # 整取安装树（x-gha 之上再省一层解包安装）；不缓存 vcpkg 源树，
+      # 它由 run-vcpkg 按钉住的 commit 管理
+      - name: Cache vcpkg 安装树
+        uses: actions/cache@v5
+        with:
+          path: vcpkg_installed*
+          key: vcpkg-installed-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-installed-${{ runner.os }}-
+
+      - name: Setup vcpkg（钉在 manifest builtin-baseline 同一 commit）
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: '10541e317a660f4165ba4ac2851ab54a8d4577b1'
+
+      - name: Configure（preset ci）
+        run: cmake --preset ci
 
       - name: Build
-        run: cmake --build build -j "$(nproc)"
+        run: cmake --build --preset ci
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --preset ci
 
       - name: Coverage report
         run: |
           gcovr --xml -o coverage.xml \
             -f 'common/' -f 'server/' -f 'client/' \
-            -e 'third_party/' -e 'build/' -e 'tests/'
+            -e 'third_party/' -e 'vcpkg_installed*/' -e 'build[^/]*/' -e 'tests/'
           gcovr --filter 'common/' --filter 'server/' --filter 'client/' \
-            --exclude 'third_party/' --exclude 'build/' --exclude 'tests/' \
+            --exclude 'third_party/' --exclude 'vcpkg_installed*/' \
+            --exclude 'build[^/]*/' --exclude 'tests/' \
             --txt-metric line --txt coverage-summary.txt
           {
             echo '### C++ 覆盖率（common / server / client）'

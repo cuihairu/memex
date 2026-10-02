@@ -20,9 +20,35 @@ PKG="$STAGE/$NAME"
 mkdir -p "$PKG/lib"
 cp "$BIN" "$PKG/memex-client"
 
-# 递归收集动态依赖；glibc 核心运行时不随包（目标机必备，随包反而冲突）。
+# Qt 插件：平台（xcb/offscreen）、SQLite 驱动、图像格式、控件样式、图标引擎。
+# 来源必须与构建所用 Qt 同源（vcpkg 安装树，x64-linux-dynamic triplet）——
+# 系统 Qt 插件混入会因版本错位崩溃。
+TRIPLET="${VCPKG_TARGET_TRIPLET:-x64-linux-dynamic}"
+REAL_BIN="$(readlink -f "$BIN")"
+for cand in "${VCPKG_INSTALLED_DIR:-}/$TRIPLET/Qt6/plugins" \
+            "$(cd "$(dirname "$REAL_BIN")/../.." && pwd)/vcpkg_installed/$TRIPLET/Qt6/plugins"; do
+  if [ -n "$cand" ] && [ -d "$cand" ]; then QT_PLUGINS_DIR="$cand"; break; fi
+done
+if [ -z "${QT_PLUGINS_DIR:-}" ]; then
+  echo "错误：未找到 vcpkg Qt 插件目录（vcpkg_installed/$TRIPLET/Qt6/plugins），拒绝出包" >&2
+  exit 1
+fi
+mkdir -p "$PKG/plugins"
+for sub in platforms sqldrivers imageformats styles iconengines; do
+  if [ -d "$QT_PLUGINS_DIR/$sub" ]; then
+    cp -r "$QT_PLUGINS_DIR/$sub" "$PKG/plugins/"
+  fi
+done
+
+# 递归收集动态依赖；Qt 插件由 dlopen 加载，其依赖树必须一并随包，
+# 否则目标机上 xcb 等平台插件起不来。解析时把包内 lib/ 前置到
+# LD_LIBRARY_PATH——插件副本无 RPATH，不加则 ldd 会命中系统 Qt 并覆盖
+# 随包版本（版本错位即崩）。glibc 核心运行时不随包（目标机必备，随包反而冲突）。
 declare -A visited=()
 queue=("$BIN")
+for plug in "$PKG"/plugins/*/*.so; do
+  [ -f "$plug" ] && queue+=("$plug")
+done
 while [ ${#queue[@]} -gt 0 ]; do
   cur="${queue[0]}"
   queue=("${queue[@]:1}")
@@ -30,33 +56,18 @@ while [ ${#queue[@]} -gt 0 ]; do
     [ -n "$dep" ] || continue
     case "$dep" in
       */ld-linux-*|*/libc.so.*|*/libm.so.*|*/libpthread*|*/libdl*|*/librt.so.*) continue ;;
+      "$PKG"/lib/*) continue ;;  # 解析已命中包内库，其依赖首入时已收集
     esac
     [ -n "${visited[$dep]:-}" ] && continue
     visited[$dep]=1
     cp -L "$dep" "$PKG/lib/"
     while read -r d2; do
       [ -n "${visited[$d2]:-}" ] || queue+=("$d2")
-    done < <(ldd "$dep" 2>/dev/null | awk '$3 ~ /^\// {print $3}')
-  done < <(ldd "$cur" 2>/dev/null | awk '$3 ~ /^\// {print $3}')
+    done < <(LD_LIBRARY_PATH="$PKG/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+             ldd "$dep" 2>/dev/null | awk '$3 ~ /^\// {print $3}')
+  done < <(LD_LIBRARY_PATH="$PKG/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+           ldd "$cur" 2>/dev/null | awk '$3 ~ /^\// {print $3}')
 done
-
-# Qt 插件：平台（xcb/offscreen）、SQLite 驱动、图像格式、控件样式、图标引擎。
-QT_PLUGINS_DIR="$(qmake6 -query QT_INSTALL_PLUGINS 2>/dev/null || true)"
-if [ -z "$QT_PLUGINS_DIR" ] || [ ! -d "$QT_PLUGINS_DIR" ]; then
-  for cand in /usr/lib/x86_64-linux-gnu/qt6/plugins /usr/lib/qt6/plugins; do
-    if [ -d "$cand" ]; then QT_PLUGINS_DIR="$cand"; break; fi
-  done
-fi
-if [ -n "$QT_PLUGINS_DIR" ] && [ -d "$QT_PLUGINS_DIR" ]; then
-  mkdir -p "$PKG/plugins"
-  for sub in platforms sqldrivers imageformats styles iconengines; do
-    if [ -d "$QT_PLUGINS_DIR/$sub" ]; then
-      cp -r "$QT_PLUGINS_DIR/$sub" "$PKG/plugins/"
-    fi
-  done
-else
-  echo "警告：未找到 Qt 插件目录，随包插件缺失" >&2
-fi
 
 cat > "$PKG/memex-client.sh" <<'EOF'
 #!/bin/sh
@@ -64,6 +75,10 @@ cat > "$PKG/memex-client.sh" <<'EOF'
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 export LD_LIBRARY_PATH="$DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export QT_PLUGIN_PATH="$DIR/plugins${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}"
+# fontconfig 缓存隔离到包内：随包 fontconfig 与用户机既有缓存可能格式错位
+# （错位会在文字排版路径直接崩进程），隔离后首次启动自建缓存
+export XDG_CACHE_HOME="$DIR/cache"
+mkdir -p "$XDG_CACHE_HOME" 2>/dev/null || true
 exec "$DIR/memex-client" "$@"
 EOF
 chmod +x "$PKG/memex-client.sh"

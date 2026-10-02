@@ -4,8 +4,9 @@ add_library(memex_common STATIC
 
 target_include_directories(memex_common
   PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${PROJECT_SOURCE_DIR}/third_party)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+target_link_libraries(memex_common PUBLIC nlohmann_json::nlohmann_json)
 
 target_compile_features(memex_common PUBLIC cxx_std_20)
 

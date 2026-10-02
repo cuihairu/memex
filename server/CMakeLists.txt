@@ -1,7 +1,7 @@
 add_executable(memex_server src/main.cpp)
 
 target_compile_features(memex_server PRIVATE cxx_std_20)
-target_link_libraries(memex_server PRIVATE memex_common)
+target_link_libraries(memex_server PRIVATE memex_common asio::asio)
 target_compile_definitions(memex_server PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 
 if(MEMEX_BUILD_TESTS)

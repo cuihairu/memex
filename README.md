@@ -55,23 +55,28 @@ memex/
 ├── common/               # 双端共用：协议定义、序列化、公共工具
 ├── admin/                # 管理后台（第一期第四阶段起）
 ├── docs/                 # 文档站（VitePress）、评审报告、产品文档、原型
-└── third_party/          # 第三方组件清单与许可核验（A22）
+└── third_party/          # 第三方组件清单与许可核验（A22；依赖经 vcpkg manifest 管理）
 ```
 
 模块边界对应评审报告第四章：两套引擎各自完整、不共享通信状态，只通过共享内核（本地消息库、会话列表、联系人视图、文件传输模块）交汇；服务端六模块与数据模型见报告第五章。
 
 ## 构建
 
-```bash
-# 服务端与公共库（C++20，依赖 asio）
-cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-ctest --test-dir build --output-on-failure
+依赖（asio / nlohmann-json / Qt6）经 vcpkg manifest 统一管理（`vcpkg.json`，版本由 `builtin-baseline` 钉住），CMake 经 `CMakePresets.json` 一条命令构建：
 
-# 客户端（需 Qt 6）
-cmake -B build -S . -DMEMEX_BUILD_CLIENT=ON
-cmake --build build
+```bash
+# 1. 准备 vcpkg（一次性；建议把 VCPKG_ROOT 写入 shell profile）
+git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
+~/vcpkg/bootstrap-vcpkg.sh
+export VCPKG_ROOT="$HOME/vcpkg"
+
+# 2. 开发构建（Release · 服务端+客户端+测试；首次配置自动按 manifest 装包）
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
 ```
+
+Preset 一览：`dev`（开发构建）、`ci`（Debug+覆盖率，CI 门禁）、`server-release` / `client-release`（每日构建产物口径）。默认只装服务端依赖，带 Qt 桌面的构建启用 manifest 的 `client` feature。首次配置会编译 qtbase，耗时较长；vcpkg 二进制缓存（默认 `~/.cache/vcpkg/archives`）在后续配置中复用编译产物，秒级完成。CI 与每日构建使用 GitHub Actions 缓存（`x-gha` 二进制缓存 + 安装树整取）加速。
 
 ## 工程纪律
 

@@ -1,0 +1,81 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed",
+        "VCPKG_TARGET_TRIPLET": "x64-linux-dynamic"
+      }
+    },
+    {
+      "name": "dev",
+      "inherits": "base",
+      "displayName": "开发构建（Release · 服务端+客户端+测试）",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MEMEX_BUILD_CLIENT": "ON",
+        "VCPKG_MANIFEST_FEATURES": "client"
+      }
+    },
+    {
+      "name": "server-release",
+      "inherits": "base",
+      "displayName": "服务端 Release（nightly 产物）",
+      "binaryDir": "${sourceDir}/build-server",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MEMEX_BUILD_CLIENT": "OFF",
+        "MEMEX_BUILD_TESTS": "OFF",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed-server"
+      }
+    },
+    {
+      "name": "client-release",
+      "inherits": "base",
+      "displayName": "客户端 Release（nightly 产物）",
+      "binaryDir": "${sourceDir}/build-client",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MEMEX_BUILD_CLIENT": "ON",
+        "MEMEX_BUILD_TESTS": "OFF",
+        "VCPKG_MANIFEST_FEATURES": "client"
+      }
+    },
+    {
+      "name": "ci",
+      "inherits": "base",
+      "displayName": "CI 门禁（Debug+覆盖率 · 服务端+客户端+测试）",
+      "binaryDir": "${sourceDir}/build-ci",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MEMEX_BUILD_CLIENT": "ON",
+        "VCPKG_MANIFEST_FEATURES": "client",
+        "CMAKE_CXX_FLAGS": "--coverage"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "server-release", "configurePreset": "server-release" },
+    { "name": "client-release", "configurePreset": "client-release" },
+    { "name": "ci", "configurePreset": "ci" }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "ci",
+      "configurePreset": "ci",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}

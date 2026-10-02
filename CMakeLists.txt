@@ -12,12 +12,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(MEMEX_BUILD_CLIENT "构建 Qt 桌面客户端（需要 Qt 6）" OFF)
 option(MEMEX_BUILD_TESTS "构建测试" ON)
 
-# asio 为 header-only 系统库（libasio-dev），以头文件存在性探测
-include(CheckIncludeFileCXX)
-check_include_file_cxx("asio.hpp" MEMEX_HAS_ASIO)
-if(NOT MEMEX_HAS_ASIO)
-  message(FATAL_ERROR "未找到 asio.hpp：请安装 libasio-dev（或等价 asio 开发包）")
-endif()
+# 第三方依赖经 vcpkg manifest（vcpkg.json + builtin-baseline）统一管理，
+# 构建入口见 CMakePresets.json（cmake --preset dev）
+find_package(asio CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
 
 if(MEMEX_BUILD_TESTS)
   enable_testing()

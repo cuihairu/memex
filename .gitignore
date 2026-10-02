@@ -59,7 +59,9 @@ compile_commands.json
 *.swp
 
 # vcpkg
-vcpkg_installed/
+vcpkg_installed*/
+# CI 里 run-vcpkg 默认把 vcpkg 源树放在仓库根下（vcpkg/），本地照此布局也不入库
+vcpkg/
 
 # debug information files
 *.dwo

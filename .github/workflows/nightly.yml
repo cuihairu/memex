@@ -3,6 +3,7 @@
 # tag 固定 nightly，资产清旧传新；48 小时无新提交当日跳过（手动触发不受此限）。
 # 产物矩阵先收 Linux x86-64（服务端 + 客户端）；Windows / macOS / UOS / 麒麟
 # 待各平台构建打通后逐个补入。
+# 依赖由 vcpkg manifest 管理，CI 使用 vcpkg 二进制缓存加速。
 name: nightly
 
 on:
@@ -47,32 +48,57 @@ jobs:
     needs: gate
     if: needs.gate.outputs.build == 'true'
     runs-on: ubuntu-latest
+    # vcpkg 二进制缓存（x-gha）须对 configure 步骤（toolchain 触发安装）可见，
+    # 故放 job 级 env 而非单步
+    env:
+      VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: server
-            packages: libasio-dev
-            cmake: -DMEMEX_BUILD_CLIENT=OFF
+            preset: server-release
+            # asio / nlohmann-json 均 header-only，vcpkg 全量提供，无系统包
+            sys_pkgs: ""
           - target: client
-            packages: libasio-dev qt6-base-dev libqt6sql6-sqlite qt6-base-dev-tools
-            cmake: -DMEMEX_BUILD_CLIENT=ON
+            preset: client-release
+            # vcpkg 不代管 X11/GL 等系统库；qtbase 构建所需系统包在此安装
+            sys_pkgs: "libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev libxcb-icccm4-dev libxcb-util-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-glx0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev libfontconfig1-dev libfreetype-dev libdbus-1-dev libicu-dev"
     name: build ${{ matrix.target }} · linux-x64
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装依赖
+      - name: 安装工具与系统依赖
         run: |
           sudo apt-get update
-          sudo apt-get install -y ${{ matrix.packages }}
+          sudo apt-get install -y ninja-build ${{ matrix.sys_pkgs }}
 
-      - name: 配置与编译（Release）
+      # 导出 Actions 缓存凭据，vcpkg 才能使用原生 x-gha 二进制缓存
+      - name: 导出 Actions 缓存凭据
+        uses: actions/github-script@v9
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # 整取安装树；不缓存 vcpkg 源树（run-vcpkg 按钉住 commit 管理）
+      - name: Cache vcpkg 安装树
+        uses: actions/cache@v5
+        with:
+          path: vcpkg_installed*
+          key: vcpkg-installed-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-installed-${{ runner.os }}-${{ matrix.target }}-
+
+      - name: Setup vcpkg（钉在 manifest builtin-baseline 同一 commit）
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: '10541e317a660f4165ba4ac2851ab54a8d4577b1'
+
+      - name: 配置与编译（Release，preset ${{ matrix.preset }}）
         run: |
-          cmake -B build -S . \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DMEMEX_BUILD_TESTS=OFF \
-            ${{ matrix.cmake }}
-          cmake --build build --parallel
+          cmake --preset ${{ matrix.preset }}
+          cmake --build --preset ${{ matrix.preset }}
 
       - name: 打包
         id: pkg
@@ -81,9 +107,9 @@ jobs:
           SHA="${GITHUB_SHA::7}"
           mkdir -p dist
           if [ "${{ matrix.target }}" = "server" ]; then
-            asset=$(bash scripts/nightly/package-server.sh build/server/memex_server dist "$DATE" "$SHA")
+            asset=$(bash scripts/nightly/package-server.sh build-server/server/memex_server dist "$DATE" "$SHA")
           else
-            asset=$(bash scripts/nightly/package-client.sh build/client/memex_client dist "$DATE" "$SHA")
+            asset=$(bash scripts/nightly/package-client.sh build-client/client/memex_client dist "$DATE" "$SHA")
           fi
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
 
@@ -162,6 +188,7 @@ jobs:
             echo "- 基于 ubuntu-latest 构建（较新 glibc）；Windows / macOS / 国产 UOS / 麒麟包待各平台构建打通后补入矩阵。"
             echo "- 客户端包自带 Qt 运行库与插件，入口脚本 memex-client.sh 解包即用。"
             echo "- 安装包形态（deb / rpm / Windows 安装器）随后补入。"
+            echo "- 依赖管理：vcpkg manifest（vcpkg.json + CMakePresets.json），本地构建见文档 development.md。"
           } > NOTES.md
 
       - name: 更新 nightly Release（资产清旧传新）
