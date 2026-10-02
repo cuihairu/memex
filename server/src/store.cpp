@@ -150,6 +150,53 @@ bool ServerStore::ensure_schema() {
   sqlite3_exec(db_, "ALTER TABLE accounts ADD COLUMN"
                     " role TEXT NOT NULL DEFAULT 'member'",
               nullptr, nullptr, nullptr);
+  // 旧库迁移（T4.1）：offline_messages 单列 UNIQUE(msg_id) →
+  // 复合 UNIQUE(msg_id, to_account)。旧表不重建则群扇出 INSERT OR IGNORE
+  // 按 msg_id 把第 2..N 个离线接收方静默丢弃。事务化重建，失败回滚保数据。
+  {
+    bool legacy = false;
+    sqlite3_stmt* st = nullptr;
+    const char* probe =
+        "SELECT sql FROM sqlite_master WHERE type='table'"
+        " AND name='offline_messages';";
+    if (sqlite3_prepare_v2(db_, probe, -1, &st, nullptr) == SQLITE_OK) {
+      if (sqlite3_step(st) == SQLITE_ROW) {
+        const char* ddl =
+            reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+        legacy = ddl && std::string(ddl).find("UNIQUE(msg_id, to_account)") ==
+                           std::string::npos;
+      }
+      sqlite3_finalize(st);
+    }
+    if (legacy) {
+      const char* steps[] = {
+          "BEGIN;",
+          "ALTER TABLE offline_messages RENAME TO offline_messages_legacy;",
+          "CREATE TABLE offline_messages ("
+          "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+          "  msg_id TEXT NOT NULL,"
+          "  to_account TEXT NOT NULL,"
+          "  envelope BLOB NOT NULL,"
+          "  queued_ms INTEGER NOT NULL,"
+          "  UNIQUE(msg_id, to_account));",
+          "INSERT INTO offline_messages(msg_id, to_account, envelope,"
+          " queued_ms) SELECT msg_id, to_account, envelope, queued_ms"
+          " FROM offline_messages_legacy;",
+          "DROP TABLE offline_messages_legacy;",
+          "CREATE INDEX IF NOT EXISTS idx_offline_to"
+          " ON offline_messages(to_account, id);",
+          "COMMIT;",
+      };
+      bool migrated = true;
+      for (const char* s : steps) {
+        if (sqlite3_exec(db_, s, nullptr, nullptr, nullptr) != SQLITE_OK) {
+          migrated = false;
+          break;
+        }
+      }
+      if (!migrated) sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+    }
+  }
   return true;
 }
 
