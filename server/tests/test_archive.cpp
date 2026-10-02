@@ -162,10 +162,11 @@ int main() {
   CHECK(rows.size() == 1); // 全量落库
   if (!rows.empty()) {
     const auto& r = rows[0];
-    CHECK(std::get<0>(r) == msg_id);      // msg_id
-    CHECK(std::get<1>(r) == "alice");     // from
-    CHECK(std::get<2>(r) == "可留痕的这一条"); // text 原样保留
-    CHECK(std::get<4>(r) == 10);          // type TEXT
+    CHECK(r.msg_id == msg_id);              // msg_id
+    CHECK(r.from_account == "alice");       // from
+    CHECK(r.text == "可留痕的这一条");       // text 原样保留
+    CHECK(r.type == 10);                    // type TEXT
+    CHECK(!r.recalled);                     // 初始未撤回
   }
   CHECK(store.offline_count("bob") == 1); // 等接收方 ACK
 
@@ -187,7 +188,8 @@ int main() {
   const auto rows2 = store.messages("bob");
   CHECK(rows2.size() == 1);
   if (!rows2.empty()) {
-    CHECK(std::get<2>(rows2[0]) == "可留痕的这一条"); // 撤回不清正文
+    CHECK(rows2[0].text == "可留痕的这一条"); // 撤回不清正文
+    CHECK(rows2[0].recalled);                // 标记可见（检索面）
   }
   // 接收方在线会话收到 RECALL 转发帧（本地副本置标记用）
   const auto recall_frame = b.read();

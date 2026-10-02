@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <tuple>
 #include <vector>
 
 typedef struct sqlite3 sqlite3;
@@ -29,6 +28,17 @@ struct LoginRecord {
   std::string version;     // 客户端版本
   std::string result;      // ok／bad_password／no_account
   std::int64_t ts_ms{0};
+};
+
+// 已归档消息（T2.3／T2.5：全量落库、撤回只置标记、按账号检索面）
+struct ArchivedMessage {
+  std::string msg_id;
+  std::string from_account;
+  std::string to_account;
+  int type{0};
+  std::string text;
+  std::int64_t ts_ms{0};
+  bool recalled{false};
 };
 
 class ServerStore {
@@ -67,9 +77,10 @@ public:
   bool store_message(const std::string& msg_id, const std::string& from_account,
                      const std::string& to_account, int type,
                      const std::string& text, std::int64_t ts_ms);
-  // 按接收账号倒序检索已归档消息（msg_id, from, text, ts_ms, type）。
-  std::vector<std::tuple<std::string, std::string, std::string, std::int64_t, int>>
-  messages(const std::string& account, int limit = 200);
+  // 检索已归档消息（倒序）：账号为空=全部；非空=该账号收发的都算
+  // （管理员检索面，T2.5 补传验收经 CLI 同口径查询）。
+  std::vector<ArchivedMessage> messages(const std::string& account,
+                                        int limit = 200);
   // 撤回仅置标记，正文不清（留痕纪律）。
   bool recall_message(const std::string& msg_id);
   bool is_recalled(const std::string& msg_id);

@@ -65,7 +65,7 @@ CollabEngine::CollabEngine(QObject* parent) : QObject(parent) {
   connect(socket_, &QTcpSocket::disconnected, this, [this] {
     const bool was_logged_in = logged_in_;
     const bool expected = kicking_ || manual_logout_;
-    teardown();
+    teardown(was_logged_in && !expected);
     if (was_logged_in && !expected) {
       emit connection_lost();
       schedule_reconnect();
@@ -119,7 +119,7 @@ void CollabEngine::attach_store(LocalStore* store) { store_ = store; }
 void CollabEngine::login(const QString& host, quint16 port,
                          const QString& account, const QString& password) {
   reconnect_timer_.stop();
-  teardown();
+  teardown(false);
   manual_logout_ = false;
   reconnecting_ = false;
   reconnect_backoff_ms_ = 1000;
@@ -146,31 +146,46 @@ void CollabEngine::logout() {
 }
 
 quint64 CollabEngine::send_text(const QString& to, const QString& text) {
-  if (!logged_in_ || to.isEmpty()) return 0;
+  if (to.isEmpty()) return 0;
   const quint64 seq = next_seq_++;
-  Message m;
-  m.set_type(MsgType::TEXT);
-  m.set_seq(seq);
-  m.set_from(account_.toStdString());
-  m.set_to(to.toStdString());
-  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
-  m.mutable_text()->set_text(text.toStdString());
-  send_frame(m);
+  PendingSend p;
+  p.to = to.toStdString();
+  p.text = text.toStdString();
+  p.seq = seq;
+  p.ts_ms = QDateTime::currentMSecsSinceEpoch();
+
+  if (logged_in_) {
+    Message m;
+    m.set_type(MsgType::TEXT);
+    m.set_seq(seq);
+    m.set_from(account_.toStdString());
+    m.set_to(p.to);
+    m.set_ts_ms(p.ts_ms);
+    m.mutable_text()->set_text(p.text);
+    send_frame(m);
+    p.sent_at_ms = QDateTime::currentMSecsSinceEpoch();
+    inflight_.insert(seq, p);
+    if (!delivery_timer_.isActive()) delivery_timer_.start(500);
+  } else if (reconnecting_) {
+    // T2.5 断线中断期：本地暂存（不判失败），恢复后按原 seq 补传；
+    // 服务端按 msg_id=sha256(from:seq) 去重——此前若已受理也不会重复归档。
+    pending_reconnect_.push_back(p);
+    qInfo() << "[协作] 断线中断期消息已暂存（待补传）：" << seq;
+  } else {
+    return 0; // 从未连接成功，不属于中断补传范围
+  }
 
   if (store_) {
     memex::client::StoredMessage sm;
     sm.seq = seq;
-    sm.peer = to.toStdString();
+    sm.peer = p.to;
     sm.from = account_.toStdString();
-    sm.to = to.toStdString();
-    sm.ts_ms = m.ts_ms();
-    sm.text = text.toStdString();
+    sm.to = p.to;
+    sm.ts_ms = p.ts_ms;
+    sm.text = p.text;
     sm.source = "collab";
     store_->append(sm);
   }
-
-  pending_ack_.insert(seq, QDateTime::currentMSecsSinceEpoch());
-  if (!delivery_timer_.isActive()) delivery_timer_.start(500);
   return seq;
 }
 
@@ -232,6 +247,8 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
       if (reconnecting_) {
         reconnecting_ = false;
         emit reconnected();
+        // T2.5：重连成功即补传中断期暂存消息（服务端按 msg_id 去重归档）
+        flush_pending_sends();
       } else {
         emit logged_in(account_, display);
       }
@@ -316,9 +333,9 @@ void CollabEngine::handle_text(const Message& msg) {
 }
 
 void CollabEngine::handle_ack(const Message& msg) {
-  if (msg.seq() != 0 && pending_ack_.contains(msg.seq())) {
+  if (msg.seq() != 0 && inflight_.contains(msg.seq())) {
     const quint64 seq = msg.seq();
-    pending_ack_.remove(seq);
+    inflight_.remove(seq);
     emit text_delivered(seq, true);
   }
 }
@@ -346,25 +363,63 @@ void CollabEngine::schedule_reconnect() {
 
 void CollabEngine::check_delivery_timeouts() {
   const qint64 now = QDateTime::currentMSecsSinceEpoch();
-  for (auto it = pending_ack_.begin(); it != pending_ack_.end();) {
-    if (now - it.value() > CollabEngine::kDeliveryTimeoutMs) {
-      emit text_delivered(it.key(), false);
-      it = pending_ack_.erase(it);
+  for (auto it = inflight_.begin(); it != inflight_.end();) {
+    if (it.value().sent_at_ms > 0 &&
+        now - it.value().sent_at_ms > CollabEngine::kDeliveryTimeoutMs) {
+      // 超时未回执：不判失败，转待补传（服务端可能已受理——补传按
+      // msg_id 去重，不会重复归档；真正送达以回执为准）
+      PendingSend p = it.value();
+      p.sent_at_ms = 0;
+      pending_reconnect_.push_back(p);
+      it = inflight_.erase(it);
     } else {
       ++it;
     }
   }
-  if (pending_ack_.isEmpty()) delivery_timer_.stop();
+  if (inflight_.isEmpty()) delivery_timer_.stop();
 }
 
-void CollabEngine::teardown() {
+// 重连成功后补传：暂存消息按原 seq 重发，服务端 sha256(from:seq) 幂等归档
+void CollabEngine::flush_pending_sends() {
+  if (pending_reconnect_.isEmpty()) return;
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  for (const PendingSend& p : pending_reconnect_) {
+    Message m;
+    m.set_type(MsgType::TEXT);
+    m.set_seq(p.seq);
+    m.set_from(account_.toStdString());
+    m.set_to(p.to);
+    m.set_ts_ms(p.ts_ms);
+    m.mutable_text()->set_text(p.text);
+    send_frame(m);
+    PendingSend inflight = p;
+    inflight.sent_at_ms = now;
+    inflight_.insert(p.seq, inflight);
+    qInfo() << "[协作] 补传中断期消息（seq" << p.seq << "）";
+  }
+  pending_reconnect_.clear();
+  if (!delivery_timer_.isActive()) delivery_timer_.start(500);
+}
+
+void CollabEngine::teardown(bool unexpected) {
   logged_in_ = false;
   kicking_ = false;
   stop_heartbeat();
-  for (auto it = pending_ack_.constBegin(); it != pending_ack_.constEnd(); ++it) {
-    emit text_delivered(it.key(), false);
+  if (unexpected) {
+    // 意外断开：在途消息转待补传（可能已达服务端——重发按 msg_id 幂等）
+    for (auto it = inflight_.constBegin(); it != inflight_.constEnd(); ++it) {
+      PendingSend p = it.value();
+      p.sent_at_ms = 0;
+      pending_reconnect_.push_back(p);
+    }
+  } else {
+    // 主动登出／被踢／重新登录：清队列并回报失败，不再补传
+    for (auto it = inflight_.constBegin(); it != inflight_.constEnd(); ++it) {
+      emit text_delivered(it.key(), false);
+    }
+    pending_reconnect_.clear();
   }
-  pending_ack_.clear();
+  inflight_.clear();
   delivery_timer_.stop();
   decoder_.reset();
   if (socket_->state() != QAbstractSocket::UnconnectedState) {

@@ -274,26 +274,41 @@ bool ServerStore::store_message(const std::string& msg_id, const std::string& fr
   return ok; // 唯一键冲突（消息已存在）→ DONE 之外 → false
 }
 
-// 消息检索：按账号查询已归档消息
-std::vector<std::tuple<std::string, std::string, std::string, std::int64_t, int>>
-ServerStore::messages(const std::string& account, int limit) {
-  std::vector<std::tuple<std::string, std::string, std::string, std::int64_t, int>> out;
-  const char* sql =
-      "SELECT msg_id, from_account, type, text, ts_ms FROM messages WHERE to_account = ?"
-      " ORDER BY id DESC LIMIT ?;";
+// 消息检索：账号为空=全部；非空=该账号收发两侧都命中（管理员检索面）
+std::vector<ArchivedMessage> ServerStore::messages(const std::string& account,
+                                                   int limit) {
+  std::vector<ArchivedMessage> out;
+  const std::string sql =
+      account.empty()
+          ? std::string("SELECT msg_id, from_account, to_account, type, text,"
+                        " ts_ms, recall FROM messages"
+                        " ORDER BY id DESC LIMIT ?;")
+          : std::string("SELECT msg_id, from_account, to_account, type, text,"
+                        " ts_ms, recall FROM messages"
+                        " WHERE from_account = ? OR to_account = ?"
+                        " ORDER BY id DESC LIMIT ?;");
   sqlite3_stmt* st = nullptr;
-  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    return out;
+  }
   int idx = 1;
-  sqlite3_bind_text(st, idx++, account.c_str(), -1, SQLITE_TRANSIENT);
+  if (!account.empty()) {
+    sqlite3_bind_text(st, idx++, account.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, idx++, account.c_str(), -1, SQLITE_TRANSIENT);
+  }
   sqlite3_bind_int(st, idx, limit);
   while (sqlite3_step(st) == SQLITE_ROW) {
-    std::string msg_id(reinterpret_cast<const char*>(sqlite3_column_text(st, 0)));
-    std::string from_account(reinterpret_cast<const char*>(sqlite3_column_text(st, 1)));
-    int type = sqlite3_column_int(st, 2);
-    const char* text_ptr = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
-    std::string text = text_ptr ? text_ptr : "";
-    std::int64_t ts_ms = sqlite3_column_int64(st, 4);
-    out.emplace_back(msg_id, from_account, text, ts_ms, type);
+    ArchivedMessage m;
+    m.msg_id = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    m.from_account = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    m.to_account = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    m.type = sqlite3_column_int(st, 3);
+    const char* text_ptr =
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    m.text = text_ptr ? text_ptr : "";
+    m.ts_ms = sqlite3_column_int64(st, 5);
+    m.recalled = sqlite3_column_int(st, 6) != 0;
+    out.push_back(std::move(m));
   }
   sqlite3_finalize(st);
   return out;

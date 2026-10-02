@@ -89,6 +89,16 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # T2.5 断线补传归档验收：中断期暂存、恢复补传、归档无重复无缺失（CLI 检索核对）
+  add_executable(test_collab_resend engine/collab/tests/test_collab_resend.cpp)
+  target_link_libraries(test_collab_resend PRIVATE memex_engine_collab)
+  target_compile_definitions(test_collab_resend PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME collab_resend COMMAND test_collab_resend)
+  set_tests_properties(collab_resend PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # T2.4 模式切换与降级验收：不重启切换、历史合并展示（来源字段）、
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch

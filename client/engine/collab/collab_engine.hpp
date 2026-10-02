@@ -1,8 +1,9 @@
-// 协作引擎：登录协作服务端的长连接（T2.1 登录与互踢；T2.2 心跳／重连／离线补投／消息路由）。
-// 「客户端提示」以 kicked 信号送达界面层（T2.4 模式切换时接入提示框）。
+// 协作引擎：登录协作服务端的长连接（T2.1 登录与互踢；T2.2 心跳／重连／离线补投／消息路由；
+// T2.5 断线中断期消息本地暂存、恢复后按消息标识去重补传归档）。
 #pragma once
 
 #include <QHash>
+#include <QList>
 #include <QObject>
 #include <QString>
 #include <QTcpSocket>
@@ -65,9 +66,21 @@ signals:
   void message_recalled(const QString& from, const QString& msg_id);
 
 private:
+  // 在途／待补传消息（T2.5）：断线中断期本地暂存，恢复后按原 seq 补传，
+  // 服务端按 msg_id=sha256(from:seq) 去重归档——重复补传不产生重复归档。
+  struct PendingSend {
+    std::string to;
+    std::string text;
+    quint64 seq{0};
+    qint64 ts_ms{0};
+    qint64 sent_at_ms{0}; // 已发未回执的超时计时（0=尚未发出）
+  };
+
   void send_login_frame();
   void handle_frame(const QByteArray& payload);
-  void teardown();
+  // unexpected=true：意外断开——在途消息转待补传（不判失败）；
+  // false：主动登出／被踢／重新登录——清队列并回报失败。
+  void teardown(bool unexpected);
   void schedule_reconnect();
   void check_delivery_timeouts();
   void start_heartbeat();
@@ -75,6 +88,7 @@ private:
   void send_frame(const memex::protocol::Message& msg);
   void handle_text(const memex::protocol::Message& msg);
   void handle_ack(const memex::protocol::Message& msg);
+  void flush_pending_sends(); // 重连成功后补传暂存消息
 
   QTcpSocket* socket_{nullptr};
   memex::protocol::FrameDecoder decoder_;
@@ -96,7 +110,8 @@ private:
   QTimer heartbeat_timer_;
 
   quint64 next_seq_{1};
-  QHash<quint64, qint64> pending_ack_; // seq -> 发送时间（ms），用于超时判定
+  QHash<quint64, PendingSend> inflight_; // seq -> 在途消息（已发未回执；超时转待补传）
+  QList<PendingSend> pending_reconnect_; // 断线中断期暂存，恢复后补传
   QTimer delivery_timer_;
 
   static constexpr qint64 kDeliveryTimeoutMs = 10000;

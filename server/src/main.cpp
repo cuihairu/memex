@@ -4,6 +4,7 @@
 
 #include <csignal>
 #include <cstdlib>
+#include <ctime>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -106,6 +107,46 @@ int cmd_logins(int argc, char** argv, const std::string& db_path) {
   return 0;
 }
 
+// messages [账号] [--limit N]：管理员检索归档（T2.5 验收面；T3.2 扩展导出）
+// 撤回消息原文照常可见并标「已撤回」——留痕纪律：撤回仅置标记不清正文。
+int cmd_messages(int argc, char** argv, const std::string& db_path) {
+  std::string account;
+  int limit = 200;
+  for (int i = 0; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (arg == "--limit" && i + 1 < argc) {
+      limit = std::atoi(argv[++i]);
+      if (limit <= 0) {
+        std::cerr << "无效 limit\n";
+        return 2;
+      }
+    } else {
+      account = argv[i];
+    }
+  }
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+  const auto rows = store.messages(account, limit);
+  std::cout << "msg_id\t发送方\t接收方\t类型\t状态\t时间\t正文\n";
+  for (const auto& m : rows) {
+    std::time_t secs = static_cast<std::time_t>(m.ts_ms / 1000);
+    std::tm tm{};
+    localtime_r(&secs, &tm);
+    char when[24];
+    std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
+    std::cout << m.msg_id << '\t' << m.from_account << '\t' << m.to_account
+              << '\t' << memex::protocol::msg_type_name(
+                             static_cast<memex::protocol::MsgType>(m.type))
+              << '\t' << (m.recalled ? "已撤回" : "正常") << '\t' << when
+              << '\t' << m.text << '\n';
+  }
+  std::cout << "共 " << rows.size() << " 条\n";
+  return 0;
+}
+
 int self_test() {
   asio::io_context io;
   asio::ip::tcp::acceptor a(
@@ -144,8 +185,10 @@ int main(int argc, char** argv) {
     if (cmd == "serve") return cmd_serve(sub_argc, sub_argv, db_path);
     if (cmd == "account") return cmd_account(sub_argc, sub_argv, db_path);
     if (cmd == "logins") return cmd_logins(sub_argc, sub_argv, db_path);
+    if (cmd == "messages") return cmd_messages(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
-              << "用法：memex_server [serve [--port N] [--db P]] | account add … | logins [账号] | --version | --self-test\n";
+              << "用法：memex_server [serve [--port N] [--db P]] | account add … | "
+                 "logins [账号] | messages [账号] [--limit N] | --version | --self-test\n";
     return 2;
   }
   return cmd_serve(0, argv, kDefaultDb);
