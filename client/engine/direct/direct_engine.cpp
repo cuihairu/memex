@@ -70,7 +70,13 @@ bool DirectEngine::start() {
 
   discovery_ = std::make_unique<DiscoveryService>(device_id_, device_name_);
   discovery_->set_tcp_port(transport_->port());
-  if (!discovery_->start()) {
+  // 测试钩子：并发测试进程各占独立 UDP 口互不串扰（默认仍为协议端口 2425）
+  DiscoveryOptions dopts;
+  const int discovery_port = qEnvironmentVariableIntValue("MEMEX_TEST_DISCOVERY_PORT");
+  if (discovery_port >= 1024 && discovery_port <= 65535) {
+    dopts.port = static_cast<quint16>(discovery_port);
+  }
+  if (!discovery_->start(dopts)) {
     discovery_.reset();
     file_service_.reset();
     transport_->stop();

@@ -10,6 +10,7 @@
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QUdpSocket>
 
 #include <cstdlib>
 #include <functional>
@@ -70,6 +71,17 @@ bool port_listening(quint16 port) {
 } // namespace
 
 int main(int argc, char** argv) {
+  // 独立 UDP 发现口：并发测试进程互不串扰（生产默认口 2425 不受影响）
+  {
+    QUdpSocket probe;
+    if (probe.bind(QHostAddress::AnyIPv4, 0,
+                   QAbstractSocket::ShareAddress |
+                       QAbstractSocket::ReuseAddressHint)) {
+      qputenv("MEMEX_TEST_DISCOVERY_PORT",
+              QByteArray::number(probe.localPort()));
+      probe.close();
+    }
+  }
   QTemporaryDir tmp;
   if (!tmp.isValid()) return 1;
   // 主窗直连引擎默认库落在 AppDataLocation——测试隔离到临时目录
