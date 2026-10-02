@@ -5,6 +5,7 @@
 #include <sqlite3.h>
 
 #include <chrono>
+#include <map>
 #include <set>
 
 namespace memex::server {
@@ -119,7 +120,13 @@ bool ServerStore::ensure_schema() {
       "  action TEXT NOT NULL,"
       "  filters TEXT NOT NULL DEFAULT '',"
       "  result_count INTEGER NOT NULL,"
-      "  ts_ms INTEGER NOT NULL);";
+      "  ts_ms INTEGER NOT NULL);"
+      // T3.4 策略开关：按部门配置（department_path 空=全局兜底行）
+      "CREATE TABLE IF NOT EXISTS policies ("
+      "  department_path TEXT PRIMARY KEY,"
+      "  allow_anonymous INTEGER NOT NULL,"
+      "  allow_cross_state INTEGER NOT NULL,"
+      "  new_device_approval INTEGER NOT NULL);";
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -919,6 +926,86 @@ OrgImportResult ServerStore::import_members(
   }
   sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr);
   return result;
+}
+
+// —— T3.4 策略开关 ——
+
+bool ServerStore::set_policy(const std::string& department_path,
+                             bool allow_anonymous, bool allow_cross_state,
+                             bool new_device_approval) {
+  if (!department_path.empty()) {
+    // 部门行须挂已存在部门（防拼错挂空名；不顺手建部门）
+    bool found = false;
+    for (const auto& [id, path] : department_list()) {
+      (void)id;
+      if (path == department_path) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
+  }
+  const char* sql =
+      "INSERT INTO policies(department_path, allow_anonymous, allow_cross_state,"
+      " new_device_approval) VALUES(?, ?, ?, ?)"
+      " ON CONFLICT(department_path) DO UPDATE SET"
+      " allow_anonymous = excluded.allow_anonymous,"
+      " allow_cross_state = excluded.allow_cross_state,"
+      " new_device_approval = excluded.new_device_approval;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, department_path.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 2, allow_anonymous ? 1 : 0);
+  sqlite3_bind_int(st, 3, allow_cross_state ? 1 : 0);
+  sqlite3_bind_int(st, 4, new_device_approval ? 1 : 0);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<PolicyRow> ServerStore::policy_list() {
+  std::vector<PolicyRow> out;
+  const char* sql =
+      "SELECT department_path, allow_anonymous, allow_cross_state,"
+      " new_device_approval FROM policies"
+      " ORDER BY department_path = '' DESC, department_path ASC;"; // 全局行在前
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    PolicyRow p;
+    const char* path_ptr =
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    p.department_path = path_ptr ? path_ptr : "";
+    p.allow_anonymous = sqlite3_column_int(st, 1) != 0;
+    p.allow_cross_state = sqlite3_column_int(st, 2) != 0;
+    p.new_device_approval = sqlite3_column_int(st, 3) != 0;
+    out.push_back(std::move(p));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// 生效策略：本人部门 → 逐级上级部门（路径去尾）→ 全局行 → 内置默认
+PolicyRow ServerStore::resolve_policy(const std::string& account) {
+  const auto all = [&] {
+    std::map<std::string, PolicyRow> by_path;
+    for (const auto& p : policy_list()) by_path[p.department_path] = p;
+    return by_path;
+  }();
+  std::string path;
+  if (const auto prof = member_profile(account)) {
+    path = prof->department_path;
+  }
+  while (!path.empty()) {
+    const auto it = all.find(path);
+    if (it != all.end()) return it->second;
+    const auto pos = path.rfind('/');
+    if (pos == std::string::npos) break;
+    path.resize(pos);
+  }
+  if (const auto it = all.find(""); it != all.end()) return it->second;
+  PolicyRow fallback; // 内置默认：宽松（免登录可用、跨态可通、新设备免审批）
+  return fallback;
 }
 
 } // namespace memex::server

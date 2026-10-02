@@ -61,6 +61,9 @@ private:
   void show_collab_login_dialog();
   void show_org_dialog();        // 菜单入口：查询＋组织架构弹窗（T3.1）
   void build_org_tree(const QString& org_json); // 弹窗内构建部门/成员树
+  void apply_policy(const QString& org_json); // 解析本人生效策略（T3.4）
+  // 直连发送是否被策略放行：免登录使用／跨态通信两项开关（T3.4）
+  bool direct_send_allowed();
 
   QString current_peer_;      // 当前会话对端（设备标识或协作账号）
   QString current_kind_{QStringLiteral("direct")}; // 会话形态：direct／collab
@@ -68,6 +71,8 @@ private:
   bool collab_was_logged_in_{false}; // 上一轮登录态（降级提示去抖）
   QString last_org_json_;     // 最近一次组织架构数据（T3.1）
   bool org_dialog_pending_{false}; // 已请求组织架构、等待弹窗
+  bool anonymous_allowed_{true};   // T3.4 生效策略：允许免登录使用（默认宽松）
+  bool cross_state_allowed_{true}; // T3.4 生效策略：允许与未登录设备通信
   QMap<QString, quint64> file_sent_; // 文件名 → 最近一次进度字节（节流）
   bool chat_showing_guidance_{false}; // 聊天区当前是否为引导态
   QString status_hint_;               // 状态栏事件提示（引擎态前缀实时拼）

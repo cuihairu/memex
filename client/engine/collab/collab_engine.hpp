@@ -68,7 +68,9 @@ signals:
   void message_recalled(const QString& from, const QString& msg_id);
   // 组织架构数据（T3.1）：JSON——
   // {"departments":[{"path":"公司/研发部"}],
-  //  "members":[{"account","display_name","title","department_path","manager","role"}]}
+  //  "members":[{"account","display_name","title","department_path","manager","role"}],
+  //  "policies":[{"department_path":"","allow_anonymous":true,
+  //              "allow_cross_state":true,"new_device_approval":false}]}（T3.4）
   void org_received(const QString& org_json);
 
 private:

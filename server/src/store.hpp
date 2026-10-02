@@ -98,6 +98,15 @@ struct AuditReadRow {
   std::int64_t ts_ms{0};
 };
 
+// 策略开关（T3.4）：按部门配置、全局兜底。department_path 空串=全局行；
+// 未配置的部门继承全局。resolve 时按成员部门逐级向上找不到再看全局。
+struct PolicyRow {
+  std::string department_path; // 空=全局默认
+  bool allow_anonymous{true};
+  bool allow_cross_state{true};
+  bool new_device_approval{false};
+};
+
 class ServerStore {
 public:
   ServerStore() = default;
@@ -202,6 +211,16 @@ public:
   // 批量导入：逐行校验（账号存在、非自身、不成环），坏行拒绝并报告行号，
   // 好行入库（单事务，坏行逐行回滚不影响好行）。
   OrgImportResult import_members(const std::vector<OrgImportRow>& rows);
+
+  // —— T3.4 策略开关 ——
+  // 配置一行策略（部门路径空=全局；部门不存在拒绝）。
+  bool set_policy(const std::string& department_path, bool allow_anonymous,
+                  bool allow_cross_state, bool new_device_approval);
+  // 全部已配置行（含全局行；部门行按路径字典序）
+  std::vector<PolicyRow> policy_list();
+  // 按账号解析生效策略：本人部门 → 逐级上级部门 → 全局 → 内置默认
+  //（未配置任何行时：允许免登录、允许跨态、新设备免审批）。
+  PolicyRow resolve_policy(const std::string& account);
 
 private:
   bool ensure_schema();

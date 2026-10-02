@@ -233,6 +233,10 @@ void MainWindow::build_ui() {
       show_status(QStringLiteral("先选择设备再发送文件"));
       return;
     }
+    if (current_kind_ != QStringLiteral("collab") &&
+        !direct_send_allowed()) { // T3.4 策略闸门（文件与文字同口径）
+      return;
+    }
     const QString path = QFileDialog::getOpenFileName(
         this, QStringLiteral("选择要发送的文件"));
     if (path.isEmpty()) return;
@@ -368,6 +372,7 @@ void MainWindow::wire_collab() {
   connect(&collab_engine_, &CollabEngine::org_received, this,
           [this](const QString& org_json) {
             last_org_json_ = org_json;
+            apply_policy(org_json);
             if (org_dialog_pending_) {
               org_dialog_pending_ = false;
               build_org_tree(org_json);
@@ -417,6 +422,7 @@ bool MainWindow::send_in_current_chat(const QString& text) {
                    QStringLiteral("collab"));
     return true;
   }
+  if (!direct_send_allowed()) return false; // T3.4 策略闸门
   const std::string peer = current_peer_.toStdString();
   if (direct_engine_.send_text(peer, text.toStdString()) == 0) {
     show_status(QStringLiteral("发送失败：对端不可达"));
@@ -426,6 +432,69 @@ bool MainWindow::send_in_current_chat(const QString& text) {
                  QDateTime::currentMSecsSinceEpoch(), true,
                  QStringLiteral("direct"));
   return true;
+}
+
+// —— T3.4 策略开关（下发自服务端，按本人部门解析）——
+// 直连发送闸门：未登录发直连＝免登录使用；已登录发直连＝与未登录设备通信。
+bool MainWindow::direct_send_allowed() {
+  if (!collab_engine_.is_logged_in() && !anonymous_allowed_) {
+    show_status(QStringLiteral(
+        "当前策略：需登录协作态后使用（免登录使用已被管理员禁止）"));
+    return false;
+  }
+  if (collab_engine_.is_logged_in() && !cross_state_allowed_) {
+    show_status(QStringLiteral(
+        "当前策略：禁止与未登录设备通信（该会话未进归档）"));
+    return false;
+  }
+  return true;
+}
+
+// 解析本人生效策略：本人部门 → 逐级上级部门 → 全局行 → 默认宽松
+void MainWindow::apply_policy(const QString& org_json) {
+  nlohmann::json j =
+      nlohmann::json::parse(org_json.toStdString(), nullptr, false);
+  if (j.is_discarded()) return;
+  // 本人部门路径
+  QString dept;
+  const QString me = collab_engine_.account();
+  if (j.contains("members")) {
+    for (const auto& m : j["members"]) {
+      if (QString::fromStdString(m.value("account", std::string{})) == me) {
+        dept = QString::fromStdString(m.value("department_path", std::string{}));
+        break;
+      }
+    }
+  }
+  const auto match = [&](const QString& path) -> const nlohmann::json* {
+    if (!j.contains("policies")) return nullptr;
+    for (const auto& p : j["policies"]) {
+      if (QString::fromStdString(p.value("department_path", std::string{})) ==
+          path) {
+        return &p;
+      }
+    }
+    return nullptr;
+  };
+  const nlohmann::json* row = nullptr;
+  QString path = dept;
+  while (!path.isEmpty()) {
+    if (const nlohmann::json* hit = match(path)) {
+      row = hit;
+      break;
+    }
+    const int pos = path.lastIndexOf(QChar('/'));
+    if (pos <= 0) break;
+    path.truncate(pos);
+  }
+  if (!row) row = match(QString()); // 全局行
+  if (row) {
+    anonymous_allowed_ = row->value("allow_anonymous", true);
+    cross_state_allowed_ = row->value("allow_cross_state", true);
+  } else {
+    anonymous_allowed_ = true; // 未配置＝默认宽松
+    cross_state_allowed_ = true;
+  }
 }
 
 bool MainWindow::collab_logged_in() const {

@@ -570,6 +570,110 @@ int cmd_org(int argc, char** argv, const std::string& db_path) {
   return 2;
 }
 
+// policy 子命令族（T3.4 策略开关，按部门配置、全局兜底）：
+//   policy set [--dept 路径] [--allow-anonymous on|off]
+//              [--allow-cross-state on|off] [--new-device-approval on|off]
+//          不带 --dept 即全局行；未给的开关保留现值（新行为内置默认）。
+//   policy list                        已配置行（全局在前）
+//   policy show <账号>                 该账号生效策略（部门→上级部门→全局）
+int cmd_policy(int argc, char** argv, const std::string& db_path) {
+  if (argc < 1) {
+    std::cerr << "用法：memex_server policy set [--dept 路径] [--allow-anonymous"
+                 " on|off] [--allow-cross-state on|off] [--new-device-approval"
+                 " on|off] | policy list | policy show <账号> [--db <库>]\n";
+    return 2;
+  }
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+  const std::string_view sub = argv[0];
+
+  if (sub == "list") {
+    std::cout << "范围\t免登录使用\t与未登录设备通信\t新设备登录需审批\n";
+    for (const auto& p : store.policy_list()) {
+      std::cout << (p.department_path.empty() ? "（全局默认）" : p.department_path)
+                << '\t' << (p.allow_anonymous ? "允许" : "禁止") << '\t'
+                << (p.allow_cross_state ? "允许" : "禁止") << '\t'
+                << (p.new_device_approval ? "需审批" : "免审批") << '\n';
+    }
+    return 0;
+  }
+  if (sub == "show") {
+    if (argc < 2) {
+      std::cerr << "用法：policy show <账号>\n";
+      return 2;
+    }
+    const auto p = store.resolve_policy(argv[1]);
+    std::cout << "账号：" << argv[1] << "\n生效范围："
+              << (p.department_path.empty() ? "（全局默认）" : p.department_path)
+              << "\n免登录使用：" << (p.allow_anonymous ? "允许" : "禁止")
+              << "\n与未登录设备通信：" << (p.allow_cross_state ? "允许" : "禁止")
+              << "\n新设备登录需审批："
+              << (p.new_device_approval ? "需审批" : "免审批") << "\n";
+    return 0;
+  }
+  if (sub == "set") {
+    std::string dept;
+    // 基线：目标范围已配置行保留现值，未配置从内置默认起步
+    memex::server::PolicyRow row;
+    const auto apply_flags = [&](int i) {
+      for (; i < argc; ++i) {
+        const std::string_view opt = argv[i];
+        const auto value_on = [&](const char* name) -> int {
+          if (i + 1 >= argc) {
+            std::cerr << name << " 缺取值（on|off）\n";
+            std::exit(2);
+          }
+          const std::string_view v = argv[++i];
+          if (v == "on") return 1;
+          if (v == "off") return 0;
+          std::cerr << name << " 取值应为 on|off：" << v << "\n";
+          std::exit(2);
+        };
+        if (opt == "--allow-anonymous") {
+          row.allow_anonymous = value_on("--allow-anonymous") != 0;
+        } else if (opt == "--allow-cross-state") {
+          row.allow_cross_state = value_on("--allow-cross-state") != 0;
+        } else if (opt == "--new-device-approval") {
+          row.new_device_approval = value_on("--new-device-approval") != 0;
+        } else {
+          std::cerr << "未知选项：" << opt << "\n";
+          std::exit(2);
+        }
+      }
+    };
+    // 先扫 --dept（决定目标范围），再按目标范围取基线、套开关
+    for (int i = 1; i < argc; ++i) {
+      if (std::string_view(argv[i]) == "--dept") {
+        if (i + 1 >= argc) {
+          std::cerr << "--dept 缺路径\n";
+          return 2;
+        }
+        dept = argv[++i];
+      }
+    }
+    for (const auto& p : store.policy_list()) {
+      if (p.department_path == dept) row = p;
+    }
+    apply_flags(1);
+    if (!store.set_policy(dept, row.allow_anonymous, row.allow_cross_state,
+                          row.new_device_approval)) {
+      std::cerr << "策略写入失败（部门路径不存在？）：" << dept << "\n";
+      return 1;
+    }
+    std::cout << "已配置策略：" << (dept.empty() ? "（全局默认）" : dept)
+              << "（免登录 " << (row.allow_anonymous ? "允许" : "禁止")
+              << "／跨态通信 " << (row.allow_cross_state ? "允许" : "禁止")
+              << "／新设备 " << (row.new_device_approval ? "需审批" : "免审批")
+              << "）\n";
+    return 0;
+  }
+  std::cerr << "未知 policy 子命令：" << sub << "\n";
+  return 2;
+}
+
 int self_test() {
   asio::io_context io;
   asio::ip::tcp::acceptor a(
@@ -612,6 +716,7 @@ int main(int argc, char** argv) {
     if (cmd == "messages") return cmd_messages(sub_argc, sub_argv, db_path);
     if (cmd == "audit") return cmd_audit(sub_argc, sub_argv, db_path);
     if (cmd == "org") return cmd_org(sub_argc, sub_argv, db_path);
+    if (cmd == "policy") return cmd_policy(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
               << "用法：memex_server [serve [--port N] [--db P]] | account add … | "
                  "logins [账号] [--device 指纹前缀] | device … | "

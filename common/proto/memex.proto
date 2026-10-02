@@ -100,9 +100,18 @@ message OrgMember {
   string role = 6;            // 角色（admin／member）
 }
 
+// 策略开关（T3.4）：按部门配置、全局兜底（department_path 空=全局默认）。
+message OrgPolicy {
+  string department_path = 1; // 空串=全局默认行
+  bool allow_anonymous = 2;       // 允许免登录（直连态）使用
+  bool allow_cross_state = 3;     // 允许已登录端与未登录设备通信
+  bool new_device_approval = 4;   // 新设备登录需审批
+}
+
 message OrgData {
   repeated OrgDepartment departments = 1;
   repeated OrgMember members = 2;
+  repeated OrgPolicy policies = 3; // 策略开关（T3.4，随组织架构一并下发）
 }
 
 // 信封：所有帧的载荷体。oneof 字段号 = 100 + 对应类型编号，便于读码对账。

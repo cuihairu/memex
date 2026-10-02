@@ -324,6 +324,13 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
                               {"manager", m.manager()},
                               {"role", m.role()}});
     }
+    j["policies"] = nlohmann::json::array();
+    for (const auto& p : msg.org_data().policies()) {
+      j["policies"].push_back({{"department_path", p.department_path()},
+                               {"allow_anonymous", p.allow_anonymous()},
+                               {"allow_cross_state", p.allow_cross_state()},
+                               {"new_device_approval", p.new_device_approval()}});
+    }
     emit org_received(QString::fromStdString(j.dump()));
     break;
   }

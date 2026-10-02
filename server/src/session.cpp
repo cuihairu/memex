@@ -138,6 +138,14 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       om->set_manager(m.manager);
       om->set_role(m.role);
     }
+    // T3.4 策略开关随组织架构一并下发（客户端按本人部门解析生效行）
+    for (const auto& p : server_.store().policy_list()) {
+      auto* op = data->add_policies();
+      op->set_department_path(p.department_path);
+      op->set_allow_anonymous(p.allow_anonymous);
+      op->set_allow_cross_state(p.allow_cross_state);
+      op->set_new_device_approval(p.new_device_approval);
+    }
     send(memex::protocol::encode(out));
     break;
   }
@@ -245,6 +253,14 @@ void Session::handle_login(const memex::protocol::Message& msg) {
       if (dev && !dev->enabled) {
         reason = "设备已停用：请联系管理员";
         rec.result = "device_disabled";
+      } else if (!dev && server_.store().resolve_policy(account_)
+                               .new_device_approval) {
+        // T3.4 新设备审批：首登即建档为停用（待审批），管理员 device approve 后放行
+        server_.store().upsert_device(device_fingerprint_, kind_, device_name_,
+                                      now_ms());
+        server_.store().set_device_enabled(device_fingerprint_, false);
+        reason = "新设备待审批：请联系管理员";
+        rec.result = "pending_approval";
       } else {
         ok = true;
         rec.result = "ok";

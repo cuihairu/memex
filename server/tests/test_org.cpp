@@ -280,6 +280,111 @@ int main() {
     io_thread.join();
   }
 
+  // —— T3.4 策略开关（库级）：全局／部门行、逐级解析、坏路径拒绝 ——
+  {
+    memex::server::ServerStore s;
+    CHECK(s.open(":memory:"));
+    CHECK(s.create_account("alice", "p", "Alice"));
+    CHECK(s.create_account("bob", "p", "Bob"));
+    const int dept = s.ensure_department_path("公司/研发部");
+    CHECK(s.set_member_profile("bob", dept, "工程师", ""));
+    auto pol = s.resolve_policy("bob"); // 未配置＝默认宽松
+    CHECK(pol.allow_anonymous && pol.allow_cross_state &&
+          !pol.new_device_approval);
+    CHECK(s.set_policy("", false, true, true)); // 全局收紧
+    pol = s.resolve_policy("alice");            // 无部门→全局
+    CHECK(!pol.allow_anonymous && pol.new_device_approval);
+    CHECK(s.set_policy("公司/研发部", true, false, false)); // 部门覆盖
+    pol = s.resolve_policy("bob");
+    CHECK(pol.allow_anonymous && !pol.allow_cross_state &&
+          !pol.new_device_approval);
+    const int sub = s.ensure_department_path("公司/研发部/客户端组");
+    CHECK(s.set_member_profile("alice", sub, "组长", ""));
+    pol = s.resolve_policy("alice"); // 子部门未配置→上级部门行
+    CHECK(pol.allow_anonymous && !pol.allow_cross_state);
+    CHECK(!s.set_policy("不存在/路径", true, true, true)); // 坏路径拒绝
+    s.close();
+  }
+
+  // —— T3.4（CLI＋协议级）：新设备审批挡首登→审批放行；ORG_DATA 带策略 ——
+  {
+    const std::string pdb = "/tmp/memex-policy-test.db";
+    std::remove(pdb.c_str());
+    run_cli("account add alice pw --db " + pdb);
+    CHECK(run_cli("policy set --new-device-approval on --db " + pdb)
+              .find("新设备 需审批") != std::string::npos);
+    CHECK(run_cli("policy show alice --db " + pdb).find("需审批") !=
+          std::string::npos);
+
+    memex::server::ServerStore srv;
+    CHECK(srv.open(pdb));
+    const auto login_alice = [&]() {
+      memex::protocol::Message m;
+      m.set_type(memex::protocol::v1::LOGIN);
+      m.set_from("pc-new");
+      m.set_to("server");
+      m.set_ts_ms(now_ms());
+      auto* in = m.mutable_login();
+      in->set_account("alice");
+      in->set_password("pw");
+      in->set_device_fingerprint(memex::server::sha256_hex("pc-new"));
+      in->set_device_kind("desktop");
+      in->set_device_name("pc-new");
+      in->set_client_version("0.1.0-test");
+      return m;
+    };
+    asio::io_context io;
+    memex::server::CollabServer server(io, srv, 0);
+    server.start_accept();
+    std::thread io_thread([&] { io.run(); });
+    {
+      TestClient c(io, server.port());
+      c.send(login_alice());
+      const auto r = c.read();
+      CHECK(!r.login_result().ok()); // 首登被挡
+      CHECK(r.login_result().reason().find("待审批") != std::string::npos);
+    }
+    CHECK(srv.device_list().size() == 1); // 已建档且停用（待审批）
+    CHECK(!srv.device_list()[0].enabled);
+    io.stop();
+    io_thread.join();
+    const std::string fp = srv.device_list()[0].fingerprint;
+    srv.close();
+
+    CHECK(run_cli("device enable " + fp.substr(0, 12) + " --db " + pdb)
+              .find("已启用") != std::string::npos);
+
+    memex::server::ServerStore srv2;
+    CHECK(srv2.open(pdb));
+    asio::io_context io2;
+    memex::server::CollabServer server2(io2, srv2, 0);
+    server2.start_accept();
+    std::thread io_thread2([&] { io2.run(); });
+    {
+      TestClient c(io2, server2.port());
+      c.send(login_alice());
+      CHECK(c.read().login_result().ok()); // 审批后放行
+      memex::protocol::Message q;
+      q.set_type(memex::protocol::v1::ORG_QUERY);
+      q.set_from("alice");
+      q.set_to("server");
+      q.set_ts_ms(now_ms());
+      c.send(q);
+      const auto data = c.read();
+      CHECK(data.type() == memex::protocol::v1::ORG_DATA);
+      bool has_global_policy = false;
+      for (const auto& p : data.org_data().policies()) {
+        if (p.department_path().empty() && p.new_device_approval()) {
+          has_global_policy = true; // 只设了审批开关，其余两项保持基线默认
+        }
+      }
+      CHECK(has_global_policy); // 策略随组织架构下发
+    }
+    io2.stop();
+    io_thread2.join();
+    srv2.close();
+  }
+
   if (g_failures == 0) {
     std::cout << "org tests: all passed\n";
     return 0;
