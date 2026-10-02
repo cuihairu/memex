@@ -61,7 +61,26 @@ bool ServerStore::ensure_schema() {
       "  result TEXT NOT NULL,"
       "  ts_ms INTEGER NOT NULL);"
       "CREATE INDEX IF NOT EXISTS idx_login_records_account"
-      "  ON login_records(account, ts_ms);";
+      "  ON login_records(account, ts_ms);"
+      "CREATE TABLE IF NOT EXISTS offline_messages ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  msg_id TEXT NOT NULL UNIQUE,"
+      "  to_account TEXT NOT NULL,"
+      "  envelope BLOB NOT NULL,"
+      "  queued_ms INTEGER NOT NULL);"
+      "CREATE INDEX IF NOT EXISTS idx_offline_to"
+      "  ON offline_messages(to_account, id);"
+      "CREATE TABLE IF NOT EXISTS messages ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  msg_id TEXT NOT NULL UNIQUE,"
+      "  from_account TEXT NOT NULL,"
+      "  to_account TEXT NOT NULL,"
+      "  type INTEGER NOT NULL,"
+      "  text TEXT NOT NULL DEFAULT '',"
+      "  ts_ms INTEGER NOT NULL,"
+      "  recall INTEGER NOT NULL DEFAULT 0);"
+      "CREATE INDEX IF NOT EXISTS idx_messages_to"
+      "  ON messages(to_account, id);";
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -169,6 +188,134 @@ std::vector<LoginRecord> ServerStore::login_records(const std::string& account,
   }
   sqlite3_finalize(st);
   return out;
+}
+
+bool ServerStore::queue_offline(const std::string& msg_id,
+                                const std::string& to_account,
+                                const std::string& envelope_blob) {
+  const char* sql =
+      "INSERT OR IGNORE INTO offline_messages(msg_id, to_account, envelope,"
+      " queued_ms) VALUES(?, ?, ?, ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, to_account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_blob(st, 3, envelope_blob.data(),
+                    static_cast<int>(envelope_blob.size()), SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, now_ms());
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<std::string> ServerStore::pending_offline(const std::string& account) {
+  std::vector<std::string> out;
+  const char* sql =
+      "SELECT envelope FROM offline_messages WHERE to_account = ?"
+      " ORDER BY id ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    const auto* p = static_cast<const char*>(sqlite3_column_blob(st, 0));
+    const int n = sqlite3_column_bytes(st, 0);
+    out.emplace_back(p, static_cast<std::size_t>(n));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::ack_offline(const std::string& msg_id) {
+  const char* sql = "DELETE FROM offline_messages WHERE msg_id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::size_t ServerStore::offline_count(const std::string& account) {
+  const char* sql =
+      "SELECT COUNT(*) FROM offline_messages WHERE to_account = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  std::size_t n = 0;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    n = static_cast<std::size_t>(sqlite3_column_int64(st, 0));
+  }
+  sqlite3_finalize(st);
+  return n;
+}
+
+// T2.3 消息归档：协作态消息全量落库
+bool ServerStore::store_message(const std::string& msg_id, const std::string& from_account,
+                                const std::string& to_account, int type,
+                                const std::string& text, std::int64_t ts_ms) {
+  const char* sql =
+      "INSERT OR IGNORE INTO messages(msg_id, from_account, to_account, type, text, ts_ms)"
+      " VALUES(?, ?, ?, ?, ?, ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, from_account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, to_account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 4, type);
+  sqlite3_bind_text(st, 5, text.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 6, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok; // 唯一键冲突（消息已存在）→ DONE 之外 → false
+}
+
+// 消息检索：按账号查询已归档消息
+std::vector<std::tuple<std::string, std::string, std::string, std::int64_t, int>>
+ServerStore::messages(const std::string& account, int limit) {
+  std::vector<std::tuple<std::string, std::string, std::string, std::int64_t, int>> out;
+  const char* sql =
+      "SELECT msg_id, from_account, type, text, ts_ms FROM messages WHERE to_account = ?"
+      " ORDER BY id DESC LIMIT ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  int idx = 1;
+  sqlite3_bind_text(st, idx++, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, idx, limit);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    std::string msg_id(reinterpret_cast<const char*>(sqlite3_column_text(st, 0)));
+    std::string from_account(reinterpret_cast<const char*>(sqlite3_column_text(st, 1)));
+    int type = sqlite3_column_int(st, 2);
+    const char* text_ptr = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    std::string text = text_ptr ? text_ptr : "";
+    std::int64_t ts_ms = sqlite3_column_int64(st, 4);
+    out.emplace_back(msg_id, from_account, text, ts_ms, type);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// 消息撤回：只置标记不清正文
+bool ServerStore::recall_message(const std::string& msg_id) {
+  const char* sql = "UPDATE messages SET recall = 1 WHERE msg_id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+// 查询消息是否被撤回
+bool ServerStore::is_recalled(const std::string& msg_id) {
+  const char* sql = "SELECT recall FROM messages WHERE msg_id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  bool recalled = false;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    recalled = sqlite3_column_int(st, 0) != 0;
+  }
+  sqlite3_finalize(st);
+  return recalled;
 }
 
 } // namespace memex::server

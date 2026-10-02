@@ -1,4 +1,4 @@
-// 接入会话：帧解码、心跳应答、登录流程与互踢下发。
+// 接入会话：帧解码、心跳应答、登录流程与互踢下发、消息路由（T2.2）。
 #pragma once
 
 #include <array>
@@ -22,7 +22,11 @@ public:
 
   const std::string& account() const { return account_; }
   const std::string& device_name() const { return device_name_; }
-  bool desktop() const { return desktop_; }
+  const std::string& device_kind() const { return kind_; }
+  bool desktop() const { return kind_ != "mobile"; }
+
+  // 投递一帧已序列化的 Envelope（离线补投／消息路由用）。
+  void deliver_frame(const std::string& envelope_blob);
 
   // 单点在线互踢：下发 KICK 帧并优雅关闭。
   void kick(const std::string& reason, const std::string& replaced_by);
@@ -50,7 +54,7 @@ private:
   std::string account_;
   std::string device_name_;
   std::string device_fingerprint_;
-  bool desktop_{true}; // 设备类型 desktop=主（单点在线）/mobile=辅
+  std::string kind_{"desktop"}; // 设备类型：同类型单点在线互踢，跨类型并存
 };
 
 } // namespace memex::server

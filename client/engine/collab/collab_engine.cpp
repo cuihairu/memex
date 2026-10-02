@@ -6,7 +6,10 @@
 #include <QFile>
 #include <QSysInfo>
 
+#include <algorithm>
+
 #include <memex/protocol/messages.hpp>
+#include <core/local_store.hpp>
 
 #ifndef MEMEX_VERSION
 #define MEMEX_VERSION "dev"
@@ -18,6 +21,7 @@ using memex::protocol::Message;
 using memex::protocol::MsgType;
 
 namespace {
+
 // machine-id 的两个常规落点（发行版差异）；都拿不到则退化为主机名。
 QString read_machine_id() {
   for (const char* path : {"/etc/machine-id", "/var/lib/dbus/machine-id"}) {
@@ -29,6 +33,7 @@ QString read_machine_id() {
   }
   return QString{};
 }
+
 } // namespace
 
 QString CollabEngine::device_fingerprint() {
@@ -42,8 +47,7 @@ QString CollabEngine::device_name() { return QSysInfo::machineHostName(); }
 
 CollabEngine::CollabEngine(QObject* parent) : QObject(parent) {
   socket_ = new QTcpSocket(this);
-  connect(socket_, &QTcpSocket::connected, this,
-          [this] { send_login(password_); });
+  connect(socket_, &QTcpSocket::connected, this, [this] { send_login_frame(); });
   connect(socket_, &QTcpSocket::readyRead, this, [this] {
     const QByteArray data = socket_->readAll();
     std::vector<std::string> payloads;
@@ -60,24 +64,65 @@ CollabEngine::CollabEngine(QObject* parent) : QObject(parent) {
   });
   connect(socket_, &QTcpSocket::disconnected, this, [this] {
     const bool was_logged_in = logged_in_;
+    const bool expected = kicking_ || manual_logout_;
     teardown();
-    if (was_logged_in && !kicking_) emit connection_lost();
+    if (was_logged_in && !expected) {
+      emit connection_lost();
+      schedule_reconnect();
+    }
   });
   connect(socket_, &QTcpSocket::errorOccurred, this,
           [this](QAbstractSocket::SocketError) {
-        if (!logged_in_) {
-          emit login_failed(QStringLiteral("无法连接服务器"));
-        } else if (!kicking_) {
-          emit connection_lost();
-        }
-      });
+            if (logged_in_) return;
+            if (reconnecting_) {
+              schedule_reconnect();
+            } else {
+              emit login_failed(QStringLiteral("无法连接服务器"));
+            }
+          });
+
+  // 定时器连接（QTimer 对象，非指针）
+  connect(&reconnect_timer_, &QTimer::timeout, this, [this] {
+    reconnect_timer_.stop();
+    qInfo() << "[协作] 自动重连" << host_ << ":" << port_;
+    socket_->connectToHost(host_, port_);
+  });
+  reconnect_timer_.setSingleShot(true);
+
+  connect(&heartbeat_timer_, &QTimer::timeout, this, [this] {
+    if (heartbeat_missed_ >= heartbeat_max_missed_) {
+      qWarning() << "[协作] 心跳超时，主动断开并转入重连";
+      socket_->abort();
+      return;
+    }
+    ++heartbeat_missed_;
+    Message ping;
+    ping.set_type(MsgType::PING);
+    ping.set_from(account_.toStdString());
+    ping.set_to("server");
+    ping.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+    send_frame(ping);
+  });
+
+  connect(&delivery_timer_, &QTimer::timeout, this, [this] { check_delivery_timeouts(); });
 }
 
 CollabEngine::~CollabEngine() = default;
 
+void CollabEngine::set_heartbeat(int interval_ms, int max_missed) {
+  heartbeat_interval_ms_ = interval_ms;
+  heartbeat_max_missed_ = max_missed;
+}
+
+void CollabEngine::attach_store(LocalStore* store) { store_ = store; }
+
 void CollabEngine::login(const QString& host, quint16 port,
                          const QString& account, const QString& password) {
+  reconnect_timer_.stop();
   teardown();
+  manual_logout_ = false;
+  reconnecting_ = false;
+  reconnect_backoff_ms_ = 1000;
   account_ = account;
   password_ = password;
   host_ = host;
@@ -88,20 +133,53 @@ void CollabEngine::login(const QString& host, quint16 port,
 
 void CollabEngine::logout() {
   if (!logged_in_) return;
+  manual_logout_ = true;
   Message m;
   m.set_type(MsgType::LOGOUT);
   m.set_from(account_.toStdString());
   m.set_to("server");
   m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
-  const std::string frame = memex::protocol::encode(m);
-  socket_->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
-  socket_->flush();
-  kicking_ = true; // 主动登出的断开不算异常
+  send_frame(m);
+  kicking_ = true;
   logged_in_ = false;
   socket_->disconnectFromHost();
 }
 
-void CollabEngine::send_login(const QString& password) {
+quint64 CollabEngine::send_text(const QString& to, const QString& text) {
+  if (!logged_in_ || to.isEmpty()) return 0;
+  const quint64 seq = next_seq_++;
+  Message m;
+  m.set_type(MsgType::TEXT);
+  m.set_seq(seq);
+  m.set_from(account_.toStdString());
+  m.set_to(to.toStdString());
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  m.mutable_text()->set_text(text.toStdString());
+  send_frame(m);
+
+  if (store_) {
+    memex::client::StoredMessage sm;
+    sm.seq = seq;
+    sm.peer = to.toStdString();
+    sm.from = account_.toStdString();
+    sm.to = to.toStdString();
+    sm.ts_ms = m.ts_ms();
+    sm.text = text.toStdString();
+    sm.source = "collab";
+    store_->append(sm);
+  }
+
+  pending_ack_.insert(seq, QDateTime::currentMSecsSinceEpoch());
+  if (!delivery_timer_.isActive()) delivery_timer_.start(500);
+  return seq;
+}
+
+void CollabEngine::send_frame(const Message& msg) {
+  const std::string frame = memex::protocol::encode(msg);
+  socket_->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
+}
+
+void CollabEngine::send_login_frame() {
   Message m;
   m.set_type(MsgType::LOGIN);
   m.set_from(device_name().toStdString());
@@ -109,13 +187,12 @@ void CollabEngine::send_login(const QString& password) {
   m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
   auto* in = m.mutable_login();
   in->set_account(account_.toStdString());
-  in->set_password(password.toStdString());
+  in->set_password(password_.toStdString());
   in->set_device_fingerprint(device_fingerprint().toStdString());
-  in->set_device_kind("desktop"); // 桌面端＝主设备：单点在线
+  in->set_device_kind("desktop");
   in->set_device_name(device_name().toStdString());
   in->set_client_version(MEMEX_VERSION);
-  const std::string frame = memex::protocol::encode(m);
-  socket_->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
+  send_frame(m);
 }
 
 void CollabEngine::handle_frame(const QByteArray& payload) {
@@ -134,12 +211,22 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
     const auto& r = msg.login_result();
     if (r.ok()) {
       logged_in_ = true;
+      reconnect_timer_.stop();
+      reconnect_backoff_ms_ = 1000;
+      start_heartbeat();
       const QString display =
           QString::fromStdString(r.display_name().empty() ? account_.toStdString()
                                                           : r.display_name());
       qInfo() << "[协作] 登录成功：" << account_ << "（" << display << "）";
-      emit logged_in(account_, display);
+      if (reconnecting_) {
+        reconnecting_ = false;
+        emit reconnected();
+      } else {
+        emit logged_in(account_, display);
+      }
     } else {
+      reconnecting_ = false;
+      reconnect_timer_.stop();
       qInfo() << "[协作] 登录失败：" << QString::fromStdString(r.reason());
       emit login_failed(QString::fromStdString(r.reason()));
       socket_->disconnectFromHost();
@@ -149,7 +236,9 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
   case MsgType::KICK: {
     const auto& k = msg.has_kick() ? msg.kick()
                                    : memex::protocol::v1::Kick{};
-    kicking_ = true; // 服务端互踢，属预期断开
+    kicking_ = true;
+    reconnect_timer_.stop();
+    reconnecting_ = false;
     qInfo() << "[协作] 被顶替下线：" << QString::fromStdString(k.reason());
     emit kicked(QString::fromStdString(k.reason()),
                 QString::fromStdString(k.replaced_by()));
@@ -158,17 +247,99 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
     break;
   }
   case MsgType::PONG:
-    // 心跳簿记在 T2.2（重连与离线补投）接入
+    heartbeat_missed_ = 0;
+    break;
+  case MsgType::TEXT:
+    if (msg.has_text()) handle_text(msg);
+    break;
+  case MsgType::ACK:
+    handle_ack(msg);
     break;
   default:
-    // 协作消息收发在 T2.2 接入
     break;
   }
+}
+
+void CollabEngine::handle_text(const Message& msg) {
+  const qint64 ts =
+      msg.ts_ms() > 0 ? msg.ts_ms() : QDateTime::currentMSecsSinceEpoch();
+  bool inserted = true;
+  if (store_) {
+    memex::client::StoredMessage sm;
+    sm.seq = msg.seq();
+    sm.peer = msg.from();
+    sm.from = msg.from();
+    sm.to = msg.to();
+    sm.ts_ms = ts;
+    sm.text = msg.has_text() ? msg.text().text() : std::string{};
+    sm.source = "collab";
+    sm.msg_id = msg.msg_id();
+    store_->append(sm, &inserted);
+  }
+  if (!msg.msg_id().empty()) {
+    Message ack;
+    ack.set_type(MsgType::ACK);
+    ack.set_from(account_.toStdString());
+    ack.set_to("server");
+    ack.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+    ack.mutable_ack()->set_msg_id(msg.msg_id());
+    send_frame(ack);
+  }
+  if (inserted) {
+    emit message_received(QString::fromStdString(msg.from()),
+                          QString::fromStdString(msg.has_text() ? msg.text().text()
+                                                                : std::string{}),
+                          ts, QString::fromStdString(msg.msg_id()));
+  } else {
+    qInfo() << "[协作] 重复补投，按 msg_id 去重：" << QString::fromStdString(msg.msg_id());
+  }
+}
+
+void CollabEngine::handle_ack(const Message& msg) {
+  if (msg.seq() != 0 && pending_ack_.contains(msg.seq())) {
+    const quint64 seq = msg.seq();
+    pending_ack_.remove(seq);
+    emit text_delivered(seq, true);
+  }
+}
+
+void CollabEngine::start_heartbeat() {
+  heartbeat_missed_ = 0;
+  heartbeat_timer_.start(heartbeat_interval_ms_);
+}
+
+void CollabEngine::stop_heartbeat() { heartbeat_timer_.stop(); }
+
+void CollabEngine::schedule_reconnect() {
+  if (manual_logout_ || host_.isEmpty() || account_.isEmpty()) return;
+  reconnecting_ = true;
+  qInfo() << "[协作] " << reconnect_backoff_ms_ << "ms 后重连";
+  reconnect_timer_.start(reconnect_backoff_ms_);
+  reconnect_backoff_ms_ = std::min(reconnect_backoff_ms_ * 2, kMaxBackoffMs);
+}
+
+void CollabEngine::check_delivery_timeouts() {
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  for (auto it = pending_ack_.begin(); it != pending_ack_.end();) {
+    if (now - it.value() > kDeliveryTimeoutMs) {
+      emit text_delivered(it.key(), false);
+      it = pending_ack_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  if (pending_ack_.isEmpty()) delivery_timer_.stop();
 }
 
 void CollabEngine::teardown() {
   logged_in_ = false;
   kicking_ = false;
+  stop_heartbeat();
+  for (auto it = pending_ack_.constBegin(); it != pending_ack_.constEnd(); ++it) {
+    emit text_delivered(it.key(), false);
+  }
+  pending_ack_.clear();
+  delivery_timer_.stop();
   decoder_.reset();
   if (socket_->state() != QAbstractSocket::UnconnectedState) {
     socket_->abort();

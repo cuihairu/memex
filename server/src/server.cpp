@@ -30,27 +30,52 @@ void CollabServer::do_accept() {
       });
 }
 
+namespace {
+std::string kind_name(const std::string& kind) {
+  if (kind == "desktop") return "桌面端";
+  if (kind == "mobile") return "移动端";
+  return kind;
+}
+} // namespace
+
 std::shared_ptr<Session> CollabServer::register_online(
-    const std::string& account, std::shared_ptr<Session> session) {
+    const std::string& account, const std::string& device_kind,
+    std::shared_ptr<Session> session) {
   std::shared_ptr<Session> kicked;
+  auto& by_kind = online_[account];
   const std::string new_device = session->device_name();
-  if (const auto it = online_.find(account); it != online_.end()) {
+  if (const auto it = by_kind.find(device_kind); it != by_kind.end()) {
     kicked = it->second;
     // 先顶替再踢：即使旧会话互踢下发失败，在线表也已指向新会话
     it->second = std::move(session);
-    kicked->kick("单点在线：同账号在另一台桌面端登录", new_device);
+    kicked->kick("单点在线：同账号在另一台" + kind_name(device_kind) + "登录",
+                 new_device);
   } else {
-    online_.emplace(account, std::move(session));
+    by_kind.emplace(device_kind, std::move(session));
   }
   return kicked;
 }
 
 void CollabServer::unregister_online(const std::string& account,
+                                     const std::string& device_kind,
                                      Session* session) {
   const auto it = online_.find(account);
-  if (it != online_.end() && it->second.get() == session) {
-    online_.erase(it);
+  if (it == online_.end()) return;
+  const auto kit = it->second.find(device_kind);
+  if (kit != it->second.end() && kit->second.get() == session) {
+    it->second.erase(kit);
   }
+  if (it->second.empty()) online_.erase(it);
+}
+
+std::vector<std::shared_ptr<Session>> CollabServer::online_sessions(
+    const std::string& account) {
+  std::vector<std::shared_ptr<Session>> out;
+  if (const auto it = online_.find(account); it != online_.end()) {
+    out.reserve(it->second.size());
+    for (const auto& [kind, session] : it->second) out.push_back(session);
+  }
+  return out;
 }
 
 } // namespace memex::server

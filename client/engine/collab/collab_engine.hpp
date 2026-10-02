@@ -1,14 +1,19 @@
-// 协作引擎：登录协作服务端的长连接（T2.1 登录与互踢；T2.2 心跳／重连／离线补投）。
+// 协作引擎：登录协作服务端的长连接（T2.1 登录与互踢；T2.2 心跳／重连／离线补投／消息路由）。
 // 「客户端提示」以 kicked 信号送达界面层（T2.4 模式切换时接入提示框）。
 #pragma once
 
+#include <QHash>
 #include <QObject>
 #include <QString>
 #include <QTcpSocket>
+#include <QTimer>
 
 #include <memex/protocol/frame.hpp>
+#include <memex/protocol/messages.hpp>
 
 namespace memex::client {
+
+class LocalStore;
 
 class CollabEngine : public QObject {
   Q_OBJECT
@@ -26,33 +31,72 @@ public:
   QString account() const { return account_; }
   std::string status_text() const;
 
+  // 设置心跳参数：interval_ms（PING 间隔）、missed_max（连续丢包阈值，触发判死重连）。
+  void set_heartbeat(int interval_ms, int missed_max);
+
+  // 绑定本地库（用于协作消息落库与 msg_id 去重）。由外部传入并管理生命周期。
+  void attach_store(LocalStore* store);
+
 public slots:
   // 连接并登录（desktop 主设备）；结果异步回报：logged_in／login_failed。
   void login(const QString& host, quint16 port, const QString& account,
              const QString& password);
   // 主动登出：发 LOGOUT 后断开（T2.4 切换形态入口）。
   void logout();
+  // 发送文本消息（协作态）：返回本地序列号（sent 回执以此 seq 关联）。
+  quint64 send_text(const QString& to, const QString& text);
 
 signals:
   void logged_in(const QString& account, const QString& display_name);
   void login_failed(const QString& reason);
-  // 单点在线被踢（第二台桌面登录）：reason 供提示文案。
+  // 单点在线被踢（第二台同类型设备登录）：reason 供提示文案。
   void kicked(const QString& reason, const QString& replaced_by);
   void connection_lost();
+  // 重连成功（自动重登后恢复在线，离线消息补投已由服务端推送）。
+  void reconnected();
+  // 收到协作文本消息：from、text、ts_ms、msg_id（服务端分配，去重键）。
+  void message_received(const QString& from, const QString& text, qint64 ts_ms,
+                        const QString& msg_id);
+  // 发送方受理回执：seq（本地 send_text 返回值）、ok（服务端已接收并入队）。
+  void text_delivered(quint64 seq, bool ok);
 
 private:
-  void send_login(const QString& password);
+  void send_login_frame();
   void handle_frame(const QByteArray& payload);
   void teardown();
+  void schedule_reconnect();
+  void check_delivery_timeouts();
+  void start_heartbeat();
+  void stop_heartbeat();
+  void send_frame(const memex::protocol::Message& msg);
+  void handle_text(const memex::protocol::Message& msg);
+  void handle_ack(const memex::protocol::Message& msg);
 
   QTcpSocket* socket_{nullptr};
   memex::protocol::FrameDecoder decoder_;
+  LocalStore* store_{nullptr};
   QString account_;
   QString password_;
   QString host_;
   quint16 port_{0};
   bool logged_in_{false};
-  bool kicking_{false}; // 互踢／登出引发的断开，不再报连接丢失
+  bool kicking_{false};            // 互踢／登出引发的断开，不再报连接丢失
+  bool manual_logout_{false};      // 主动登出，不触发重连
+  bool reconnecting_{false};       // 正在重连中
+  int reconnect_backoff_ms_{1000}; // 重连退避（ms），指数级增至 30s
+  QTimer reconnect_timer_;
+
+  int heartbeat_interval_ms_{0};   // 0=未启用
+  int heartbeat_max_missed_{0};
+  int heartbeat_missed_{0};
+  QTimer heartbeat_timer_;
+
+  quint64 next_seq_{1};
+  QHash<quint64, qint64> pending_ack_; // seq -> 发送时间（ms），用于超时判定
+  QTimer delivery_timer_;
+
+  static constexpr qint64 kDeliveryTimeoutMs = 10000;
+  static constexpr int kMaxBackoffMs = 30000;
 };
 
 } // namespace memex::client

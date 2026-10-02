@@ -53,6 +53,10 @@ void Session::send(std::string frame) {
   if (idle && !closed_) do_write();
 }
 
+void Session::deliver_frame(const std::string& envelope_blob) {
+  send(memex::protocol::encode_frame(envelope_blob));
+}
+
 void Session::do_read() {
   auto self = shared_from_this();
   socket_.async_read_some(
@@ -60,7 +64,7 @@ void Session::do_read() {
       [this, self](std::error_code ec, std::size_t n) {
         if (ec) {
           log(std::string{"断开："} + ec.message());
-          if (logged_in_) server_.unregister_online(account_, this);
+          if (logged_in_) server_.unregister_online(account_, kind_, this);
           return;
         }
         handle_bytes(n);
@@ -112,8 +116,36 @@ void Session::handle_message(const memex::protocol::Message& msg) {
   case v1::LOGOUT:
     if (logged_in_) handle_logout();
     break;
+  case v1::TEXT: {
+    // 协作态消息路由：先入离线队列（至少一次投递），在线即投；
+    // 接收方 ACK(msg_id) 清队列，未 ACK 的下次登录重投（接收端按 msg_id 去重）。
+    if (!logged_in_ || !msg.has_text()) break;
+    const std::string msg_id =
+        sha256_hex(msg.from() + ":" + std::to_string(msg.seq()));
+    memex::protocol::Message out = msg;
+    out.set_msg_id(msg_id);
+    const std::string blob = out.SerializeAsString();
+    server_.store().queue_offline(msg_id, msg.to(), blob);
+    // 在线即投（桌面＋手机都在则都投，任一端 ACK 即清队列）
+    for (const auto& target : server_.online_sessions(msg.to())) {
+      target->deliver_frame(blob);
+    }
+    // 发送方受理回执（原 seq）：消息已被服务端接收并负责投递
+    memex::protocol::Message ack;
+    ack.set_type(v1::ACK);
+    ack.set_seq(msg.seq());
+    ack.set_to(msg.from());
+    send(memex::protocol::encode(ack));
+    break;
+  }
+  case v1::ACK:
+    // 接收方回执：消息已收取，清离线队列
+    if (logged_in_ && msg.has_ack() && !msg.ack().msg_id().empty()) {
+      server_.store().ack_offline(msg.ack().msg_id());
+    }
+    break;
   default:
-    // 消息路由与归档在 T2.2／T2.3 接入
+    // 归档落库在 T2.3 接入
     break;
   }
 }
@@ -129,13 +161,13 @@ void Session::handle_login(const memex::protocol::Message& msg) {
   account_ = in.account();
   device_fingerprint_ = in.device_fingerprint();
   device_name_ = in.device_name();
-  desktop_ = in.device_kind() != "mobile"; // 桌面=主设备；mobile=辅
+  kind_ = in.device_kind().empty() ? "desktop" : in.device_kind();
 
   LoginRecord rec;
   rec.account = account_;
   rec.fingerprint = device_fingerprint_;
-  rec.kind = in.device_kind();
-  rec.name = in.device_name();
+  rec.kind = kind_;
+  rec.name = device_name_;
   rec.source_ip = remote_;
   rec.version = in.client_version();
 
@@ -163,17 +195,20 @@ void Session::handle_login(const memex::protocol::Message& msg) {
   result.set_to(account_);
   result.set_ts_ms(now_ms());
   if (ok) {
-    // 单点在线：桌面端（主设备）同账号只允许一台在线——
+    // 同类型单点在线：同账号桌面端互踢、移动端互踢，桌面与手机并存。
     // register_online 在 io 线程内完成顶替，登录回包与互踢不会交错
     const auto kicked =
-        desktop_ ? server_.register_online(account_, shared_from_this())
-                 : nullptr;
+        server_.register_online(account_, kind_, shared_from_this());
     (void)kicked;
     logged_in_ = true;
     result.mutable_login_result()->set_ok(true);
     result.mutable_login_result()->set_display_name(
         row->display_name);
-    log("登录成功（" + account_ + "，" + in.device_kind() + "）");
+    log("登录成功（" + account_ + "，" + kind_ + "）");
+    // 离线消息补投：登录即推未 ACK 的队列（重复投递由接收端 msg_id 去重）
+    for (const auto& blob : server_.store().pending_offline(account_)) {
+      deliver_frame(blob);
+    }
   } else {
     result.mutable_login_result()->set_ok(false);
     result.mutable_login_result()->set_reason(reason);
@@ -184,7 +219,7 @@ void Session::handle_login(const memex::protocol::Message& msg) {
 
 void Session::handle_logout() {
   log("登出（" + account_ + "）");
-  server_.unregister_online(account_, this);
+  server_.unregister_online(account_, kind_, this);
   logged_in_ = false;
   close();
 }

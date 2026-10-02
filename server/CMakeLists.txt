@@ -31,4 +31,10 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_accounts PRIVATE memex_server_core)
   add_test(NAME accounts COMMAND test_accounts)
   set_tests_properties(accounts PROPERTIES TIMEOUT 60)
+
+  # T2.2 消息通道验收：在线路由、离线排队补投、ACK 清队重投、同类型互踢跨类型并存
+  add_executable(test_gateway tests/test_gateway.cpp)
+  target_link_libraries(test_gateway PRIVATE memex_server_core)
+  add_test(NAME gateway COMMAND test_gateway)
+  set_tests_properties(gateway PROPERTIES TIMEOUT 60)
 endif()

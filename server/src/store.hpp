@@ -1,10 +1,11 @@
-// 服务端本地库（SQLite）：账号表与登录记录表。
+// 服务端本地库（SQLite）：账号表、登录记录表与离线消息队列。
 // 归档消息表在 T2.3 接入同一库文件；本层只做存储，不含业务策略。
 #pragma once
 
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 typedef struct sqlite3 sqlite3;
@@ -53,6 +54,25 @@ public:
   bool add_login_record(const LoginRecord& rec);
   std::vector<LoginRecord> login_records(const std::string& account,
                                          int limit = 200);
+
+  // 离线消息队列（投递语义：先入队，在线即投，接收方 ACK(msg_id) 后删除；
+  // 未 ACK 前重复投递无害——接收端按 msg_id 去重）。归档库（T2.3）另行落表。
+  bool queue_offline(const std::string& msg_id, const std::string& to_account,
+                     const std::string& envelope_blob);
+  std::vector<std::string> pending_offline(const std::string& account);
+  bool ack_offline(const std::string& msg_id);
+  std::size_t offline_count(const std::string& account);
+
+  // T2.3 消息归档：协作态消息全量落库（msg_id 唯一；重复消息忽略）。
+  bool store_message(const std::string& msg_id, const std::string& from_account,
+                     const std::string& to_account, int type,
+                     const std::string& text, std::int64_t ts_ms);
+  // 按接收账号倒序检索已归档消息（msg_id, from, text, ts_ms, type）。
+  std::vector<std::tuple<std::string, std::string, std::string, std::int64_t, int>>
+  messages(const std::string& account, int limit = 200);
+  // 撤回仅置标记，正文不清（留痕纪律）。
+  bool recall_message(const std::string& msg_id);
+  bool is_recalled(const std::string& msg_id);
 
 private:
   bool ensure_schema();

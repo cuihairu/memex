@@ -20,6 +20,9 @@ struct StoredMessage {
   qint64 ts_ms{0};
   std::string text;
   std::string source; // "direct" 或 "collab"
+  // 消息标识（协作态：服务端分配；直连态为空）。按其去重：离线补投重复
+  // 投递、断线补传重传同一消息都不产生第二条本地记录。
+  std::string msg_id;
 };
 
 class LocalStore {
@@ -35,8 +38,9 @@ public:
   void close();
   bool is_open() const { return open_; }
 
-  // 幂等插入（from+seq 唯一约束去重）。
-  bool append(const StoredMessage& msg);
+  // 幂等插入（from+seq 与 msg_id 唯一约束去重）。
+  // inserted 非空时回报是否真正插入（false=命中已有记录，重复消息）。
+  bool append(const StoredMessage& msg, bool* inserted = nullptr);
 
   // 某对端的本地历史：取最近 limit 条，按时间正序返回。
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;

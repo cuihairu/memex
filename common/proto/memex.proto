@@ -33,6 +33,11 @@ message Text {
   string text = 1; // UTF-8 文本
 }
 
+// 回执：确认 msg_id 对应消息已被接收方收取（离线补投清理依据）
+message Ack {
+  string msg_id = 1;
+}
+
 message Recall {
   string target_seq = 1; // 被撤回消息的发送序号（十进制字符串）
 }
@@ -85,10 +90,12 @@ message Envelope {
   string from = 3;  // 发送方标识（直连态为设备标识，协作态为账号）
   string to = 4;    // 接收方标识
   int64 ts_ms = 5;  // 发送时间戳（毫秒）
+  string msg_id = 6; // 消息标识（服务端分配：sha256(from:seq)）——去重与补投清理依据
 
   oneof body {
     Hello hello = 101;
     Text text = 110;
+    Ack ack = 111;
     Recall recall = 112;
     FileMeta file_meta = 120;
     FileResume file_resume = 121;

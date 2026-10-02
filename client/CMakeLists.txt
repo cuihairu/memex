@@ -18,7 +18,7 @@ target_link_libraries(memex_engine_direct PUBLIC memex_core memex_common Qt6::Co
 add_library(memex_engine_collab STATIC
   engine/collab/collab_engine.cpp)
 target_include_directories(memex_engine_collab PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(memex_engine_collab PUBLIC memex_common Qt6::Core Qt6::Network)
+target_link_libraries(memex_engine_collab PUBLIC memex_core memex_common Qt6::Core Qt6::Network)
 target_compile_definitions(memex_engine_collab PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 
 qt_add_executable(memex_client
@@ -78,4 +78,14 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(collab_login PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 60)
+
+  # T2.2 协作消息通道验收：互发回执、离线补投、msg_id 去重落库、断线自动重连
+  add_executable(test_collab_chat engine/collab/tests/test_collab_chat.cpp)
+  target_link_libraries(test_collab_chat PRIVATE memex_engine_collab)
+  target_compile_definitions(test_collab_chat PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME collab_chat COMMAND test_collab_chat)
+  set_tests_properties(collab_chat PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
 endif()
