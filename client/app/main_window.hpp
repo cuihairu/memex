@@ -18,6 +18,8 @@
 #include <engine/direct/direct_engine.hpp>
 #include <engine/collab/collab_engine.hpp>
 
+#include <app/screenshot_tool.hpp>
+
 class QAction;
 
 namespace memex::client {
@@ -50,6 +52,11 @@ public:
   // 是否已发现该局域网设备（发现表在窗体私有引擎里）。
   bool has_direct_peer(const QString& device_id) const;
 
+  // —— T4.4 截图与标注 ——
+  // 截图工具（区域选择→标注→确认即发送；测试缝见 ScreenshotTool 注释）。
+  ScreenshotTool* screenshot_tool() { return &screenshot_tool_; }
+  void start_screenshot(); // 按钮与 Ctrl+Alt+A 快捷键入口
+
   // 状态断言面（验收测试）
   bool collab_logged_in() const;
   QString banner_text() const;   // 归档提示条文案（直连／协作两态）
@@ -76,6 +83,8 @@ private:
   void apply_policy(const QString& org_json); // 解析本人生效策略（T3.4）
   // 直连发送是否被策略放行：免登录使用／跨态通信两项开关（T3.4）
   bool direct_send_allowed();
+  // 截图确认后发送（PNG 临时文件走既有文件通道；与「发文件」同口径）
+  void on_screenshot_confirmed(const QString& path);
 
   // —— T4.2 跨态互通 ——
   // 跨态＝恰一边登录（我已登录而对端未登录，或反之）。跨态会话固定标
@@ -127,6 +136,9 @@ private:
   QMap<quint64, GroupEntry> groups_;  // 群号 → 条目（登录后 query_groups 拉取）
   QHash<QString, QStringList> dgroup_members_; // 临时群 id → 成员设备（本机视图）
   int next_dgroup_{1};                // 临时群序号（标题与 id 用）
+  QHash<QString, QString> shot_paths_; // 截图传输 id → PNG 路径（发送完成后清理）
+
+  ScreenshotTool screenshot_tool_;
 
   // T4.2 跨态会话表：设备 id → 会话建立时刻（已上报 start、未闭环）
   QHash<QString, qint64> cross_open_;

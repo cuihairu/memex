@@ -24,7 +24,9 @@ target_compile_definitions(memex_engine_collab PRIVATE MEMEX_VERSION="${PROJECT_
 qt_add_executable(memex_client
   app/main.cpp
   app/main_window.cpp
-  app/main_window.hpp)
+  app/main_window.hpp
+  app/screenshot_tool.cpp
+  app/screenshot_tool.hpp)
 target_include_directories(memex_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_compile_definitions(memex_client PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 target_link_libraries(memex_client PRIVATE
@@ -103,7 +105,8 @@ if(MEMEX_BUILD_TESTS)
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
-    app/main_window.cpp)
+    app/main_window.cpp
+    app/screenshot_tool.cpp)
   target_include_directories(test_mode_switch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_mode_switch PRIVATE
@@ -112,6 +115,22 @@ if(MEMEX_BUILD_TESTS)
     MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
   add_test(NAME mode_switch COMMAND test_mode_switch)
   set_tests_properties(mode_switch PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
+  # T4.4 截图与标注验收：标注画布（涂鸦/箭头/马赛克/文字/撤销/保存）、
+  # 多屏区域数学（跨屏/负坐标/高 DPI）、端到端（注入截屏→标注→确认→
+  # 主窗发送→对端引擎收到文件）
+  add_executable(test_screenshot
+    tests/test_screenshot.cpp
+    app/main_window.cpp
+    app/screenshot_tool.cpp)
+  target_include_directories(test_screenshot PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_screenshot PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+  add_test(NAME screenshot COMMAND test_screenshot)
+  set_tests_properties(screenshot PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 endif()

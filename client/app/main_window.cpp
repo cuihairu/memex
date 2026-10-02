@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -16,6 +17,7 @@
 #include <QRegularExpression>
 #include <QScrollBar>
 #include <QSettings>
+#include <QShortcut>
 #include <QStatusBar>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -102,6 +104,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   // 双态共用同一份本地库：协作消息与直连消息同库，界面按 source 合并展示
   collab_engine_.attach_store(direct_engine_.store());
   wire_collab();
+  // T4.4 截图与标注：确认后发送（取消／失败仅提示）
+  connect(&screenshot_tool_, &ScreenshotTool::confirmed, this,
+          &MainWindow::on_screenshot_confirmed);
+  connect(&screenshot_tool_, &ScreenshotTool::cancelled, this, [] {
+    // 取消无需提示（用户主动放弃）
+  });
+  connect(&screenshot_tool_, &ScreenshotTool::failed, this,
+          [this](const QString& reason) { show_status(reason); });
 
   refresh_devices();
   show_status(QStringLiteral("就绪"));
@@ -213,6 +223,19 @@ void MainWindow::build_ui() {
       "QPushButton { background:#ffffff; color:#a05a26; border:1px solid "
       "#e16531; border-radius:8px; padding:6px 12px; }"
       "QPushButton:hover { background:#fdeee2; }"));
+  // T4.4 截图与标注：按钮＋ Ctrl+Alt+A 快捷键（与「发文件」同发送口径）
+  auto* shot_btn = new QPushButton(QStringLiteral("截图"), input_row);
+  shot_btn->setStyleSheet(QStringLiteral(
+      "QPushButton { background:#ffffff; color:#a05a26; border:1px solid "
+      "#e16531; border-radius:8px; padding:6px 12px; }"
+      "QPushButton:hover { background:#fdeee2; }"));
+  shot_btn->setToolTip(QStringLiteral("截图并标注（Ctrl+Alt+A）"));
+  auto* shot_sc = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+A")), this);
+  shot_sc->setContext(Qt::WindowShortcut);
+  connect(shot_btn, &QPushButton::clicked, this, [this] { start_screenshot(); });
+  connect(shot_sc, &QShortcut::activated, this, [this] { start_screenshot(); });
+  input_layout->addWidget(shot_btn);
+  input_layout->addWidget(file_btn);
   input_box_ = new QLineEdit(input_row);
   input_box_->setPlaceholderText(QStringLiteral("输入消息，回车发送"));
   send_btn_ = new QPushButton(QStringLiteral("发送"), input_row);
@@ -221,7 +244,6 @@ void MainWindow::build_ui() {
       "border-radius:8px; padding:6px 18px; font-weight:600; }"
       "QPushButton:hover { background:#c95524; }"
       "QPushButton:disabled { background:#d9cfc4; }"));
-  input_layout->addWidget(file_btn);
   input_layout->addWidget(input_box_, 1);
   input_layout->addWidget(send_btn_);
 
@@ -329,9 +351,15 @@ void MainWindow::wire_engines() {
             }
           });
   connect(&direct_engine_, &DirectEngine::file_finished, this,
-          [this](const QString& /*id*/, bool ok, const QString& error) {
+          [this](const QString& id, bool ok, const QString& error) {
             show_status(ok ? QStringLiteral("文件已送达")
                            : QStringLiteral("文件传输中断：%1").arg(error));
+            // T4.4：截图临时文件在传输结束后清理（成功／失败均清）
+            const auto shot = shot_paths_.constFind(id);
+            if (shot != shot_paths_.cend()) {
+              QFile::remove(shot.value());
+              shot_paths_.erase(shot);
+            }
           });
   connect(&direct_engine_, &DirectEngine::file_received, this,
           [this](const QString& /*id*/, const QString& path) {
@@ -631,6 +659,39 @@ bool MainWindow::direct_send_allowed() {
     return false;
   }
   return true;
+}
+
+// —— T4.4 截图与标注 ——
+// 入口口径与「发文件」一致：仅直连单聊可发（群会话与协作会话无文件通道）；
+// 策略闸门（免登录／跨态）同样适用。
+void MainWindow::start_screenshot() {
+  if (current_peer_.isEmpty()) {
+    show_status(QStringLiteral("先选择设备再截图"));
+    return;
+  }
+  if (current_kind_ != QStringLiteral("direct")) {
+    show_status(QStringLiteral(
+        "群会话与协作会话暂不支持截图发送（截图走单聊点对点，同文件口径）"));
+    return;
+  }
+  if (!direct_send_allowed()) return; // T3.4 策略闸门（与文件同口径）
+  screenshot_tool_.start();
+}
+
+// 截图确认后发送：PNG 临时文件走既有文件通道（与「发文件」同路径）。
+void MainWindow::on_screenshot_confirmed(const QString& path) {
+  if (current_kind_ != QStringLiteral("direct") || current_peer_.isEmpty()) return;
+  const std::string tid =
+      direct_engine_.send_file(current_peer_.toStdString(), path);
+  if (tid.empty()) {
+    show_status(QStringLiteral("截图发送失败"));
+    return;
+  }
+  shot_paths_.insert(QString::fromStdString(tid), path);
+  const QString name = QFileInfo(path).fileName();
+  file_sent_.insert(name, 0);
+  append_system_line(QStringLiteral("[截图] %1 开始发送").arg(esc(name)));
+  show_status(QStringLiteral("截图已发送至当前会话：%1").arg(name));
 }
 
 // 解析本人生效策略：本人部门 → 逐级上级部门 → 全局行 → 默认宽松
