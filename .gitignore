@@ -69,3 +69,6 @@ vcpkg/
 # test output & cache
 Testing/
 .cache/
+
+# 本地打包验证产物（scripts/nightly 在仓库根输出）
+dist/

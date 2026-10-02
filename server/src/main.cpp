@@ -62,19 +62,18 @@ private:
     }
     for (const auto& f : frames) {
       try {
-        const auto msg = memex::protocol::Message::decode_payload(f);
-        log(std::string{"收到 "} + memex::protocol::msg_type_name(msg.type));
-        if (msg.type == memex::protocol::MsgType::kPing) {
+        const auto msg = memex::protocol::decode_payload(f);
+        log(std::string{"收到 "} + memex::protocol::msg_type_name(msg.type()));
+        if (msg.type() == memex::protocol::v1::PING) {
           memex::protocol::Message pong;
-          pong.type = memex::protocol::MsgType::kPong;
-          pong.seq = msg.seq;
-          pong.from = "server";
-          pong.to = msg.from;
-          pong.ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                           std::chrono::system_clock::now().time_since_epoch())
-                           .count();
-          pong.body = nlohmann::json::object();
-          write_queue_.push_back(pong.encode());
+          pong.set_type(memex::protocol::v1::PONG);
+          pong.set_seq(msg.seq());
+          pong.set_from("server");
+          pong.set_to(msg.from());
+          pong.set_ts_ms(std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::system_clock::now().time_since_epoch())
+                             .count());
+          write_queue_.push_back(memex::protocol::encode(pong));
         }
       } catch (const memex::protocol::ProtocolError& e) {
         log(std::string{"协议错误："} + e.what());
@@ -151,7 +150,7 @@ int self_test() {
   tcp::acceptor a(io, tcp::endpoint(asio::ip::make_address("127.0.0.1"), 0));
   std::cout << "self-test ok: listen 127.0.0.1:" << a.local_endpoint().port()
             << ", protocol " << memex::protocol::msg_type_name(
-                                   memex::protocol::MsgType::kHello)
+                                   memex::protocol::v1::HELLO)
             << std::endl;
   return 0;
 }

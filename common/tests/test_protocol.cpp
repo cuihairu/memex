@@ -1,4 +1,5 @@
-// 协议编解码单测：往返、粘包／半包、畸形输入不崩溃。
+// 协议编解码单测（proto 载荷）：往返、粘包／半包、畸形输入不崩溃、
+// 未知字段容忍（前向兼容：旧端收到新端加字段的消息不拒收）。
 #include <cassert>
 #include <iostream>
 #include <string>
@@ -34,28 +35,50 @@ int g_failures = 0;
 
 Message sample_message() {
   Message m;
-  m.type = MsgType::kText;
-  m.seq = 42;
-  m.from = "dev-2077";
-  m.to = "dev-0042";
-  m.ts_ms = 1727848800123;
-  m.body = nlohmann::json{{"text", "对账单已归档，可检索"}, {"lang", "zh-CN"}};
+  m.set_type(v1::TEXT);
+  m.set_seq(42);
+  m.set_from("dev-2077");
+  m.set_to("dev-0042");
+  m.set_ts_ms(1727848800123);
+  m.mutable_text()->set_text("对账单已归档，可检索");
   return m;
 }
 
 void test_roundtrip() {
   const Message m = sample_message();
-  const Message back = Message::decode_frame(m.encode());
-  CHECK(back.type == m.type);
-  CHECK(back.seq == m.seq);
-  CHECK(back.from == m.from);
-  CHECK(back.to == m.to);
-  CHECK(back.ts_ms == m.ts_ms);
-  CHECK(back.body == m.body);
+  const Message back = decode_frame(encode(m));
+  CHECK(back.type() == m.type());
+  CHECK(back.seq() == m.seq());
+  CHECK(back.from() == m.from());
+  CHECK(back.to() == m.to());
+  CHECK(back.ts_ms() == m.ts_ms());
+  CHECK(back.has_text());
+  CHECK(back.text().text() == "对账单已归档，可检索");
+
+  // 各类型字段逐一往返
+  Message f;
+  f.set_type(v1::FILE_META);
+  f.mutable_file_meta()->set_transfer_id("t-1");
+  f.mutable_file_meta()->set_rel_path("docs/报告.pdf");
+  f.mutable_file_meta()->set_size(120u * 1024 * 1024);
+  f.mutable_file_meta()->set_sha256("ab12");
+  const Message fb = decode_frame(encode(f));
+  CHECK(fb.file_meta().transfer_id() == "t-1");
+  CHECK(fb.file_meta().rel_path() == "docs/报告.pdf");
+  CHECK(fb.file_meta().size() == 120u * 1024 * 1024);
+  CHECK(fb.file_meta().sha256() == "ab12");
+
+  Message d;
+  d.set_type(v1::FILE_DONE);
+  d.mutable_file_done()->set_ok(false);
+  d.mutable_file_done()->set_error("哈希不一致");
+  const Message db = decode_frame(encode(d));
+  CHECK(!db.file_done().ok());
+  CHECK(db.file_done().error() == "哈希不一致");
 }
 
 void test_stream_split() {
-  const std::string frame = sample_message().encode();
+  const std::string frame = encode(sample_message());
   FrameDecoder decoder;
   std::vector<std::string> out;
   DecodeStatus st = DecodeStatus::kNeedMoreData;
@@ -68,8 +91,8 @@ void test_stream_split() {
 }
 
 void test_batch_and_pipelining() {
-  const std::string f1 = sample_message().encode();
-  const std::string f2 = sample_message().encode();
+  const std::string f1 = encode(sample_message());
+  const std::string f2 = encode(sample_message());
   FrameDecoder decoder;
   std::vector<std::string> out;
   const DecodeStatus st = decoder.feed(f1 + f2, out); // 粘包：两帧一次到达
@@ -99,21 +122,36 @@ void test_malformed() {
 }
 
 void test_bad_payloads() {
-  std::string frame;
-  // 非法 JSON
-  {
-    const std::string payload = "{not json";
-    frame = encode_frame(payload);
-  }
-  CHECK_THROWS(static_cast<void>(Message::decode_frame(frame)));
-  // 合法 JSON 但缺字段
-  {
-    const std::string payload = nlohmann::json{{"type", 10}}.dump();
-    frame = encode_frame(payload);
-  }
-  CHECK_THROWS(static_cast<void>(Message::decode_frame(frame)));
+  // 随机垃圾字节：解析必须报错而非崩溃
+  const char garbage[] = "\x0a\xff\xfe\x00not-proto-at-all\x12";
+  CHECK_THROWS(static_cast<void>(
+      decode_payload(std::string_view(garbage, sizeof(garbage) - 1))));
+  // 空载荷
+  CHECK_THROWS(static_cast<void>(decode_payload("")));
   // 帧过短
-  CHECK_THROWS(static_cast<void>(Message::decode_frame("\x00\x00\x00\x02{}")));
+  CHECK_THROWS(static_cast<void>(decode_frame(std::string_view("\x00\x00\x00\x02x", 5))));
+}
+
+// 前向兼容：对端升协议加字段后，本端解析不失败、已知字段不丢。
+// 手工在序列化尾部追加未知字段（编号 9999，varint），模拟新版本消息。
+void test_unknown_field_tolerance() {
+  std::string payload;
+  sample_message().SerializeToString(&payload);
+  // field 9999, wire type 0 → tag varint = (9999 << 3) | 0 = 79992 → 0xB8 0xF0 0x04，值 1
+  payload.append("\xB8\xF0\x04\x01", 4);
+
+  const Message back = decode_frame(encode_frame(payload));
+  CHECK(back.type() == v1::TEXT);
+  CHECK(back.has_text());
+  CHECK(back.text().text() == "对账单已归档，可检索");
+}
+
+void test_type_names() {
+  CHECK(std::string(msg_type_name(v1::HELLO)) == "hello");
+  CHECK(std::string(msg_type_name(v1::TEXT)) == "text");
+  CHECK(std::string(msg_type_name(v1::FILE_DONE)) == "file_done");
+  CHECK(std::string(msg_type_name(v1::LOGIN)) == "login");
+  CHECK(std::string(msg_type_name(v1::KICK)) == "kick");
 }
 
 } // namespace
@@ -124,6 +162,8 @@ int main() {
   test_batch_and_pipelining();
   test_malformed();
   test_bad_payloads();
+  test_unknown_field_tolerance();
+  test_type_names();
   if (g_failures == 0) {
     std::cout << "protocol tests: all passed\n";
     return 0;

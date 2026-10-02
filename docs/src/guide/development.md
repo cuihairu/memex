@@ -11,7 +11,7 @@
 
 ## 依赖管理（vcpkg manifest）
 
-仓库根 `vcpkg.json` 声明全部第三方依赖（asio、nlohmann-json、qtbase），
+仓库根 `vcpkg.json` 声明全部第三方依赖（asio、protobuf、nlohmann-json、qtbase），
 版本由 `builtin-baseline` 钉在 vcpkg 上游某一次提交；个别需要锁版本的包写进
 `overrides`（当前为空占位）。CI 与每日构建把 vcpkg 钉在同一 commit，
 启用 GitHub Actions 二进制缓存（`x-gha`）+ 安装树缓存，跨 run 复用编译产物。

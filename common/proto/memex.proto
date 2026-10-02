@@ -1,0 +1,101 @@
+// Memex 协议单一事实源：帧格式 = 4 字节大端长度前缀 + Envelope 序列化字节。
+// 类型编号沿用 v0.1 骨架分配（1–3 握手心跳、10–12 消息、20–22 文件、30–33 账号会话），
+// 只增不改。UDP 发现宣告（T1.1）为独立 JSON 格式，不在本文件管辖。
+syntax = "proto3";
+
+package memex.protocol.v1;
+
+// 消息类型。与 Envelope.type 对应；已分配编号不改动。
+enum MsgType {
+  MSG_TYPE_UNSPECIFIED = 0;
+  HELLO = 1;         // 握手：终端标识与能力
+  PING = 2;          // 心跳请求
+  PONG = 3;          // 心跳应答
+  TEXT = 10;         // 文本消息
+  ACK = 11;          // 消息回执
+  RECALL = 12;       // 撤回（仅显示层；服务端保留原文并记录撤回事件）
+  FILE_META = 20;    // 文件元数据（文件字节流旁路，不经服务端）
+  FILE_RESUME = 21;  // 文件续传偏移协商（接收方 → 发送方）
+  FILE_DONE = 22;    // 文件终态：落盘完成与否 + 整文件 SHA-256 校验结果
+  LOGIN = 30;        // 终端 → 服务端：账号登录（凭据、设备指纹与设备信息）
+  LOGIN_RESULT = 31; // 服务端 → 终端：登录结果（成功／失败原因）
+  KICK = 32;         // 服务端 → 终端：单点在线互踢，收到即下线并提示
+  LOGOUT = 33;       // 终端 → 服务端：主动登出（随后由终端断开连接）
+}
+
+message Hello {
+  string device_id = 1;     // 终端标识
+  string device_name = 2;   // 展示名
+  uint32 proto_version = 3; // 直连协议版本
+}
+
+message Text {
+  string text = 1; // UTF-8 文本
+}
+
+message Recall {
+  string target_seq = 1; // 被撤回消息的发送序号（十进制字符串）
+}
+
+message FileMeta {
+  string transfer_id = 1; // 传输标识（UUID）
+  string rel_path = 2;    // 目录传输时的相对路径（单文件为文件名）
+  string name = 3;        // 文件名
+  uint64 size = 4;        // 总字节数
+  string sha256 = 5;      // 整文件 SHA-256（hex）
+}
+
+message FileResume {
+  string transfer_id = 1; // 传输标识
+  uint64 offset = 2;      // 接收方已落盘字节数（续传起点）
+}
+
+message FileDone {
+  bool ok = 1;       // 落盘与校验结果
+  string sha256 = 2; // 校验通过的哈希（ok 时有效）
+  string error = 3;  // 失败原因（ok=false 时有效）
+}
+
+message Login {
+  string account = 1;           // 账号
+  string password = 2;          // 凭据（摘要由通道约定，T2.1 定）
+  string device_fingerprint = 3; // 设备指纹（SHA-256 hex）
+  string device_kind = 4;       // 设备类型（desktop 等；主辅分级 T2.1 定）
+  string device_name = 5;       // 设备名（主机名）
+  string client_version = 6;    // 客户端版本
+}
+
+message LoginResult {
+  bool ok = 1;         // 登录结果
+  string reason = 2;   // 失败原因（失败时有效）
+  string display_name = 3; // 展示名（成功时有效）
+}
+
+message Kick {
+  string reason = 1;       // 踢出原因（单点在线）
+  string replaced_by = 2;  // 顶替登录的设备名（供提示）
+}
+
+message Logout {}
+
+// 信封：所有帧的载荷体。oneof 字段号 = 100 + 对应类型编号，便于读码对账。
+message Envelope {
+  MsgType type = 1;
+  uint64 seq = 2;   // 发送序号（会话内单调）
+  string from = 3;  // 发送方标识（直连态为设备标识，协作态为账号）
+  string to = 4;    // 接收方标识
+  int64 ts_ms = 5;  // 发送时间戳（毫秒）
+
+  oneof body {
+    Hello hello = 101;
+    Text text = 110;
+    Recall recall = 112;
+    FileMeta file_meta = 120;
+    FileResume file_resume = 121;
+    FileDone file_done = 122;
+    Login login = 130;
+    LoginResult login_result = 131;
+    Kick kick = 132;
+    Logout logout = 133;
+  }
+}

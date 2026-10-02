@@ -88,7 +88,7 @@ memex/
 
 ### 构建
 
-依赖（asio / nlohmann-json / Qt6）经 vcpkg manifest 管理，构建入口为 CMake Presets：
+依赖（asio / protobuf / nlohmann-json / Qt6）经 vcpkg manifest 管理，构建入口为 CMake Presets：
 
 ```bash
 # 准备 vcpkg（一次性）

@@ -91,38 +91,37 @@ void DirectTransport::on_inbound_ready(QTcpSocket* socket) {
 void DirectTransport::handle_payload(QTcpSocket* socket, const std::string& payload) {
   Message msg;
   try {
-    msg = Message::decode_payload(payload);
+    msg = memex::protocol::decode_payload(payload);
   } catch (const memex::protocol::ProtocolError& e) {
     qWarning() << "[直连接入] 载荷解析失败：" << e.what();
     return; // 畸形载荷丢弃，不断开（可能只是个别坏帧）
   }
 
-  switch (msg.type) {
-  case MsgType::kText: {
-    const QString from_id = QString::fromStdString(msg.from);
-    const QString to_id = QString::fromStdString(msg.to);
-    const QString text =
-        (msg.body.contains("text") && msg.body.at("text").is_string())
-            ? QString::fromStdString(msg.body.at("text").get<std::string>())
-            : QString{};
-    emit text_received(from_id, to_id, static_cast<quint64>(msg.seq), msg.ts_ms, text);
+  switch (msg.type()) {
+  case MsgType::TEXT: {
+    const QString from_id = QString::fromStdString(msg.from());
+    const QString to_id = QString::fromStdString(msg.to());
+    const QString text = msg.has_text()
+                             ? QString::fromStdString(msg.text().text())
+                             : QString{};
+    emit text_received(from_id, to_id, static_cast<quint64>(msg.seq()),
+                       msg.ts_ms(), text);
 
-    // 送达确认：kAck 携带原 seq
+    // 送达确认：ACK 携带原 seq
     Message ack;
-    ack.type = MsgType::kAck;
-    ack.seq = msg.seq;
-    ack.from = device_id_;
-    ack.to = msg.from;
-    ack.ts_ms = QDateTime::currentMSecsSinceEpoch();
-    ack.body = nlohmann::json::object();
-    const std::string frame = ack.encode();
+    ack.set_type(MsgType::ACK);
+    ack.set_seq(msg.seq());
+    ack.set_from(device_id_);
+    ack.set_to(msg.from());
+    ack.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+    const std::string frame = memex::protocol::encode(ack);
     socket->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
     break;
   }
-  case MsgType::kAck:
+  case MsgType::ACK:
     // 入站连接不承载发送确认（确认走各自出站连接）
     break;
-  case MsgType::kFileMeta:
+  case MsgType::FILE_META:
     // T1.3：文件连接整体移交文件服务（此后为二进制块流，不走帧解码）
     inbound_decoders_.erase(socket);
     socket->disconnect(this);
@@ -163,13 +162,13 @@ void DirectTransport::send_text(const QHostAddress& target, quint16 target_port,
 
   connect(socket, &QTcpSocket::connected, this, [this, socket, to_id, seq, text] {
     Message msg;
-    msg.type = MsgType::kText;
-    msg.seq = seq;
-    msg.from = device_id_;
-    msg.to = to_id;
-    msg.ts_ms = QDateTime::currentMSecsSinceEpoch();
-    msg.body = nlohmann::json{{"text", text}};
-    const std::string frame = msg.encode();
+    msg.set_type(MsgType::TEXT);
+    msg.set_seq(seq);
+    msg.set_from(device_id_);
+    msg.set_to(to_id);
+    msg.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+    msg.mutable_text()->set_text(text);
+    const std::string frame = memex::protocol::encode(msg);
     socket->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
   });
 
@@ -188,9 +187,9 @@ void DirectTransport::send_text(const QHostAddress& target, quint16 target_port,
     }
     if (buf.size() < qsizetype(4 + len)) return;
     try {
-      const Message ack =
-          Message::decode_payload(std::string_view(buf.constData() + 4, len));
-      finish(ack.type == MsgType::kAck && ack.seq == seq);
+      const Message ack = memex::protocol::decode_payload(
+          std::string_view(buf.constData() + 4, len));
+      finish(ack.type() == MsgType::ACK && ack.seq() == seq);
     } catch (const memex::protocol::ProtocolError&) {
       finish(false);
     }

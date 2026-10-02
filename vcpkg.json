@@ -12,6 +12,10 @@
     {
       "name": "nlohmann-json",
       "version>=": "3.11.3"
+    },
+    {
+      "name": "protobuf",
+      "$comment": "协议载荷单一事实源（common/proto/memex.proto）：libprotobuf 运行时 + protoc 生成工具，双端共用"
     }
   ],
   "default-features": [],

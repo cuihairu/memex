@@ -125,16 +125,15 @@ std::string FileTransferService::send_file(const QHostAddress& target,
     Outgoing* p = outgoing(id);
     if (!p) return;
     Message meta;
-    meta.type = MsgType::kFileMeta;
-    meta.from = device_id_;
-    meta.to = p->peer_id;
-    meta.body = nlohmann::json{
-        {"transfer_id", p->id},
-        {"rel_path", p->rel_path.toStdString()},
-        {"name", QFileInfo(p->local_path).fileName().toStdString()},
-        {"size", p->total},
-        {"sha256", p->sha256.toStdString()},
-    };
+    meta.set_type(MsgType::FILE_META);
+    meta.set_from(device_id_);
+    meta.set_to(p->peer_id);
+    auto* fm = meta.mutable_file_meta();
+    fm->set_transfer_id(p->id);
+    fm->set_rel_path(p->rel_path.toStdString());
+    fm->set_name(QFileInfo(p->local_path).fileName().toStdString());
+    fm->set_size(p->total);
+    fm->set_sha256(p->sha256.toStdString());
     reply(p->socket, meta);
   });
 
@@ -156,21 +155,18 @@ std::string FileTransferService::send_file(const QHostAddress& target,
     for (const auto& payload : payloads) {
       Message m;
       try {
-        m = Message::decode_payload(payload);
+        m = memex::protocol::decode_payload(payload);
       } catch (const ProtocolError& e) {
         finish_outgoing(id, false, QStringLiteral("对端控制帧解析失败：%1")
                                        .arg(QString::fromUtf8(e.what())));
         return;
       }
-      if (m.type == MsgType::kFileResume && !p->resumed) {
-        quint64 offset = 0;
-        if (m.body.is_object() && m.body.contains("offset") &&
-            m.body.at("offset").is_number_unsigned()) {
-          offset = m.body.at("offset").get<std::uint64_t>();
-        } else {
+      if (m.type() == MsgType::FILE_RESUME && !p->resumed) {
+        if (!m.has_file_resume()) {
           finish_outgoing(id, false, QStringLiteral("续传响应缺 offset"));
           return;
         }
+        const quint64 offset = m.file_resume().offset();
         if (offset > p->total) {
           finish_outgoing(id, false, QStringLiteral("对端续传偏移越界"));
           return;
@@ -185,9 +181,8 @@ std::string FileTransferService::send_file(const QHostAddress& target,
         p->offset = offset;
         emit file_progress(id, offset, p->total);
         pump(id);
-      } else if (m.type == MsgType::kFileDone && p->resumed) {
-        const bool ok =
-            m.body.is_object() && m.body.value("ok", false) == true;
+      } else if (m.type() == MsgType::FILE_DONE && p->resumed) {
+        const bool ok = m.has_file_done() && m.file_done().ok();
         finish_outgoing(id, ok,
                         ok ? QString() : QStringLiteral("对端校验未通过"));
         return;
@@ -271,19 +266,15 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
     socket->deleteLater();
     return;
   }
-  const nlohmann::json& b = meta.body;
-  if (!b.is_object() || !b.contains("transfer_id") ||
-      !b.at("transfer_id").is_string() || !b.contains("rel_path") ||
-      !b.at("rel_path").is_string() || !b.contains("size") ||
-      !b.at("size").is_number_unsigned() || !b.contains("sha256") ||
-      !b.at("sha256").is_string()) {
+  if (!meta.has_file_meta() || meta.file_meta().transfer_id().empty() ||
+      meta.file_meta().rel_path().empty() || meta.file_meta().sha256().empty()) {
     qWarning() << "[文件传输] 元数据缺字段，拒绝";
     socket->abort();
     socket->deleteLater();
     return;
   }
-  const QString rel = sanitize_rel_path(
-      QString::fromStdString(b.at("rel_path").get<std::string>()));
+  const auto& b = meta.file_meta();
+  const QString rel = sanitize_rel_path(QString::fromStdString(b.rel_path()));
   if (rel.isEmpty()) {
     qWarning() << "[文件传输] 相对路径非法，拒绝";
     socket->abort();
@@ -292,13 +283,13 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
   }
 
   Incoming in;
-  in.id = b.at("transfer_id").get<std::string>();
-  in.peer_id = meta.from;
+  in.id = b.transfer_id();
+  in.peer_id = meta.from();
   in.rel_path = rel;
   in.final_path = QDir(opts_.download_dir).filePath(rel);
   in.part_path = in.final_path + QString(kPartSuffix);
-  in.total = b.at("size").get<std::uint64_t>();
-  in.sha256 = QString::fromStdString(b.at("sha256").get<std::string>());
+  in.total = b.size();
+  in.sha256 = QString::fromStdString(b.sha256());
   in.socket = socket;
   in.hasher = std::make_unique<QCryptographicHash>(QCryptographicHash::Sha256);
   in.file = std::make_unique<QFile>(in.part_path);
@@ -309,11 +300,11 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
     const QString have_sha = file_sha256(in.final_path, &have);
     if (have && have_sha == in.sha256) {
       Message done;
-      done.type = MsgType::kFileDone;
-      done.from = device_id_;
-      done.to = in.peer_id;
-      done.body =
-          nlohmann::json{{"ok", true}, {"sha256", in.sha256.toStdString()}};
+      done.set_type(MsgType::FILE_DONE);
+      done.set_from(device_id_);
+      done.set_to(in.peer_id);
+      done.mutable_file_done()->set_ok(true);
+      done.mutable_file_done()->set_sha256(in.sha256.toStdString());
       reply(socket, done);
       emit file_progress(in.id, in.total, in.total);
       emit file_received(in.id, in.final_path);
@@ -363,10 +354,11 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
   }
   if (!opened) {
     Message done;
-    done.type = MsgType::kFileDone;
-    done.from = device_id_;
-    done.to = in.peer_id;
-    done.body = nlohmann::json{{"ok", false}, {"error", "无法写盘"}};
+    done.set_type(MsgType::FILE_DONE);
+    done.set_from(device_id_);
+    done.set_to(in.peer_id);
+    done.mutable_file_done()->set_ok(false);
+    done.mutable_file_done()->set_error("无法写盘");
     reply(socket, done);
     qWarning() << "[文件传输] 落地文件打开失败：" << in.part_path;
     socket->disconnect(this);
@@ -442,10 +434,11 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
     return;
   }
   Message resume;
-  resume.type = MsgType::kFileResume;
-  resume.from = device_id_;
-  resume.to = peer_id;
-  resume.body = nlohmann::json{{"transfer_id", id}, {"offset", p->expect}};
+  resume.set_type(MsgType::FILE_RESUME);
+  resume.set_from(device_id_);
+  resume.set_to(peer_id);
+  resume.mutable_file_resume()->set_transfer_id(id);
+  resume.mutable_file_resume()->set_offset(p->expect);
   reply(socket, resume);
 }
 
@@ -464,10 +457,11 @@ void FileTransferService::finalize_incoming(QTcpSocket* socket) {
       return;
     }
     Message done;
-    done.type = MsgType::kFileDone;
-    done.from = device_id_;
-    done.to = in.peer_id;
-    done.body = nlohmann::json{{"ok", true}, {"sha256", in.sha256.toStdString()}};
+    done.set_type(MsgType::FILE_DONE);
+    done.set_from(device_id_);
+    done.set_to(in.peer_id);
+    done.mutable_file_done()->set_ok(true);
+    done.mutable_file_done()->set_sha256(in.sha256.toStdString());
     reply(socket, done);
     emit file_progress(in.id, in.total, in.total);
     emit file_received(in.id, in.final_path);
@@ -476,10 +470,11 @@ void FileTransferService::finalize_incoming(QTcpSocket* socket) {
     // 哈希不符：坏数据不可续传，删部分文件要求整发重来
     QFile::remove(in.part_path);
     Message done;
-    done.type = MsgType::kFileDone;
-    done.from = device_id_;
-    done.to = in.peer_id;
-    done.body = nlohmann::json{{"ok", false}, {"error", "哈希不一致"}};
+    done.set_type(MsgType::FILE_DONE);
+    done.set_from(device_id_);
+    done.set_to(in.peer_id);
+    done.mutable_file_done()->set_ok(false);
+    done.mutable_file_done()->set_error("哈希不一致");
     reply(socket, done);
     emit file_finished(in.id, false, QStringLiteral("哈希不一致"));
   }
@@ -510,7 +505,7 @@ void FileTransferService::fail_incoming(QTcpSocket* socket,
 // ---------- 公共 ----------
 
 void FileTransferService::reply(QTcpSocket* socket, const Message& msg) {
-  const std::string frame = msg.encode();
+  const std::string frame = memex::protocol::encode(msg);
   socket->write(QByteArray(frame.data(),
                            static_cast<qsizetype>(frame.size())));
 }

@@ -62,7 +62,7 @@ memex/
 
 ## 构建
 
-依赖（asio / nlohmann-json / Qt6）经 vcpkg manifest 统一管理（`vcpkg.json`，版本由 `builtin-baseline` 钉住），CMake 经 `CMakePresets.json` 一条命令构建：
+依赖（asio / protobuf / nlohmann-json / Qt6）经 vcpkg manifest 统一管理（`vcpkg.json`，版本由 `builtin-baseline` 钉住），CMake 经 `CMakePresets.json` 一条命令构建：
 
 ```bash
 # 1. 准备 vcpkg（一次性；建议把 VCPKG_ROOT 写入 shell profile）
