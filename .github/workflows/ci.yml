@@ -30,8 +30,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           # libltdl-dev：vcpkg libxcrypt 端口源码构建需 ltdl 系统开发文件（runner 镜像未预装，缺则 configure 失败）
+          # libsm/libice：qtbase xcb_sm 强制开启需系统 X11 SM/ICE 头；libegl1-mesa：qtbase xcb GL 的 EGL 头
           sudo apt-get install -y -qq gcovr ninja-build \
             autoconf autoconf-archive automake libtool libltdl-dev \
+            libsm-dev libice-dev libegl1-mesa-dev \
             libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
             libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev \
             libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev \
