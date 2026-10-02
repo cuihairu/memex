@@ -18,8 +18,7 @@ export default defineConfig({
       { text: '指南', link: '/guide/product', activeMatch: '/guide/' },
       { text: '需求与验收', link: '/guide/requirements' },
       { text: '决策清单', link: '/guide/decisions' },
-      { text: '评审报告', link: '/guide/report' },
-      { text: 'GitHub', link: 'https://github.com/cuihairu/memex' }
+      { text: '评审报告', link: '/guide/report' }
     ],
     sidebar: [
       {
