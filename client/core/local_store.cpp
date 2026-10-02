@@ -1,6 +1,8 @@
 #include "local_store.hpp"
 
 #include <QDebug>
+#include <QDir>
+#include <QFileInfo>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -12,6 +14,10 @@ LocalStore::~LocalStore() { close(); }
 
 bool LocalStore::open(const QString& path) {
   if (open_) return false;
+  // 首跑时应用数据目录可能不存在（SQLite 不会自动建目录）
+  if (!path.startsWith(QChar(':'))) {
+    QDir().mkpath(QFileInfo(path).absolutePath());
+  }
   connection_name_ = QStringLiteral("memex-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
   {
     QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connection_name_);

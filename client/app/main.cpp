@@ -3,9 +3,21 @@
 #include <QApplication>
 #include <QTimer>
 
+#include <iostream>
+#include <string_view>
+
 #include "main_window.hpp"
 
+#ifndef MEMEX_VERSION
+#define MEMEX_VERSION "dev"
+#endif
+
 int main(int argc, char** argv) {
+  if (argc > 1 && std::string_view(argv[1]) == "--version") {
+    std::cout << "memex-client " << MEMEX_VERSION << std::endl;
+    return 0;
+  }
+
   QApplication app(argc, argv);
   QApplication::setApplicationName("Memex");
   QApplication::setOrganizationName("memex");

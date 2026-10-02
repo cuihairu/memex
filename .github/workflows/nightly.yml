@@ -1,0 +1,186 @@
+# 每日构建（nightly）：编译当前可构建面 → 产物压缩包 → 滚动 nightly Release。
+# 分发口径：Actions artifacts 只是中间物，nightly Release 是交付面——
+# tag 固定 nightly，资产清旧传新；48 小时无新提交当日跳过（手动触发不受此限）。
+# 产物矩阵先收 Linux x86-64（服务端 + 客户端）；Windows / macOS / UOS / 麒麟
+# 待各平台构建打通后逐个补入。
+name: nightly
+
+on:
+  schedule:
+    # 02:43（UTC+8），整点外错峰
+    - cron: "43 18 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    # 48h 无新提交跳过（仅定时触发；手动触发必建，供真实验证）
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.gate.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          last=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          age=$((now - last))
+          echo "HEAD 提交距今 ${age} 秒"
+          if [ "$age" -gt 172800 ]; then
+            echo "48 小时无新提交，本日跳过"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: server
+            packages: libasio-dev
+            cmake: -DMEMEX_BUILD_CLIENT=OFF
+          - target: client
+            packages: libasio-dev qt6-base-dev libqt6sql6-sqlite qt6-base-dev-tools
+            cmake: -DMEMEX_BUILD_CLIENT=ON
+    name: build ${{ matrix.target }} · linux-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.packages }}
+
+      - name: 配置与编译（Release）
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DMEMEX_BUILD_TESTS=OFF \
+            ${{ matrix.cmake }}
+          cmake --build build --parallel
+
+      - name: 打包
+        id: pkg
+        run: |
+          DATE=$(TZ=Asia/Shanghai date +%Y%m%d)
+          SHA="${GITHUB_SHA::7}"
+          mkdir -p dist
+          if [ "${{ matrix.target }}" = "server" ]; then
+            asset=$(bash scripts/nightly/package-server.sh build/server/memex_server dist "$DATE" "$SHA")
+          else
+            asset=$(bash scripts/nightly/package-client.sh build/client/memex_client dist "$DATE" "$SHA")
+          fi
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - name: 解包冒烟（与取件验证同款动作）
+        run: |
+          rm -rf /tmp/verify && mkdir -p /tmp/verify
+          tar -xzf "dist/${{ steps.pkg.outputs.asset }}" -C /tmp/verify
+          if [ "${{ matrix.target }}" = "server" ]; then
+            /tmp/verify/memex-server-linux-x64-*/memex-server --version
+            /tmp/verify/memex-server-linux-x64-*/memex-server --self-test
+          else
+            /tmp/verify/memex-client-linux-x64-*/memex-client --version
+            QT_QPA_PLATFORM=offscreen \
+              /tmp/verify/memex-client-linux-x64-*/memex-client.sh --smoke
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*.tar.gz
+          retention-days: 7
+
+  release:
+    needs: [gate, build]
+    if: needs.gate.outputs.build == 'true' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 校验和与发布说明
+        run: |
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS.txt
+          cd ..
+          updated=$(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M')
+          sha7="${GITHUB_SHA::7}"
+          subject=$(git log -1 --format=%s)
+          {
+            echo "## Memex Nightly（每日构建）"
+            echo
+            echo "- 更新时间：$updated（UTC+8）"
+            echo "- 提交：$sha7 $subject"
+            echo "- 基线：main @ $GITHUB_SHA"
+            echo
+            echo "## 产物"
+            echo
+            echo "| 产物 | 大小 |"
+            echo "| --- | --- |"
+            for f in dist/*.tar.gz; do
+              echo "| $(basename "$f") | $(du -h "$f" | cut -f1) |"
+            done
+            echo "| SHA256SUMS.txt | 全部产物校验和 |"
+            echo
+            echo "## 取件验证"
+            echo
+            echo "    # 1. 校验和"
+            echo "    sha256sum -c SHA256SUMS.txt"
+            echo "    # 2. 服务端解包自检"
+            echo "    tar xzf memex-server-linux-x64-*.tar.gz"
+            echo "    ./memex-server-linux-x64-*/memex-server --version"
+            echo "    ./memex-server-linux-x64-*/memex-server --self-test"
+            echo "    # 3. 客户端解包冒烟（无界面环境）"
+            echo "    tar xzf memex-client-linux-x64-*.tar.gz"
+            echo "    QT_QPA_PLATFORM=offscreen ./memex-client-linux-x64-*/memex-client.sh --smoke"
+            echo
+            echo "## 说明"
+            echo
+            echo "- 滚动发布：tag 固定 nightly，资产随最新 main 清旧传新；48 小时无新提交当日跳过。"
+            echo "- 基于 ubuntu-latest 构建（较新 glibc）；Windows / macOS / 国产 UOS / 麒麟包待各平台构建打通后补入矩阵。"
+            echo "- 客户端包自带 Qt 运行库与插件，入口脚本 memex-client.sh 解包即用。"
+            echo "- 安装包形态（deb / rpm / Windows 安装器）随后补入。"
+          } > NOTES.md
+
+      - name: 更新 nightly Release（资产清旧传新）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=nightly
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "Nightly · 每日构建" \
+              --notes "初始化" --prerelease --latest=false
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            -q '.assets[].name' | while read -r a; do
+              [ -n "$a" ] && gh release delete-asset "$TAG" "$a" \
+                --repo "$GITHUB_REPOSITORY" --yes
+            done
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" \
+            dist/*.tar.gz dist/SHA256SUMS.txt
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --title "Nightly · 每日构建" --notes-file NOTES.md \
+            --prerelease --latest=false

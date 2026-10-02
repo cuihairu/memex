@@ -24,6 +24,7 @@ qt_add_executable(memex_client
   app/main_window.cpp
   app/main_window.hpp)
 target_include_directories(memex_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app)
+target_compile_definitions(memex_client PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 target_link_libraries(memex_client PRIVATE
   memex_engine_direct
   memex_engine_collab

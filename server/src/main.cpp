@@ -15,6 +15,10 @@
 
 #include <memex/protocol/messages.hpp>
 
+#ifndef MEMEX_VERSION
+#define MEMEX_VERSION "dev"
+#endif
+
 namespace {
 
 using asio::ip::tcp;
@@ -157,6 +161,10 @@ int self_test() {
 int main(int argc, char** argv) {
   std::uint16_t port = kDefaultPort;
 
+  if (argc > 1 && std::string_view(argv[1]) == "--version") {
+    std::cout << "memex-server " << MEMEX_VERSION << std::endl;
+    return 0;
+  }
   if (argc > 1 && std::string_view(argv[1]) == "--self-test") {
     return self_test();
   }
