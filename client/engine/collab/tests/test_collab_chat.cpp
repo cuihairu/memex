@@ -148,19 +148,27 @@ int main(int argc, char** argv) {
   CHECK(b_receipts[0].first == s2);
   CHECK(b_receipts[0].second);
 
-  // 双方本地库均落协作消息（发送方与接收方各一条）
+  // 双方本地库均落协作消息（发送方与接收方各自完整记录，双向同属该对端）
   CHECK(wait_until(
       [&] {
-        return store_a.history(QStringLiteral("bob")).size() == 1 &&
-               store_b.history(QStringLiteral("alice")).size() == 1;
+        return store_a.history(QStringLiteral("bob")).size() == 2 &&
+               store_b.history(QStringLiteral("alice")).size() == 2;
       },
       5000));
   const auto a_hist = store_a.history(QStringLiteral("bob"));
-  CHECK(a_hist[0].source == "collab");
-  CHECK(a_hist[0].text == "你好-bob");
+  bool a_has_sent = false;
+  for (const auto& m : a_hist) {
+    if (m.source == "collab" && m.text == "你好-bob") a_has_sent = true;
+  }
+  CHECK(a_has_sent);
   const auto b_hist = store_b.history(QStringLiteral("alice"));
-  CHECK(b_hist[0].source == "collab");
-  CHECK(b_hist[0].msg_id == b_got[0].msg_id.toStdString());
+  bool b_match = false;
+  for (const auto& m : b_hist) {
+    if (m.source == "collab" &&
+        m.msg_id == b_got[0].msg_id.toStdString() && m.text == "你好-bob")
+      b_match = true;
+  }
+  CHECK(b_match);
 
   // 离线补投：bob 登出，alice 发消息入队；bob 重新登录收到，且本地库只此一条
   b.logout();
@@ -171,7 +179,7 @@ int main(int argc, char** argv) {
   b.login(QStringLiteral("127.0.0.1"), port, QStringLiteral("bob"), QStringLiteral("pass-b"));
   CHECK(wait_until([&] { return b_got.size() == 2; }, 8000));
   CHECK(b_got[1].text == QStringLiteral("离线也送达"));
-  CHECK(wait_until([&] { return store_b.history(QStringLiteral("alice")).size() == 2; }, 5000));
+  CHECK(wait_until([&] { return store_b.history(QStringLiteral("alice")).size() == 3; }, 5000));
   {
     int copies = 0;
     for (const auto& m : store_b.history(QStringLiteral("alice"))) {

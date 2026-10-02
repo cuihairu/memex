@@ -205,16 +205,18 @@ void Session::handle_login(const memex::protocol::Message& msg) {
     result.mutable_login_result()->set_display_name(
         row->display_name);
     log("登录成功（" + account_ + "，" + kind_ + "）");
-    // 离线消息补投：登录即推未 ACK 的队列（重复投递由接收端 msg_id 去重）
-    for (const auto& blob : server_.store().pending_offline(account_)) {
-      deliver_frame(blob);
-    }
   } else {
     result.mutable_login_result()->set_ok(false);
     result.mutable_login_result()->set_reason(reason);
     log("登录失败：" + reason);
   }
   send(memex::protocol::encode(result));
+  if (ok) {
+    // 离线消息补投：登录回执之后推未 ACK 的队列（重复投递由接收端 msg_id 去重）
+    for (const auto& blob : server_.store().pending_offline(account_)) {
+      deliver_frame(blob);
+    }
+  }
 }
 
 void Session::handle_logout() {

@@ -305,23 +305,29 @@ void CollabEngine::handle_ack(const Message& msg) {
 
 void CollabEngine::start_heartbeat() {
   heartbeat_missed_ = 0;
-  heartbeat_timer_.start(heartbeat_interval_ms_);
+  // 未配置心跳参数（interval=0）则不启用——QTimer::start(0) 会退化为
+  // 连发，误触超时重连。
+  if (heartbeat_interval_ms_ > 0) {
+    heartbeat_timer_.start(heartbeat_interval_ms_);
+  }
 }
 
-void CollabEngine::stop_heartbeat() { heartbeat_timer_.stop(); }
+void CollabEngine::stop_heartbeat() {
+  heartbeat_timer_.stop();
+}
 
 void CollabEngine::schedule_reconnect() {
   if (manual_logout_ || host_.isEmpty() || account_.isEmpty()) return;
   reconnecting_ = true;
   qInfo() << "[协作] " << reconnect_backoff_ms_ << "ms 后重连";
   reconnect_timer_.start(reconnect_backoff_ms_);
-  reconnect_backoff_ms_ = std::min(reconnect_backoff_ms_ * 2, kMaxBackoffMs);
+  reconnect_backoff_ms_ = std::min(reconnect_backoff_ms_ * 2, CollabEngine::kMaxBackoffMs);
 }
 
 void CollabEngine::check_delivery_timeouts() {
   const qint64 now = QDateTime::currentMSecsSinceEpoch();
   for (auto it = pending_ack_.begin(); it != pending_ack_.end();) {
-    if (now - it.value() > kDeliveryTimeoutMs) {
+    if (now - it.value() > CollabEngine::kDeliveryTimeoutMs) {
       emit text_delivered(it.key(), false);
       it = pending_ack_.erase(it);
     } else {
