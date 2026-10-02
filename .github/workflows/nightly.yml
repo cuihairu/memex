@@ -62,14 +62,16 @@ jobs:
             sys_pkgs: ""
           - target: client
             preset: client-release
-            # vcpkg 统一供给 asio/qtbase/nlohmann-json；系统套件由 preset toolchain 完成
-            sys_pkgs: ""
+            # vcpkg 不代管 X11/GL 等系统库；qtbase 构建所需系统包在此安装
+            sys_pkgs: "libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev libxcb-icccm4-dev libxcb-util-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-glx0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev libfontconfig1-dev libfreetype-dev libdbus-1-dev libicu-dev"
     name: build ${{ matrix.target }} · linux-x64
     steps:
       - uses: actions/checkout@v4
 
-      # vcpkg 二进制缓存已通过 job 级 env 生效，不再逐步安装系统依赖。
-      # (以前的 libx11/qtbase 套件由 CMakePresets.json toolchain / vcpkg manifest 完成)
+      - name: 安装工具与系统依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build ${{ matrix.sys_pkgs }}
 
       # 导出 Actions 缓存凭据，vcpkg 才能使用原生 x-gha 二进制缓存
       - name: 导出 Actions 缓存凭据
