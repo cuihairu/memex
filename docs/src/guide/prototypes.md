@@ -25,8 +25,8 @@
 
 ### 登录协作态
 
-![桌面端登录协作态（浅色）](/screenshots/desktop-collab-light.png)
-![桌面端登录协作态（深色）](/screenshots/desktop-collab-dark.png)
+![桌面端登录协作态（浅色·实况）](/screenshots/live-collab-light.png)
+![桌面端登录协作态（深色·实况）](/screenshots/live-collab-dark.png)
 
 ### 单聊
 
@@ -37,23 +37,23 @@
 
 ### 群聊
 
-![桌面端群聊（浅色）](/screenshots/desktop-group-light.png)
-![桌面端群聊（深色）](/screenshots/desktop-group-dark.png)
+![桌面端群聊（浅色·实况）](/screenshots/live-group-light.png)
+![桌面端群聊（深色·实况）](/screenshots/live-group-dark.png)
 
 ### 组织架构
 
-![桌面端组织架构（浅色）](/screenshots/desktop-org-light.png)
-![桌面端组织架构（深色）](/screenshots/desktop-org-dark.png)
+![桌面端组织架构（浅色·实况）](/screenshots/live-org-light.png)
+![桌面端组织架构（深色·实况）](/screenshots/live-org-dark.png)
 
 ### 文件传输
 
-![桌面端文件传输（浅色）](/screenshots/desktop-files-light.png)
-![桌面端文件传输（深色）](/screenshots/desktop-files-dark.png)
+![桌面端文件传输（浅色·实况）](/screenshots/live-files-light.png)
+![桌面端文件传输（深色·实况）](/screenshots/live-files-dark.png)
 
 ### 归档检索
 
-![桌面端归档检索（浅色）](/screenshots/desktop-search-light.png)
-![桌面端归档检索（深色）](/screenshots/desktop-search-dark.png)
+![桌面端归档检索（浅色·实况）](/screenshots/live-search-light.png)
+![桌面端归档检索（深色·实况）](/screenshots/live-search-dark.png)
 
 ## 手机端
 
@@ -91,4 +91,4 @@
 - 桌面端：[desktop-direct](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct.html) · [desktop-collab](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-collab.html) · [desktop-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-chat.html) · [desktop-group](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-group.html) · [desktop-org](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-org.html) · [desktop-files](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-files.html) · [desktop-search](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-search.html)
 - 手机端：[mobile-init](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-init.html) · [mobile-sessions](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-sessions.html) · [mobile-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-chat.html) · [mobile-me](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-me.html)
 
-功能实现后，本页截图将逐步替换为客户端实况截图。当前进度：桌面端「未登录直连态」「单聊」两屏已替换为实况（浅／深各一），其余五屏仍为原型稿，随功能实现逐步替换；手机端四屏的实况截图待鸿蒙客户端（T6.2）落地后取得。
+功能实现后，本页截图将逐步替换为客户端实况截图。当前进度：桌面端七屏已全部替换为实况截图（浅／深各一，真实客户端在 Xvfb 下拍摄，逐张目检非原型稿）；手机端四屏的实况截图待鸿蒙客户端（T6.2）落地后取得。
