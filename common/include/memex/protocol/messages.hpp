@@ -19,6 +19,26 @@ namespace memex::protocol {
 using Message = v1::Envelope;
 using MsgType = v1::MsgType;
 
+// —— 通知子系统（T4.10）——
+// 通知消息的服务端发送方标识：归档／常用联系人／界面显示均以此为键，
+// 客户端分级推送的入口判断也以此为准（普通通知不走常规新消息提示）。
+inline constexpr const char* kNoticeSender = "\xe9\x80\x9a\xe7\x9f\xa5"; // "通知"（UTF-8）
+
+// 通知正文的归档形态（服务端归档与客户端本地缓存同源生成，前后对账一致）：
+// 「标题：正文[ 跳转]」——气泡渲染按单行处理，跳转随文留痕。
+inline std::string compose_notice_text(std::string_view title,
+                                       std::string_view content,
+                                       std::string_view jump_url) {
+  std::string s(title);
+  s += "\xef\xbc\x9a"; // "："
+  s += content;
+  if (!jump_url.empty()) {
+    s += ' ';
+    s += jump_url;
+  }
+  return s;
+}
+
 // 编码为完整帧（长度前缀 + 序列化 Envelope）。
 std::string encode(const Message& msg);
 

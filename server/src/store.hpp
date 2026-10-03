@@ -162,6 +162,17 @@ struct ReadRow {
   std::int64_t read_ms{0}; // 服务端受理时刻
 };
 
+// webhook 接入台账（T4.10）：按群／个人独立——target="group:<群号>" 或账号。
+// token 明文仅 create 时输出一次，库内存 sha256 摘要；revoked=1 即吊销拒收。
+struct WebhookRow {
+  std::int64_t id{0};
+  std::string token_hash;
+  std::string target;
+  std::string name; // 备注（CLI --name，可空）
+  std::int64_t created_ms{0};
+  bool revoked{false};
+};
+
 class ServerStore {
 public:
   ServerStore() = default;
@@ -294,6 +305,18 @@ public:
   bool remove_visibility_allow(const std::string& viewer,
                                const std::string& target);
   std::vector<VisibilityAllow> visibility_allows();
+
+  // —— T4.10 webhook 接入 ——
+  // 建台账行（token 明文由调用方持有，这里只落摘要）；返回自增 id（失败 0）。
+  std::int64_t webhook_create(const std::string& token_hash,
+                              const std::string& target,
+                              const std::string& name, std::int64_t created_ms);
+  // 按 token 摘要取有效行（吊销／不存在返回 nullopt——HTTP 401 的判定依据）。
+  std::optional<WebhookRow> webhook_by_token(const std::string& token_hash);
+  // 全部行（CLI list；吊销行也列，状态列区分）
+  std::vector<WebhookRow> webhook_list();
+  // 吊销（按 id；返回是否确有该行被置位）
+  bool webhook_revoke(std::int64_t id);
   // ORG_DATA 下发视图（按查看者过滤与脱敏，T4.6）：
   //  ① 被隐藏成员／隐藏部门（整树）对查看者不可见——管理员、白名单与
   //    部门内自己人豁免；② 查看者所在部门若限看本部门，则只见本部门子树；

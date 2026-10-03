@@ -9,7 +9,8 @@ add_library(memex_server_core STATIC
   src/server.cpp
   src/session.cpp
   src/store.cpp
-  src/cred.cpp)
+  src/cred.cpp
+  src/webhook.cpp)
 target_include_directories(memex_server_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_features(memex_server_core PUBLIC cxx_std_20)
 target_link_libraries(memex_server_core PUBLIC
@@ -93,4 +94,11 @@ if(MEMEX_BUILD_TESTS)
     MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
   add_test(NAME visibility COMMAND test_visibility)
   set_tests_properties(visibility PROPERTIES TIMEOUT 60)
+
+  # T4.10 webhook 通知接入验收：HTTP 面鉴权／校验／状态码 ＋ 投递管线
+  # （在线即投、离线补投＋ACK、群扇出、归档 type=48 前后对账）
+  add_executable(test_webhook tests/test_webhook.cpp)
+  target_link_libraries(test_webhook PRIVATE memex_server_core)
+  add_test(NAME webhook COMMAND test_webhook)
+  set_tests_properties(webhook PROPERTIES TIMEOUT 60)
 endif()

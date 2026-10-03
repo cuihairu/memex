@@ -199,7 +199,16 @@ bool ServerStore::ensure_schema() {
       "CREATE TABLE IF NOT EXISTS org_visibility_allow ("
       "  viewer TEXT NOT NULL,"
       "  target TEXT NOT NULL,"
-      "  PRIMARY KEY(viewer, target));"; // 本段为 schema 字符串最后一段
+      "  PRIMARY KEY(viewer, target));"
+      // 通知子系统（T4.10）：webhook 台账——按群／个人独立；token 只存
+      // sha256 摘要（明文仅 create 时输出一次）；revoked=1 吊销即拒收。
+      "CREATE TABLE IF NOT EXISTS webhooks ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  token_hash TEXT NOT NULL UNIQUE,"
+      "  target TEXT NOT NULL,"
+      "  name TEXT NOT NULL DEFAULT '',"
+      "  created_ms INTEGER NOT NULL,"
+      "  revoked INTEGER NOT NULL DEFAULT 0);"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -1814,6 +1823,87 @@ std::int64_t ServerStore::archive_start_ms(const std::string& account) {
     sqlite3_finalize(st);
   }
   return login_ms > 0 ? login_ms : first_msg;
+}
+
+std::int64_t ServerStore::webhook_create(const std::string& token_hash,
+                                          const std::string& target,
+                                          const std::string& name,
+                                          std::int64_t created_ms) {
+  if (token_hash.empty() || target.empty()) return 0;
+  const char* sql =
+      "INSERT INTO webhooks(token_hash, target, name, created_ms)"
+      " VALUES(?,?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, token_hash.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, target.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, name.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, created_ms);
+  std::int64_t id = 0;
+  if (sqlite3_step(st) == SQLITE_DONE) id = sqlite3_last_insert_rowid(db_);
+  sqlite3_finalize(st);
+  return id;
+}
+
+std::optional<WebhookRow> ServerStore::webhook_by_token(
+    const std::string& token_hash) {
+  if (token_hash.empty()) return std::nullopt;
+  const char* sql =
+      "SELECT id, token_hash, target, name, created_ms, revoked"
+      " FROM webhooks WHERE token_hash=? AND revoked=0;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_text(st, 1, token_hash.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<WebhookRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    WebhookRow r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.token_hash = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.target = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    if (sqlite3_column_type(st, 3) != SQLITE_NULL) {
+      r.name = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    }
+    r.created_ms = sqlite3_column_int64(st, 4);
+    r.revoked = sqlite3_column_int(st, 5) != 0;
+    out = std::move(r);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<WebhookRow> ServerStore::webhook_list() {
+  std::vector<WebhookRow> out;
+  const char* sql =
+      "SELECT id, token_hash, target, name, created_ms, revoked"
+      " FROM webhooks ORDER BY id;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    WebhookRow r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.token_hash = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.target = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    if (sqlite3_column_type(st, 3) != SQLITE_NULL) {
+      r.name = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    }
+    r.created_ms = sqlite3_column_int64(st, 4);
+    r.revoked = sqlite3_column_int(st, 5) != 0;
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::webhook_revoke(std::int64_t id) {
+  const char* sql = "UPDATE webhooks SET revoked=1 WHERE id=? AND revoked=0;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
 }
 
 } // namespace memex::server
