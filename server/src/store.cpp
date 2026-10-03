@@ -19,6 +19,30 @@ std::int64_t now_ms() {
 }
 // 与登录校验共用同一迭代数（改值需同步重建账号表口径）
 constexpr int kPbkdf2IterationsForStore = 60000;
+// 部门层级：ancestor 是否为 path 本身或其上级（"公司/研发" ⊑ "公司/研发/客户端组"）
+bool dept_covers(const std::string& ancestor, const std::string& path) {
+  if (ancestor.empty() || path.empty()) return false;
+  if (path == ancestor) return true;
+  return path.size() > ancestor.size() &&
+         path.compare(0, ancestor.size(), ancestor) == 0 &&
+         path[ancestor.size()] == '/';
+}
+// 逗号分隔字段表是否含某字段（精确匹配，容忍空格）
+bool csv_field_has(const std::string& csv, const std::string& field) {
+  std::size_t start = 0;
+  while (start <= csv.size()) {
+    const std::size_t comma = csv.find(',', start);
+    std::string item =
+        csv.substr(start, comma == std::string::npos ? std::string::npos
+                                                     : comma - start);
+    const auto b = item.find_first_not_of(' ');
+    const auto e = item.find_last_not_of(' ');
+    if (b != std::string::npos && item.substr(b, e - b + 1) == field) return true;
+    if (comma == std::string::npos) break;
+    start = comma + 1;
+  }
+  return false;
+}
 } // namespace
 
 ServerStore::~ServerStore() { close(); }
@@ -162,7 +186,20 @@ bool ServerStore::ensure_schema() {
       "  peer TEXT NOT NULL,"
       "  starred INTEGER NOT NULL DEFAULT 0,"
       "  last_ms INTEGER NOT NULL DEFAULT 0,"
-      "  PRIMARY KEY(account, peer));"; // 本段为 schema 字符串最后一段
+      "  PRIMARY KEY(account, peer));"
+      // T4.6 通讯录可见性：按成员／部门的隐藏、限看与敏感字段（UPSERT 单行）
+      "CREATE TABLE IF NOT EXISTS org_visibility ("
+      "  scope TEXT NOT NULL," // member（key=账号）| dept（key=部门全路径）
+      "  target_key TEXT NOT NULL,"
+      "  hidden INTEGER NOT NULL DEFAULT 0,"
+      "  restrict_scope INTEGER NOT NULL DEFAULT 0,"
+      "  hide_fields TEXT NOT NULL DEFAULT '',"
+      "  PRIMARY KEY(scope, target_key));"
+      // 白名单例外：viewer 可见 target（成员账号或部门全路径，整树豁免）
+      "CREATE TABLE IF NOT EXISTS org_visibility_allow ("
+      "  viewer TEXT NOT NULL,"
+      "  target TEXT NOT NULL,"
+      "  PRIMARY KEY(viewer, target));"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -1069,6 +1106,302 @@ PolicyRow ServerStore::resolve_policy(const std::string& account) {
   if (const auto it = all.find(""); it != all.end()) return it->second;
   PolicyRow fallback; // 内置默认：宽松（免登录可用、跨态可通、新设备免审批）
   return fallback;
+}
+
+// —— T4.6 通讯录可见性 ——
+
+bool ServerStore::set_visibility(const std::string& scope,
+                                 const std::string& key, bool hidden,
+                                 bool restrict_scope,
+                                 const std::string& hide_fields) {
+  if (scope != "member" && scope != "dept") return false;
+  if (key.empty()) return false;
+  if (scope == "member") {
+    if (!find_account(key).has_value()) return false;
+  } else {
+    bool exists = false;
+    for (const auto& [id, path] : department_list()) {
+      (void)id;
+      if (path == key) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) return false;
+  }
+  const char* sql =
+      "INSERT INTO org_visibility(scope, target_key, hidden, restrict_scope,"
+      " hide_fields) VALUES(?,?,?,?,?)"
+      " ON CONFLICT(scope, target_key) DO UPDATE SET"
+      " hidden=excluded.hidden, restrict_scope=excluded.restrict_scope,"
+      " hide_fields=excluded.hide_fields;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, scope.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, key.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 3, hidden ? 1 : 0);
+  sqlite3_bind_int(st, 4, restrict_scope ? 1 : 0);
+  sqlite3_bind_text(st, 5, hide_fields.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::optional<VisibilityRow> ServerStore::visibility_row(
+    const std::string& scope, const std::string& key) {
+  const char* sql =
+      "SELECT hidden, restrict_scope, hide_fields FROM org_visibility"
+      " WHERE scope=? AND target_key=?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_text(st, 1, scope.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, key.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<VisibilityRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    VisibilityRow r;
+    r.scope = scope;
+    r.key = key;
+    r.hidden = sqlite3_column_int(st, 0) != 0;
+    r.restrict_scope = sqlite3_column_int(st, 1) != 0;
+    if (sqlite3_column_type(st, 2) != SQLITE_NULL) {
+      r.hide_fields = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    }
+    out = r;
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<VisibilityRow> ServerStore::visibility_list() {
+  std::vector<VisibilityRow> out;
+  const char* sql =
+      "SELECT scope, target_key, hidden, restrict_scope, hide_fields"
+      " FROM org_visibility ORDER BY scope, target_key;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    VisibilityRow r;
+    r.scope = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    r.key = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.hidden = sqlite3_column_int(st, 2) != 0;
+    r.restrict_scope = sqlite3_column_int(st, 3) != 0;
+    if (sqlite3_column_type(st, 4) != SQLITE_NULL) {
+      r.hide_fields = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    }
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::add_visibility_allow(const std::string& viewer,
+                                       const std::string& target) {
+  if (viewer.empty() || target.empty()) return false;
+  const char* sql =
+      "INSERT OR IGNORE INTO org_visibility_allow(viewer, target)"
+      " VALUES(?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, viewer.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, target.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::remove_visibility_allow(const std::string& viewer,
+                                          const std::string& target) {
+  const char* sql =
+      "DELETE FROM org_visibility_allow WHERE viewer=? AND target=?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, viewer.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, target.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<VisibilityAllow> ServerStore::visibility_allows() {
+  std::vector<VisibilityAllow> out;
+  const char* sql =
+      "SELECT viewer, target FROM org_visibility_allow"
+      " ORDER BY viewer, target;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    VisibilityAllow a;
+    a.viewer = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    a.target = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    out.push_back(std::move(a));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+namespace {
+
+// 过滤上下文（一次计算，member/dept 两表共用）：查看者角色与部门、白名单
+// 目标集、生效的限看范围、全部配置行。
+struct VisCtx {
+  bool is_admin{false};
+  std::string vdept;              // 查看者所在部门（空=未分配）
+  std::set<std::string> allows;   // 白名单目标（账号或部门全路径）
+  std::string limit_dept;         // 生效的限看部门（空=不限）
+  std::vector<VisibilityRow> rows; // 全部配置行
+};
+
+} // namespace
+
+std::vector<MemberProfile> ServerStore::visible_members(
+    const std::string& viewer) {
+  VisCtx ctx;
+  ctx.rows = visibility_list();
+  if (const auto vprof = member_profile(viewer)) {
+    ctx.vdept = vprof->department_path;
+    ctx.is_admin = vprof->role == "admin";
+  }
+  for (const auto& a : visibility_allows()) {
+    if (a.viewer == viewer) ctx.allows.insert(a.target);
+  }
+  if (!ctx.is_admin) {
+    // 限看本部门：本人部门链上最近的 restrict 行（与策略解析同口径）
+    std::string path = ctx.vdept;
+    while (!path.empty()) {
+      if (const auto r = visibility_row("dept", path); r && r->restrict_scope) {
+        ctx.limit_dept = path;
+        break;
+      }
+      const auto pos = path.rfind('/');
+      if (pos == std::string::npos) break;
+      path.resize(pos);
+    }
+  }
+
+  const auto whitelisted = [&](const std::string& account,
+                               const std::string& dept) {
+    if (ctx.allows.count(account) != 0) return true;
+    for (const std::string& t : ctx.allows) {
+      if (dept_covers(t, dept)) return true;
+    }
+    return false;
+  };
+  const auto dept_hidden_outside =
+      [&](const std::string& dept) { // 部门被隐藏且查看者不在其内
+      if (dept.empty()) return false;
+      for (const auto& r : ctx.rows) {
+        if (r.scope == "dept" && r.hidden && dept_covers(r.key, dept) &&
+            !dept_covers(r.key, ctx.vdept)) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+  std::vector<MemberProfile> out;
+  for (const auto& m : member_list()) {
+    if (ctx.is_admin || m.account == viewer) {
+      out.push_back(m); // 管理员全量；查看者本人始终在列
+      continue;
+    }
+    const bool allow = whitelisted(m.account, m.department_path);
+    if (!allow) {
+      // ① 限看本部门：非白名单成员须落在限看部门子树内
+      if (!ctx.limit_dept.empty() &&
+          !dept_covers(ctx.limit_dept, m.department_path)) {
+        continue;
+      }
+      // ② 隐藏成员；③ 隐藏部门（整树）——部门内自己人互见
+      bool hidden = false;
+      if (const auto r = visibility_row("member", m.account);
+          r && r->hidden) {
+        hidden = true;
+      }
+      if (!hidden) hidden = dept_hidden_outside(m.department_path);
+      if (hidden) continue;
+    }
+    // ④ 敏感字段脱敏（非管理员、非白名单）
+    MemberProfile m2 = m;
+    if (!allow) {
+      if (const auto r = visibility_row("member", m.account)) {
+        if (csv_field_has(r->hide_fields, "title")) m2.title.clear();
+        if (csv_field_has(r->hide_fields, "manager")) m2.manager.clear();
+        if (csv_field_has(r->hide_fields, "role")) m2.role.clear();
+      }
+    }
+    out.push_back(std::move(m2));
+  }
+  // ⑤ 上级引用随可见性走：直属上级若不可见则抹去（不留不可见者的账号线索）
+  std::set<std::string> visible_accounts;
+  for (const auto& m : out) visible_accounts.insert(m.account);
+  for (auto& m : out) {
+    if (!m.manager.empty() && visible_accounts.count(m.manager) == 0) {
+      m.manager.clear();
+    }
+  }
+  return out;
+}
+
+std::vector<std::pair<int, std::string>> ServerStore::visible_departments(
+    const std::string& viewer) {
+  // 与 visible_members 同规则；另保证可见成员所在部门链完整
+  //（客户端按全路径成树，链缺一级成员就挂不上）
+  VisCtx ctx;
+  ctx.rows = visibility_list();
+  if (const auto vprof = member_profile(viewer)) {
+    ctx.vdept = vprof->department_path;
+    ctx.is_admin = vprof->role == "admin";
+  }
+  for (const auto& a : visibility_allows()) {
+    if (a.viewer == viewer) ctx.allows.insert(a.target);
+  }
+  if (!ctx.is_admin) {
+    std::string path = ctx.vdept;
+    while (!path.empty()) {
+      if (const auto r = visibility_row("dept", path); r && r->restrict_scope) {
+        ctx.limit_dept = path;
+        break;
+      }
+      const auto pos = path.rfind('/');
+      if (pos == std::string::npos) break;
+      path.resize(pos);
+    }
+  }
+  std::set<std::string> needed; // 可见成员所在部门链（含各级前缀）
+  for (const auto& m : visible_members(viewer)) {
+    std::string path = m.department_path;
+    while (!path.empty()) {
+      needed.insert(path);
+      const auto pos = path.rfind('/');
+      if (pos == std::string::npos) break;
+      path.resize(pos);
+    }
+  }
+  std::vector<std::pair<int, std::string>> out;
+  for (const auto& [id, path] : department_list()) {
+    if (needed.count(path) != 0) {
+      out.emplace_back(id, path);
+      continue;
+    }
+    if (ctx.is_admin) {
+      out.emplace_back(id, path);
+      continue;
+    }
+    if (!ctx.limit_dept.empty() && !dept_covers(ctx.limit_dept, path)) continue;
+    bool skip = false;
+    for (const auto& r : ctx.rows) {
+      if (r.scope != "dept" || !r.hidden || !dept_covers(r.key, path)) continue;
+      const bool in_dept = dept_covers(r.key, ctx.vdept);
+      const bool allow = ctx.allows.count(r.key) != 0 ||
+                         ctx.allows.count(path) != 0;
+      if (!in_dept && !allow) skip = true;
+    }
+    if (skip) continue;
+    out.emplace_back(id, path);
+  }
+  return out;
 }
 
 // —— T4.1 群聊 ——

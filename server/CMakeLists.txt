@@ -83,4 +83,14 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_read_presence PRIVATE memex_server_core)
   add_test(NAME read_presence COMMAND test_read_presence)
   set_tests_properties(read_presence PROPERTIES TIMEOUT 60)
+
+  # T4.6 通讯录可见性验收（A20）：库级过滤／脱敏／上级引用抹除／落盘重开＋
+  # CLI 配置面（org hide|fields|allow|visibility list）＋协议级 ORG_QUERY
+  # 按查询者过滤（被隐藏者不可见不可搜——数据不出服务端）
+  add_executable(test_visibility tests/test_visibility.cpp)
+  target_link_libraries(test_visibility PRIVATE memex_server_core)
+  target_compile_definitions(test_visibility PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME visibility COMMAND test_visibility)
+  set_tests_properties(visibility PROPERTIES TIMEOUT 60)
 endif()

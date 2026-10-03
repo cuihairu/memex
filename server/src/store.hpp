@@ -107,6 +107,24 @@ struct PolicyRow {
   bool new_device_approval{false};
 };
 
+// 通讯录可见性（T4.6）：一行配置管一个目标——scope="member"（key=账号）或
+// "dept"（key=部门全路径）。hidden＝对查看者隐藏；restrict_scope＝该部门成员
+// 只看本部门（仅 dept 行有效）；hide_fields＝敏感字段脱敏（title,manager,role
+// 逗号分隔，仅 member 行有效）。白名单例外走 VisibilityAllow。
+struct VisibilityRow {
+  std::string scope; // member | dept
+  std::string key;   // 账号 或 部门全路径
+  bool hidden{false};
+  bool restrict_scope{false};
+  std::string hide_fields;
+};
+
+// 白名单例外：viewer 可见 target——target=成员账号，或部门全路径（整树豁免）
+struct VisibilityAllow {
+  std::string viewer;
+  std::string target;
+};
+
 // 群聊（T4.1）：群消息走既有 TEXT（to="group:<群号>"），
 // 归档 to_account 即 "group:<群号>"，按成员账号检索时一并联入。
 struct GroupInfo {
@@ -259,6 +277,31 @@ public:
   // 按账号解析生效策略：本人部门 → 逐级上级部门 → 全局 → 内置默认
   //（未配置任何行时：允许免登录、允许跨态、新设备免审批）。
   PolicyRow resolve_policy(const std::string& account);
+
+  // —— T4.6 通讯录可见性 ——
+  // 写入一行（UPSERT，三项全量覆盖）。校验拒绝（返回 false）：scope 非
+  // member/dept、member 的账号不存在、dept 的部门路径不存在。
+  bool set_visibility(const std::string& scope, const std::string& key,
+                      bool hidden, bool restrict_scope,
+                      const std::string& hide_fields);
+  // 单行查询（无配置返回 nullopt）；全部已配置行（member 在前，键字典序）
+  std::optional<VisibilityRow> visibility_row(const std::string& scope,
+                                              const std::string& key);
+  std::vector<VisibilityRow> visibility_list();
+  // 白名单例外增删（目标重复添加即幂等；查询返回全部行）
+  bool add_visibility_allow(const std::string& viewer,
+                            const std::string& target);
+  bool remove_visibility_allow(const std::string& viewer,
+                               const std::string& target);
+  std::vector<VisibilityAllow> visibility_allows();
+  // ORG_DATA 下发视图（按查看者过滤与脱敏，T4.6）：
+  //  ① 被隐藏成员／隐藏部门（整树）对查看者不可见——管理员、白名单与
+  //    部门内自己人豁免；② 查看者所在部门若限看本部门，则只见本部门子树；
+  //  ③ 敏感字段对非管理员、非白名单查看者脱敏；④ 查看者本人始终在列。
+  std::vector<MemberProfile> visible_members(const std::string& viewer);
+  // 部门树下发表（与 visible_members 同规则：隐藏部门与限看范围裁剪）
+  std::vector<std::pair<int, std::string>> visible_departments(
+      const std::string& viewer);
 
   // —— T4.1 群聊 ——
   // 建群：群主（owner）自动入群；members 须全部为已建账号（含去重）。

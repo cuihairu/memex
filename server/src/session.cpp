@@ -117,7 +117,9 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     if (logged_in_) handle_logout();
     break;
   case v1::ORG_QUERY: {
-    // 组织架构下发（T3.1）：登录后可查——部门树＋成员资料（含直属上级与角色）
+    // 组织架构下发（T3.1）：登录后可查——部门树＋成员资料（含直属上级与角色）。
+    // T4.6 通讯录可见性：按查询者过滤与脱敏（被隐藏者不可见不可搜——
+    // 数据不出服务端，客户端建群/拉人数据源同受此口径约束）。
     if (!logged_in_) break;
     memex::protocol::Message out;
     out.set_type(v1::ORG_DATA);
@@ -125,11 +127,11 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     out.set_to(account_);
     out.set_ts_ms(now_ms());
     auto* data = out.mutable_org_data();
-    for (const auto& [id, path] : server_.store().department_list()) {
+    for (const auto& [id, path] : server_.store().visible_departments(account_)) {
       (void)id;
       data->add_departments()->set_path(path);
     }
-    for (const auto& m : server_.store().member_list()) {
+    for (const auto& m : server_.store().visible_members(account_)) {
       auto* om = data->add_members();
       om->set_account(m.account);
       om->set_display_name(m.display_name);

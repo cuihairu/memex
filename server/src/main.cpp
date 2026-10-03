@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -490,10 +491,19 @@ int cmd_audit(int argc, char** argv, const std::string& db_path) {
 //   org set <账号> [--dept 路径] [--title 职务] [--manager 账号|none]
 //   org import <CSV>               批量导入（账号,部门,职务,直属上级；
 //                                  错误行校验拒绝并报告行号）
+// 通讯录可见性（T4.6）：
+//   org hide/unhide <账号>         成员隐藏／恢复（管理员、本人与白名单仍可见）
+//   org dept hide/unhide <路径>    部门整树隐藏（部门内自己人仍互见）
+//   org dept restrict/unrestrict <路径>  部门限看本部门／解除
+//   org fields <账号> --hide title,manager[,role] | --clear  敏感字段脱敏
+//   org allow/disallow <查看者> --see <账号|部门路径>         白名单例外
+//   org visibility list            已配置行与白名单一览
 int cmd_org(int argc, char** argv, const std::string& db_path) {
   if (argc < 1) {
     std::cerr << "用法：memex_server org dept add <路径> | dept list | "
-                 "member <账号> | set … | import <CSV> [--db <库>]\n";
+                 "member <账号> | set … | import <CSV> | hide/unhide <账号> | "
+                 "dept hide|restrict <路径> | fields … | allow/disallow … | "
+                 "visibility list [--db <库>]\n";
     return 2;
   }
   const std::string_view sub = argv[0];
@@ -519,7 +529,34 @@ int cmd_org(int argc, char** argv, const std::string& db_path) {
       }
       return 0;
     }
-    std::cerr << "用法：org dept add <路径> | org dept list\n";
+    // T4.6 部门级可见性：隐藏整树（部门内自己人仍互见）／限看本部门
+    if (argc >= 3) {
+      const std::string_view op = argv[1];
+      if (op == "hide" || op == "unhide" || op == "restrict" ||
+          op == "unrestrict") {
+        memex::server::VisibilityRow row =
+            store.visibility_row("dept", argv[2])
+                .value_or(memex::server::VisibilityRow{});
+        row.scope = "dept";
+        row.key = argv[2];
+        if (op == "hide") row.hidden = true;
+        if (op == "unhide") row.hidden = false;
+        if (op == "restrict") row.restrict_scope = true;
+        if (op == "unrestrict") row.restrict_scope = false;
+        if (!store.set_visibility(row.scope, row.key, row.hidden,
+                                  row.restrict_scope, row.hide_fields)) {
+          std::cerr << "部门不存在或写入失败：" << argv[2] << "\n";
+          return 1;
+        }
+        std::cout << "已配置部门可见性：" << argv[2] << "（"
+                  << (row.hidden ? "隐藏" : "不隐藏") << "·"
+                  << (row.restrict_scope ? "限看本部门" : "不限看") << "）\n";
+        return 0;
+      }
+    }
+    std::cerr << "用法：org dept add <路径> | dept list | dept hide <路径> | "
+                 "dept unhide <路径> | dept restrict <路径> | dept "
+                 "unrestrict <路径>\n";
     return 2;
   }
 
@@ -560,6 +597,152 @@ int cmd_org(int argc, char** argv, const std::string& db_path) {
       std::cout << "\n";
     }
     return 0;
+  }
+
+  // —— T4.6 通讯录可见性（成员级）：隐藏／敏感字段／白名单例外 ——
+  if (sub == "hide" || sub == "unhide") {
+    if (argc < 2) {
+      std::cerr << "用法：org hide <账号> | org unhide <账号>\n";
+      return 2;
+    }
+    memex::server::VisibilityRow row =
+        store.visibility_row("member", argv[1])
+            .value_or(memex::server::VisibilityRow{});
+    row.scope = "member";
+    row.key = argv[1];
+    row.hidden = sub == "hide";
+    if (!store.set_visibility(row.scope, row.key, row.hidden, row.restrict_scope,
+                              row.hide_fields)) {
+      std::cerr << "成员不存在或写入失败：" << argv[1] << "\n";
+      return 1;
+    }
+    std::cout << (row.hidden ? "已隐藏成员：" : "已取消隐藏成员：") << argv[1]
+              << "（本人与管理员仍可见；白名单例外经 org allow 配置）\n";
+    return 0;
+  }
+  if (sub == "fields") {
+    // org fields <账号> --hide title,manager,role | org fields <账号> --clear
+    if (argc < 2) {
+      std::cerr << "用法：org fields <账号> --hide title,manager[,role] | "
+                   "org fields <账号> --clear\n";
+      return 2;
+    }
+    std::string fields;
+    bool clear = false;
+    for (int i = 2; i < argc; ++i) {
+      if (std::string_view(argv[i]) == "--hide" && i + 1 < argc) {
+        fields = argv[++i];
+      } else if (std::string_view(argv[i]) == "--clear") {
+        clear = true;
+      } else {
+        std::cerr << "未知选项：" << argv[i] << "\n";
+        return 2;
+      }
+    }
+    if (clear) fields.clear();
+    for (std::size_t start = 0; start <= fields.size();) {
+      const std::size_t comma = fields.find(',', start);
+      const std::string f =
+          fields.substr(start, comma == std::string::npos ? std::string::npos
+                                                           : comma - start);
+      if (!f.empty() && f != "title" && f != "manager" && f != "role") {
+        std::cerr << "敏感字段只支持 title,manager,role：" << f << "\n";
+        return 2;
+      }
+      if (comma == std::string::npos) break;
+      start = comma + 1;
+    }
+    memex::server::VisibilityRow row =
+        store.visibility_row("member", argv[1])
+            .value_or(memex::server::VisibilityRow{});
+    row.scope = "member";
+    row.key = argv[1];
+    row.hide_fields = fields;
+    if (!store.set_visibility(row.scope, row.key, row.hidden, row.restrict_scope,
+                              row.hide_fields)) {
+      std::cerr << "成员不存在或写入失败：" << argv[1] << "\n";
+      return 1;
+    }
+    std::cout << (fields.empty() ? "已清除敏感字段配置：" : "已配置敏感字段：")
+              << argv[1]
+              << (fields.empty() ? "（全部恢复可见）\n"
+                                 : "（对非管理员隐藏：" + fields + "）\n");
+    return 0;
+  }
+  if (sub == "allow" || sub == "disallow") {
+    // org allow <查看者账号> --see <成员账号|部门路径>：白名单例外
+    if (argc < 2) {
+      std::cerr << "用法：org allow <查看者账号> --see <成员账号|部门路径> | "
+                   "org disallow <查看者账号> --see <目标>\n";
+      return 2;
+    }
+    const std::string viewer = argv[1];
+    std::string target;
+    for (int i = 2; i + 1 < argc; ++i) {
+      if (std::string_view(argv[i]) == "--see") target = argv[++i];
+    }
+    if (target.empty()) {
+      std::cerr << "缺 --see <成员账号|部门路径>\n";
+      return 2;
+    }
+    if (sub == "disallow") {
+      if (!store.remove_visibility_allow(viewer, target)) {
+        std::cerr << "白名单删除失败\n";
+        return 1;
+      }
+      std::cout << "已移除白名单：" << viewer << " → " << target << "\n";
+      return 0;
+    }
+    // 校验：查看者须是账号；目标须是账号或部门路径（防静默配错）
+    std::map<std::string, std::string> accounts;
+    for (const auto& [acct, label] : store.account_list()) {
+      accounts.emplace(acct, label);
+    }
+    if (accounts.count(viewer) == 0) {
+      std::cerr << "查看者账号不存在：" << viewer << "\n";
+      return 1;
+    }
+    bool target_ok = accounts.count(target) != 0;
+    if (!target_ok) {
+      for (const auto& [id, path] : store.department_list()) {
+        (void)id;
+        if (path == target) {
+          target_ok = true;
+          break;
+        }
+      }
+    }
+    if (!target_ok) {
+      std::cerr << "目标既非账号也非部门路径：" << target << "\n";
+      return 1;
+    }
+    if (!store.add_visibility_allow(viewer, target)) {
+      std::cerr << "白名单写入失败\n";
+      return 1;
+    }
+    std::cout << "已加白名单：" << viewer << " 可见 " << target << "\n";
+    return 0;
+  }
+  if (sub == "visibility") {
+    // 已配置行＋白名单一览（配置面自查）
+    if (argc >= 2 && std::string_view(argv[1]) == "list") {
+      std::cout << "范围\t隐藏\t限看本部门\t敏感字段\n";
+      for (const auto& r : store.visibility_list()) {
+        const std::string scope =
+            r.scope == "member" ? "成员 " + r.key : "部门 " + r.key;
+        std::cout << scope << '\t' << (r.hidden ? "是" : "否") << '\t'
+                  << (r.restrict_scope ? "是" : "否") << '\t'
+                  << (r.hide_fields.empty() ? "（无）" : r.hide_fields) << '\n';
+      }
+      const auto allows = store.visibility_allows();
+      std::cout << "\n白名单例外（" << allows.size() << " 条）\n";
+      for (const auto& a : allows) {
+        std::cout << a.viewer << " → " << a.target << '\n';
+      }
+      return 0;
+    }
+    std::cerr << "用法：org visibility list\n";
+    return 2;
   }
 
   if (sub == "set") {
