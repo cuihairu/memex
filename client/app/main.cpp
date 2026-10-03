@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "main_window.hpp"
+#include "theme.hpp"
 
 #ifndef MEMEX_VERSION
 #define MEMEX_VERSION "dev"
@@ -33,6 +34,11 @@ int main(int argc, char** argv) {
   QApplication app(argc, argv);
   QApplication::setApplicationName("Memex");
   QApplication::setOrganizationName("memex");
+
+  // 主题（R19）：起窗前应用令牌化调色板与全局 QSS；跟随系统时系统亮暗变化
+  // 由 ThemeManager 自动重应用。窗口内控件各自设的样式优先级更高，
+  // 不受此处影响。
+  memex::client::ThemeManager::instance().apply(&app);
 
   memex::client::MainWindow window;
   window.show();

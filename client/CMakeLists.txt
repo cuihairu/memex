@@ -26,7 +26,11 @@ qt_add_executable(memex_client
   app/main_window.cpp
   app/main_window.hpp
   app/screenshot_tool.cpp
-  app/screenshot_tool.hpp)
+  app/screenshot_tool.hpp
+  app/theme.cpp
+  app/theme.hpp
+  app/theme_settings_page.cpp
+  app/theme_settings_page.hpp)
 target_include_directories(memex_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_compile_definitions(memex_client PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 target_link_libraries(memex_client PRIVATE
@@ -159,4 +163,18 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(screenshot PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
+
+  # T4.9 主题切换验收（R19）：令牌完备性与品牌橙恒定、跟随系统解析、
+  # 手动选择落盘往返、令牌化 QSS、多主题扩展位、应用级即时生效、设置页交互
+  add_executable(test_theme
+    tests/test_theme.cpp
+    app/theme.cpp
+    app/theme_settings_page.cpp)
+  target_include_directories(test_theme PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_theme PRIVATE Qt6::Widgets)
+  add_test(NAME theme COMMAND test_theme)
+  set_tests_properties(theme PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
 endif()
