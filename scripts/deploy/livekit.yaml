@@ -1,0 +1,21 @@
+# LiveKit 服务端配置（Memex 音视频底座）。内网演示值，上线前替换 keys
+# 并收紧 CORS／webhook 回调鉴权。TURN 指向同栈 coturn（静态账号，
+# 与 meet-compose.yml 的 --user 保持一致）。
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+rtc:
+  tcp_port: 7881
+  port_range_start: 6000
+  port_range_end: 6010
+  use_external_ip: false
+turn:
+  enabled: true
+  udp_port: 3478
+  # TLS TURN 需证书（生产反代后启用）：演示 profile 只开 UDP/TCP 明文
+  #（内网交换机域），tls_port 保持 0 即关闭。
+keys:
+  devkey: devsecret0123456789devsecret0123456789
+room:
+  empty_timeout: 300
+  max_participants: 50

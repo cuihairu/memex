@@ -1,0 +1,25 @@
+# Memex 协同文档底座（OnlyOffice DocumentServer 自部署）——独立进程部署，
+# 与 memex 服务端保持进程边界（todo 协同文档行：OnlyOffice／Collabora
+# 独立进程部署）。文档字节不出内网；落盘与版本由 DocumentServer 自管，
+# 会话级元数据（谁何时编了哪篇）走其回调接口，后续接 memex 归档。
+# 用法：docker compose -f scripts/deploy/docs-compose.yml up -d
+# 编辑器页：http://<宿主机>:8800/（集成示例）或经 WOPI/回调自研前端接入。
+name: memex-docs
+
+services:
+  onlyoffice:
+    image: onlyoffice/documentserver:8.2
+    container_name: memex-onlyoffice
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: "onlyoffice-jwt-devsecret"
+      ALLOW_PRIVATE_IP_ADDRESS: "true" # 内网回调放行（公网部署须关）
+    ports:
+      - "8800:80" # HTTP（编辑器＋API＋/healthcheck）
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1/healthcheck"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 60s

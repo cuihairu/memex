@@ -1,0 +1,26 @@
+# Memex 音视频会议底座（LiveKit 自部署，内嵌 TURN）——独立进程部署，
+# 与 memex 协作服务端保持进程边界（todo 音视频会议行）。
+# 内网演示值：livekit.yaml 的 keys 上线前必须替换
+#（见 docs/src/guide/av-collab.md 生产 hardening 清单）。
+# 用法：docker compose -f scripts/deploy/meet-compose.yml up -d
+name: memex-meet
+
+services:
+  livekit:
+    image: livekit/livekit-server:v1.8
+    container_name: memex-livekit
+    volumes:
+      - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+    command: ["--config", "/etc/livekit/livekit.yaml"]
+    ports:
+      - "7880:7880"   # HTTP API（建房／列房／纪要回调）
+      - "7881:7881"   # RTC/TCP 回落
+      - "3478:3478"   # 内嵌 TURN/UDP+TCP（对称 NAT 穿透）
+      - "3478:3478/udp"
+      - "6000-6010:6000-6010/udp" # RTC/UDP 媒体
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:7880/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
