@@ -25,6 +25,10 @@ qt_add_executable(memex_client
   app/main.cpp
   app/main_window.cpp
   app/main_window.hpp
+  app/notify_center.cpp
+  app/notify_center.hpp
+  app/notify_prefs.cpp
+  app/notify_prefs.hpp
   app/screenshot_tool.cpp
   app/screenshot_tool.hpp
   app/theme.cpp
@@ -136,6 +140,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
     app/main_window.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
     app/screenshot_tool.cpp)
   target_include_directories(test_mode_switch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -154,6 +160,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_screenshot
     tests/test_screenshot.cpp
     app/main_window.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
     app/screenshot_tool.cpp)
   target_include_directories(test_screenshot PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -161,6 +169,26 @@ if(MEMEX_BUILD_TESTS)
     memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
   add_test(NAME screenshot COMMAND test_screenshot)
   set_tests_properties(screenshot PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
+
+  # T4.10 通知子系统验收：分级裁决矩阵／偏好落盘／通知中心执行面
+  # （重要托盘强提醒、紧急置顶确认弹窗抓图、全屏递延补弹）／设置页
+  # 交互；全链路＝真实服务端 --webhook-port → CLI 建 webhook → HTTP
+  # POST 三级 → 引擎 NOTICE →信号＋弹窗，本地库 compose 同源对账
+  add_executable(test_notify
+    tests/test_notify.cpp
+    app/notify_prefs.cpp
+    app/notify_center.cpp)
+  target_include_directories(test_notify PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_notify PRIVATE
+    memex_engine_collab Qt6::Widgets Qt6::Sql)
+  target_compile_definitions(test_notify PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME notify COMMAND test_notify)
+  set_tests_properties(notify PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 

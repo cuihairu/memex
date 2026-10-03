@@ -431,6 +431,9 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
   case MsgType::TEXT:
     if (msg.has_text()) handle_text(msg);
     break;
+  case MsgType::NOTICE:
+    if (msg.has_notice()) handle_notice(msg);
+    break;
   case MsgType::ACK:
     handle_ack(msg);
     break;
@@ -577,6 +580,66 @@ void CollabEngine::handle_text(const Message& msg) {
     }
   } else {
     qInfo() << "[协作] 重复补投，按 msg_id 去重：" << QString::fromStdString(msg.msg_id());
+  }
+}
+
+void CollabEngine::handle_notice(const Message& msg) {
+  if (!msg.has_notice()) return;
+  const auto& n = msg.notice();
+  const qint64 ts =
+      msg.ts_ms() > 0 ? msg.ts_ms() : QDateTime::currentMSecsSinceEpoch();
+  // 群通知（to="group:N"）与个人通知（to=账号，from="通知"）：归档形态与
+  // 服务端同源（compose_notice_text），本地按 msg_id 去重（离线补投重复无害）
+  const bool is_group = msg.to().rfind("group:", 0) == 0;
+  const std::string peer = is_group ? msg.to() : msg.from();
+  const std::string text = memex::protocol::compose_notice_text(
+      n.title(), n.content(), n.jump_url());
+  bool inserted = true;
+  if (store_) {
+    memex::client::StoredMessage sm;
+    // 服务端通知无会话 seq（恒 0）：本地分配单调 seq，否则同 from 的第二条
+    // 撞 UNIQUE(from_id, seq) 被 IGNORE 而丢信号；重投仍按 msg_id 去重
+    sm.seq = msg.seq() > 0 ? msg.seq()
+                           : store_->next_local_seq(msg.from());
+    sm.peer = peer;
+    sm.from = msg.from();
+    sm.to = msg.to();
+    sm.ts_ms = ts;
+    sm.text = text;
+    sm.source = "collab";
+    sm.msg_id = msg.msg_id();
+    store_->append(sm, &inserted);
+  }
+  // ACK 清服务端离线队列（与 TEXT 同语义；未回执下次登录重投，按 msg_id 去重）
+  if (!msg.msg_id().empty()) {
+    Message ack;
+    ack.set_type(MsgType::ACK);
+    ack.set_from(account_.toStdString());
+    ack.set_to("server");
+    ack.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+    ack.mutable_ack()->set_msg_id(msg.msg_id());
+    send_frame(ack);
+  }
+  if (inserted) {
+    const QString qtext = QString::fromStdString(text);
+    if (is_group) {
+      emit group_message_received(QString::fromStdString(msg.to()),
+                                  QString::fromStdString(msg.from()), qtext,
+                                  ts, QString::fromStdString(msg.msg_id()));
+    } else {
+      emit message_received(QString::fromStdString(msg.from()), qtext, ts,
+                            QString::fromStdString(msg.msg_id()));
+    }
+    // 分级推送入口（T4.10）：普通＝站内消息已由上面的信号渲染，弹窗策略
+    // 由 NotificationCenter 按个人偏好与紧急程度裁决
+    emit notice_received(
+        QString::fromStdString(msg.from()), QString::fromStdString(n.title()),
+        QString::fromStdString(n.content()), static_cast<int>(n.urgency()),
+        QString::fromStdString(n.jump_url()), ts,
+        QString::fromStdString(msg.msg_id()));
+  } else {
+    qInfo() << "[协作] 重复通知，按 msg_id 去重："
+            << QString::fromStdString(msg.msg_id());
   }
 }
 

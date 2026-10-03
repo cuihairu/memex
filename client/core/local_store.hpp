@@ -45,6 +45,10 @@ public:
   // inserted 非空时回报是否真正插入（false=命中已有记录，重复消息）。
   bool append(const StoredMessage& msg, bool* inserted = nullptr);
 
+  // 服务端起源消息（如通知，无发送方会话 seq）本地分配单调 seq——满足
+  // UNIQUE(from_id, seq)；离线重投的去重仍走 msg_id 唯一索引。
+  qint64 next_local_seq(const std::string& from_id);
+
   // 按 msg_id 置撤回标记（服务端撤回事件到达后调用）。
   bool mark_recalled(const std::string& msg_id);
 

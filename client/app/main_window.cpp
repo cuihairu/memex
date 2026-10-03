@@ -41,6 +41,8 @@
 
 #include <core/local_store.hpp>
 
+#include "notify_center.hpp"
+
 namespace memex::client {
 
 namespace {
@@ -175,6 +177,10 @@ void MainWindow::build_ui() {
 
   // —— 设置：开机启动（T4.7；勾选态与登记文件同步）——
   auto* opt_menu = menuBar()->addMenu(QStringLiteral("设置"));
+  auto* act_notify = opt_menu->addAction(QStringLiteral("通知偏好…"));
+  connect(act_notify, &QAction::triggered, this, [] {
+    NotificationCenter::instance().show_settings();
+  });
   act_autostart_ =
       opt_menu->addAction(QStringLiteral("开机启动（登录后自动运行）"));
   act_autostart_->setCheckable(true);
@@ -550,6 +556,12 @@ void MainWindow::wire_collab() {
   // 都通知，不随分支改写而丢失）
   connect(&collab_engine_, &CollabEngine::message_received, this,
           [this](const QString& from, const QString&, qint64, const QString&) {
+            // T4.10：通知（发送方＝kNoticeSender）由通知中心分级自管，不在此
+            // 重复托盘气泡（普通默认不弹，重要／紧急由通知中心直发）
+            if (from ==
+                QString::fromUtf8(memex::protocol::kNoticeSender)) {
+              return;
+            }
             if (!isActiveWindow()) {
               tray_notify(QStringLiteral("新消息"),
                           QStringLiteral("来自 %1 的协作消息").arg(from));
@@ -610,6 +622,11 @@ void MainWindow::wire_collab() {
   connect(&collab_engine_, &CollabEngine::group_message_received, this,
           [this](const QString& group_key, const QString& sender,
                  const QString&, qint64, const QString&) {
+            // T4.10：群通知同样由通知中心分级自管（不重复托盘气泡）
+            if (sender ==
+                QString::fromUtf8(memex::protocol::kNoticeSender)) {
+              return;
+            }
             if (!isActiveWindow()) {
               const QString gname =
                   groups_.value(group_key.mid(6).toULongLong()).name;
@@ -618,6 +635,16 @@ void MainWindow::wire_collab() {
                               .arg(gname.isEmpty() ? group_key : gname, sender));
             }
           });
+  // —— T4.10 分级推送接入：通知中心按个人偏好裁决普通／重要／紧急三级
+  // （普通＝仅站内消息已渲染；重要＝托盘强提醒；紧急＝置顶确认弹窗）——
+  connect(&collab_engine_, &CollabEngine::notice_received,
+          &NotificationCenter::instance(), &NotificationCenter::on_notice);
+  connect(&NotificationCenter::instance(),
+          &NotificationCenter::want_tray_notify, this,
+          [this](const QString& title, const QString& text) {
+            tray_notify(title, text); // 通知中心裁决出的强提醒，不看激活态
+          });
+
   // —— T4.3 已读回执与在线状态 ——
   connect(&collab_engine_, &CollabEngine::message_read, this,
           [this](const QString& /*msg_id*/, const QString& reader,
@@ -1516,6 +1543,10 @@ void MainWindow::setup_tray() {
     set_autostart(on);
     act_tray_auto->setChecked(autostart_enabled());
     if (act_autostart_) act_autostart_->setChecked(autostart_enabled());
+  });
+  auto* act_notify_prefs = menu->addAction(QStringLiteral("通知偏好"));
+  connect(act_notify_prefs, &QAction::triggered, this, [] {
+    NotificationCenter::instance().show_settings();
   });
   auto* act_quit = menu->addAction(QStringLiteral("退出"));
   connect(act_quit, &QAction::triggered, this, [this] {

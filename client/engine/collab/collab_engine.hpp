@@ -107,6 +107,14 @@ signals:
   void message_read(const QString& msg_id, const QString& reader, qint64 read_ms);
   // 在线账号表（T4.3）：登录/登出/互踢/断开变更即推送，含自己
   void presence_changed(const QStringList& online_accounts);
+  // 收到通知（T4.10，webhook 推入）：from（＝"通知"）、标题、正文、紧急程度
+  // （1 普通／2 重要／3 紧急，Notice::Urgency 数值）、跳转、ts_ms、msg_id。
+  // 正文展示走 message_received／group_message_received（同一条只渲染一次），
+  // 本信号专供分级推送（桌面通知／置顶弹窗）与通知偏好判定。
+  void notice_received(const QString& from, const QString& title,
+                       const QString& content, int urgency,
+                       const QString& jump_url, qint64 ts_ms,
+                       const QString& msg_id);
 
 private:
   // 在途／待补传消息（T2.5）：断线中断期本地暂存，恢复后按原 seq 补传，
@@ -130,6 +138,7 @@ private:
   void stop_heartbeat();
   void send_frame(const memex::protocol::Message& msg);
   void handle_text(const memex::protocol::Message& msg);
+  void handle_notice(const memex::protocol::Message& msg); // T4.10 通知
   void handle_ack(const memex::protocol::Message& msg);
   void flush_pending_sends(); // 重连成功后补传暂存消息
 

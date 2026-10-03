@@ -108,6 +108,19 @@ bool LocalStore::append(const StoredMessage& msg, bool* inserted) {
   return true;
 }
 
+qint64 LocalStore::next_local_seq(const std::string& from_id) {
+  if (!open_) return 0;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE from_id = ?"));
+  q.addBindValue(QString::fromStdString(from_id));
+  if (!q.exec() || !q.next()) {
+    qWarning() << "[本地库] 分配 seq 失败：" << q.lastError().text();
+    return 0;
+  }
+  return q.value(0).toLongLong();
+}
+
 QList<StoredMessage> LocalStore::history(const QString& peer, int limit) const {
   QList<StoredMessage> out;
   if (!open_) return out;
