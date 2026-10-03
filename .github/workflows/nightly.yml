@@ -132,7 +132,7 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      # 整取安装树；不缓存 vcpkg 源树（run-vcpkg 按钉住 commit 管理）
+      # 整取安装树；不缓存 vcpkg 源树（每轮按钉住 commit 浅克隆）
       - name: Cache vcpkg 安装树
         uses: actions/cache@v5
         with:
@@ -141,10 +141,31 @@ jobs:
           restore-keys: |
             vcpkg-installed-${{ runner.os }}-${{ matrix.target }}-
 
+      # vcpkg：显式浅克隆并钉在 manifest builtin-baseline 同一 commit，装在
+      # runner.temp（工作区之外）。不用 run-vcpkg——它在 Windows/macOS 上把
+      # 工作区内的 vcpkg 路径当 git submodule 查，以 "pathspec … did not
+      # match any file(s) known to git" 中断（Linux 上同一错误仅落在 stderr
+      # 未致命，跨平台行为不一致）。x-gha 二进制缓存仍生效（凭据已导出）。
       - name: Setup vcpkg（钉在 manifest builtin-baseline 同一 commit）
-        uses: lukka/run-vcpkg@v11
-        with:
-          vcpkgGitCommitId: '10541e317a660f4165ba4ac2851ab54a8d4577b1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VCPKG_COMMIT=10541e317a660f4165ba4ac2851ab54a8d4577b1
+          BASE="$(cygpath -u "${RUNNER_TEMP}" 2>/dev/null || echo "${RUNNER_TEMP}")"
+          ROOT="${BASE}/vcpkg"
+          if [ ! -d "${ROOT}/.git" ]; then
+            git init -q "${ROOT}"
+            git -C "${ROOT}" remote add origin https://github.com/microsoft/vcpkg.git
+            git -C "${ROOT}" fetch -q --depth=1 origin "${VCPKG_COMMIT}"
+            git -C "${ROOT}" checkout -q FETCH_HEAD
+          fi
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            "${ROOT}/bootstrap-vcpkg.bat" -disableMetrics
+          else
+            "${ROOT}/bootstrap-vcpkg.sh" -disableMetrics
+          fi
+          echo "VCPKG_ROOT=${ROOT}" >> "${GITHUB_ENV}"
+          echo "vcpkg: $(${ROOT}/vcpkg version 2>/dev/null || echo '（工具将在 configure 时按需自举）')"
 
       # Windows/macOS：Qt 取官方树（install-qt-action 缓存），vcpkg 清空 client
       # feature（preset 已置空），CMAKE_PREFIX_PATH 显式指到官方 Qt 防 vcpkg 树抢先
@@ -186,12 +207,16 @@ jobs:
           rm -rf /tmp/verify && mkdir -p /tmp/verify
           tar -xzf "dist/${{ steps.pkg.outputs.asset }}" -C /tmp/verify
           if [ "$TARGET" = "server" ]; then
+            # 解包目录唯一：单命中 glob 展开作命令（冒烟约定），豁免 glob-as-command 误报
+            # shellcheck disable=SC2211
             /tmp/verify/memex-server-linux-x64-*/memex-server --version
+            # shellcheck disable=SC2211
             /tmp/verify/memex-server-linux-x64-*/memex-server --self-test
           else
+            # shellcheck disable=SC2211
             /tmp/verify/MemexClient-*-linux-x64-*/memex-client --version
-            QT_QPA_PLATFORM=offscreen \
-              /tmp/verify/MemexClient-*-linux-x64-*/memex-client.sh --smoke
+            # shellcheck disable=SC2037,SC2211
+            QT_QPA_PLATFORM=offscreen /tmp/verify/MemexClient-*-linux-x64-*/memex-client.sh --smoke
           fi
           # deb 真装走查：安装 → --version（客户端再走 --smoke）→ 卸载
           sudo dpkg -i "dist/memex-$TARGET-linux-x64.deb"
@@ -370,7 +395,7 @@ jobs:
 
           # —— 取件验证指南（三平台逐资产；随 Release 分发）——
           {
-            echo "# Memex Nightly 取件验证（$updated · $sha7）"
+            echo "# Memex Nightly 取件验证（${updated} · ${sha7}）"
             echo
             echo "## 总则"
             echo
@@ -418,7 +443,7 @@ jobs:
           {
             echo "## Memex Nightly（每日构建）"
             echo
-            echo "- 更新时间：$updated（UTC+8）"
+            echo "- 更新时间：${updated}（UTC+8）"
             echo "- 提交：$sha7 $subject"
             echo "- 基线：main @ $GITHUB_SHA"
             echo
