@@ -74,7 +74,7 @@ jobs:
             preset: client-release
             # vcpkg 不代管 X11/GL 等系统库；qtbase 构建所需系统包在此安装；
             # rpm 提供 rpmbuild（Linux 安装包矩阵）
-            sys_pkgs: "rpm libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev libxcb-icccm4-dev libxcb-util-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-rand0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-glx0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev libfontconfig1-dev libfreetype-dev libdbus-1-dev libicu-dev"
+            sys_pkgs: "rpm libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev libxcb-icccm4-dev libxcb-util-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-glx0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev libfontconfig1-dev libfreetype-dev libdbus-1-dev libicu-dev"
           - os: windows-latest
             plat: windows-x64
             target: client
@@ -148,7 +148,9 @@ jobs:
 
       # Windows/macOS：Qt 取官方树（install-qt-action 缓存），vcpkg 清空 client
       # feature（preset 已置空），CMAKE_PREFIX_PATH 显式指到官方 Qt 防 vcpkg 树抢先
-      - name: 配置与编译（Release，preset ${{ matrix.preset }}）
+      - name: 配置与编译（Release，preset ${{ matrix.preset }})
+        # 显式 bash：Windows 默认 shell 是 pwsh，本步是 POSIX 脚本（ParserError 防呆）
+        shell: bash
         run: |
           EXTRA=""
           if [ "${{ runner.os }}" != "Linux" ]; then

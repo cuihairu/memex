@@ -11,8 +11,9 @@
 
 namespace memex::protocol {
 
-// 生成代码命名空间（memex.protocol.v1）。
-namespace v1 = ::memex::protocol::v1;
+// 生成代码命名空间（memex.protocol.v1）：pb.h 已在本作用域声明 namespace v1，
+// 直接引用即可——再写同名命名空间别名（namespace v1 = …::v1）在 clang 下是
+// redefinition 错误（gcc 宽容曾掩盖；linux/gcc 与 mac/clang 双工具链对齐）。
 
 // 对外统一别名：信封即消息。
 using Message = v1::Envelope;
