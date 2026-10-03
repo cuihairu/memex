@@ -104,15 +104,15 @@
 - [x] T4.7 系统集成：托盘、系统通知、开机启动、互踢提示；安装包命名 `MemexClient-x.y.z-*`（A23）。
 - [ ] T4.8 手机端初始化向导（R17／R18）：首次启动强制服务器地址设置页（含连通性校验），通过后进登录；移动端无任何免登录入口。
   验收：未完成初始化无法进入主界面；全部界面无匿名入口（R17、R18）。
-  依赖：R17／R18 均为手机端专属规则（直连态／免登录仅桌面端），交付依赖鸿蒙客户端（T6.2，阶段 6）落地后启动。
-  受阻（2026-10-04 探测）：构建链 hvigor／hdc／ohpm 与 OHOS SDK 均不在环境（见 T6.2），无鸿蒙客户端可承载初始化向导面——随 T6.2 解锁后启动。
+  依赖（2026-10-04 用户令更新）：R17／R18 均为手机端专属规则（直连态／免登录仅桌面端）；初始化向导随 Android 端（T6.3，排前）落地启动，iOS 端（T6.4）代码面并行，不再等鸿蒙 T6.2（T6.2 属桌面矩阵项）。
+  受阻（2026-10-04 探测）：构建链 hvigor／hdc／ohpm 与 OHOS SDK 均不在环境（见 T6.2），当时判「无鸿蒙客户端可承载初始化向导面——随 T6.2 解锁后启动」；该交付口径后经 2026-10-04 用户令改为随 Android／iOS（T6.3／T6.4）落地，探测结果本身留档不重探。
 - [x] T4.9 主题切换（R19，第一期主线后启动）：亮／暗主题跟随系统＋手动切换；界面颜色全部走主题令牌，预留多主题扩展位。
   验收：切换即时生效且重启后保持；系统亮暗变化时跟随；新增主题仅需新增一套令牌（R19）。
   进展（内核已落地）：`theme.{hpp,cpp}` 令牌层（23 令牌 × 亮暗两套；品牌橙 #e16531 两主题恒同，扩展主题也不许漂移主色）＋ ThemeManager（跟随系统按 QStyleHints::colorScheme 解析、手动选择优先且不被系统变化覆盖、QSettings 落盘 `appearance/theme_mode`）＋ 令牌化全局 QSS（`%令牌名%` 模板统一替换，无占位符残留）＋ 设置页 `theme_settings_page`（点选即时生效并回灌选中态）＋ main.cpp 起窗前 apply。验收用例 `test_theme`（令牌完备性与对比度门槛、跟随解析、落盘往返、QSS 覆盖、自定义主题扩展位、应用级即时生效、设置页交互），全量 21/21 两轮绿；xvfb 实截亮/暗两态像素差成立。
   接线收尾（T4.9 清零）：主窗各控件硬编码色全部改走令牌（apply_theme_styles 统一出口：侧栏/设备列表/会话头/气泡区/输入行/描边按钮/发送按钮/归档横幅，theme_changed 即时重刷＋setWindowIcon 同刷）；聊天区富文本内联色按 ChatRow 记录重放（rerender_chat，不重查库防丢即时提示）；「设置 → 主题…」入口挂进主窗菜单（macOS PreferencesRole）；令牌扩 4 枚（brand_text 浅底品牌色文本 5.3:1／success_wash+success_text 协作态横幅／disabled_bg 禁用底，亮暗各一套、对比度门槛入 test）；test_theme 补第⑧节主窗接线验收（生产路径 ThemeManager::instance() 驱动；「颜色全部来自令牌」运行时口径＝样式里每个 hex ∈ 当前主题令牌值，与④「QSS 必含品牌橙」自洽）。截图标注工具条为截图功能自身对比面（白色工具条压暗背景），不属主窗 UI 未令牌化。全量 25/25 绿。
 - [x] T4.10 通知子系统：webhook 接入（token 鉴权、按群／个人独立 webhook，JSON payload＝目标／标题／内容／紧急程度／可选跳转，调用即向目标发消息，文档带 curl 示例）；紧急程度三级分级推送（普通＝站内会话消息、重要＝桌面通知强提醒、紧急＝置顶弹窗需确认收悉，全屏／演示模式策略可配）；个人通知偏好（每级是否弹窗、免打扰时段）可配；群公告式通知同级；手机端规则照旧（初始化设域名、无匿名聊天，紧急＝横幅＋震动）。
   验收：真实走查——curl 打 webhook → 群内收到消息 → 改紧急级别 → 弹窗真实弹出（截图）、前后对账。
-  进展（已落地，四笔）：2b8782b webhook 面（协议 NOTICE=48＋Notice{title,content,urgency,jump_url}、kNoticeSender「通知」、compose_notice_text 同源正文、webhooks 台账 sha256 摘要、HTTP 接收器 POST /hook/<token>、投递镜像 TEXT＝离线入队＋归档＋在线扇出＋常用联系人，test_webhook 鉴权/校验/投递全绿）；3ee6309 CLI 面（serve --webhook-port 默认 24361 独立端口绑定失败只降级、webhook create|list|revoke、建即校验目标、token 仅一次显示＋自带 curl 示例）；8484905 客户端面（引擎 handle_notice＋notice_received、本地库 next_local_seq 解服务端起源消息 UNIQUE(from_id,seq) 冲突、notify_prefs 三级开关/免打扰跨零点/全屏策略、notify_center 重要托盘强提醒＋紧急置顶确认弹窗排队＋全屏递延退出补弹＋偏好设置页、主窗设置/托盘入口与 T4.7 气泡 kNoticeSender 守卫，test_notify 六节含真实服务端全链路与弹窗抓图）；文档笔 notify.md（payload 表＋curl 示例＋状态码＋截图）＋文档站导航。走查：curl 三级 200 带 msg_id、错 token 401、坏 urgency 400、messages 前后 0→3 条类型 notice 正文同源；紧急弹窗真实弹出截图入库。手机端规则（横幅＋震动）随 T6.2。
+  进展（已落地，四笔）：2b8782b webhook 面（协议 NOTICE=48＋Notice{title,content,urgency,jump_url}、kNoticeSender「通知」、compose_notice_text 同源正文、webhooks 台账 sha256 摘要、HTTP 接收器 POST /hook/<token>、投递镜像 TEXT＝离线入队＋归档＋在线扇出＋常用联系人，test_webhook 鉴权/校验/投递全绿）；3ee6309 CLI 面（serve --webhook-port 默认 24361 独立端口绑定失败只降级、webhook create|list|revoke、建即校验目标、token 仅一次显示＋自带 curl 示例）；8484905 客户端面（引擎 handle_notice＋notice_received、本地库 next_local_seq 解服务端起源消息 UNIQUE(from_id,seq) 冲突、notify_prefs 三级开关/免打扰跨零点/全屏策略、notify_center 重要托盘强提醒＋紧急置顶确认弹窗排队＋全屏递延退出补弹＋偏好设置页、主窗设置/托盘入口与 T4.7 气泡 kNoticeSender 守卫，test_notify 六节含真实服务端全链路与弹窗抓图）；文档笔 notify.md（payload 表＋curl 示例＋状态码＋截图）＋文档站导航。走查：curl 三级 200 带 msg_id、错 token 401、坏 urgency 400、messages 前后 0→3 条类型 notice 正文同源；紧急弹窗真实弹出截图入库。手机端规则（横幅＋震动）随 Android／iOS 手机端（T6.3／T6.4，2026-10-04 用户令）。
 
 ### 阶段 5：平台适配与验收（A12–A15、A21–A23）
 
@@ -121,11 +121,16 @@
 - [x] T5.3 组件清单与许可核验（A22）、命名一致性检查（A23）。
 - [x] T5.4 跨地域接入联调与断线补传场景验证（A13、A15、A16）。
 
-### 阶段 6：平台矩阵扩展（macOS 已落地、鸿蒙排期）
+### 阶段 6：平台矩阵扩展（手机端优先序 2026-10-04 用户令：Android 排前 → iOS 进行中·代码-only＋CI 验证 → 其他手机端排后·代码-only＋CI；桌面 macOS 已落地、鸿蒙 NEXT 照原计划不受手机端令影响）
 
 - [x] T6.1 macOS 产物与每日构建三平台安装包：客户端 dmg（Memex.app）＋服务端 dmg（内含 pkg 引导安装），arm64（官方 Qt 6.10.3＋vcpkg 静态非 Qt 依赖）；Linux 补 deb/rpm、Windows 补 Inno setup.exe；install.sh／install.ps1 一键安装（OS/架构检测、装后 --version 真验证、幂等）（A23）。
-- [ ] T6.2 鸿蒙（HarmonyOS NEXT）客户端：OHOS SDK 交叉编译链（arm64-v8a）、HAP 打包、真机验收（Qt 官方支持口径：HarmonyOS 6.1 起、API 23+）。依赖：DevEco Studio 环境、应用签名证书、真机各一。手机端规则与桌面一致——初始化设服务端域名、无匿名聊天。前置：一期桌面主线清零后再启动。
-  受阻（2026-10-04 环境探测）：`hvigor`／`hdc`／`ohpm` 均 NOT FOUND，未检出 OHOS SDK 与 DevEco Studio 目录；签名证书、真机亦无。三项依赖（工具链＋证书＋真机）齐备前无法开工，解锁后即启动（R17／R18、T4.8、手机端通知规则随本项一并落地）。
+- [ ] T6.2 鸿蒙（HarmonyOS NEXT）客户端（**桌面矩阵项**——2026-10-04 用户令：鸿蒙 NEXT 属 Qt 桌面矩阵，不受手机端口径令影响，照原计划）：OHOS SDK 交叉编译链（arm64-v8a）、HAP 打包、真机验收（Qt 官方支持口径：HarmonyOS 6.1 起、API 23+）。依赖：DevEco Studio 环境、应用签名证书、真机各一。手机端规则与桌面一致——初始化设服务端域名、无匿名聊天。前置：一期桌面主线清零后再启动。
+  受阻（2026-10-04 环境探测）：`hvigor`／`hdc`／`ohpm` 均 NOT FOUND，未检出 OHOS SDK 与 DevEco Studio 目录；签名证书、真机亦无。三项依赖（工具链＋证书＋真机）齐备前无法开工，解锁后即启动。（原随本项落地的 R17／R18、T4.8、手机端通知规则已按 2026-10-04 用户令改由 Android／iOS 承载，见 T6.3／T6.4。）
+- [~] T6.3 **Android 手机端（排前，手机端第一优先）**：`apps/android` 从零（Kotlin），对齐桌面端功能面——登录（R17 初始化向导设服务器地址＋连通校验、R18 无匿名入口，随本块落地）、会话列表、单聊／群聊收发、消息推送横幅＋震动（对齐桌面端三级通知语义：普通站内／重要横幅强提醒／紧急横幅需确认）、移动端适配。
+  验收：功能面＝登录／会话／收发／消息推送横幅震动对齐桌面端；**做完一块提交推送一块**（path-scoped，测试全绿后推）。
+- [~] T6.4 **iOS 手机端（进行中：代码-only＋CI 验证）**：`apps/ios` 从零（Swift／SwiftUI）——登录、会话列表、单聊／群聊收发、消息推送（APNs 横幅／震动，对齐桌面端三级通知语义；R17／R18 手机端规则同）、移动端适配。
+  验收（2026-10-04 用户令）：本机无 iOS 环境，**只写代码不做本地验证**；构建＋测试全走 GitHub Actions macOS runner（swift build／test 腿），红了修到绿。
+- [ ] 其他手机端（鸿蒙手机版等，2026-10-04 用户令）：排在 Android／iOS 之后；只写代码不本地验证，验证走 CI 可用平台。注：早前「手机端只做 Android、iOS 不做」口径已被后两道令覆盖——最终口径＝Android 排前、iOS 进行中（代码-only＋CI）、其他排后（代码-only＋CI）。
 
 
 ## 三、第二期（单独立项后细化）
