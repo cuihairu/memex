@@ -10,10 +10,11 @@
 #include <QListWidget>
 #include <QMainWindow>
 #include <QMap>
-#include <QSet>
 #include <QPushButton>
+#include <QSet>
 #include <QStringList>
 #include <QTextBrowser>
+#include <QVector>
 
 #include <engine/direct/direct_engine.hpp>
 #include <engine/collab/collab_engine.hpp>
@@ -93,6 +94,23 @@ private:
                       qint64 ts_ms, bool outgoing, const QString& source);
   void append_system_line(const QString& text);
   void show_guidance();
+  void render_guidance();  // 空态引导正文（颜色走令牌，主题切换可重渲）
+  // —— T4.9 主题（R19）——
+  // 控件样式统一出口：所有颜色只从 ThemeTokens 取，切换后重刷即生效。
+  void apply_theme_styles();
+  // 聊天区富文本重渲：气泡/@高亮/系统行的颜色是内联的，随主题重放记录。
+  void rerender_chat();
+  void show_theme_settings();  // 「设置 → 主题…」入口
+  // 聊天区一行（消息或系统行）的结构化记录——主题切换时据此重渲，
+  // 不必重查本地库（重查会丢掉尚未落库的即时提示）。
+  struct ChatRow {
+    bool system{false}; // true=系统行（text 即正文）；false=消息气泡
+    QString name;       // 气泡行：显示名＋来源标签（已 esc）
+    QString text;
+    qint64 ts_ms{0};
+    bool outgoing{false};
+    bool at_mode{false}; // 群聊：@账号 高亮
+  };
   void show_status(const QString& text);
   void update_banner();          // 按当前形态切换归档提示条
   void seed_collab_peers();      // 登录后从本地库补入历史协作会话
@@ -150,6 +168,7 @@ private:
   bool cross_state_allowed_{true}; // T3.4 生效策略：允许与未登录设备通信
   QMap<QString, quint64> file_sent_; // 文件名 → 最近一次进度字节（节流）
   bool chat_showing_guidance_{false}; // 聊天区当前是否为引导态
+  QVector<ChatRow> chat_rows_;       // 当前会话的聊天行记录（重渲用）
   QString status_hint_;               // 状态栏事件提示（引擎态前缀实时拼）
 
   QString last_groups_json_;          // 最近一次群列表数据（T4.1）
@@ -175,6 +194,7 @@ private:
   // 开机启动：freedesktop autostart .desktop 登记（UOS/麒麟同为 Linux 生效）。
   void setup_tray(); // 托盘可用才建（offscreen 等环境跳过，不崩）
   void tray_notify(const QString& title, const QString& text);
+  void show_about(); // A23 图标面：关于页（logo＋版本）
   void closeEvent(QCloseEvent* event) override; // 托盘可用时关闭即最小化进托盘
   static QString autostart_dir(); // 登记目录（MEMEX_TEST_AUTOSTART_DIR 可覆盖，测后无污染）
   QSystemTrayIcon* tray_{nullptr}; // 托盘不可用时保持空（全部调用判空）
@@ -198,6 +218,17 @@ private:
   QLineEdit* input_box_{nullptr};
   QPushButton* send_btn_{nullptr};
   QAction* act_collab_logout_{nullptr};
+  QAction* act_theme_{nullptr}; // 「设置 → 主题…」菜单项
+
+  // 参与 apply_theme_styles 的控件（构造期为局部变量，主题重刷需长期持有）
+  QWidget* side_{nullptr};
+  QLabel* side_title_{nullptr};
+  QLabel* local_badge_{nullptr};
+  QWidget* head_{nullptr};
+  QWidget* input_row_{nullptr};
+  QPushButton* file_btn_{nullptr};
+  QPushButton* shot_btn_{nullptr};
+  QPushButton* emoji_btn_{nullptr};
 };
 
 } // namespace memex::client

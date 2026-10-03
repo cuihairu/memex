@@ -25,6 +25,9 @@ DefaultGroupName=Memex
 DisableProgramGroupPage=yes
 ; A23：客户端资产名 MemexClient-x.y.z-*（版本号随 AppVersion 注入）
 OutputBaseFilename=MemexClient-{#AppVersion}-win-x64
+; A23 图标面：安装器向导/卸载项图标（nightly win 暂存面同取 client/app/icons
+; 的 memex.ico 落进 StageDir；快捷方式默认取 exe 内嵌 ico——同源）
+SetupIconFile={#StageDir}\memex.ico
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin

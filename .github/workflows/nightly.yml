@@ -256,6 +256,9 @@ jobs:
           # 暂存即对齐分发名：CMake 目标产物 memex_client.exe（下划线），
           # 下游 windeployqt/zip/iss/装后路径全按 memex-client.exe（连字符）走
           Copy-Item build-client-win/client/memex_client.exe $stage/memex-client.exe
+          # A23 图标面：ico 随暂存面（安装器 SetupIconFile 与便携 zip 同取；
+          # 窗口/任务栏图标在 exe PE 资源内嵌，与 Qt qrc 同源）
+          Copy-Item client/app/icons/memex.ico $stage/memex.ico
 
           # windeployqt：Qt DLL + 平台/风格/图像/SQL 驱动插件随包
           #（缺 platforms/qwindows.dll 时 GUI 无法启动）
@@ -288,7 +291,7 @@ jobs:
           }
 
           # 关键文件面检查（出包前快速失败）
-          foreach ($f in @('memex-client.exe','Qt6Core.dll','Qt6Widgets.dll','platforms/qwindows.dll','vcruntime140.dll')) {
+          foreach ($f in @('memex-client.exe','Qt6Core.dll','Qt6Widgets.dll','platforms/qwindows.dll','vcruntime140.dll','memex.ico')) {
             if (-not (Test-Path (Join-Path $stage $f))) { Write-Error "missing in stage: $f"; exit 1 }
           }
 

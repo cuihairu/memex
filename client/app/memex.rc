@@ -1,0 +1,3 @@
+// Windows executable resource: explorer/taskbar icon, same source as the
+// Qt resource icons (see icons/ README for the generation chain).
+1 ICON "icons/memex.ico"

@@ -21,10 +21,14 @@ target_include_directories(memex_engine_collab PUBLIC ${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(memex_engine_collab PUBLIC memex_core memex_common Qt6::Core Qt6::Network)
 target_compile_definitions(memex_engine_collab PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 
+# qrc 资源自动处理（A23 图标面：窗口/托盘/关于页共用的 logo 多尺寸资产）
+set(CMAKE_AUTORCC ON)
+
 qt_add_executable(memex_client
   app/main.cpp
   app/main_window.cpp
   app/main_window.hpp
+  app/icons/icons.qrc
   app/notify_center.cpp
   app/notify_center.hpp
   app/notify_prefs.cpp
@@ -45,6 +49,13 @@ target_link_libraries(memex_client PRIVATE
 
 # 分发体属性：Windows GUI 子系统（双击启动不弹控制台；--version 等控制台面经
 # 句柄重定向仍可用）；macOS .app bundle（dmg 分发体，Info.plist 由 CMake 生成）。
+# A23 图标面：icns 进 .app bundle Resources（Info.plist CFBundleIconFile 指名）
+if(APPLE)
+  target_sources(memex_client PRIVATE app/icons/memex.icns)
+  set_source_files_properties(app/icons/memex.icns PROPERTIES
+    MACOSX_PACKAGE_LOCATION Resources)
+endif()
+
 set_target_properties(memex_client PROPERTIES
   WIN32_EXECUTABLE TRUE
   MACOSX_BUNDLE TRUE)
@@ -53,9 +64,15 @@ if(APPLE)
   set_target_properties(memex_client PROPERTIES
     OUTPUT_NAME "Memex"
     MACOSX_BUNDLE_BUNDLE_NAME "Memex"
+    MACOSX_BUNDLE_ICON_FILE memex.icns
     MACOSX_BUNDLE_GUI_IDENTIFIER "site.cuihairu.memex"
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
+endif()
+
+# A23 图标面：Windows 可执行内嵌 ico（Explorer/任务栏取此，与 Qt 资源同源）
+if(WIN32)
+  target_sources(memex_client PRIVATE app/memex.rc)
 endif()
 
 if(MEMEX_BUILD_TESTS)
@@ -142,7 +159,10 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
-    app/screenshot_tool.cpp)
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
+    app/theme.cpp
+    app/theme_settings_page.cpp)
   target_include_directories(test_mode_switch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_mode_switch PRIVATE
@@ -162,7 +182,10 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
-    app/screenshot_tool.cpp)
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
+    app/theme.cpp
+    app/theme_settings_page.cpp)
   target_include_directories(test_screenshot PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_screenshot PRIVATE
@@ -192,17 +215,45 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # A23 图标面验收：qrc logo 资产（多尺寸可载＋品牌橙恒定）、主窗窗口
+  # 图标非空、帮助→关于页真弹（logo 标签抓图入库）、开机启动 .desktop Icon
+  add_executable(test_icon
+    tests/test_icon.cpp
+    app/main_window.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
+    app/theme.cpp
+    app/theme_settings_page.cpp)
+  target_include_directories(test_icon PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_icon PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+  add_test(NAME icon COMMAND test_icon)
+  set_tests_properties(icon PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
+
   # T4.9 主题切换验收（R19）：令牌完备性与品牌橙恒定、跟随系统解析、
-  # 手动选择落盘往返、令牌化 QSS、多主题扩展位、应用级即时生效、设置页交互
+  # 手动选择落盘往返、令牌化 QSS、多主题扩展位、应用级即时生效、设置页交互、
+  # 主窗接线（控件样式走令牌、切换后富文本重渲、菜单入口可达）
+  # 链接面与 test_screenshot 一致（含 main_window.cpp/引擎）——否则接线无覆盖
   add_executable(test_theme
     tests/test_theme.cpp
+    app/main_window.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
     app/theme.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_theme PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
-  target_link_libraries(test_theme PRIVATE Qt6::Widgets)
+  target_link_libraries(test_theme PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
   add_test(NAME theme COMMAND test_theme)
   set_tests_properties(theme PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
-    TIMEOUT 60)
+    TIMEOUT 90)
 endif()

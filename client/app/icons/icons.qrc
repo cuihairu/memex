@@ -1,0 +1,14 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <!-- 应用图标资产：docs/src/public/logo.svg 经 SVG→PNG 多尺寸栅格化（本目录，
+       生成命令见 README.md），客户端窗口/托盘/关于页统一引用 :/icons/memex-<N>.png -->
+  <qresource prefix="/icons">
+    <file>memex-16.png</file>
+    <file>memex-32.png</file>
+    <file>memex-48.png</file>
+    <file>memex-64.png</file>
+    <file>memex-128.png</file>
+    <file>memex-256.png</file>
+    <file>memex-512.png</file>
+  </qresource>
+</RCC>

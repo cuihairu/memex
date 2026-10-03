@@ -6,7 +6,8 @@
 #   client → memex-client-linux-x64.deb / memex-client-linux-x64.rpm
 #   server → memex-server-linux-x64.deb / memex-server-linux-x64.rpm
 # 布局：/opt/memex/<component>/（tar 内容原样）+ /usr/bin/memex-<component>
-#       （入口包装，客户端转发到随包 memex-client.sh）+ 客户端另附 .desktop。
+#       （入口包装，客户端转发到随包 memex-client.sh）+ 客户端另附 .desktop
+#       与 hicolor 图标（Icon=memex 的解析来源，A23 图标面）。
 # 自包含口径：Qt/protobuf 等运行库均在 /opt/memex 内，不声明外部 Depends，
 # 目标机只需 glibc（与 tar 产物同一底线）。
 set -euo pipefail
@@ -46,6 +47,14 @@ exec /opt/memex/client/memex-client.sh "$@"
 EOF
   chmod 755 "$PAYLOAD/usr/bin/memex-client"
   mkdir -p "$PAYLOAD/usr/share/applications"
+  # A23 图标面：hicolor 多尺寸（上面 Icon=memex 的解析来源）。资产＝仓库内
+  # logo.svg 栅格化产物（client/app/icons，生成链见其 README），与客户端
+  # qrc/Windows ico/macOS icns 同源。
+  ICON_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/client/app/icons"
+  for s in 16 32 48 64 128 256; do
+    install -Dm644 "$ICON_SRC/memex-$s.png" \
+      "$PAYLOAD/usr/share/icons/hicolor/${s}x${s}/apps/memex.png"
+  done
   cat > "$PAYLOAD/usr/share/applications/memex-client.desktop" <<'EOF'
 [Desktop Entry]
 Type=Application
@@ -122,6 +131,7 @@ cp -a "$PAYLOAD/usr" "%{buildroot}/usr"
 EOF
 if [ "$COMPONENT" = client ]; then
   echo "/usr/share/applications/memex-client.desktop" >> "$SPEC"
+  echo "/usr/share/icons/hicolor/*/apps/memex.png" >> "$SPEC"
 fi
 echo "%changelog" >> "$SPEC"
 

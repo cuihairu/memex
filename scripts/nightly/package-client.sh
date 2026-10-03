@@ -23,6 +23,14 @@ PKG="$STAGE/$NAME"
 mkdir -p "$PKG/lib"
 cp "$BIN" "$PKG/memex-client"
 
+# A23 图标面：随包带 hicolor 图标资产（tar 自包含；deb/rpm 二次打包从仓库
+# 源另装到 /usr/share/icons——与 qrc/ico/icns 同源，生成链见 client/app/icons）
+ICON_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/client/app/icons"
+for s in 16 32 48 64 128 256; do
+  mkdir -p "$PKG/share/icons/hicolor/${s}x${s}/apps"
+  cp "$ICON_SRC/memex-$s.png" "$PKG/share/icons/hicolor/${s}x${s}/apps/memex.png"
+done
+
 # Qt 插件：平台（xcb/offscreen）、SQLite 驱动、图像格式、控件样式、图标引擎。
 # 来源必须与构建所用 Qt 同源（vcpkg 安装树，x64-linux-dynamic triplet）——
 # 系统 Qt 插件混入会因版本错位崩溃。
