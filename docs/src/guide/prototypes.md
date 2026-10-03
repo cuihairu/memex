@@ -18,8 +18,10 @@
 
 ### 未登录直连态
 
-![桌面端未登录直连态（浅色）](/screenshots/desktop-direct-light.png)
-![桌面端未登录直连态（深色）](/screenshots/desktop-direct-dark.png)
+实况截图：双实例同机互发现（UDP 2425），未选择会话的零配置引导态。
+
+![桌面端未登录直连态（浅色·实况）](/screenshots/live-direct-light.png)
+![桌面端未登录直连态（深色·实况）](/screenshots/live-direct-dark.png)
 
 ### 登录协作态
 
@@ -28,8 +30,10 @@
 
 ### 单聊
 
-![桌面端单聊（浅色）](/screenshots/desktop-chat-light.png)
-![桌面端单聊（深色）](/screenshots/desktop-chat-dark.png)
+实况截图：直连单聊互发文本——外出气泡品牌橙靠右、来访气泡靠左，行首标注「直连·仅本机」，顶部常驻「消息不进归档」横幅。
+
+![桌面端单聊（浅色·实况）](/screenshots/live-chat-light.png)
+![桌面端单聊（深色·实况）](/screenshots/live-chat-dark.png)
 
 ### 群聊
 
@@ -87,4 +91,4 @@
 - 桌面端：[desktop-direct](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct.html) · [desktop-collab](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-collab.html) · [desktop-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-chat.html) · [desktop-group](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-group.html) · [desktop-org](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-org.html) · [desktop-files](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-files.html) · [desktop-search](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-search.html)
 - 手机端：[mobile-init](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-init.html) · [mobile-sessions](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-sessions.html) · [mobile-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-chat.html) · [mobile-me](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-me.html)
 
-功能实现后，本页截图将逐步替换为客户端实况截图。
+功能实现后，本页截图将逐步替换为客户端实况截图。当前进度：桌面端「未登录直连态」「单聊」两屏已替换为实况（浅／深各一），其余五屏仍为原型稿，随功能实现逐步替换；手机端四屏的实况截图待鸿蒙客户端（T6.2）落地后取得。
