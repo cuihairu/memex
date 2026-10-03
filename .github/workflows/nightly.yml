@@ -80,16 +80,20 @@ jobs:
             target: client
             preset: client-release-win
             sys_pkgs: ""
+            # win 钉 6.10.3：Qt 6.11 起改了 Windows 在线仓布局，aqt 3.3.0 解析不了
+            qt: "6.10.3"
           - os: macos-latest
             plat: macos-arm64
             target: server
             preset: server-release-mac
             sys_pkgs: ""
+            qt: "6.12.0"
           - os: macos-latest
             plat: macos-arm64
             target: client
             preset: client-release-mac
             sys_pkgs: ""
+            qt: "6.12.0"
     name: build ${{ matrix.target }} · ${{ matrix.plat }}
     steps:
       - uses: actions/checkout@v7
@@ -115,15 +119,19 @@ jobs:
 
       # Windows/macOS 用官方 Qt 二进制（vcpkg 侧只装 Qt 以外依赖，避免源码重建
       # Qt 的 1.5h+；windeployqt / macdeployqt 与官方运行库天然同源）。
-      # 6.12.0：当前稳定（LTS，2026-09 发布；6.10 已于 2026-04 停止支持）；
-      # Xcode 26 SDK 移除 AGL.framework，Qt ≤6.8.3 链接报错（QTBUG-137687）
+      # 版本按平台钉（matrix.qt）：mac 6.12.0（2026-09 LTS，仓布局未变，aqt 可装）；
+      # win 6.10.3——Qt 自 6.11 起 Windows 在线仓去掉 qt6_6xx0 聚合目录（只留
+      # qt6_6xx0_msvc2022_64 等按工具链分目录），aqtinstall 3.3.0（install-qt-action
+      # v4 所钉最新版）按旧布局找 Updates.xml 即 404（aqtinstall#1007/#959，修复
+      # 未随 3.4.0 发版），6.10.3 是 aqt 当前能装的最后一档；待 aqt 发版后跟进
+      # 6.12。Xcode 26 SDK 移除 AGL.framework，Qt ≤6.8.3 链接报错（QTBUG-137687）
       - name: 安装 Qt（Windows/macOS）
         if: runner.os != 'Linux'
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.12.0"
+          version: ${{ matrix.qt }}
           cache: true
-          cache-key-prefix: "memex-qt-6120"
+          cache-key-prefix: ${{ format('memex-qt-{0}', matrix.qt) }}
 
       # 导出 Actions 缓存凭据，vcpkg 才能使用原生 x-gha 二进制缓存
       - name: 导出 Actions 缓存凭据
