@@ -5,19 +5,29 @@
 // ④ 令牌化 QSS 生成：占位符零残留、关键选择器齐、切换后样式变化（即时生效）；
 // ⑤ 多主题扩展位：只注册一套令牌即可被选中／解析／落盘；
 // ⑥ 应用级落地：调色板色与令牌一致、系统亮暗变化仅在跟随模式下重应用；
-// ⑦ 设置页交互：点选暗色／跟随系统即时生效并回灌选中态。
+// ⑦ 设置页交互：点选暗色／跟随系统即时生效并回灌选中态；
+// ⑧ 主窗接线：控件样式里的颜色全部来自令牌（零字面量）、主题切换后
+//    控件样式与聊天区富文本同步重渲、「设置 → 主题…」菜单入口存在。
 #include <QApplication>
+#include <QLabel>
+#include <QListWidget>
+#include <QMenu>
+#include <QMenuBar>
 #include <QPalette>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QSettings>
 #include <QStyleHints>
 #include <QTemporaryDir>
+#include <QTextBrowser>
+#include <QRegularExpression>
 
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <set>
 
+#include <app/main_window.hpp>
 #include <app/theme.hpp>
 #include <app/theme_settings_page.hpp>
 
@@ -60,6 +70,26 @@ bool has_placeholder(const QString& qss) {
          qss.contains(QStringLiteral("%brand%"));
 }
 
+// 抓样式里的十六进制字面量：#rgb／#rrggbb（排除锚点 # 之外的都算色值）
+std::set<QString> hex_literals(const QString& qss) {
+  static const QRegularExpression re(QStringLiteral("#[0-9a-fA-F]{3,8}"));
+  std::set<QString> found;
+  auto it = re.globalMatch(qss);
+  while (it.hasNext()) found.insert(it.next().captured());
+  return found;
+}
+
+// —— 亮暗两套都必须给出的新增令牌（主窗接线用到的语义面）——
+void check_new_token_contrast(const ThemeTokens& t, const QString& label) {
+  CHECK(contrast(t.brand_text, t.surface_raised) > 4.5);
+  CHECK(contrast(t.brand_text, t.brand_tint) > 3.0);
+  CHECK(contrast(t.success_text, t.success_wash) > 4.5);
+  CHECK(contrast(t.brand_wash_text, t.brand_wash) > 4.5);
+  CHECK(contrast(t.bubble_out_text, t.bubble_out) > 3.0);
+  CHECK(luminance(t.disabled_bg) > 0.0);
+  Q_UNUSED(label);
+}
+
 // —— ① 令牌完备性／品牌橙恒定／亮暗差异 ——
 void test_tokens() {
   const ThemeTokens light = ThemeManager::tokens_for(
@@ -93,6 +123,13 @@ void test_tokens() {
   CHECK(contrast(dark.bubble_in_text, dark.bubble_in) > 4.5);
   CHECK(contrast(light.bubble_out_text, light.bubble_out) > 3.0);
   CHECK(contrast(dark.bubble_out_text, dark.bubble_out) > 3.0);
+  // 主窗接线新增的语义面（描边按钮文字／成功横幅／禁用底）
+  check_new_token_contrast(light, QStringLiteral("light"));
+  check_new_token_contrast(dark, QStringLiteral("dark"));
+  // 亮暗不得共用同一批底色（否则「切换」在这些面上看不出差别）
+  CHECK(light.brand_text.name() != dark.brand_text.name());
+  CHECK(light.success_wash.name() != dark.success_wash.name());
+  CHECK(light.disabled_bg.name() != dark.disabled_bg.name());
 }
 
 // —— ② 跟随系统解析与手动覆盖 ——
@@ -283,6 +320,121 @@ void test_settings_page(QApplication& app) {
   CHECK(!page2.select_mode(QStringLiteral("nope")));
 }
 
+// —— ⑧ 主窗接线：控件样式走令牌、切换即重渲、菜单入口可达 ——
+// 真起一个 MainWindow（生产路径：ThemeManager::instance()——main.cpp
+// 起窗前 apply、设置页与主窗重刷都接在 instance 上，测试驱动同一实例）。
+// 「颜色全部来自令牌」的运行时口径：样式里的每个十六进制值都必须是
+// 当前主题某个令牌的取值（令牌值经 QColor::name() 以 hex 写入样式是
+// 设计内行为；要抓的是绕开令牌散落的硬编码色）。
+void test_main_window_wiring(QApplication& app) {
+  ThemeManager& manager = ThemeManager::instance();
+  manager.set_system_dark_probe([] { return false; });
+  manager.apply(&app);
+
+  memex::client::MainWindow window;
+  window.show();
+
+  // 当前主题令牌取值集合：样式里允许出现的全部 hex
+  QList<QString> token_values;
+  const QHash<QString, QColor> token_map =
+      ThemeManager::tokens_for(manager.effective_theme()).as_map();
+  for (const QColor& c : token_map.values()) token_values << c.name();
+
+  const auto strays = [&](const QString& sheet) {
+    std::set<QString> bad;
+    for (const QString& color : hex_literals(sheet)) {
+      if (!token_values.contains(color)) bad.insert(color);
+    }
+    return bad;
+  };
+
+  // 收集主窗全部控件样式表：非令牌色零容忍
+  std::set<QString> literals;
+  const auto widgets = window.findChildren<QWidget*>();
+  CHECK(!widgets.isEmpty());
+  for (const QWidget* w : widgets) {
+    for (const QString& color : strays(w->styleSheet())) {
+      qCritical("控件 %s [%s] 样式含非令牌色：%s",
+                w->metaObject()->className(), qPrintable(w->objectName()),
+                qPrintable(color));
+      literals.insert(color);
+    }
+  }
+  CHECK(literals.empty());
+
+  // 全局 QSS：占位符零残留，且每个 hex 都是令牌值
+  //（④ 已断言 QSS 必含品牌橙等令牌取值——与「零 hex」互斥，故口径统一为令牌值）
+  CHECK(!has_placeholder(app.styleSheet()));
+  {
+    const std::set<QString> bad = strays(app.styleSheet());
+    for (const QString& c : bad) {
+      qCritical("全局 QSS 含非令牌色：%s", qPrintable(c));
+    }
+    CHECK(bad.empty());
+  }
+
+  // 「设置 → 主题…」入口在菜单里
+  bool has_theme_action = false;
+  const auto menus = window.menuBar()->findChildren<QMenu*>();
+  for (const QMenu* menu : menus) {
+    for (const QAction* action : menu->actions()) {
+      if (action->text().contains(QStringLiteral("主题"))) {
+        has_theme_action = true;
+      }
+    }
+  }
+  CHECK(has_theme_action);
+
+  // 切换暗色：控件样式立即换成暗色令牌（品牌橙恒同，故查 surface）
+  auto* device_list =
+      window.findChild<QListWidget*>(QStringLiteral("device_list"));
+  CHECK(device_list != nullptr);
+  const QString light_qss = device_list ? device_list->styleSheet() : QString();
+  auto* banner = window.findChild<QLabel*>(QStringLiteral("mode_banner"));
+  CHECK(banner != nullptr);
+  manager.set_mode(QString::fromUtf8(ThemeManager::kDark));
+  if (device_list) {
+    CHECK(device_list->styleSheet() != light_qss);
+    CHECK(device_list->styleSheet().contains(
+        ThemeManager::tokens_for(QString::fromUtf8(ThemeManager::kDark))
+            .surface_alt.name()));
+  }
+  if (banner) {
+    CHECK(banner->styleSheet().contains(
+        ThemeManager::tokens_for(QString::fromUtf8(ThemeManager::kDark))
+            .brand_wash.name()));
+  }
+
+  // 复位到亮色（下面富文本重渲用例要在亮色下起手）
+  manager.set_mode(QString::fromUtf8(ThemeManager::kFollowSystem));
+
+  // 聊天区富文本重渲：内联色（系统行/气泡底）不随全局 QSS 自动变，
+  // 必须靠 chat_rows_ 重放。打开一个会话（有系统行）后切主题验证。
+  window.open_direct_peer(QStringLiteral("theme-wiring-peer"));
+  auto* chat = window.findChild<QTextBrowser*>();
+  CHECK(chat != nullptr);
+  const QString light_tokens_muted =
+      ThemeManager::tokens_for(QString::fromUtf8(ThemeManager::kLight))
+          .text_muted.name();
+  const QString dark_tokens_muted =
+      ThemeManager::tokens_for(QString::fromUtf8(ThemeManager::kDark))
+          .text_muted.name();
+  if (chat) {
+    const QString light_html = chat->toHtml();
+    CHECK(light_html.contains(light_tokens_muted));
+    CHECK(!light_html.contains(QStringLiteral("#9b8f86"))); // 旧字面量已除
+    manager.set_mode(QString::fromUtf8(ThemeManager::kDark));
+    const QString dark_html = chat->toHtml();
+    CHECK(dark_html.contains(dark_tokens_muted));
+    CHECK(!dark_html.contains(light_tokens_muted));
+    // 消息正文仍在（重渲不是清空）
+    CHECK(!dark_html.trimmed().isEmpty());
+  }
+
+  manager.set_mode(QString::fromUtf8(ThemeManager::kFollowSystem));
+  window.close();
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -306,6 +458,7 @@ int main(int argc, char** argv) {
   test_theme_extension();
   test_apply_to_app(app);
   test_settings_page(app);
+  test_main_window_wiring(app);
 
   if (g_failures == 0) {
     qInfo("test_theme: ALL PASS");

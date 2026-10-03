@@ -29,13 +29,19 @@ ThemeTokens light_tokens() {
   t.text_muted = QColor(QStringLiteral("#7d7169"));
   t.brand = QColor(QString::fromUtf8(kBrandOrange));
   t.brand_hover = QColor(QStringLiteral("#c9541f"));
+  // brand_text＝浅底上的品牌色文本（描边按钮文字、本机保存徽标）：
+  // 直接压暗品牌橙到 5.3:1，保住「橙色系文字」观感又守住可读门槛
+  t.brand_text = QColor(QStringLiteral("#a05a26"));
   t.on_brand = QColor(QStringLiteral("#ffffff"));
   t.brand_tint = QColor(QStringLiteral("#f6e3d7"));
   t.brand_wash = QColor(QStringLiteral("#fdeee2"));
   t.brand_wash_text = QColor(QStringLiteral("#8a4a1f"));
   t.success = QColor(QStringLiteral("#6f8f6a"));
   t.warning = QColor(QStringLiteral("#c98a3c"));
+  t.success_wash = QColor(QStringLiteral("#eaf3e7"));
+  t.success_text = QColor(QStringLiteral("#3f6b3a"));
   t.danger = QColor(QStringLiteral("#c0492f"));
+  t.disabled_bg = QColor(QStringLiteral("#d9cfc4"));
   t.bubble_out = QColor(QStringLiteral("#e16531"));
   t.bubble_out_text = QColor(QStringLiteral("#ffffff"));
   t.bubble_in = QColor(QStringLiteral("#f0ebe5"));
@@ -57,13 +63,18 @@ ThemeTokens dark_tokens() {
   t.text_muted = QColor(QStringLiteral("#a3978a"));
   t.brand = QColor(QString::fromUtf8(kBrandOrange));
   t.brand_hover = QColor(QStringLiteral("#ef7a4a"));
+  // 暗底上的品牌色文字须提亮才可读（brand 本身在暗底只有 3.5:1）
+  t.brand_text = QColor(QStringLiteral("#f0a07c"));
   t.on_brand = QColor(QStringLiteral("#ffffff"));
   t.brand_tint = QColor(QStringLiteral("#3a2a20"));
   t.brand_wash = QColor(QStringLiteral("#2e241d"));
   t.brand_wash_text = QColor(QStringLiteral("#e9a97f"));
   t.success = QColor(QStringLiteral("#8fae88"));
   t.warning = QColor(QStringLiteral("#d9a066"));
+  t.success_wash = QColor(QStringLiteral("#22301f"));
+  t.success_text = QColor(QStringLiteral("#a8cfa4"));
   t.danger = QColor(QStringLiteral("#d9705a"));
+  t.disabled_bg = QColor(QStringLiteral("#3a352f"));
   t.bubble_out = QColor(QString::fromUtf8(kBrandOrange));
   t.bubble_out_text = QColor(QStringLiteral("#ffffff"));
   t.bubble_in = QColor(QStringLiteral("#2b2622"));
@@ -98,13 +109,17 @@ QHash<QString, QColor> ThemeTokens::as_map() const {
           {QStringLiteral("text_muted"), text_muted},
           {QStringLiteral("brand"), brand},
           {QStringLiteral("brand_hover"), brand_hover},
+          {QStringLiteral("brand_text"), brand_text},
           {QStringLiteral("on_brand"), on_brand},
           {QStringLiteral("brand_tint"), brand_tint},
           {QStringLiteral("brand_wash"), brand_wash},
           {QStringLiteral("brand_wash_text"), brand_wash_text},
           {QStringLiteral("success"), success},
           {QStringLiteral("warning"), warning},
+          {QStringLiteral("success_wash"), success_wash},
+          {QStringLiteral("success_text"), success_text},
           {QStringLiteral("danger"), danger},
+          {QStringLiteral("disabled_bg"), disabled_bg},
           {QStringLiteral("bubble_out"), bubble_out},
           {QStringLiteral("bubble_out_text"), bubble_out_text},
           {QStringLiteral("bubble_in"), bubble_in},
@@ -258,6 +273,8 @@ QString ThemeManager::stylesheet_for(const ThemeTokens& tokens) {
       "QPushButton:hover { border: 1px solid %brand_hover%; "
       "color: %brand_hover%; }\n"
       "QPushButton:pressed { background: %brand_tint%; }\n"
+      "QPushButton:disabled { background: %disabled_bg%; color: %text_muted%; "
+      "border-color: %divider%; }\n"
       "QToolButton { color: %text%; }\n"
       "QToolButton:hover { color: %brand_hover%; }\n"
       "QHeaderView::section { background: %surface_alt%; color: %text_muted%; "

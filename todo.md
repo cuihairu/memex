@@ -105,10 +105,10 @@
 - [ ] T4.8 手机端初始化向导（R17／R18）：首次启动强制服务器地址设置页（含连通性校验），通过后进登录；移动端无任何免登录入口。
   验收：未完成初始化无法进入主界面；全部界面无匿名入口（R17、R18）。
   依赖：R17／R18 均为手机端专属规则（直连态／免登录仅桌面端），交付依赖鸿蒙客户端（T6.2，阶段 6）落地后启动。
-- [ ] T4.9 主题切换（R19，第一期主线后启动）：亮／暗主题跟随系统＋手动切换；界面颜色全部走主题令牌，预留多主题扩展位。
+- [x] T4.9 主题切换（R19，第一期主线后启动）：亮／暗主题跟随系统＋手动切换；界面颜色全部走主题令牌，预留多主题扩展位。
   验收：切换即时生效且重启后保持；系统亮暗变化时跟随；新增主题仅需新增一套令牌（R19）。
   进展（内核已落地）：`theme.{hpp,cpp}` 令牌层（23 令牌 × 亮暗两套；品牌橙 #e16531 两主题恒同，扩展主题也不许漂移主色）＋ ThemeManager（跟随系统按 QStyleHints::colorScheme 解析、手动选择优先且不被系统变化覆盖、QSettings 落盘 `appearance/theme_mode`）＋ 令牌化全局 QSS（`%令牌名%` 模板统一替换，无占位符残留）＋ 设置页 `theme_settings_page`（点选即时生效并回灌选中态）＋ main.cpp 起窗前 apply。验收用例 `test_theme`（令牌完备性与对比度门槛、跟随解析、落盘往返、QSS 覆盖、自定义主题扩展位、应用级即时生效、设置页交互），全量 21/21 两轮绿；xvfb 实截亮/暗两态像素差成立。
-  待接线：主窗各控件硬编码色改走令牌、设置页入口挂进主窗菜单（待 main_window.cpp 在途 T4.5/T4.7 落库后接入，避免混他人未提交改动）。
+  接线收尾（T4.9 清零）：主窗各控件硬编码色全部改走令牌（apply_theme_styles 统一出口：侧栏/设备列表/会话头/气泡区/输入行/描边按钮/发送按钮/归档横幅，theme_changed 即时重刷＋setWindowIcon 同刷）；聊天区富文本内联色按 ChatRow 记录重放（rerender_chat，不重查库防丢即时提示）；「设置 → 主题…」入口挂进主窗菜单（macOS PreferencesRole）；令牌扩 4 枚（brand_text 浅底品牌色文本 5.3:1／success_wash+success_text 协作态横幅／disabled_bg 禁用底，亮暗各一套、对比度门槛入 test）；test_theme 补第⑧节主窗接线验收（生产路径 ThemeManager::instance() 驱动；「颜色全部来自令牌」运行时口径＝样式里每个 hex ∈ 当前主题令牌值，与④「QSS 必含品牌橙」自洽）。截图标注工具条为截图功能自身对比面（白色工具条压暗背景），不属主窗 UI 未令牌化。全量 25/25 绿。
 - [x] T4.10 通知子系统：webhook 接入（token 鉴权、按群／个人独立 webhook，JSON payload＝目标／标题／内容／紧急程度／可选跳转，调用即向目标发消息，文档带 curl 示例）；紧急程度三级分级推送（普通＝站内会话消息、重要＝桌面通知强提醒、紧急＝置顶弹窗需确认收悉，全屏／演示模式策略可配）；个人通知偏好（每级是否弹窗、免打扰时段）可配；群公告式通知同级；手机端规则照旧（初始化设域名、无匿名聊天，紧急＝横幅＋震动）。
   验收：真实走查——curl 打 webhook → 群内收到消息 → 改紧急级别 → 弹窗真实弹出（截图）、前后对账。
   进展（已落地，四笔）：2b8782b webhook 面（协议 NOTICE=48＋Notice{title,content,urgency,jump_url}、kNoticeSender「通知」、compose_notice_text 同源正文、webhooks 台账 sha256 摘要、HTTP 接收器 POST /hook/<token>、投递镜像 TEXT＝离线入队＋归档＋在线扇出＋常用联系人，test_webhook 鉴权/校验/投递全绿）；3ee6309 CLI 面（serve --webhook-port 默认 24361 独立端口绑定失败只降级、webhook create|list|revoke、建即校验目标、token 仅一次显示＋自带 curl 示例）；8484905 客户端面（引擎 handle_notice＋notice_received、本地库 next_local_seq 解服务端起源消息 UNIQUE(from_id,seq) 冲突、notify_prefs 三级开关/免打扰跨零点/全屏策略、notify_center 重要托盘强提醒＋紧急置顶确认弹窗排队＋全屏递延退出补弹＋偏好设置页、主窗设置/托盘入口与 T4.7 气泡 kNoticeSender 守卫，test_notify 六节含真实服务端全链路与弹窗抓图）；文档笔 notify.md（payload 表＋curl 示例＋状态码＋截图）＋文档站导航。走查：curl 三级 200 带 msg_id、错 token 401、坏 urgency 400、messages 前后 0→3 条类型 notice 正文同源；紧急弹窗真实弹出截图入库。手机端规则（横幅＋震动）随 T6.2。

@@ -47,7 +47,17 @@
 #define MEMEX_VERSION "dev"
 #endif
 
+#include "theme.hpp"
+#include "theme_settings_page.hpp"
+
 namespace memex::client {
+
+namespace {
+
+// 当前令牌（界面颜色唯一来源，R19 · T4.9）——不再散落十六进制字面量
+const ThemeTokens& tk() { return ThemeManager::instance().tokens(); }
+
+} // namespace
 
 namespace {
 // 品牌图标：logo 本体（docs/src/public/logo.svg → 多尺寸 PNG 进 qrc，
@@ -97,9 +107,10 @@ QString hhmm(qint64 ts_ms) {
 // at_mode=true（群聊）：@账号 标记整体包品牌橙加粗。
 QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
                     bool outgoing, bool at_mode = false) {
-  const QString meta =
-      QStringLiteral("<span style=\"color:#9b8f86; font-size:small;\">%1 %2</span>")
-          .arg(esc(name), hhmm(ts_ms));
+  const ThemeTokens& t = tk();
+  const QString meta = QStringLiteral(
+                           "<span style=\"color:%1; font-size:small;\">%2 %3</span>")
+                           .arg(t.text_muted.name(), esc(name), hhmm(ts_ms));
   QString content = esc(text);
   if (at_mode) {
     static const QRegularExpression at_re(
@@ -111,8 +122,8 @@ QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
       const auto m = it.next();
       highlighted += content.mid(pos, m.capturedStart() - pos);
       highlighted += QStringLiteral(
-                          "<span style=\"color:#e16531; font-weight:600;\">%1</span>")
-                          .arg(m.captured());
+                         "<span style=\"color:%1; font-weight:600;\">%2</span>")
+                         .arg(t.brand.name(), m.captured());
       pos = m.capturedEnd();
     }
     highlighted += content.mid(pos);
@@ -122,10 +133,9 @@ QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
                            "<table cellspacing=\"0\" cellpadding=\"6\"><tr><td "
                            "bgcolor=\"%1\"><span style=\"color:%2;\">%3</span></td>"
                            "</tr></table>")
-                           .arg(outgoing ? QStringLiteral("#e16531")
-                                         : QStringLiteral("#f0ebe5"),
-                                outgoing ? QStringLiteral("#ffffff")
-                                         : QStringLiteral("#332b24"),
+                           .arg(outgoing ? t.bubble_out.name() : t.bubble_in.name(),
+                                outgoing ? t.bubble_out_text.name()
+                                         : t.bubble_in_text.name(),
                                 content);
   if (outgoing) {
     return QStringLiteral(
@@ -137,6 +147,14 @@ QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
              "<div>%1</div><table width=\"100%\" cellspacing=\"0\"><tr>"
              "<td align=\"left\">%2</td><td width=\"28%\"></td></tr></table>")
       .arg(meta, body);
+}
+
+// 居中系统行（建立会话提示／跨态说明／文件进度）：次要文本色。
+// 正文不做转义——调用方按既有口径自行 esc（与改版前逐字一致）。
+QString system_line_html(const QString& text) {
+  return QStringLiteral("<div align=\"center\"><span style=\"color:%1; "
+                        "font-size:small;\">%2</span></div>")
+      .arg(ThemeManager::instance().tokens().text_muted.name(), text);
 }
 
 } // namespace
@@ -164,6 +182,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   refresh_devices();
   show_status(QStringLiteral("就绪"));
   update_banner();
+
+  // R19 · T4.9：主题切换即时生效——令牌变了就重刷控件样式与聊天区富文本
+  connect(&ThemeManager::instance(), &ThemeManager::theme_changed, this,
+          [this](const QString&) {
+            apply_theme_styles();
+            setWindowIcon(brand_icon());
+          });
 }
 
 void MainWindow::build_ui() {
@@ -187,12 +212,16 @@ void MainWindow::build_ui() {
           [this] { create_group_dialog(); });
   connect(act_dgroup_new, &QAction::triggered, this, [this] { dgroup_dialog(); });
 
-  // —— 设置：开机启动（T4.7；勾选态与登记文件同步）——
+  // —— 设置：开机启动（T4.7；勾选态与登记文件同步）＋主题（R19 · T4.9）——
   auto* opt_menu = menuBar()->addMenu(QStringLiteral("设置"));
   auto* act_notify = opt_menu->addAction(QStringLiteral("通知偏好…"));
   connect(act_notify, &QAction::triggered, this, [] {
     NotificationCenter::instance().show_settings();
   });
+  act_theme_ = opt_menu->addAction(QStringLiteral("主题…"));
+  act_theme_->setMenuRole(QAction::PreferencesRole); // macOS 走应用菜单偏好项
+  connect(act_theme_, &QAction::triggered, this, &MainWindow::show_theme_settings);
+  opt_menu->addSeparator();
   act_autostart_ =
       opt_menu->addAction(QStringLiteral("开机启动（登录后自动运行）"));
   act_autostart_->setCheckable(true);
@@ -213,17 +242,15 @@ void MainWindow::build_ui() {
 
   // —— 左侧：局域网设备列表（直连态以设备替代联系人）——
   auto* side = new QWidget(this);
+  side_ = side;
   auto* side_layout = new QVBoxLayout(side);
   side_layout->setContentsMargins(10, 10, 6, 10);
   side_layout->setSpacing(6);
 
   auto* side_head = new QHBoxLayout();
   auto* side_title = new QLabel(QStringLiteral("局域网设备"), side);
-  side_title->setStyleSheet(
-      QStringLiteral("font-weight:600; font-size:14px; color:#332b24;"));
+  side_title_ = side_title;
   device_count_ = new QLabel(side);
-  device_count_->setStyleSheet(
-      QStringLiteral("color:#6f8f6a; font-size:12px;"));
   side_head->addWidget(side_title);
   side_head->addStretch();
   side_head->addWidget(device_count_);
@@ -233,17 +260,13 @@ void MainWindow::build_ui() {
   search_box_->setClearButtonEnabled(true);
 
   device_list_ = new QListWidget(side);
+  device_list_->setObjectName(QStringLiteral("device_list"));
   device_list_->setFrameShape(QFrame::NoFrame);
   device_list_->setSelectionMode(QAbstractItemView::SingleSelection);
   // 群条目右键菜单（T4.1）：拉人／公告／退群／解散
   device_list_->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(device_list_, &QListWidget::customContextMenuRequested, this,
           [this](const QPoint& pos) { show_group_menu(pos); });
-  device_list_->setStyleSheet(QStringLiteral(
-      "QListWidget { background:#faf7f3; border:1px solid #e8e0d6; "
-      "border-radius:8px; }"
-      "QListWidget::item { padding:8px; border-bottom:1px solid #efe8de; }"
-      "QListWidget::item:selected { background:#f6e3d7; color:#332b24; }"));
 
   side_layout->addLayout(side_head);
   side_layout->addWidget(search_box_);
@@ -256,18 +279,13 @@ void MainWindow::build_ui() {
   chat_layout->setSpacing(0);
 
   auto* head = new QWidget(chat);
-  head->setStyleSheet(QStringLiteral("background:#ffffff;"));
+  head_ = head;
   auto* head_layout = new QHBoxLayout(head);
   head_layout->setContentsMargins(14, 10, 14, 10);
   chat_title_ = new QLabel(QStringLiteral("直连态"), head);
-  chat_title_->setStyleSheet(
-      QStringLiteral("font-weight:600; font-size:15px; color:#332b24;"));
   chat_meta_ = new QLabel(QStringLiteral("未选择设备"), head);
-  chat_meta_->setStyleSheet(QStringLiteral("color:#9b8f86; font-size:12px;"));
   auto* local_badge = new QLabel(QStringLiteral("本机保存"), head);
-  local_badge->setStyleSheet(QStringLiteral(
-      "background:#f6e3d7; color:#a05a26; border-radius:8px; padding:2px 8px; "
-      "font-size:12px;"));
+  local_badge_ = local_badge;
   head_layout->addWidget(chat_title_);
   head_layout->addWidget(chat_meta_);
   head_layout->addStretch();
@@ -278,29 +296,19 @@ void MainWindow::build_ui() {
   banner_ = new QLabel(chat);
   banner_->setObjectName(QStringLiteral("mode_banner"));
   banner_->setWordWrap(true);
-  banner_->setStyleSheet(QStringLiteral(
-      "background:#fdeee2; color:#8a4a1f; font-size:12px; padding:6px 10px;"));
 
   chat_view_ = new QTextBrowser(chat);
   chat_view_->setFrameShape(QFrame::NoFrame);
-  chat_view_->setStyleSheet(QStringLiteral(
-      "QTextBrowser { background:#ffffff; border:none; }"));
 
   auto* input_row = new QWidget(chat);
-  input_row->setStyleSheet(QStringLiteral("background:#ffffff;"));
+  input_row_ = input_row;
   auto* input_layout = new QHBoxLayout(input_row);
   input_layout->setContentsMargins(10, 8, 10, 8);
   auto* file_btn = new QPushButton(QStringLiteral("发文件"), input_row);
-  file_btn->setStyleSheet(QStringLiteral(
-      "QPushButton { background:#ffffff; color:#a05a26; border:1px solid "
-      "#e16531; border-radius:8px; padding:6px 12px; }"
-      "QPushButton:hover { background:#fdeee2; }"));
+  file_btn_ = file_btn;
   // T4.4 截图与标注：按钮＋ Ctrl+Alt+A 快捷键（与「发文件」同发送口径）
   auto* shot_btn = new QPushButton(QStringLiteral("截图"), input_row);
-  shot_btn->setStyleSheet(QStringLiteral(
-      "QPushButton { background:#ffffff; color:#a05a26; border:1px solid "
-      "#e16531; border-radius:8px; padding:6px 12px; }"
-      "QPushButton:hover { background:#fdeee2; }"));
+  shot_btn_ = shot_btn;
   shot_btn->setToolTip(QStringLiteral("截图并标注（Ctrl+Alt+A）"));
   auto* shot_sc = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+A")), this);
   shot_sc->setContext(Qt::WindowShortcut);
@@ -308,10 +316,7 @@ void MainWindow::build_ui() {
   connect(shot_sc, &QShortcut::activated, this, [this] { start_screenshot(); });
   // T4.5 表情：内置（按频次排序）＋自定义表情包导入（走文件通道发送）
   auto* emoji_btn = new QPushButton(QStringLiteral("表情"), input_row);
-  emoji_btn->setStyleSheet(QStringLiteral(
-      "QPushButton { background:#ffffff; color:#a05a26; border:1px solid "
-      "#e16531; border-radius:8px; padding:6px 12px; }"
-      "QPushButton:hover { background:#fdeee2; }"));
+  emoji_btn_ = emoji_btn;
   connect(emoji_btn, &QPushButton::clicked, this,
           [this] { show_emoji_panel(); });
   input_layout->addWidget(shot_btn);
@@ -320,11 +325,6 @@ void MainWindow::build_ui() {
   input_box_ = new QLineEdit(input_row);
   input_box_->setPlaceholderText(QStringLiteral("输入消息，回车发送"));
   send_btn_ = new QPushButton(QStringLiteral("发送"), input_row);
-  send_btn_->setStyleSheet(QStringLiteral(
-      "QPushButton { background:#e16531; color:#ffffff; border:none; "
-      "border-radius:8px; padding:6px 18px; font-weight:600; }"
-      "QPushButton:hover { background:#c95524; }"
-      "QPushButton:disabled { background:#d9cfc4; }"));
   input_layout->addWidget(input_box_, 1);
   input_layout->addWidget(send_btn_);
 
@@ -338,11 +338,13 @@ void MainWindow::build_ui() {
   layout->setContentsMargins(0, 0, 0, 0);
   layout->setSpacing(0);
   side->setFixedWidth(260);
-  side->setStyleSheet(
-      QStringLiteral("background:#f5f0e8; border-right:1px solid #e8e0d6;"));
   layout->addWidget(side);
   layout->addWidget(chat, 1);
   setCentralWidget(central);
+
+  // 主题：控件样式统一在这里刷（构造时先按当前令牌落一次，之后跟随
+  // ThemeManager::theme_changed 重刷，切换即时生效）。
+  apply_theme_styles();
 
   connect(search_box_, &QLineEdit::textChanged, this, [this](const QString& t) {
     const QString needle = t.trimmed();
@@ -1543,6 +1545,7 @@ bool MainWindow::tray_available() const {
   return tray_ != nullptr && QSystemTrayIcon::isSystemTrayAvailable();
 }
 
+// A23 图标面：关于页——logo（qrc 多尺寸，与窗口/任务栏/安装器同源）＋版本
 void MainWindow::show_about() {
   QDialog dlg(this);
   dlg.setObjectName(QStringLiteral("about_dialog"));
@@ -1568,6 +1571,7 @@ void MainWindow::show_about() {
   dlg.setMinimumWidth(320);
   dlg.exec();
 }
+
 void MainWindow::setup_tray() {
   if (!QSystemTrayIcon::isSystemTrayAvailable()) return; // 无托盘环境跳过
   tray_ = new QSystemTrayIcon(brand_icon(), this);
@@ -1674,15 +1678,20 @@ void MainWindow::update_banner() {
       (current_kind_ == QStringLiteral("collab") ||
        current_kind_ == QStringLiteral("group")) &&
       collab_engine_.is_logged_in();
+  const ThemeTokens& t = tk();
   if (collab_session) {
-    banner_->setStyleSheet(QStringLiteral(
-        "background:#eaf3e7; color:#3f6b3a; font-size:12px; padding:6px 10px;"));
+    banner_->setStyleSheet(
+        QStringLiteral("background:%1; color:%2; font-size:12px; "
+                       "padding:6px 10px;")
+            .arg(t.success_wash.name(), t.success_text.name()));
     banner_->setText(QStringLiteral(
         "　✔ 协作态会话：消息经服务端转发并全量归档；撤回仅改显示，"
         "服务端保留原文与撤回记录"));
   } else {
-    banner_->setStyleSheet(QStringLiteral(
-        "background:#fdeee2; color:#8a4a1f; font-size:12px; padding:6px 10px;"));
+    banner_->setStyleSheet(
+        QStringLiteral("background:%1; color:%2; font-size:12px; "
+                       "padding:6px 10px;")
+            .arg(t.brand_wash.name(), t.brand_wash_text.name()));
     // T4.2 跨态会话（恰一边登录）：固定「未归档」标识，常驻不可关闭（A7）
     bool cross = false;
     if (current_kind_ == QStringLiteral("direct")) {
@@ -1863,6 +1872,7 @@ void MainWindow::refresh_devices() {
     } else if (chat_showing_guidance_) {
       chat_showing_guidance_ = false;
       chat_view_->clear();
+      chat_rows_.clear();
       append_system_line(QStringLiteral("从左侧选择设备，开始点对点会话"));
     }
   }
@@ -1879,6 +1889,7 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
   current_peer_ = id;
   chat_showing_guidance_ = false;
   chat_view_->clear();
+  chat_rows_.clear(); // 换会话即清空重渲记录（否则旧行会在切换主题时冒出来）
 
   const bool collab = kind == QStringLiteral("collab");
   const bool group = kind == QStringLiteral("group");
@@ -2004,33 +2015,168 @@ void MainWindow::append_message(const QString& from_id, const QString& text,
           ? QStringLiteral(" · 协作·已归档")
           : QStringLiteral(" · 直连·仅本机");
   // 群聊启用 @成员 高亮（T4.1）
-  chat_view_->append(bubble_html(name + tag, text, ts_ms, outgoing,
-                                 current_kind_ == QStringLiteral("group")));
+  const bool at_mode = current_kind_ == QStringLiteral("group");
+  ChatRow row;
+  row.system = false;
+  row.name = name + tag;
+  row.text = text;
+  row.ts_ms = ts_ms;
+  row.outgoing = outgoing;
+  row.at_mode = at_mode;
+  chat_rows_.append(row);
+  chat_view_->append(bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
+                                 row.at_mode));
   auto* bar = chat_view_->verticalScrollBar();
   bar->setValue(bar->maximum());
 }
 
 void MainWindow::append_system_line(const QString& text) {
-  chat_view_->append(QStringLiteral(
-      "<div align=\"center\"><span style=\"color:#9b8f86; "
-      "font-size:small;\">%1</span></div>")
-                         .arg(text));
+  ChatRow row;
+  row.system = true;
+  row.text = text;
+  chat_rows_.append(row);
+  chat_view_->append(system_line_html(text));
   auto* bar = chat_view_->verticalScrollBar();
   bar->setValue(bar->maximum());
 }
 
 void MainWindow::show_guidance() {
   chat_showing_guidance_ = true;
+  chat_rows_.clear();
   chat_view_->clear();
+  render_guidance();
+}
+
+void MainWindow::render_guidance() {
+  const ThemeTokens& t = tk();
   chat_view_->append(QStringLiteral(
       "<div align=\"center\" style=\"margin-top:48px;\">"
-      "<span style=\"color:#6b6157;\">尚未发现同网段设备。</span><br><br>"
-      "<span style=\"color:#9b8f86; font-size:small;\">"
+      "<span style=\"color:%1;\">尚未发现同网段设备。</span><br><br>"
+      "<span style=\"color:%2; font-size:small;\">"
       "请确认对方已安装 Memex 且与本机同一局域网；<br>"
       "直连发现使用 UDP 2425、点对点传输使用 TCP 2426–2437，"
       "请检查终端防火墙放行。<br><br>"
       "如需组织架构、云端历史与归档检索，请经左上角「协作」菜单登录协作态。"
-      "</span></div>"));
+      "</span></div>")
+                         .arg(t.text.name(), t.text_muted.name()));
+}
+
+// 控件样式统一出口：所有颜色只从令牌取（R19 · T4.9）。主题切换后
+// ThemeManager::theme_changed 触发重刷，无需重启界面。
+void MainWindow::apply_theme_styles() {
+  const ThemeTokens& t = tk();
+  if (side_) {
+    side_->setStyleSheet(QStringLiteral("background:%1; border-right:1px solid %2;")
+                             .arg(t.surface_alt.name(), t.border.name()));
+  }
+  if (side_title_) {
+    side_title_->setStyleSheet(
+        QStringLiteral("font-weight:600; font-size:14px; color:%1;")
+            .arg(t.text.name()));
+  }
+  if (device_count_) {
+    device_count_->setStyleSheet(
+        QStringLiteral("color:%1; font-size:12px;").arg(t.success.name()));
+  }
+  if (device_list_) {
+    device_list_->setStyleSheet(QStringLiteral(
+        "QListWidget { background:%1; border:1px solid %2; border-radius:8px; }"
+        "QListWidget::item { padding:8px; border-bottom:1px solid %3; }"
+        "QListWidget::item:selected { background:%4; color:%5; }")
+        .arg(t.surface_alt.name(), t.border.name(), t.divider.name(),
+             t.selection.name(), t.text.name()));
+  }
+  if (head_) {
+    head_->setStyleSheet(
+        QStringLiteral("background:%1;").arg(t.surface_raised.name()));
+  }
+  if (chat_title_) {
+    chat_title_->setStyleSheet(
+        QStringLiteral("font-weight:600; font-size:15px; color:%1;")
+            .arg(t.text.name()));
+  }
+  if (chat_meta_) {
+    chat_meta_->setStyleSheet(
+        QStringLiteral("color:%1; font-size:12px;").arg(t.text_muted.name()));
+  }
+  if (local_badge_) {
+    local_badge_->setStyleSheet(
+        QStringLiteral("background:%1; color:%2; border-radius:8px; "
+                       "padding:2px 8px; font-size:12px;")
+            .arg(t.brand_tint.name(), t.brand_text.name()));
+  }
+  if (chat_view_) {
+    chat_view_->setStyleSheet(QStringLiteral("QTextBrowser { background:%1; border:none; }")
+                                  .arg(t.chat_bg.name()));
+  }
+  if (input_row_) {
+    input_row_->setStyleSheet(
+        QStringLiteral("background:%1;").arg(t.surface_raised.name()));
+  }
+  // 描边按钮（发文件／截图／表情）同款：品牌色描边＋品牌色文字
+  const QString outline = QStringLiteral(
+      "QPushButton { background:%1; color:%2; border:1px solid %3; "
+      "border-radius:8px; padding:6px 12px; }"
+      "QPushButton:hover { background:%4; }")
+      .arg(t.surface_raised.name(), t.brand_text.name(), t.brand.name(),
+           t.brand_wash.name());
+  for (QPushButton* btn : {file_btn_, shot_btn_, emoji_btn_}) {
+    if (btn) btn->setStyleSheet(outline);
+  }
+  if (send_btn_) {
+    send_btn_->setStyleSheet(QStringLiteral(
+        "QPushButton { background:%1; color:%2; border:none; "
+        "border-radius:8px; padding:6px 18px; font-weight:600; }"
+        "QPushButton:hover { background:%3; }"
+        "QPushButton:disabled { background:%4; }")
+        .arg(t.brand.name(), t.on_brand.name(), t.brand_hover.name(),
+             t.disabled_bg.name()));
+  }
+  if (banner_) {
+    update_banner(); // 横幅底/文随形态与主题两变
+  }
+  // 聊天区富文本里的颜色也是内联的（气泡/@高亮/系统行）——按记录重渲一遍
+  rerender_chat();
+}
+
+// 聊天区重渲：主题切换后富文本里的内联色不会自动跟随，故按记录重放。
+// 只重渲当前会话已有的行（记录在 chat_rows_），不重新查库。
+void MainWindow::rerender_chat() {
+  if (!chat_view_) return;
+  if (chat_showing_guidance_) {
+    chat_view_->clear();
+    render_guidance();
+    return;
+  }
+  const bool at_bottom =
+      chat_view_->verticalScrollBar()->value() >=
+      chat_view_->verticalScrollBar()->maximum() - 4;
+  chat_view_->clear();
+  for (const ChatRow& row : chat_rows_) {
+    if (row.system) {
+      chat_view_->append(system_line_html(row.text));
+    } else {
+      chat_view_->append(bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
+                                     row.at_mode));
+    }
+  }
+  if (at_bottom) {
+    auto* bar = chat_view_->verticalScrollBar();
+    bar->setValue(bar->maximum());
+  }
+}
+
+void MainWindow::show_theme_settings() {
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("主题"));
+  auto* layout = new QVBoxLayout(&dlg);
+  auto* page = new ThemeSettingsPage(&ThemeManager::instance(), &dlg);
+  layout->addWidget(page);
+  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dlg);
+  connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  layout->addWidget(buttons);
+  dlg.exec();
 }
 
 void MainWindow::show_status(const QString& text) {

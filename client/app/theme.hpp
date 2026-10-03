@@ -27,13 +27,17 @@ struct ThemeTokens {
   QColor text_muted;      // 次要文本（时间、说明）
   QColor brand;           // 品牌橙（R19 主色；两主题恒同）
   QColor brand_hover;
+  QColor brand_text;      // 浅底上可读的品牌色文本（按钮文字、徽标）
   QColor on_brand;        // 品牌底上的文本
   QColor brand_tint;      // 选中行底
   QColor brand_wash;      // 提示条底
   QColor brand_wash_text; // 提示条文本
   QColor success;
   QColor warning;
+  QColor success_wash;    // 成功提示条底（协作态横幅）
+  QColor success_text;    // 成功提示条文本
   QColor danger;
+  QColor disabled_bg;     // 禁用控件底
   QColor bubble_out;
   QColor bubble_out_text;
   QColor bubble_in;
