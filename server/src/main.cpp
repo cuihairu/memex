@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -224,6 +225,24 @@ int cmd_device(int argc, char** argv, const std::string& db_path) {
   return 2;
 }
 
+// 可移植 strptime（T3.2 时间窗解析用）：MSVC 无此 POSIX 函数（win 腿
+// nightly 首编即 C3861）。std::get_time 按格式前缀匹配、不校验尾部残留——
+// 与 strptime 口径一致，最长格式在前逐个尝试（"12:34:56" 先中 HH:MM:SS）。
+bool parse_time_prefix(const std::string& text, const char* fmt, std::tm* tm) {
+  std::istringstream ss(text);
+  ss >> std::get_time(tm, fmt);
+  return !ss.fail();
+}
+
+// localtime_r 的可移植替身：Windows 走 localtime_s（参数序与 POSIX 相反）
+void local_time(std::time_t secs, std::tm* out) {
+#ifdef _WIN32
+  localtime_s(out, &secs);
+#else
+  localtime_r(&secs, out);
+#endif
+}
+
 // 时间参数解析（T3.2）："YYYY-MM-DD" 或 "YYYY-MM-DD HH:MM[:SS]"（本地时区）。
 // date_only 端补零点／当日末秒，使日期粒度的开闭区间语义正确。失败返回 -1。
 std::int64_t parse_time_arg(const std::string& text, bool end_of_day) {
@@ -231,7 +250,7 @@ std::int64_t parse_time_arg(const std::string& text, bool end_of_day) {
   const char* fmts[] = {"%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"};
   bool ok = false;
   for (const char* f : fmts) {
-    if (strptime(text.c_str(), f, &tm) != nullptr) {
+    if (parse_time_prefix(text, f, &tm)) {
       ok = true;
       break;
     }
@@ -313,7 +332,7 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {
     if (start_ms > 0) {
       std::time_t secs = static_cast<std::time_t>(start_ms / 1000);
       std::tm tm{};
-      localtime_r(&secs, &tm);
+      local_time(secs, &tm);
       char when[24];
       std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
       archive_origin = std::string("归档自 ") + when +
@@ -338,7 +357,7 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {
   auto format_row = [](const memex::server::ArchivedMessage& m) {
     std::time_t secs = static_cast<std::time_t>(m.ts_ms / 1000);
     std::tm tm{};
-    localtime_r(&secs, &tm);
+    local_time(secs, &tm);
     char when[24];
     std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
     std::ostringstream line;
@@ -454,7 +473,7 @@ int cmd_audit(int argc, char** argv, const std::string& db_path) {
   for (const auto& r : store.audit_reads(limit)) {
     std::time_t secs = static_cast<std::time_t>(r.ts_ms / 1000);
     std::tm tm{};
-    localtime_r(&secs, &tm);
+    local_time(secs, &tm);
     char when[24];
     std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
     std::cout << when << '\t' << r.op_account << '\t' << r.action << '\t'
