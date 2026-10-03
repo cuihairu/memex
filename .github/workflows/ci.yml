@@ -22,7 +22,7 @@ jobs:
     env:
       VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # vcpkg 不代管 X11/GL 等系统库；qtbase 构建所需系统包在此安装。
       # autoconf 链为 gperf（qtbase 依赖）源码构建所需，runner 镜像未预装
@@ -56,7 +56,7 @@ jobs:
       # 整取安装树（x-gha 之上再省一层解包安装）；不缓存 vcpkg 源树，
       # 它由 run-vcpkg 按钉住的 commit 管理
       - name: Cache vcpkg 安装树
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: vcpkg_installed*
           key: vcpkg-installed-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
@@ -93,7 +93,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.xml

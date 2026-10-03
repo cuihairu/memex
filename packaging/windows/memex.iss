@@ -1,4 +1,4 @@
-; Memex Windows installer (Inno Setup 6).
+; Memex Windows installer (Inno Setup 7；ISCC 6.x 亦可编译).
 ; Built by nightly workflow:
 ;   ISCC.exe /DAppVersion=<x.y.z> /DStageDir=<abs stage dir> /O<outdir> packaging\windows\memex.iss
 ; Output: memex-windows-x64-setup.exe (fixed asset name, install.ps1 direct link).

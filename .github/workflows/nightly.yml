@@ -31,7 +31,7 @@ jobs:
     outputs:
       build: ${{ steps.gate.outputs.build }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: gate
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -92,7 +92,7 @@ jobs:
             sys_pkgs: ""
     name: build ${{ matrix.target }} · ${{ matrix.plat }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # autoconf 链为 gperf（qtbase 依赖）源码构建所需、libltdl-dev 为 libxcrypt 端口源码构建所需、
       # libsm/libice/libegl1-mesa 为 qtbase xcb_sm 与 xcb GL 的系统头，runner 镜像均未预装
@@ -106,7 +106,7 @@ jobs:
 
       - name: 安装 Ninja（Windows/macOS）
         if: runner.os != 'Linux'
-        uses: seanmiddleditch/gha-setup-ninja@v5
+        uses: seanmiddleditch/gha-setup-ninja@v6
 
       # Windows 锁 MSVC：Ninja 需要显式选中 VS 工具链（不走默认生成器探测）
       - name: 配置 MSVC 环境（Windows）
@@ -115,14 +115,15 @@ jobs:
 
       # Windows/macOS 用官方 Qt 二进制（vcpkg 侧只装 Qt 以外依赖，避免源码重建
       # Qt 的 1.5h+；windeployqt / macdeployqt 与官方运行库天然同源）。
-      # 6.10.3：Xcode 26 SDK 移除 AGL.framework，Qt ≤6.8.3 链接报错（QTBUG-137687）
+      # 6.12.0：当前稳定（LTS，2026-09 发布；6.10 已于 2026-04 停止支持）；
+      # Xcode 26 SDK 移除 AGL.framework，Qt ≤6.8.3 链接报错（QTBUG-137687）
       - name: 安装 Qt（Windows/macOS）
         if: runner.os != 'Linux'
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.10.3"
+          version: "6.12.0"
           cache: true
-          cache-key-prefix: "memex-qt-6103"
+          cache-key-prefix: "memex-qt-6120"
 
       # 导出 Actions 缓存凭据，vcpkg 才能使用原生 x-gha 二进制缓存
       - name: 导出 Actions 缓存凭据
@@ -134,7 +135,7 @@ jobs:
 
       # 整取安装树；不缓存 vcpkg 源树（每轮按钉住 commit 浅克隆）
       - name: Cache vcpkg 安装树
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: vcpkg_installed*
           key: vcpkg-installed-${{ runner.os }}-${{ matrix.target }}-${{ hashFiles('vcpkg.json') }}
@@ -244,7 +245,9 @@ jobs:
           $version = (Select-String -Path CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)' | Select-Object -First 1).Matches[0].Groups[1].Value
           $stage = Join-Path $env:RUNNER_TEMP 'memex-stage'
           New-Item -ItemType Directory -Force -Path $stage, dist | Out-Null
-          Copy-Item build-client-win/client/memex_client.exe $stage/
+          # 暂存即对齐分发名：CMake 目标产物 memex_client.exe（下划线），
+          # 下游 windeployqt/zip/iss/装后路径全按 memex-client.exe（连字符）走
+          Copy-Item build-client-win/client/memex_client.exe $stage/memex-client.exe
 
           # windeployqt：Qt DLL + 平台/风格/图像/SQL 驱动插件随包
           #（缺 platforms/qwindows.dll 时 GUI 无法启动）
@@ -284,9 +287,23 @@ jobs:
           # 便携 zip（解包即用面）
           Compress-Archive -Path "$stage/*" -DestinationPath dist/memex-client-windows-x64.zip
 
-          # Inno 安装器（windows-latest 预装 6.x；缺失 choco 兜底）
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          # Inno 安装器：钉最新稳定 7.1.0（官方自 2026-03 起只发 GitHub Release；
+          # 7.x 与 6.x 命令行 ISCC 兼容，本 iss 全标准指令；runner 仅预装 6.7.1、
+          # choco 包也停在 6.7.1——都到不了 7，故直下官方安装器静默装。
+          # /DIR 钉装到 RUNNER_TEMP：x64 版默认目录（Program Files）不依赖探测）
+          $iscc = @(
+            "${env:ProgramFiles}\Inno Setup 7\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe"
+          ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            $innoDir = Join-Path $env:RUNNER_TEMP 'innosetup-7'
+            $installer = Join-Path $env:RUNNER_TEMP 'innosetup-7.1.0-x64.exe'
+            Invoke-WebRequest -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe' -OutFile $installer
+            Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR={0}' -f $innoDir) -Wait
+            Remove-Item $installer -ErrorAction SilentlyContinue
+            $iscc = Join-Path $innoDir 'ISCC.exe'
+          }
+          if (-not (Test-Path $iscc)) { Write-Error "ISCC not found: $iscc"; exit 1 }
           & $iscc "/DAppVersion=$version" "/DStageDir=$stage" "/O$PWD/dist" 'packaging/windows/memex.iss'
           if ($LASTEXITCODE -ne 0) { Write-Error "ISCC failed with exit $LASTEXITCODE"; exit 1 }
           Get-ChildItem dist | Select-Object Name, Length
@@ -365,7 +382,7 @@ jobs:
             hdiutil detach "$MNT" -quiet
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.plat }}-${{ matrix.target }}
           path: dist/*
@@ -378,9 +395,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
