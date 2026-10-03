@@ -141,7 +141,7 @@ jobs:
           restore-keys: |
             vcpkg-installed-${{ runner.os }}-${{ matrix.target }}-
 
-      # vcpkg：显式浅克隆并钉在 manifest builtin-baseline 同一 commit，装在
+      # vcpkg：显式克隆并钉在 manifest builtin-baseline 同一 commit，装在
       # runner.temp（工作区之外）。不用 run-vcpkg——它在 Windows/macOS 上把
       # 工作区内的 vcpkg 路径当 git submodule 查，以 "pathspec … did not
       # match any file(s) known to git" 中断（Linux 上同一错误仅落在 stderr
@@ -154,10 +154,13 @@ jobs:
           BASE="$(cygpath -u "${RUNNER_TEMP}" 2>/dev/null || echo "${RUNNER_TEMP}")"
           ROOT="${BASE}/vcpkg"
           if [ ! -d "${ROOT}/.git" ]; then
-            git init -q "${ROOT}"
-            git -C "${ROOT}" remote add origin https://github.com/microsoft/vcpkg.git
-            git -C "${ROOT}" fetch -q --depth=1 origin "${VCPKG_COMMIT}"
-            git -C "${ROOT}" checkout -q FETCH_HEAD
+            # 完整克隆（既不 --depth=1 浅克隆，也不 --filter 部分克隆）：vcpkg 以
+            # GIT_NO_LAZY_FETCH=1 调 git，并要按 builtin-baseline 的历史 commit
+            # 取 port 树（versions/*.json 钉的树），缺对象即 "failed to unpack
+            # tree object"。同款流程本地实测：完整克隆 37s/187MB，read-tree 在
+            # GIT_NO_LAZY_FETCH=1 下通过。
+            git clone -q https://github.com/microsoft/vcpkg.git "${ROOT}"
+            git -C "${ROOT}" checkout -q "${VCPKG_COMMIT}"
           fi
           if [ "${RUNNER_OS}" = "Windows" ]; then
             "${ROOT}/bootstrap-vcpkg.bat" -disableMetrics

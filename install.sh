@@ -77,7 +77,7 @@ download_url() { # download_url <url> <落盘路径> <资产名>
   code="$(curl -fsSL -o "$dest" -w '%{http_code}' "$url" 2>/dev/null || true)"
   [ -n "$code" ] || code=000
   if [ "$code" = 404 ]; then
-    die "资产不存在（HTTP 404）：$name——今日构建可能尚未发布，可到 ${BASE_URL%/nightly}/nightly 手动取件"
+    die "资产不存在（HTTP 404）：${name}——今日构建可能尚未发布，可到 ${BASE_URL%/nightly}/nightly 手动取件"
   fi
   if [ "$code" != 200 ]; then
     die "下载失败（HTTP ${code}）：$url"
@@ -115,7 +115,7 @@ install_linux() {
     info "安装 deb（重跑=升级）"
     as_root dpkg -i "$TMP/$pkg.deb"
     verify "/usr/bin/memex-$COMPONENT" "memex-$COMPONENT"
-    info "安装完成：/usr/bin/memex-$COMPONENT（随包 Qt/运行库在 /opt/memex/$COMPONENT）"
+    info "安装完成：/usr/bin/memex-${COMPONENT}（随包 Qt/运行库在 /opt/memex/${COMPONENT}）"
     return
   fi
   if command -v rpm >/dev/null 2>&1; then
@@ -131,7 +131,7 @@ install_linux() {
       as_root rpm -Uvh --replacepkgs "$TMP/$pkg.rpm"
     fi
     verify "/usr/bin/memex-$COMPONENT" "memex-$COMPONENT"
-    info "安装完成：/usr/bin/memex-$COMPONENT（随包运行库在 /opt/memex/$COMPONENT）"
+    info "安装完成：/usr/bin/memex-${COMPONENT}（随包运行库在 /opt/memex/${COMPONENT}）"
     return
   fi
 
@@ -154,7 +154,7 @@ install_linux() {
   tar -xzf "$tgz" -C "$TMP/x"
   top="$(ls "$TMP/x")"
   [ -f "$TMP/x/$top/memex-$COMPONENT.sh" ] || die "解包结构异常：未找到 memex-$COMPONENT.sh"
-  info "安装到 /opt/memex/$COMPONENT（重跑=升级）"
+  info "安装到 /opt/memex/${COMPONENT}（重跑=升级）"
   as_root mkdir -p /opt/memex
   as_root rm -rf "/opt/memex/$COMPONENT"
   as_root cp -R "$TMP/x/$top" "/opt/memex/$COMPONENT"

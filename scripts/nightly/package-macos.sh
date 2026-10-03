@@ -29,7 +29,7 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 cat > "$STAGE/使用说明.txt" <<EOF
-Memex $COMPONENT（macOS arm64，每日构建）
+Memex ${COMPONENT}（macOS arm64，每日构建）
 
 - 版本查看：
 $( [ "$COMPONENT" = client ] && echo '  /Applications/Memex.app/Contents/MacOS/Memex --version' || echo '  memex-server --version（安装后）' )
@@ -40,7 +40,6 @@ EOF
 
 if [ "$COMPONENT" = client ]; then
   [ -d "$SRC" ] || { echo "错误：未找到 .app：$SRC" >&2; exit 2; }
-  APP_NAME="$(basename "$SRC")"
 
   # Qt 运行库进 bundle（官方 Qt 树的 macdeployqt；vcpkg 侧依赖为静态链入）
   MACDEPLOYQT="${QT_ROOT_DIR:-}/bin/macdeployqt"

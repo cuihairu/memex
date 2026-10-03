@@ -53,6 +53,7 @@
       "displayName": "客户端 Release（Windows x64：官方 Qt + vcpkg 非 Qt 依赖）",
       "binaryDir": "${sourceDir}/build-client-win",
       "cacheVariables": {
+        "MEMEX_BUILD_SERVER": "OFF",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
         "VCPKG_MANIFEST_FEATURES": "",
         "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed-win"
