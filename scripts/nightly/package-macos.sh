@@ -3,8 +3,8 @@
 # 用法：
 #   package-macos.sh client <Memex.app 路径> <输出目录> [版本x.y.z]
 #   package-macos.sh server <memex_server 二进制路径> <输出目录> [版本x.y.z]
-# 产物（固定资产名，install.sh 直链取件）：
-#   client → memex-client-macos-arm64.dmg（内含 Memex.app，拖入 /Applications 即用）
+# 产物（client 走 A23 版本化资产名；server 固定名，直链取件）：
+#   client → MemexClient-<版本>-macos-arm64.dmg（内含 Memex.app，拖入 /Applications 即用）
 #   server → memex-server-macos-arm64.dmg（内含 memex-server.pkg，双击安装到
 #            /usr/local/bin/memex-server——pkg 形态满足系统「引导安装」口径）
 # 依赖：macdeployqt（官方 Qt 树 $QT_ROOT_DIR/bin，由 install-qt-action 提供）、
@@ -17,11 +17,13 @@ SRC="$2"
 OUT="$3"
 VERSION="${4:-0.1.0}"
 ARCH=arm64
-ASSET="memex-$COMPONENT-macos-$ARCH"
 
-case "$COMPONENT" in client|server) ;; *)
-  echo "错误：用法 package-macos.sh <client|server> <源路径> <输出目录> [版本]" >&2
-  exit 2 ;;
+case "$COMPONENT" in
+  client) ASSET="MemexClient-${VERSION}-macos-$ARCH" ;; # A23：MemexClient-x.y.z-*
+  server) ASSET="memex-$COMPONENT-macos-$ARCH" ;;       # 服务端固定资产名
+  *)
+    echo "错误：用法 package-macos.sh <client|server> <源路径> <输出目录> [版本]" >&2
+    exit 2 ;;
 esac
 mkdir -p "$OUT"
 

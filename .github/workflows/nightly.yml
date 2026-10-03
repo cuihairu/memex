@@ -292,8 +292,8 @@ jobs:
             if (-not (Test-Path (Join-Path $stage $f))) { Write-Error "missing in stage: $f"; exit 1 }
           }
 
-          # 便携 zip（解包即用面）
-          Compress-Archive -Path "$stage/*" -DestinationPath dist/memex-client-windows-x64.zip
+          # 便携 zip（解包即用面）——A23 客户端资产名 MemexClient-x.y.z-*
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/MemexClient-$version-win-x64.zip"
 
           # Inno 安装器：钉最新稳定 7.1.0（官方自 2026-03 起只发 GitHub Release；
           # 7.x 与 6.x 命令行 ISCC 兼容，本 iss 全标准指令；runner 仅预装 6.7.1、
@@ -340,7 +340,9 @@ jobs:
           Write-Host "version: $($t.Trim())"
 
           # ③ 安装器真装走查：静默装到 Program Files → 装后 --version → 快捷方式
-          $setup = 'dist/memex-windows-x64-setup.exe'
+          #（资产名 A23 版本化：MemexClient-<版本>-win-x64.exe，与打包步同源取版本）
+          $version = (Select-String -Path CMakeLists.txt -Pattern 'VERSION (\d+\.\d+\.\d+)' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $setup = "dist/MemexClient-$version-win-x64.exe"
           if (-not (Test-Path $setup)) { Write-Error "installer not found: $setup"; exit 1 }
           $p = Start-Process $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
           if ($p.ExitCode -ne 0) { Write-Error "installer exited with $($p.ExitCode)"; exit 1 }
@@ -383,9 +385,9 @@ jobs:
             fi
             "$APP/Contents/MacOS/Memex" --version
             bash scripts/nightly/package-macos.sh client "$APP" dist "$VERSION"
-            # dmg 往返走查：挂载 → .app 内二进制 --version → 卸载
+            # dmg 往返走查：挂载 → .app 内二进制 --version → 卸载（A23 版本化资产名）
             MNT="$(mktemp -d)"
-            hdiutil attach dist/memex-client-macos-arm64.dmg -nobrowse -readonly -mountpoint "$MNT" >/dev/null
+            hdiutil attach "dist/MemexClient-$VERSION-macos-arm64.dmg" -nobrowse -readonly -mountpoint "$MNT" >/dev/null
             "$MNT/Memex.app/Contents/MacOS/Memex" --version
             hdiutil detach "$MNT" -quiet
           fi
@@ -446,8 +448,8 @@ jobs:
             echo
             echo "| 资产 | 形态 | 验证 |"
             echo "| --- | --- | --- |"
-            echo "| \`memex-windows-x64-setup.exe\` | Inno 安装器（Program Files＋开始菜单＋卸载入口；GUI 子系统无控制台弹窗） | 安装后开始菜单启动，或 \`& \"\$env:ProgramFiles\Memex\memex-client.exe\" --version\` |"
-            echo "| \`memex-client-windows-x64.zip\` | 便携解包即用（随包 Qt/CRT） | 解包后双击 \`memex-client.exe\` |"
+            echo "| \`MemexClient-<版本>-win-x64.exe\` | Inno 安装器（Program Files＋开始菜单＋卸载入口；GUI 子系统无控制台弹窗） | 安装后开始菜单启动，或 \`& \"\$env:ProgramFiles\Memex\memex-client.exe\" --version\` |"
+            echo "| \`MemexClient-<版本>-win-x64.zip\` | 便携解包即用（随包 Qt/CRT） | 解包后双击 \`memex-client.exe\` |"
             echo
             echo "    # PowerShell 一键安装：irm https://raw.githubusercontent.com/cuihairu/memex/main/install.ps1 | iex"
             echo
@@ -455,7 +457,7 @@ jobs:
             echo
             echo "| 资产 | 形态 | 验证 |"
             echo "| --- | --- | --- |"
-            echo "| \`memex-client-macos-arm64.dmg\` | 磁盘映像（内含 Memex.app，拖入 Applications） | \`/Applications/Memex.app/Contents/MacOS/Memex --version\` |"
+            echo "| \`MemexClient-<版本>-macos-arm64.dmg\` | 磁盘映像（内含 Memex.app，拖入 Applications） | \`/Applications/Memex.app/Contents/MacOS/Memex --version\` |"
             echo "| \`memex-server-macos-arm64.dmg\` | 磁盘映像（内含 pkg，双击引导安装到 /usr/local/bin） | 安装后 \`memex-server --version\` |"
             echo
             echo "    # 首次打开前清 Gatekeeper 隔离属性（每日构建未做开发者证书签名）："
@@ -463,7 +465,7 @@ jobs:
             echo
             echo "## 说明"
             echo
-            echo "- 安装包为固定资产名（直链恒可达，install 脚本按此取件）；tar/zip 保留日期-短SHA 版本名。"
+            echo "- 客户端安装资产统一 \`MemexClient-x.y.z-*\` 版本名（A23；版本取根 CMakeLists）；服务端 tar/deb/rpm/dmg 为固定名直链，install 脚本按此取件。"
             echo "- 重装/重跑安装脚本 = 升级（deb/rpm 包管理器幂等、setup.exe 固定 AppId 覆盖安装、dmg 覆盖拷贝）。"
           } > VERIFY.md
 

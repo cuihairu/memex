@@ -38,7 +38,7 @@
 | 数据库与日志前缀 | memex、[MEMEX] | 服务端默认库 `memex-server.db`、客户端本地库 `memex-local.db`、日志行前缀 `[MEMEX]`（`server/src/server.cpp`） | ✓ |
 | Windows 服务名 | MemexServer | 文档站（development.md、report.md）与服务端入口注释 `MemexServer 入口` 口径一致；服务端运行期日志以 `[MEMEX] MemexServer 监听` 输出 | ✓ |
 | 内网域名／主机名 | memex.corp.local（示例）、memex-srv | 评审报告部署章给出同口径示例 | ✓ |
-| 客户端安装包命名 | `MemexClient-x.y.z-*` | 随 T4.7 系统集成落地时执行，当前 nightly 产物为 `memex-client-linux-x64-<日期>-<短SHA>.tar.gz` | 待 T4.7 |
+| 客户端安装包命名 | `MemexClient-x.y.z-*` | nightly 产物统一：linux `MemexClient-<版本>-linux-x64-<日期>-<短SHA>.tar.gz`、win `MemexClient-<版本>-win-x64.exe`（Inno 安装器）`/.zip`（便携）、macOS `MemexClient-<版本>-macos-arm64.dmg`（版本取根 CMakeLists PROJECT_VERSION；T4.7 落地） | ✓ |
 | 表述口径 | 「归档与检索」，不用「监控」「追踪」「审查」 | 界面归档提示条用「消息不进归档」，README 与文档站同口径 | ✓ |
 
-核查结论：除 T4.7 安装包命名随系统集成落地外，其余标识与命名清单一致，无偏差项。
+核查结论：全部标识与命名清单一致，无偏差项（T4.7 安装包命名已落地）。

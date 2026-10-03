@@ -6,8 +6,9 @@
 # Usage (one line, anonymous download, no GitHub login needed):
 #   irm https://raw.githubusercontent.com/cuihairu/memex/main/install.ps1 | iex
 #
-# Downloads the nightly Inno Setup installer (memex-windows-x64-setup.exe)
-# from the rolling nightly Release and installs it silently:
+# Downloads the nightly Inno Setup installer (MemexClient-<version>-win-x64.exe,
+# A23 versioned client asset name - resolved from the nightly Release asset list
+# via the GitHub API, exact regex match, never guessed) and installs it silently:
 #   - installs to Program Files\Memex
 #   - Start menu shortcut + optional desktop shortcut (interactive only)
 #   - Add/Remove Programs uninstall entry (fixed AppId: re-run = upgrade)
@@ -20,8 +21,6 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'   # irm|iex: IWR progress bar is very slow
 
 $Repo = 'cuihairu/memex'
-$BaseUrl = "https://github.com/$Repo/releases/download/nightly"
-$Asset = 'memex-windows-x64-setup.exe'
 $InstallDir = Join-Path $env:ProgramFiles 'Memex'
 
 function Info([string]$msg) { Write-Host ">>> $msg" }
@@ -42,11 +41,26 @@ switch ($arch) {
     default { Die "Unsupported CPU architecture: $arch (supported: AMD64/x64)." }
 }
 
-# ---------- download (404 vs network failure reported separately) ----------
-$url = "$BaseUrl/$Asset"
+# ---------- asset discovery + download (404 vs network failure reported separately) ----------
+# A23: client assets carry the version in the name (MemexClient-x.y.z-win-x64.exe),
+# so resolve the exact name from the nightly Release asset list instead of a fixed link.
 $tmpRoot = Join-Path ([IO.Path]::GetTempPath()) ("memex-install-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
+try {
+    $rel = Invoke-RestMethod -UseBasicParsing -Uri "https://api.github.com/repos/$Repo/releases/tags/nightly"
+} catch {
+    Die "nightly release lookup failed: $($_.Exception.Message)"
+}
+$assetHit = @($rel.assets) |
+    Where-Object { $_.name -match '^MemexClient-[0-9]+\.[0-9]+\.[0-9]+-win-x64\.exe$' } |
+    Select-Object -First 1
+if (-not $assetHit) {
+    Die "no MemexClient-<version>-win-x64.exe asset in the nightly Release - it may not be published yet; pick it manually at https://github.com/$Repo/releases/tag/nightly"
+}
+$Asset = $assetHit.name
+$url = $assetHit.browser_download_url
 $setupPath = Join-Path $tmpRoot $Asset
+Info "resolved nightly asset: $Asset"
 
 try {
     Info "Downloading $url"

@@ -1,7 +1,8 @@
 ; Memex Windows installer (Inno Setup 7；ISCC 6.x 亦可编译).
 ; Built by nightly workflow:
 ;   ISCC.exe /DAppVersion=<x.y.z> /DStageDir=<abs stage dir> /O<outdir> packaging\windows\memex.iss
-; Output: memex-windows-x64-setup.exe (fixed asset name, install.ps1 direct link).
+; Output: MemexClient-<AppVersion>-win-x64.exe (A23 versioned client asset name;
+; install.ps1 discovers it via the nightly Release asset list).
 ; Payload = windeployqt/vcpkg-staged client tree (GUI subsystem exe, no console).
 
 #ifndef AppVersion
@@ -22,7 +23,8 @@ AppPublisherURL=https://github.com/cuihairu/memex
 DefaultDirName={autopf}\Memex
 DefaultGroupName=Memex
 DisableProgramGroupPage=yes
-OutputBaseFilename=memex-windows-x64-setup
+; A23：客户端资产名 MemexClient-x.y.z-*（版本号随 AppVersion 注入）
+OutputBaseFilename=MemexClient-{#AppVersion}-win-x64
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
