@@ -416,6 +416,25 @@ int cmd_cross(int argc, char** argv, const std::string& db_path) {
   return 0;
 }
 
+// favs <账号>：常用联系人（T4.5）——星标置顶＋最近排序，落服务端换机保留
+int cmd_favs(int argc, char** argv, const std::string& db_path) {
+  if (argc < 1) {
+    std::cerr << "用法：memex_server favs <账号> [--db <库>]\n";
+    return 2;
+  }
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+  std::cout << "对端\t星标\t最近联系(ms)\n";
+  for (const auto& f : store.fav_list(argv[0])) {
+    std::cout << f.peer << '\t' << (f.starred ? "是" : "否") << '\t'
+              << f.last_ms << '\n';
+  }
+  return 0;
+}
+
 // audit [N]：查阅日志（倒序）——谁、何时、检索还是导出、用了什么条件、命中几条
 int cmd_audit(int argc, char** argv, const std::string& db_path) {
   int limit = 100;
@@ -763,6 +782,7 @@ int main(int argc, char** argv) {
     if (cmd == "messages") return cmd_messages(sub_argc, sub_argv, db_path);
     if (cmd == "audit") return cmd_audit(sub_argc, sub_argv, db_path);
     if (cmd == "cross") return cmd_cross(sub_argc, sub_argv, db_path);
+    if (cmd == "favs") return cmd_favs(sub_argc, sub_argv, db_path);
     if (cmd == "org") return cmd_org(sub_argc, sub_argv, db_path);
     if (cmd == "policy") return cmd_policy(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
@@ -770,7 +790,7 @@ int main(int argc, char** argv) {
                  "logins [账号] [--device 指纹前缀] | device … | "
                  "messages [账号] [--keyword K] [--since T] "
                  "[--until T] [--limit N] [--export 文件] | audit [N] | "
-                 "cross [N] | org … | --version | --self-test\n";
+                 "cross [N] | favs <账号> | org … | --version | --self-test\n";
     return 2;
   }
   return cmd_serve(0, argv, kDefaultDb);

@@ -70,6 +70,13 @@ if(MEMEX_BUILD_TESTS)
   add_test(NAME cross COMMAND test_cross)
   set_tests_properties(cross PROPERTIES TIMEOUT 60)
 
+  # T4.5 表情与常用联系人验收（服务端面）：星标／最近落库（UPSERT、
+  # MAX 单调、排序、账号隔离）＋TEXT 受理双方最近刷新＋FAV_CMD 置顶重推
+  add_executable(test_fav tests/test_fav.cpp)
+  target_link_libraries(test_fav PRIVATE memex_server_core)
+  add_test(NAME fav COMMAND test_fav)
+  set_tests_properties(fav PROPERTIES TIMEOUT 60)
+
   # T4.3 消息状态与多端验收（服务端面）：已读上报留痕（伪造拒绝／幂等）、
   # READ_NOTICE 在线路由、在线表查询与登录/登出/断开变更推送
   add_executable(test_read_presence tests/test_read_presence.cpp)

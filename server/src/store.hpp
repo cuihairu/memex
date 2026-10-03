@@ -119,6 +119,13 @@ struct GroupInfo {
 
 // 跨态会话日志（T4.2）：已登录端上报与未登录设备的会话——时间/双方/时长，
 // 不含消息内容。ended_ms=0 表示进行中。
+// T4.5 常用联系人：星标置顶＋最近联系，落 SQLite 换机保留。
+struct FavRow {
+  std::string peer;
+  bool starred{false};
+  std::int64_t last_ms{0};
+};
+
 struct CrossLogRow {
   std::int64_t id{0};
   std::string account;     // 已登录端账号（上报方）
@@ -290,6 +297,16 @@ public:
   // 进入协作态、归档开始的时刻；无归档返回 0；有归档但无登录记录
   //（旧库数据）退化为首条归档消息时刻。
   std::int64_t archive_start_ms(const std::string& account);
+
+  // —— T4.5 常用联系人 ——
+  // 星标／取消星标（UPSERT，仅改 starred，不刷新 last_ms）
+  bool fav_star(const std::string& account, const std::string& peer,
+                bool starred);
+  // 最近联系刷新（UPSERT，last_ms 取 max；已有 starred 不动）
+  bool fav_touch(const std::string& account, const std::string& peer,
+                 std::int64_t ts_ms);
+  // 全量列表：星标置顶（last_ms 新者先）、未星标按 last_ms 倒序、peer 兜底
+  std::vector<FavRow> fav_list(const std::string& account);
 
   // —— T4.3 已读回执 ——
   // 已读上报：仅归档库存在的 msg_id 才留痕（防伪造 msg_id 灌库）；

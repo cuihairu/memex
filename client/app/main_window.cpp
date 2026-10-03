@@ -1,27 +1,40 @@
 #include "main_window.hpp"
 
 #include <QAction>
+#include <QCloseEvent>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFont>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenuBar>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPixmap>
 #include <QRegularExpression>
 #include <QScrollBar>
 #include <QSettings>
+#include <QSize>
 #include <QShortcut>
+#include <QStandardPaths>
 #include <QStatusBar>
+#include <QSystemTrayIcon>
+#include <QTextStream>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <map>
 
 #include <nlohmann/json.hpp>
@@ -29,6 +42,27 @@
 #include <core/local_store.hpp>
 
 namespace memex::client {
+
+namespace {
+// 品牌图标（程序绘制，不依赖外部资源）：品牌橙圆角底＋白色 M。
+// 托盘与窗口图标共用（logo 本体不替换，图标仅为程序内绘制示意）。
+QIcon brand_icon() {
+  QPixmap pm(64, 64);
+  pm.fill(Qt::transparent);
+  QPainter p(&pm);
+  p.setRenderHint(QPainter::Antialiasing);
+  p.setBrush(QColor(QStringLiteral("#e16531")));
+  p.setPen(Qt::NoPen);
+  p.drawRoundedRect(pm.rect().adjusted(2, 2, -2, -2), 14, 14);
+  p.setPen(Qt::white);
+  QFont f = p.font();
+  f.setPixelSize(38);
+  f.setBold(true);
+  p.setFont(f);
+  p.drawText(pm.rect(), Qt::AlignCenter, QStringLiteral("M"));
+  return QIcon(pm);
+}
+} // namespace
 
 namespace {
 
@@ -139,6 +173,20 @@ void MainWindow::build_ui() {
           [this] { create_group_dialog(); });
   connect(act_dgroup_new, &QAction::triggered, this, [this] { dgroup_dialog(); });
 
+  // —— 设置：开机启动（T4.7；勾选态与登记文件同步）——
+  auto* opt_menu = menuBar()->addMenu(QStringLiteral("设置"));
+  act_autostart_ =
+      opt_menu->addAction(QStringLiteral("开机启动（登录后自动运行）"));
+  act_autostart_->setCheckable(true);
+  act_autostart_->setChecked(autostart_enabled());
+  connect(act_autostart_, &QAction::triggered, this, [this](bool on) {
+    set_autostart(on);
+    act_autostart_->setChecked(autostart_enabled()); // 落盘失败回滚勾选，不说谎
+  });
+
+  setWindowIcon(brand_icon());
+  setup_tray(); // 托盘可用才建（offscreen 等环境跳过）
+
   // —— 左侧：局域网设备列表（直连态以设备替代联系人）——
   auto* side = new QWidget(this);
   auto* side_layout = new QVBoxLayout(side);
@@ -234,8 +282,17 @@ void MainWindow::build_ui() {
   shot_sc->setContext(Qt::WindowShortcut);
   connect(shot_btn, &QPushButton::clicked, this, [this] { start_screenshot(); });
   connect(shot_sc, &QShortcut::activated, this, [this] { start_screenshot(); });
+  // T4.5 表情：内置（按频次排序）＋自定义表情包导入（走文件通道发送）
+  auto* emoji_btn = new QPushButton(QStringLiteral("表情"), input_row);
+  emoji_btn->setStyleSheet(QStringLiteral(
+      "QPushButton { background:#ffffff; color:#a05a26; border:1px solid "
+      "#e16531; border-radius:8px; padding:6px 12px; }"
+      "QPushButton:hover { background:#fdeee2; }"));
+  connect(emoji_btn, &QPushButton::clicked, this,
+          [this] { show_emoji_panel(); });
   input_layout->addWidget(shot_btn);
   input_layout->addWidget(file_btn);
+  input_layout->addWidget(emoji_btn);
   input_box_ = new QLineEdit(input_row);
   input_box_->setPlaceholderText(QStringLiteral("输入消息，回车发送"));
   send_btn_ = new QPushButton(QStringLiteral("发送"), input_row);
@@ -332,6 +389,15 @@ void MainWindow::wire_engines() {
                              QStringLiteral("direct"));
             } else {
               show_status(QStringLiteral("来自 %1 的新消息").arg(from));
+            }
+          });
+  // T4.7 系统通知独立接入（与渲染分支解耦：窗口未激活时任何直连新消息
+  // 都通知，不随分支改写而丢失）
+  connect(&direct_engine_, &DirectEngine::message_received, this,
+          [this](const QString& from, const QString& text, qint64) {
+            if (!isActiveWindow()) {
+              tray_notify(QStringLiteral("新消息"),
+                          QStringLiteral("来自 %1：%2").arg(from, text));
             }
           });
   connect(&direct_engine_, &DirectEngine::text_delivered, this,
@@ -453,6 +519,8 @@ void MainWindow::wire_collab() {
             kick_text_ = QStringLiteral("已被顶替下线（%1）：%2")
                              .arg(replaced_by, reason);
             set_delivery_state(kick_text_);
+            // T4.7：互踢同时走系统通知（托盘气泡；无托盘仅记录不断言面）
+            tray_notify(QStringLiteral("已被顶替下线"), kick_text_);
             auto* box = new QMessageBox(
                 QMessageBox::Warning, QStringLiteral("已被顶替下线"),
                 kick_text_ + QStringLiteral("\n同账号在另一台设备登录，"
@@ -478,6 +546,15 @@ void MainWindow::wire_collab() {
             collab_peers_.insert(from);
             refresh_devices();
           });
+  // T4.7 系统通知独立接入（与渲染分支解耦：窗口未激活时任何协作新消息
+  // 都通知，不随分支改写而丢失）
+  connect(&collab_engine_, &CollabEngine::message_received, this,
+          [this](const QString& from, const QString&, qint64, const QString&) {
+            if (!isActiveWindow()) {
+              tray_notify(QStringLiteral("新消息"),
+                          QStringLiteral("来自 %1 的协作消息").arg(from));
+            }
+          });
   connect(&collab_engine_, &CollabEngine::text_delivered, this,
           [this](quint64 seq, bool ok) {
             // 已读是终态：后到的受理回执不回退状态（自发自收回环时先已读后回执）
@@ -497,6 +574,8 @@ void MainWindow::wire_collab() {
               show_status(QStringLiteral("组织架构已更新"));
             }
           });
+  connect(&collab_engine_, &CollabEngine::fav_received, this,
+          [this](const QString& fav_json) { apply_favs(fav_json); });
   // —— T4.1 群聊 ——
   connect(&collab_engine_, &CollabEngine::group_result, this,
           [this](bool ok, const QString& reason, const QString& op,
@@ -523,6 +602,19 @@ void MainWindow::wire_collab() {
               const QString gname = groups_.value(group_key.mid(6).toULongLong())
                                         .name;
               show_status(QStringLiteral("来自群「%1」%2 的消息")
+                              .arg(gname.isEmpty() ? group_key : gname, sender));
+            }
+          });
+  // T4.7 系统通知独立接入（与渲染分支解耦：窗口未激活时任何群新消息
+  // 都通知，不随分支改写而丢失）
+  connect(&collab_engine_, &CollabEngine::group_message_received, this,
+          [this](const QString& group_key, const QString& sender,
+                 const QString&, qint64, const QString&) {
+            if (!isActiveWindow()) {
+              const QString gname =
+                  groups_.value(group_key.mid(6).toULongLong()).name;
+              tray_notify(QStringLiteral("新消息"),
+                          QStringLiteral("来自群「%1」%2 的消息")
                               .arg(gname.isEmpty() ? group_key : gname, sender));
             }
           });
@@ -628,10 +720,142 @@ bool MainWindow::send_in_current_chat(const QString& text) {
     return false;
   }
   cross_touch(current_peer_); // T4.2：跨态会话首触即上报建立
+  // T4.5：登录态直连会话的最近联系上报（peer=设备标识，与服务端群/账号同表）
+  if (collab_engine_.is_logged_in()) {
+    collab_engine_.fav_cmd(QStringLiteral("touch"), current_peer_);
+  }
   append_message(QString::fromStdString(direct_engine_.device_id()), text,
                  QDateTime::currentMSecsSinceEpoch(), true,
                  QStringLiteral("direct"));
   set_delivery_state(QStringLiteral("发送中…（直连点对点）"));
+  return true;
+}
+
+void MainWindow::show_emoji_panel() {
+  auto* dlg = new QDialog(this, Qt::Popup);
+  dlg->setAttribute(Qt::WA_DeleteOnClose);
+  dlg->setWindowTitle(QStringLiteral("表情"));
+  auto* grid = new QGridLayout(dlg);
+  grid->setContentsMargins(8, 8, 8, 8);
+  grid->setHorizontalSpacing(4);
+  grid->setVerticalSpacing(4);
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  QStringList builtin;
+  builtin << QStringLiteral("😀") << QStringLiteral("😄") << QStringLiteral("😂")
+          << QStringLiteral("🙂") << QStringLiteral("😉") << QStringLiteral("😊")
+          << QStringLiteral("😍") << QStringLiteral("😘") << QStringLiteral("😎")
+          << QStringLiteral("🤔") << QStringLiteral("😅") << QStringLiteral("😢")
+          << QStringLiteral("😭") << QStringLiteral("😡") << QStringLiteral("👍")
+          << QStringLiteral("👎") << QStringLiteral("👏") << QStringLiteral("🙏")
+          << QStringLiteral("💪") << QStringLiteral("🎉") << QStringLiteral("❤️")
+          << QStringLiteral("🔥") << QStringLiteral("✅") << QStringLiteral("❌");
+  // 常用＝按本地使用频次降序（T4.5）
+  std::sort(builtin.begin(), builtin.end(), [&settings](const QString& a, const QString& b) {
+    return settings.value(QStringLiteral("emoji_use/") + a, 0).toInt() >
+           settings.value(QStringLiteral("emoji_use/") + b, 0).toInt();
+  });
+  int i = 0;
+  for (const QString& e : builtin) {
+    auto* b = new QPushButton(e, dlg);
+    b->setFixedSize(34, 34);
+    b->setStyleSheet(QStringLiteral("QPushButton{border:none;font-size:18px;}"));
+    connect(b, &QPushButton::clicked, this, [this, e, dlg, &settings] {
+      input_box_->insert(e);
+      input_box_->setFocus();
+      const QString key = QStringLiteral("emoji_use/") + e;
+      settings.setValue(key, settings.value(key, 0).toInt() + 1);
+      dlg->close();
+    });
+    grid->addWidget(b, i / 8, i % 8);
+    ++i;
+  }
+  // 自定义表情包：emoji 目录（emoji_dir，测试缝可覆盖）下的图片，
+  // 点击即按文件通道发送
+  const QString dir = emoji_dir();
+  QDir().mkpath(dir);
+  const QStringList files = QDir(dir).entryList(
+      {QStringLiteral("*.png"), QStringLiteral("*.jpg"),
+       QStringLiteral("*.jpeg"), QStringLiteral("*.gif")},
+      QDir::Files);
+  int row = i / 8;
+  int col = i % 8;
+  for (const QString& f : files) {
+    auto* b = new QPushButton(dlg);
+    b->setFixedSize(40, 40);
+    b->setIcon(QIcon(dir + QLatin1Char('/') + f));
+    b->setIconSize(QSize(36, 36));
+    const QString path = dir + QLatin1Char('/') + f;
+    connect(b, &QPushButton::clicked, this, [this, path, dlg] {
+      dlg->close();
+      if (current_peer_.isEmpty()) {
+        show_status(QStringLiteral("先选择会话再发送自定义表情"));
+        return;
+      }
+      if (current_kind_ == QStringLiteral("group") ||
+          current_kind_ == QStringLiteral("dgroup")) {
+        show_status(QStringLiteral("群会话暂不支持自定义表情（走文件单聊）"));
+        return;
+      }
+      const std::string tid =
+          direct_engine_.send_file(current_peer_.toStdString(), path);
+      if (tid.empty()) {
+        show_status(QStringLiteral("自定义表情发送失败"));
+        return;
+      }
+      append_system_line(QStringLiteral("[表情] %1")
+                             .arg(esc(QFileInfo(path).fileName())));
+    });
+    grid->addWidget(b, row, col);
+    if (++col >= 8) { col = 0; ++row; }
+  }
+  auto* imp = new QPushButton(QStringLiteral("导入自定义表情…"), dlg);
+  connect(imp, &QPushButton::clicked, this, [this, dlg] {
+    const QString src = QFileDialog::getOpenFileName(
+        this, QStringLiteral("选择表情图片"), QString(),
+        QStringLiteral("图片 (*.png *.jpg *.jpeg *.gif)"));
+    if (src.isEmpty()) return;
+    if (import_emoji(src)) dlg->close(); // 导入失败留下面板＋状态栏报因
+  });
+  grid->addWidget(imp, row + 1, 0, 1, 4);
+  dlg->show();
+}
+
+// —— T4.5 自定义表情：目录与导入 ——
+QString MainWindow::emoji_dir() {
+  // 测试覆盖：MEMEX_TEST_EMOJI_DIR 指向临时目录（与 MEMEX_TEST_AUTOSTART_DIR
+  // 同口径），避免污染真实应用数据目录
+  const QByteArray override_dir = qgetenv("MEMEX_TEST_EMOJI_DIR");
+  if (!override_dir.isEmpty()) return QString::fromUtf8(override_dir);
+  return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+         QStringLiteral("/emoji");
+}
+
+bool MainWindow::import_emoji(const QString& src) {
+  static const QSet<QString> kExt{QStringLiteral("png"), QStringLiteral("jpg"),
+                                  QStringLiteral("jpeg"),
+                                  QStringLiteral("gif")};
+  const QFileInfo si(src);
+  if (!si.exists() || !si.isFile() || !kExt.contains(si.suffix().toLower())) {
+    show_status(QStringLiteral("导入失败：不是支持的表情图片（png/jpg/jpeg/gif）"));
+    return false;
+  }
+  const QString dir = emoji_dir();
+  if (!QDir().mkpath(dir)) {
+    show_status(QStringLiteral("导入失败：无法创建目录 %1").arg(dir));
+    return false;
+  }
+  const QString dst = dir + QLatin1Char('/') + si.fileName();
+  if (QFile::exists(dst) && !QFile::remove(dst)) {
+    show_status(QStringLiteral("导入失败：无法覆盖同名文件 %1").arg(dst));
+    return false;
+  }
+  if (!QFile::copy(src, dst)) {
+    show_status(QStringLiteral("导入失败：无法写入 %1").arg(dir));
+    return false;
+  }
+  show_status(QStringLiteral("已导入表情：%1（重新打开面板可见）")
+                  .arg(si.fileName()));
   return true;
 }
 
@@ -880,6 +1104,55 @@ void MainWindow::open_group(const QString& group_key) {
   open_chat(QStringLiteral("group"), group_key);
 }
 
+// 常用联系人到达（T4.5）：缓存并刷新列表（星标置顶排序在 refresh 里按此算）
+void MainWindow::apply_favs(const QString& fav_json) {
+  last_fav_json_ = fav_json;
+  refresh_devices();
+}
+
+QString MainWindow::fav_json() const { return last_fav_json_; }
+
+bool MainWindow::fav_is_starred_(const QString& peer) const {
+  nlohmann::json j = nlohmann::json::parse(last_fav_json_.toStdString(),
+                                           nullptr, false);
+  if (j.is_discarded() || !j.is_array()) return false;
+  for (const auto& e : j) {
+    if (e.value("peer", std::string{}) == peer.toStdString()) {
+      return e.value("starred", false);
+    }
+  }
+  return false;
+}
+
+qint64 MainWindow::fav_last_ms_(const QString& peer) const {
+  nlohmann::json j = nlohmann::json::parse(last_fav_json_.toStdString(),
+                                           nullptr, false);
+  if (j.is_discarded() || !j.is_array()) return 0;
+  for (const auto& e : j) {
+    if (e.value("peer", std::string{}) == peer.toStdString()) {
+      return e.value("last_ms", 0LL);
+    }
+  }
+  return 0;
+}
+
+void MainWindow::toggle_current_fav_star() {
+  if (current_kind_ != QStringLiteral("collab") &&
+      current_kind_ != QStringLiteral("group")) {
+    show_status(QStringLiteral("常用联系人星标仅适用于协作会话／服务端群"));
+    return;
+  }
+  if (!collab_engine_.is_logged_in()) {
+    show_status(QStringLiteral("未登录协作态，常用联系人不可用"));
+    return;
+  }
+  const QString peer = current_peer_;
+  if (peer.isEmpty()) return;
+  collab_engine_.fav_cmd(fav_is_starred_(peer) ? QStringLiteral("unstar")
+                                               : QStringLiteral("star"),
+                         peer);
+}
+
 // 群列表数据到达：解析入 groups_，刷新列表与当前群会话标题
 void MainWindow::apply_groups(const QString& groups_json) {
   last_groups_json_ = groups_json;
@@ -940,6 +1213,22 @@ void MainWindow::show_group_menu(const QPoint& pos) {
   const QString kind = item->data(Qt::UserRole + 1).toString();
   const QString id = item->data(Qt::UserRole).toString();
   QMenu menu(this);
+  if (kind == QStringLiteral("collab") || kind == QStringLiteral("group")) {
+    // T4.5：常用联系人星标／取消（group kind 的 id 形如 "group:N"，直接用）
+    const bool starred = fav_is_starred_(id);
+    auto* act_star = menu.addAction(
+        starred ? QStringLiteral("取消星标") : QStringLiteral("星标（置顶）"));
+    connect(act_star, &QAction::triggered, this, [this, id, starred] {
+      if (!collab_engine_.is_logged_in()) {
+        show_status(QStringLiteral("未登录协作态，常用联系人不可用"));
+        return;
+      }
+      collab_engine_.fav_cmd(starred ? QStringLiteral("unstar")
+                                     : QStringLiteral("star"),
+                             id);
+    });
+    menu.addSeparator();
+  }
   if (kind == QStringLiteral("group")) {
     const quint64 gid = id.mid(QStringLiteral("group:").size()).toULongLong();
     auto* act_invite = menu.addAction(QStringLiteral("拉人进群…"));
@@ -1201,6 +1490,107 @@ void MainWindow::set_delivery_state(const QString& text) {
   show_status(text); // 状态栏同步（最近一条发出消息的状态常驻可查）
 }
 
+// —— T4.7 系统集成 ——
+
+QString MainWindow::last_notify() const { return last_notify_; }
+
+bool MainWindow::tray_available() const {
+  return tray_ != nullptr && QSystemTrayIcon::isSystemTrayAvailable();
+}
+
+void MainWindow::setup_tray() {
+  if (!QSystemTrayIcon::isSystemTrayAvailable()) return; // 无托盘环境跳过
+  tray_ = new QSystemTrayIcon(brand_icon(), this);
+  tray_->setToolTip(QStringLiteral("Memex（直连态：消息不进归档）"));
+  auto* menu = new QMenu(this);
+  auto* act_show = menu->addAction(QStringLiteral("显示主窗口"));
+  connect(act_show, &QAction::triggered, this, [this] {
+    show();
+    raise();
+    activateWindow();
+  });
+  auto* act_tray_auto = menu->addAction(QStringLiteral("开机启动"));
+  act_tray_auto->setCheckable(true);
+  act_tray_auto->setChecked(autostart_enabled());
+  connect(act_tray_auto, &QAction::triggered, this, [this, act_tray_auto](bool on) {
+    set_autostart(on);
+    act_tray_auto->setChecked(autostart_enabled());
+    if (act_autostart_) act_autostart_->setChecked(autostart_enabled());
+  });
+  auto* act_quit = menu->addAction(QStringLiteral("退出"));
+  connect(act_quit, &QAction::triggered, this, [this] {
+    tray_ = nullptr; // 先摘托盘，closeEvent 不再拦截（真退出）
+    close();
+  });
+  tray_->setContextMenu(menu);
+  tray_->show();
+  connect(tray_, &QSystemTrayIcon::activated, this,
+          [this](QSystemTrayIcon::ActivationReason reason) {
+            if (reason == QSystemTrayIcon::Trigger && !isVisible()) {
+              show();
+              raise();
+              activateWindow();
+            }
+          });
+}
+
+void MainWindow::tray_notify(const QString& title, const QString& text) {
+  last_notify_ = title + QStringLiteral("：") + text; // 无托盘也记录（断言面）
+  if (tray_ && QSystemTrayIcon::supportsMessages()) {
+    tray_->showMessage(title, text, QSystemTrayIcon::Information, 5000);
+  }
+}
+
+void MainWindow::closeEvent(QCloseEvent* event) {
+  if (tray_) {
+    // 托盘可用：关闭即最小化进托盘（常驻后台不断直连发现；真退出走托盘菜单）
+    hide();
+    tray_notify(QStringLiteral("已最小化到托盘"),
+                QStringLiteral("Memex 仍在后台运行（右键托盘图标可退出）"));
+    event->ignore();
+    return;
+  }
+  QMainWindow::closeEvent(event);
+}
+
+QString MainWindow::autostart_dir() {
+  // 测试覆盖：MEMEX_TEST_AUTOSTART_DIR 指向临时目录，避免污染真实家目录
+  const QByteArray override_dir = qgetenv("MEMEX_TEST_AUTOSTART_DIR");
+  if (!override_dir.isEmpty()) return QString::fromUtf8(override_dir);
+  return QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) +
+         QStringLiteral("/autostart");
+}
+
+bool MainWindow::autostart_enabled() const {
+  return QFile::exists(autostart_dir() + QStringLiteral("/memex-client.desktop"));
+}
+
+void MainWindow::set_autostart(bool on) {
+  const QString path = autostart_dir() + QStringLiteral("/memex-client.desktop");
+  if (!on) {
+    QFile::remove(path);
+    if (act_autostart_) act_autostart_->setChecked(false);
+    return;
+  }
+  QDir().mkpath(autostart_dir());
+  QFile f(path);
+  if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    if (act_autostart_) act_autostart_->setChecked(false); // 落盘失败回滚勾选
+    return;
+  }
+  QTextStream out(&f);
+  out << "[Desktop Entry]\n"
+      << "Type=Application\n"
+      << "Name=Memex\n"
+      << "Comment=Memex 内网办公即时通讯\n"
+      << "Exec=" << QCoreApplication::applicationFilePath() << "\n"
+      << "Terminal=false\n"
+      << "Categories=Network;InstantMessaging;\n"
+      << "X-GNOME-Autostart-enabled=true\n";
+  f.close();
+  if (act_autostart_) act_autostart_->setChecked(true);
+}
+
 // 归档提示条（常驻不可关）：协作态显示归档口径；直连／降级态必须明示
 // 「消息不进归档」——切换与降级共用这一条提示（A7、A11 界面口径）。
 void MainWindow::update_banner() {
@@ -1320,14 +1710,25 @@ void MainWindow::refresh_devices() {
     header->setFlags(Qt::NoItemFlags); // 分组标题：不可选（空 id 不进会话）
     device_list_->addItem(header);
     QStringList sorted(collab_peers_.begin(), collab_peers_.end());
-    sorted.sort();
+    // T4.5：星标置顶（最近优先）、其余按最近联系、再按账号名
+    std::sort(sorted.begin(), sorted.end(), [this](const QString& a, const QString& b) {
+      const bool sa = fav_is_starred_(a), sb = fav_is_starred_(b);
+      if (sa != sb) return sa;
+      const qint64 ta = fav_last_ms_(a), tb = fav_last_ms_(b);
+      if (ta != tb) return ta > tb;
+      return a < b;
+    });
     for (const QString& account : sorted) {
       auto* item = new QListWidgetItem(device_list_);
       // T4.3：在线标识随服务端推送刷新（在线表含自己；未登录不显示本分组）
       const QString presence = online_accounts_.contains(account)
                                    ? QStringLiteral("●在线")
                                    : QStringLiteral("○离线");
-      item->setText(QStringLiteral("%1\n协作态 · 已归档 · %2").arg(account, presence));
+      const QString star = fav_is_starred_(account)
+                               ? QStringLiteral("★ ")
+                               : QString();
+      item->setText(QStringLiteral("%1%2\n协作态 · 已归档 · %3")
+                        .arg(star, account, presence));
       item->setData(Qt::UserRole, account);
       item->setData(Qt::UserRole + 1, QStringLiteral("collab"));
     }

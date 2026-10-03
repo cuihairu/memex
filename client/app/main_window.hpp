@@ -21,6 +21,8 @@
 #include <app/screenshot_tool.hpp>
 
 class QAction;
+class QCloseEvent;
+class QSystemTrayIcon;
 
 namespace memex::client {
 
@@ -43,6 +45,10 @@ public:
   QString org_json() const;
   // —— T4.1 群聊（验收面）——
   QString groups_json() const; // 最近一次群列表数据
+  // 最近一次常用联系人数据（T4.5；星标置顶＋最近排序，服务端换机保留）
+  QString fav_json() const;
+  // 当前会话的星标切换（服务端常用联系人；未登录协作态时提示）
+  void toggle_current_fav_star();
   void create_group_dialog();  // 服务端群：建群后全量归档
   void open_group(const QString& group_key); // group_key 形如 "group:7"
 
@@ -56,6 +62,10 @@ public:
   // 截图工具（区域选择→标注→确认即发送；测试缝见 ScreenshotTool 注释）。
   ScreenshotTool* screenshot_tool() { return &screenshot_tool_; }
   void start_screenshot(); // 按钮与 Ctrl+Alt+A 快捷键入口
+  void show_emoji_panel(); // T4.5：表情面板（内置按频次＋自定义导入）
+  // 自定义表情导入（测试缝：面板「导入」按钮即此函数；同名覆盖、失败回 false）
+  bool import_emoji(const QString& src);
+  static QString emoji_dir(); // 表情目录（MEMEX_TEST_EMOJI_DIR 可覆盖，测后无污染）
 
   // 状态断言面（验收测试）
   bool collab_logged_in() const;
@@ -66,6 +76,11 @@ public:
   QString delivery_text() const; // 最近一条发出消息的状态（发送中／已送达／失败／已读）
   QString kick_text() const;     // 最近一次互踢提示（空=本会话未被踢）
   QStringList online_accounts() const; // 最近一次在线账号表（推送即刷新）
+  // —— T4.7 系统集成（验收面）——
+  QString last_notify() const; // 最近一条系统通知（标题＋正文；托盘不可用也记录）
+  bool tray_available() const; // 托盘是否可用（offscreen 等环境为假）
+  bool autostart_enabled() const; // 开机启动是否已登记
+  void set_autostart(bool on);    // 登记／撤销开机启动（freedesktop .desktop）
 
 private:
   void build_ui();
@@ -111,6 +126,7 @@ private:
   };
   // 群列表数据到达（GROUP_DATA）：解析入 groups_ 并刷新列表／当前会话标题
   void apply_groups(const QString& groups_json);
+  void apply_favs(const QString& fav_json); // 常用联系人刷新（T4.5）
   // 群条目右键菜单：拉人／公告／退群（服务端群）；解散（临时群）
   void show_group_menu(const QPoint& pos);
   // 当前会话为服务端群时返回群号与其条目；否则 0／nullptr
@@ -137,6 +153,9 @@ private:
   QString status_hint_;               // 状态栏事件提示（引擎态前缀实时拼）
 
   QString last_groups_json_;          // 最近一次群列表数据（T4.1）
+  QString last_fav_json_;             // 最近一次常用联系人（T4.5）
+  bool fav_is_starred_(const QString& peer) const; // 星标查询（解析 last_fav_json_）
+  qint64 fav_last_ms_(const QString& peer) const;  // 最近联系时刻（同上）
   QMap<quint64, GroupEntry> groups_;  // 群号 → 条目（登录后 query_groups 拉取）
   QHash<QString, QStringList> dgroup_members_; // 临时群 id → 成员设备（本机视图）
   int next_dgroup_{1};                // 临时群序号（标题与 id 用）
@@ -149,6 +168,18 @@ private:
   QString kick_text_;                 // 最近一次互踢提示（测试断言面）
   QSet<QString> online_accounts_;      // 在线账号表（服务端推送，含自己）
   void set_delivery_state(const QString& text); // 同步状态面＋状态栏提示
+
+  // —— T4.7 系统集成 ——
+  // 托盘：关闭进托盘（可用时）、托盘菜单（显示／开机启动／退出）；
+  // 系统通知：窗口未激活时的新消息与互踢提示走托盘气泡（不可用仅记录）；
+  // 开机启动：freedesktop autostart .desktop 登记（UOS/麒麟同为 Linux 生效）。
+  void setup_tray(); // 托盘可用才建（offscreen 等环境跳过，不崩）
+  void tray_notify(const QString& title, const QString& text);
+  void closeEvent(QCloseEvent* event) override; // 托盘可用时关闭即最小化进托盘
+  static QString autostart_dir(); // 登记目录（MEMEX_TEST_AUTOSTART_DIR 可覆盖，测后无污染）
+  QSystemTrayIcon* tray_{nullptr}; // 托盘不可用时保持空（全部调用判空）
+  QAction* act_autostart_{nullptr}; // 开机启动菜单项（与登记态同步勾选）
+  QString last_notify_;             // 最近一条系统通知（测试断言面）
 
   // T4.2 跨态会话表：设备 id → 会话建立时刻（已上报 start、未闭环）
   QHash<QString, qint64> cross_open_;

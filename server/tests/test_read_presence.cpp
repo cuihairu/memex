@@ -56,15 +56,19 @@ public:
     asio::write(*socket_, asio::buffer(frame));
   }
   memex::protocol::Message read() {
-    std::array<char, 4> head{};
-    asio::read(*socket_, asio::buffer(head));
-    const std::uint32_t len = (std::uint8_t(head[0]) << 24) |
-                              (std::uint8_t(head[1]) << 16) |
-                              (std::uint8_t(head[2]) << 8) |
-                              std::uint8_t(head[3]);
-    std::string payload(len, '\0');
-    asio::read(*socket_, asio::buffer(payload));
-    return memex::protocol::decode_payload(payload);
+    for (;;) {
+      std::array<char, 4> head{};
+      asio::read(*socket_, asio::buffer(head));
+      const std::uint32_t len = (std::uint8_t(head[0]) << 24) |
+                                (std::uint8_t(head[1]) << 16) |
+                                (std::uint8_t(head[2]) << 8) |
+                                std::uint8_t(head[3]);
+      std::string payload(len, '\0');
+      asio::read(*socket_, asio::buffer(payload));
+      auto msg = memex::protocol::decode_payload(payload);
+      // T4.5：TEXT 受理后的 FAV 全量回推不串扰帧序断言
+      if (msg.type() != memex::protocol::v1::FAV_DATA) return msg;
+    }
   }
   // 同步点：PING/PONG 往返后，服务端已处理完此前发来的全部帧
   void sync() {
@@ -74,8 +78,13 @@ public:
     ping.set_to("server");
     ping.set_ts_ms(now_ms());
     send(ping);
-    memex::protocol::Message r = read();
-    CHECK(r.type() == memex::protocol::v1::PONG);
+    // T4.5：FAV 全量回推可能插队——读到 PONG 为止
+    bool saw_pong = false;
+    for (int i = 0; i < 16 && !saw_pong; ++i) {
+      const auto r = read();
+      if (r.type() == memex::protocol::v1::PONG) saw_pong = true;
+    }
+    CHECK(saw_pong);
   }
   // 登录：T4.3 起登录成功伴随 PRESENCE_DATA 推送（先于 LOGIN_RESULT），
   // 逐帧读到 LOGIN_RESULT 为止（推送帧顺手断言在线表内容）。
@@ -223,8 +232,14 @@ int main() {
     b.read_msg(mid);
     b.sync();
     {
-      const auto n = a.read();
-      CHECK(n.type() == v1::READ_NOTICE);
+      // T4.5：FAV 全量回推可能插在 ACK 与 READ_NOTICE 之间——读到 NOTICE 为止
+      memex::protocol::Message n;
+      bool saw = false;
+      for (int i = 0; i < 8 && !saw; ++i) {
+        n = a.read();
+        if (n.type() == v1::READ_NOTICE) saw = true;
+      }
+      CHECK(saw);
       CHECK(n.read_notice().msg_id() == mid);
       CHECK(n.read_notice().reader() == "bob");
       CHECK(n.read_notice().read_ms() > 0);

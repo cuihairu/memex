@@ -155,7 +155,14 @@ bool ServerStore::ensure_schema() {
       "  peer_name TEXT NOT NULL,"
       "  started_ms INTEGER NOT NULL,"
       "  ended_ms INTEGER NOT NULL DEFAULT 0,"
-      "  duration_ms INTEGER NOT NULL DEFAULT 0);"; // 本段为 schema 字符串最后一段
+      "  duration_ms INTEGER NOT NULL DEFAULT 0);"
+      // T4.5 常用联系人：(账号, 对端) 联合主键 UPSERT
+      "CREATE TABLE IF NOT EXISTS favorites ("
+      "  account TEXT NOT NULL,"
+      "  peer TEXT NOT NULL,"
+      "  starred INTEGER NOT NULL DEFAULT 0,"
+      "  last_ms INTEGER NOT NULL DEFAULT 0,"
+      "  PRIMARY KEY(account, peer));"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -1324,6 +1331,63 @@ std::vector<CrossLogRow> ServerStore::cross_logs(int limit) {
     r.started_ms = sqlite3_column_int64(st, 4);
     r.ended_ms = sqlite3_column_int64(st, 5);
     r.duration_ms = sqlite3_column_int64(st, 6);
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// —— T4.5 常用联系人 ——
+
+bool ServerStore::fav_star(const std::string& account,
+                           const std::string& peer, bool starred) {
+  if (account.empty() || peer.empty()) return false;
+  const char* sql =
+      "INSERT INTO favorites(account, peer, starred, last_ms)"
+      " VALUES(?, ?, ?, 0)"
+      " ON CONFLICT(account, peer) DO UPDATE SET starred=excluded.starred;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, peer.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 3, starred ? 1 : 0);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::fav_touch(const std::string& account,
+                            const std::string& peer, std::int64_t ts_ms) {
+  if (account.empty() || peer.empty() || ts_ms <= 0) return false;
+  const char* sql =
+      "INSERT INTO favorites(account, peer, starred, last_ms)"
+      " VALUES(?, ?, 0, ?)"
+      " ON CONFLICT(account, peer) DO UPDATE SET"
+      " last_ms=MAX(last_ms, excluded.last_ms);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, peer.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<FavRow> ServerStore::fav_list(const std::string& account) {
+  std::vector<FavRow> out;
+  const char* sql =
+      "SELECT peer, starred, last_ms FROM favorites WHERE account = ?"
+      " ORDER BY starred DESC, last_ms DESC, peer ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    FavRow r;
+    const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    r.peer = p ? std::string(p) : std::string{};
+    r.starred = sqlite3_column_int(st, 1) != 0;
+    r.last_ms = sqlite3_column_int64(st, 2);
     out.push_back(std::move(r));
   }
   sqlite3_finalize(st);

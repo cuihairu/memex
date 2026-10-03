@@ -6,6 +6,8 @@
 #include <QApplication>
 #include <QDateTime>
 #include <QElapsedTimer>
+#include <QDir>
+#include <QFile>
 #include <QProcess>
 #include <QTcpServer>
 #include <QTemporaryDir>
@@ -164,6 +166,34 @@ int main(int argc, char** argv) {
     return window.status_text().contains(QStringLiteral("已送达"));
   }, 8000));
 
+  // —— T4.5 常用联系人（主窗验收）：发送后 FAV 数据应含 bob，星标可切换 ——
+  CHECK(wait_until([&] { return window.fav_json().contains("bob"); }, 8000));
+
+  // —— T4.5 自定义表情导入（A18「表情包可导入」；发送半边＝文件通道，
+  //    direct_file 已验；面板走 import_emoji 缝，QFileDialog 面不进断言）——
+  {
+    QTemporaryDir emoji_root;
+    CHECK(emoji_root.isValid());
+    const QString src_dir = emoji_root.filePath(QStringLiteral("import-src"));
+    const QString dst_dir = emoji_root.filePath(QStringLiteral("emoji-store"));
+    CHECK(QDir().mkpath(src_dir));
+    CHECK(QDir().mkpath(dst_dir));
+    qputenv("MEMEX_TEST_EMOJI_DIR", dst_dir.toUtf8());
+    const QString src = src_dir + QStringLiteral("/验收表情.png");
+    {
+      QFile f(src);
+      CHECK(f.open(QIODevice::WriteOnly));
+      f.write("fake-png-bytes");
+    }
+    CHECK(window.import_emoji(src)); // 首次导入成功
+    CHECK(window.status_text().contains(QStringLiteral("已导入表情")));
+    CHECK(QFile::exists(dst_dir + QStringLiteral("/验收表情.png")));
+    CHECK(window.import_emoji(src)); // 同名重复导入＝覆盖，幂等
+    CHECK(!window.import_emoji(
+        src_dir + QStringLiteral("/不存在.png"))); // 源缺失明确失败不半就
+    qunsetenv("MEMEX_TEST_EMOJI_DIR");
+  }
+
   // —— 登出／再登录：不重启切换，历史不丢 ——
   window.logout_collab();
   CHECK(wait_until([&] { return !window.collab_logged_in(); }, 5000));
@@ -225,6 +255,50 @@ int main(int argc, char** argv) {
                         QStringLiteral("alice"), QStringLiteral("pass-a"));
     CHECK(wait_until([&] { return window.collab_logged_in(); }, 8000));
     CHECK(window.kick_text().isEmpty()); // 新会话清除旧互踢提示
+  }
+
+  // —— T4.7 系统集成（主窗验收）——
+  // 开机启动登记往返（MEMEX_TEST_AUTOSTART_DIR 覆盖到临时目录，不污染家目录）
+  {
+    QTemporaryDir autostart_dir;
+    CHECK(autostart_dir.isValid());
+    qputenv("MEMEX_TEST_AUTOSTART_DIR", autostart_dir.path().toUtf8());
+    CHECK(!window.autostart_enabled());
+    window.set_autostart(true);
+    CHECK(window.autostart_enabled());
+    CHECK(QFile::exists(autostart_dir.filePath(
+        QStringLiteral("memex-client.desktop"))));
+    window.set_autostart(false);
+    CHECK(!window.autostart_enabled());
+    qunsetenv("MEMEX_TEST_AUTOSTART_DIR");
+  }
+  // 系统通知：窗口隐藏（未激活）时收协作消息 → 通知面记录发送方；
+  // 互踢同样走通知（T4.3 kick_text_ 不变，通知面叠加不断言面）。
+  // offscreen 无托盘：tray_available() 为假但不断言（有屏环境人工核托盘气泡）。
+  {
+    CollabEngine peer2;
+    bool peer2_in = false;
+    QObject::connect(&peer2, &CollabEngine::logged_in, &peer2,
+                     [&](const QString&, const QString&) { peer2_in = true; });
+    peer2.login(QStringLiteral("127.0.0.1"), port, QStringLiteral("bob"),
+                QStringLiteral("pass-b"));
+    CHECK(wait_until([&] { return peer2_in; }, 8000));
+    window.hide(); // 隐藏即未激活 → 通知路径必触发
+    CHECK(peer2.send_text(QStringLiteral("alice"),
+                          QStringLiteral("T47通知验收")) != 0);
+    CHECK(wait_until([&] {
+      return window.last_notify().contains(QStringLiteral("bob"));
+    }, 8000));
+    window.show();
+    // 互踢通知：peer2 转登 alice → 本窗被踢 → 通知面含顶替下线
+    peer2.login(QStringLiteral("127.0.0.1"), port, QStringLiteral("alice"),
+                QStringLiteral("pass-a"));
+    CHECK(wait_until([&] { return !window.collab_logged_in(); }, 8000));
+    CHECK(window.last_notify().contains(QStringLiteral("顶替下线")));
+    // 重登恢复（后文 T4.2 块要求登录态；重登把 peer2 顶掉，其析构无影响）
+    window.login_collab(QStringLiteral("127.0.0.1"), port,
+                        QStringLiteral("alice"), QStringLiteral("pass-a"));
+    CHECK(wait_until([&] { return window.collab_logged_in(); }, 8000));
   }
 
   // —— T4.2 跨态互通：已登录端 × 未登录端的直连会话 ——

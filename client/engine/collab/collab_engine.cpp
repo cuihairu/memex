@@ -215,6 +215,30 @@ void CollabEngine::query_org() {
   send_frame(m);
 }
 
+void CollabEngine::fav_query() {
+  if (!logged_in_) return;
+  Message m;
+  m.set_type(MsgType::FAV_QUERY);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  send_frame(m);
+}
+
+void CollabEngine::fav_cmd(const QString& op, const QString& peer) {
+  if (!logged_in_ || peer.isEmpty() || op.isEmpty()) return;
+  Message m;
+  m.set_type(MsgType::FAV_CMD);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* c = m.mutable_fav_cmd();
+  c->set_op(op.toStdString());
+  c->set_peer(peer.toStdString());
+  c->set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  send_frame(m);
+}
+
 // —— T4.1 群聊 ——
 
 void CollabEngine::create_group(const QString& name, const QStringList& members) {
@@ -377,6 +401,7 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
         flush_pending_sends();
       } else {
         emit logged_in(account_, display);
+        fav_query(); // T4.5 常用联系人随登录自动拉取（换机保留即此体现）
       }
     } else {
       reconnecting_ = false;
@@ -416,6 +441,18 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
     }
     emit message_recalled(QString::fromStdString(msg.from()),
                           QString::fromStdString(target));
+    break;
+  }
+  case MsgType::FAV_DATA: {
+    // 常用联系人全量下发（T4.5）：JSON 交界面层
+    if (!msg.has_fav_data()) return;
+    nlohmann::json j = nlohmann::json::array();
+    for (const auto& e : msg.fav_data().entries()) {
+      j.push_back({{"peer", e.peer()},
+                   {"starred", e.starred()},
+                   {"last_ms", e.last_ms()}});
+    }
+    emit fav_received(QString::fromStdString(j.dump()));
     break;
   }
   case MsgType::ORG_DATA: {

@@ -196,6 +196,37 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     ack.set_seq(msg.seq());
     ack.set_to(msg.from());
     send(memex::protocol::encode(ack));
+    // T4.5 常用联系人最近刷新：发送方 ↔ 会话（单聊对端／群）
+    const std::int64_t fav_ts = msg.ts_ms() > 0 ? msg.ts_ms() : now_ms();
+    server_.store().fav_touch(msg.from(), msg.to(), fav_ts);
+    if (is_group) {
+      for (const auto& to : recipients) {
+        server_.store().fav_touch(to, msg.to(), fav_ts);
+      }
+    } else {
+      server_.store().fav_touch(msg.to(), msg.from(), fav_ts);
+    }
+    // 最近刷新后即时回推双方全量（在线会话持有最新排序；COALESCE 于下一次
+    // 自然重推——客户端按整表替换处理，重复无妨）
+    auto push_favs = [&](const std::string& acct) {
+      for (const auto& s : server_.online_sessions(acct)) {
+        memex::protocol::Message fo;
+        fo.set_type(v1::FAV_DATA);
+        fo.set_from("server");
+        fo.set_to(acct);
+        fo.set_ts_ms(now_ms());
+        auto* d = fo.mutable_fav_data();
+        for (const auto& f : server_.store().fav_list(acct)) {
+          auto* e = d->add_entries();
+          e->set_peer(f.peer);
+          e->set_starred(f.starred);
+          e->set_last_ms(f.last_ms);
+        }
+        s->deliver_frame(fo.SerializeAsString());
+      }
+    };
+    push_favs(msg.from());
+    for (const auto& to : recipients) push_favs(to);
     break;
   }
   case v1::GROUP_CMD: {
@@ -335,6 +366,56 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     out.set_ts_ms(now_ms());
     auto* p = out.mutable_presence_data();
     for (const auto& a : server_.online_accounts()) p->add_accounts(a);
+    send(memex::protocol::encode(out));
+    break;
+  }
+  case v1::FAV_QUERY: {
+    // 常用联系人全量（T4.5）：登录后可查，星标置顶＋最近排序
+    if (!logged_in_) break;
+    memex::protocol::Message out;
+    out.set_type(v1::FAV_DATA);
+    out.set_from("server");
+    out.set_to(account_);
+    out.set_ts_ms(now_ms());
+    auto* d = out.mutable_fav_data();
+    for (const auto& f : server_.store().fav_list(account_)) {
+      auto* e = d->add_entries();
+      e->set_peer(f.peer);
+      e->set_starred(f.starred);
+      e->set_last_ms(f.last_ms);
+    }
+    send(memex::protocol::encode(out));
+    break;
+  }
+  case v1::FAV_CMD: {
+    // 星标／取消／最近上报（T4.5）：受理后全量重推 FAV_DATA
+    if (!logged_in_ || !msg.has_fav_cmd()) break;
+    const auto& c = msg.fav_cmd();
+    if (c.peer().empty()) break;
+    if (c.op() == "star") {
+      server_.store().fav_star(account_, c.peer(), true);
+      log("常用联系人星标：" + c.peer());
+    } else if (c.op() == "unstar") {
+      server_.store().fav_star(account_, c.peer(), false);
+      log("取消星标：" + c.peer());
+    } else if (c.op() == "touch") {
+      const std::int64_t ts = c.ts_ms() > 0 ? c.ts_ms() : now_ms();
+      server_.store().fav_touch(account_, c.peer(), ts);
+    } else {
+      break;
+    }
+    memex::protocol::Message out;
+    out.set_type(v1::FAV_DATA);
+    out.set_from("server");
+    out.set_to(account_);
+    out.set_ts_ms(now_ms());
+    auto* d = out.mutable_fav_data();
+    for (const auto& f : server_.store().fav_list(account_)) {
+      auto* e = d->add_entries();
+      e->set_peer(f.peer);
+      e->set_starred(f.starred);
+      e->set_last_ms(f.last_ms);
+    }
     send(memex::protocol::encode(out));
     break;
   }

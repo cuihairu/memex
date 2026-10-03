@@ -52,6 +52,9 @@ public slots:
   void recall_text(const QString& to, const QString& msg_id);
   // 请求组织架构（部门树＋成员资料，T3.1）；结果经 org_received 送达。
   void query_org();
+  // 常用联系人（T4.5）：登录后自动拉取；star/unstar/touch 都触发全量重推
+  void fav_query();
+  void fav_cmd(const QString& op, const QString& peer);
   // —— 群聊（T4.1）：命令走 GROUP_CMD，回执经 group_result；群列表 query_groups ——
   void create_group(const QString& name, const QStringList& members);
   void invite_group(quint64 group_id, const QStringList& members);
@@ -89,6 +92,8 @@ signals:
   //  "policies":[{"department_path":"","allow_anonymous":true,
   //              "allow_cross_state":true,"new_device_approval":false}]}（T3.4）
   void org_received(const QString& org_json);
+  // 常用联系人全量（T4.5）：JSON [{"peer","starred","last_ms"}]（已排序）
+  void fav_received(const QString& fav_json);
   // 群命令回执（T4.1）：op（create/invite/leave/announce）、ok、reason、群号
   void group_result(bool ok, const QString& reason, const QString& op,
                     quint64 group_id);

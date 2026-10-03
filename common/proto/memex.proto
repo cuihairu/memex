@@ -32,6 +32,9 @@ enum MsgType {
   READ_NOTICE = 42;  // 服务端 → 发送方：某条消息已被接收方已读（T4.3）
   PRESENCE_QUERY = 43; // 终端 → 服务端：请求在线账号表（T4.3）
   PRESENCE_DATA = 44;  // 服务端 → 终端：在线账号表（查询回执＋登录/登出/互踢推送，T4.3）
+  FAV_QUERY = 45;    // 终端 → 服务端：请求常用联系人（T4.5）
+  FAV_DATA = 46;     // 服务端 → 终端：常用联系人全量（T4.5）
+  FAV_CMD = 47;      // 终端 → 服务端：常用联系人星标／最近上报（T4.5）
 }
 
 message Hello {
@@ -183,6 +186,23 @@ message PresenceData {
   repeated string accounts = 1; // 当前在线账号（排序后）
 }
 
+// —— 常用联系人（T4.5）——
+// 星标／最近按账号落服务端，换机即得；peer 为对端账号或 "group:N"。
+// 排序口径：星标置顶（last_ms 新的在前）＞未星标按最近
+message FavEntry {
+  string peer = 1;   // 对端标识：协作账号或群键
+  bool starred = 2;  // 星标（置顶）
+  int64 last_ms = 3; // 最近一次联系时刻（双向消息受理即刷新）
+}
+message FavData {
+  repeated FavEntry entries = 1; // 全量（按星标＋最近排序）
+}
+message FavCmd {
+  string op = 1;       // star（星标）／unstar（取消）／touch（仅刷新最近）
+  string peer = 2;
+  int64 ts_ms = 3;     // touch 时的联系时刻（客户端取当前时刻）
+}
+
 // 信封：所有帧的载荷体。oneof 字段号 = 100 + 对应类型编号，便于读码对账。
 message Envelope {
   MsgType type = 1;
@@ -212,5 +232,7 @@ message Envelope {
     Read read = 141;
     ReadNotice read_notice = 142;
     PresenceData presence_data = 144;
+    FavData fav_data = 146;
+    FavCmd fav_cmd = 147;
   }
 }

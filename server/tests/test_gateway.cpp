@@ -75,7 +75,7 @@ public:
       std::string payload(len, '\0');
       asio::read(*socket_, asio::buffer(payload));
       auto msg = memex::protocol::decode_payload(payload);
-      if (msg.type() != memex::protocol::v1::PRESENCE_DATA) return msg;
+      if (msg.type() != memex::protocol::v1::PRESENCE_DATA && msg.type() != memex::protocol::v1::FAV_DATA) return msg;
     }
   }
 
