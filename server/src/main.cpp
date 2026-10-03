@@ -17,8 +17,10 @@
 
 #include <memex/protocol/messages.hpp>
 
+#include "cred.hpp"
 #include "server.hpp"
 #include "store.hpp"
+#include "webhook.hpp"
 
 #ifndef MEMEX_VERSION
 #define MEMEX_VERSION "dev"
@@ -29,17 +31,27 @@ namespace {
 // 服务端默认监听端口。评审报告只固定了直连态端口段（UDP 2425–2436／TCP 2426–2437），
 // 服务端监听端口未钉死，此默认值待与网络管理侧确认后写入部署文档。
 constexpr std::uint16_t kDefaultPort = 24360;
+// webhook 接入独立端口（T4.10）：与消息端口分离，HTTP 面不与长连接混线；
+// --webhook-port 0 可整体关闭接入（其余功能不受影响）。
+constexpr std::uint16_t kDefaultWebhookPort = 24361;
 constexpr const char* kDefaultDb = "memex-server.db";
 
 // db_path 由 main 统一解析（--db 剥离会就地改写 argv，不能再从 argv 复读）
 int cmd_serve(int argc, char** argv, const std::string& db_path) {
   std::uint16_t port = kDefaultPort;
+  int webhook_port = kDefaultWebhookPort; // int 才能表达 0＝关闭
   for (int i = 0; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--port" && i + 1 < argc) {
       port = static_cast<std::uint16_t>(std::atoi(argv[++i]));
       if (port == 0) {
         std::cerr << "无效端口\n";
+        return 2;
+      }
+    } else if (arg == "--webhook-port" && i + 1 < argc) {
+      webhook_port = std::atoi(argv[++i]);
+      if (webhook_port < 0 || webhook_port > 65535) {
+        std::cerr << "无效 webhook 端口（0＝关闭接入）\n";
         return 2;
       }
     }
@@ -54,12 +66,25 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
   try {
     asio::io_context io;
     memex::server::CollabServer server(io, store, port);
+    // webhook 接入（T4.10）：独立端口；端口占用等绑定失败只降级为
+    // 「接入未启用」并明示，消息主通道不受影响。
+    std::unique_ptr<memex::server::WebhookServer> webhook;
+    if (webhook_port > 0) {
+      try {
+        webhook = std::make_unique<memex::server::WebhookServer>(
+            io, server, static_cast<std::uint16_t>(webhook_port));
+      } catch (const std::exception& e) {
+        std::cerr << "[MEMEX] webhook 端口绑定失败，接入未启用（消息主通道不受影响）："
+                  << e.what() << std::endl;
+      }
+    }
     asio::signal_set signals(io, SIGINT, SIGTERM);
     signals.async_wait([&](std::error_code, int sig) {
       std::cout << "[MEMEX] 收到信号 " << sig << "，退出" << std::endl;
       io.stop();
     });
     server.start_accept();
+    if (webhook) webhook->start_accept();
     io.run();
   } catch (const std::exception& e) {
     std::cerr << "服务端异常退出：" << e.what() << std::endl;
@@ -942,6 +967,119 @@ int cmd_policy(int argc, char** argv, const std::string& db_path) {
   return 2;
 }
 
+// webhook 接入台账（T4.10）：create 建 token（明文仅此一次，库内存 sha256
+// 摘要）／list 一览／revoke 吊销。目标＝账号（个人）或 group:<群号>（按群独立）。
+int cmd_webhook(int argc, char** argv, const std::string& db_path) {
+  if (argc < 1) {
+    std::cerr << "用法：memex_server webhook create --target <账号|group:N> "
+                 "[--name 备注] | list | revoke <id> [--db <库>]\n";
+    return 2;
+  }
+  const std::string_view sub = argv[0];
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+
+  if (sub == "create") {
+    std::string target;
+    std::string name;
+    for (int i = 1; i < argc; ++i) {
+      const std::string_view arg = argv[i];
+      if (arg == "--target" && i + 1 < argc) {
+        target = argv[++i];
+      } else if (arg == "--name" && i + 1 < argc) {
+        name = argv[++i];
+      } else {
+        std::cerr << "未知选项：" << argv[i] << "\n";
+        return 2;
+      }
+    }
+    if (target.empty()) {
+      std::cerr << "缺 --target <账号|group:N>\n";
+      return 2;
+    }
+    // 建即校验目标（防错绑到不存在的账号／群）
+    if (target.rfind("group:", 0) == 0) {
+      const auto gid = static_cast<std::uint64_t>(
+          std::strtoull(target.c_str() + 6, nullptr, 10));
+      if (!store.group_info(gid)) {
+        std::cerr << "目标群不存在：" << target << "\n";
+        return 1;
+      }
+    } else if (!store.find_account(target)) {
+      std::cerr << "目标账号不存在：" << target << "\n";
+      return 1;
+    }
+    const std::string token = std::string("whk_") + memex::server::random_salt_hex();
+    const auto created_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now()
+                                    .time_since_epoch())
+                                .count();
+    const auto id =
+        store.webhook_create(memex::server::sha256_hex(token), target, name,
+                             created_ms);
+    if (id == 0) {
+      std::cerr << "webhook 台账写入失败\n";
+      return 1;
+    }
+    std::cout << "已创建 webhook（id " << id << "，目标 " << target << "）\n"
+              << "token：" << token << "\n"
+              << "（token 仅此一次显示，请立即保存；吊销："
+                 "memex_server webhook revoke "
+              << id << "）\n"
+              << "curl 示例：\n"
+                 "  curl -X POST http://<服务器>:"
+              << kDefaultWebhookPort << "/hook/" << token
+              << " -H 'Content-Type: application/json' \\\n"
+                 "    -d '{\"title\":\"通知标题\",\"content\":\"通知内容\","
+                 "\"urgency\":\"important\"}'\n";
+    return 0;
+  }
+
+  if (sub == "list") {
+    const auto rows = store.webhook_list();
+    std::cout << "id\t目标\t备注\ttoken 摘要前缀\t创建时间\t状态\n";
+    for (const auto& w : rows) {
+      std::time_t secs = static_cast<std::time_t>(w.created_ms / 1000);
+      std::tm tm{};
+      local_time(secs, &tm);
+      char when[24];
+      std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
+      std::cout << w.id << '\t' << w.target << '\t'
+                << (w.name.empty() ? "-" : w.name) << '\t'
+                << w.token_hash.substr(0, 12) << '\t' << when << '\t'
+                << (w.revoked ? "已吊销" : "有效") << '\n';
+    }
+    std::cout << "共 " << rows.size() << " 条\n";
+    return 0;
+  }
+
+  if (sub == "revoke") {
+    if (argc < 2) {
+      std::cerr << "用法：webhook revoke <id>\n";
+      return 2;
+    }
+    const auto id = std::atoll(argv[1]);
+    if (id <= 0) {
+      std::cerr << "无效 id：" << argv[1] << "\n";
+      return 2;
+    }
+    if (!store.webhook_revoke(id)) {
+      std::cerr << "无此 id 或已吊销：" << id << "\n";
+      return 1;
+    }
+    std::cout << "已吊销 webhook id " << id << "\n";
+    return 0;
+  }
+
+  std::cerr << "未知 webhook 子命令：" << sub << "\n"
+            << "用法：webhook create --target <账号|group:N> [--name 备注] | "
+               "list | revoke <id>\n";
+  return 2;
+}
+
 int self_test() {
   asio::io_context io;
   asio::ip::tcp::acceptor a(
@@ -987,12 +1125,15 @@ int main(int argc, char** argv) {
     if (cmd == "favs") return cmd_favs(sub_argc, sub_argv, db_path);
     if (cmd == "org") return cmd_org(sub_argc, sub_argv, db_path);
     if (cmd == "policy") return cmd_policy(sub_argc, sub_argv, db_path);
+    if (cmd == "webhook") return cmd_webhook(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
-              << "用法：memex_server [serve [--port N] [--db P]] | account add … | "
+              << "用法：memex_server [serve [--port N] [--webhook-port N] "
+                 "[--db P]] | account add … | "
                  "logins [账号] [--device 指纹前缀] | device … | "
                  "messages [账号] [--keyword K] [--since T] "
                  "[--until T] [--limit N] [--export 文件] | audit [N] | "
-                 "cross [N] | favs <账号> | org … | --version | --self-test\n";
+                 "cross [N] | favs <账号> | org … | "
+                 "webhook create|list|revoke | --version | --self-test\n";
     return 2;
   }
   return cmd_serve(0, argv, kDefaultDb);
