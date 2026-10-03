@@ -160,9 +160,7 @@ if(MEMEX_BUILD_TESTS)
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
-    app/icons/icons.qrc
-    app/theme.cpp
-    app/theme_settings_page.cpp)
+    app/icons/icons.qrc)
   target_include_directories(test_mode_switch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_mode_switch PRIVATE
@@ -183,9 +181,7 @@ if(MEMEX_BUILD_TESTS)
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
-    app/icons/icons.qrc
-    app/theme.cpp
-    app/theme_settings_page.cpp)
+    app/icons/icons.qrc)
   target_include_directories(test_screenshot PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_screenshot PRIVATE
@@ -223,9 +219,7 @@ if(MEMEX_BUILD_TESTS)
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
-    app/icons/icons.qrc
-    app/theme.cpp
-    app/theme_settings_page.cpp)
+    app/icons/icons.qrc)
   target_include_directories(test_icon PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_icon PRIVATE
@@ -236,24 +230,16 @@ if(MEMEX_BUILD_TESTS)
     TIMEOUT 60)
 
   # T4.9 主题切换验收（R19）：令牌完备性与品牌橙恒定、跟随系统解析、
-  # 手动选择落盘往返、令牌化 QSS、多主题扩展位、应用级即时生效、设置页交互、
-  # 主窗接线（控件样式走令牌、切换后富文本重渲、菜单入口可达）
-  # 链接面与 test_screenshot 一致（含 main_window.cpp/引擎）——否则接线无覆盖
+  # 手动选择落盘往返、令牌化 QSS、多主题扩展位、应用级即时生效、设置页交互
   add_executable(test_theme
     tests/test_theme.cpp
-    app/main_window.cpp
-    app/notify_center.cpp
-    app/notify_prefs.cpp
-    app/screenshot_tool.cpp
-    app/icons/icons.qrc
     app/theme.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_theme PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
-  target_link_libraries(test_theme PRIVATE
-    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+  target_link_libraries(test_theme PRIVATE Qt6::Widgets)
   add_test(NAME theme COMMAND test_theme)
   set_tests_properties(theme PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
-    TIMEOUT 90)
+    TIMEOUT 60)
 endif()
