@@ -65,7 +65,16 @@ bool port_listening(quint16 port) {
 QString run_capture(const QString& bin, const QStringList& args) {
   QProcess p;
   p.start(bin, args);
-  if (!p.waitForFinished(5000)) return QString();
+  // 启动与完成分开等：负载下进程孵化偶发超 5s，只等完成会把启动失败
+  // 误报成「CLI 没归档」（本文件历史上的偶发红——整段断言全空即此因）
+  if (!p.waitForStarted(5000)) {
+    qWarning("run_capture: 进程未启动 %s", qPrintable(bin));
+    return QString();
+  }
+  if (!p.waitForFinished(15000)) {
+    qWarning("run_capture: 进程未退出 %s", qPrintable(bin));
+    return QString();
+  }
   return QString::fromUtf8(p.readAllStandardOutput());
 }
 
@@ -192,10 +201,16 @@ int main(int argc, char** argv) {
       5000));
 
   // 归档核对（CLI messages 检索面）：三条全在、无重复、无缺失
+  //（messages 为只读检索，短窗重试等服务端归档落盘可见——不改变语义）
   {
-    const QString out = run_capture(
-        server_bin, {QStringLiteral("messages"), QStringLiteral("--db"), db,
-                     QStringLiteral("--limit"), QStringLiteral("50")});
+    QString out;
+    CHECK(wait_until([&] {
+            out = run_capture(server_bin,
+                              {QStringLiteral("messages"), QStringLiteral("--db"),
+                               db, QStringLiteral("--limit"),
+                               QStringLiteral("50")});
+            return out.contains(QStringLiteral("共 3 条"));
+          }, 5000));
     CHECK(out.contains(QStringLiteral("在线基线消息")));
     CHECK(out.count(QStringLiteral("中断期消息甲")) == 1);
     CHECK(out.count(QStringLiteral("中断期消息乙")) == 1);
@@ -214,9 +229,14 @@ int main(int argc, char** argv) {
       },
       8000));
   {
-    const QString out = run_capture(
-        server_bin, {QStringLiteral("messages"), QStringLiteral("--db"), db,
-                     QStringLiteral("--limit"), QStringLiteral("50")});
+    QString out;
+    CHECK(wait_until([&] {
+            out = run_capture(server_bin,
+                              {QStringLiteral("messages"), QStringLiteral("--db"),
+                               db, QStringLiteral("--limit"),
+                               QStringLiteral("50")});
+            return out.contains(QStringLiteral("共 4 条"));
+          }, 5000));
     CHECK(out.contains(QStringLiteral("共 4 条")));
   }
 
