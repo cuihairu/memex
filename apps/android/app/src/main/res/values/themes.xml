@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Memex" parent="Theme.AppCompat.DayNight.DarkActionBar">
+        <item name="colorPrimary">@color/brand_orange</item>
+        <item name="colorPrimaryDark">@color/brand_orange_dark</item>
+        <item name="colorAccent">@color/brand_orange</item>
+    </style>
+</resources>

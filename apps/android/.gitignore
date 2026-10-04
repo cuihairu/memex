@@ -1,0 +1,9 @@
+# Gradle / Android 构建产物（本目录级；仓库根 .gitignore 不管 Android 面）
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+.cxx/

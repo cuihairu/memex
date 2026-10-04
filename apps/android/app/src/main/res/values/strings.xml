@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Memex</string>
+
+    <!-- 初始化向导（R17） -->
+    <string name="init_title">设置服务器地址</string>
+    <string name="init_body">首次启动必须先配置服务器：填写域名或 IP 地址，连通性校验通过后才能进入登录页。</string>
+    <string name="init_hint">例如 192.168.1.10 或 im.example.com:24360</string>
+    <string name="init_action">校验并保存</string>
+    <string name="init_checking">正在校验连通性…</string>
+    <string name="init_port_note">不填端口时默认 24360</string>
+    <string name="init_ok_toast">校验通过，已保存服务器地址</string>
+
+    <!-- 登录页（R18：必须登录后使用） -->
+    <string name="login_title">登录</string>
+    <string name="login_account_hint">账号</string>
+    <string name="login_password_hint">密码</string>
+    <string name="login_action">登录</string>
+    <string name="login_busy">正在登录…</string>
+    <string name="login_change_server">修改服务器地址</string>
+    <string name="login_mode_note">移动端为协作态，登录后方可使用</string>
+
+    <!-- 主界面（会话列表随 T6.3 后续块落地） -->
+    <string name="main_title">已登录</string>
+    <string name="main_server">服务器：%1$s</string>
+    <string name="main_account">账号：%1$s</string>
+    <string name="main_display">显示名：%1$s</string>
+    <string name="main_logout">退出登录</string>
+    <string name="main_note">即时消息、群聊与通讯录界面随后续版本提供。</string>
+
+    <!-- 校验失败原因（与 core 探测结果一一对应） -->
+    <string name="err_addr_empty">服务器地址不能为空</string>
+    <string name="err_addr_bad_host">地址格式不正确，请填写域名或 IP</string>
+    <string name="err_addr_bad_port">端口必须是 1–65535 的数字</string>
+    <string name="err_addr_scheme">地址不支持该前缀，请直接填域名或 IP</string>
+    <string name="err_addr_ipv6">IPv6 地址请用方括号包裹，如 [::1]:24360</string>
+    <string name="err_unreachable">无法连接到服务器，请检查地址与网络</string>
+    <string name="err_timeout">校验超时，服务器未在时限内应答</string>
+    <string name="err_not_memex">该端口不是 Memex 服务端（协议校验未通过）</string>
+    <string name="err_io">通信中断：%1$s</string>
+</resources>

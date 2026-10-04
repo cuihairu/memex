@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 品牌橙（R19：两主题恒同，与桌面端一致） -->
+    <color name="brand_orange">#e16531</color>
+    <color name="brand_orange_dark">#c04f20</color>
+    <color name="ic_launcher_background">@color/brand_orange</color>
+</resources>

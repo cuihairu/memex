@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Memex Android 客户端（T6.3）。
+  R17/R18 口径：唯一入口是 MainActivity（onCreate 经 RouteGuard 守卫），
+  未完成服务器地址初始化 → InitActivity；未登录 → LoginActivity。
+  全应用无免登录/匿名入口：移动端只有协作态。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 协作态长连接（TCP 24360 起） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.Memex"
+        android:supportsRtl="true">
+
+        <!-- 唯一 launcher 入口：进来先过守卫，未初始化/未登录一律改道 -->
+        <activity
+            android:name="com.memex.im.ui.MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name="com.memex.im.ui.InitActivity"
+            android:exported="false" />
+
+        <activity
+            android:name="com.memex.im.ui.LoginActivity"
+            android:exported="false" />
+    </application>
+
+</manifest>
