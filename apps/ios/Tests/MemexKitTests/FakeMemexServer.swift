@@ -39,7 +39,7 @@ final class FakeMemexServer {
             }
         }
         guard bindRC == 0, listen(fd, 8) == 0 else {
-            close(fd)
+            Self.closeFD(fd) // 实例 close() 在 init 内不可用，用 static 版本
             throw NSError(domain: "fake-server", code: 2, userInfo: [NSLocalizedDescriptionKey: "bind/listen 失败"])
         }
         var len = socklen_t(MemoryLayout<sockaddr_in>.size)
@@ -131,10 +131,15 @@ final class FakeMemexServer {
 
     func close() {
         running = false
+        Self.closeFD(listenFd)
+    }
+
+    /// static：init 错误路径（成员未全初始化，不能走实例方法）也能关 fd
+    private static func closeFD(_ s: Int32) {
         #if canImport(Darwin)
-        Darwin.close(listenFd)
+        Darwin.close(s)
         #else
-        Glibc.close(listenFd)
+        Glibc.close(s)
         #endif
     }
 
