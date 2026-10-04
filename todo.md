@@ -183,6 +183,10 @@
   - 排障实录（并行 lane 叠加事故，双重根因）：本块期间 e2e 全线 NoSuchBucket。①并行 lane 9dff259 升级 aws-sdk-cpp 并适配编译 API，但真容器腿 MEMEX_S3_E2E 门控 CI 不跑——**旧式 4 参 S3Client 构造在新 SDK 桥接路径里丢 endpointOverride**，请求打去默认端点；改新式主构造（S3ClientConfiguration 携带全部含 payloadSigningPolicy）恢复。修后仍挂→②e2e 数据目录残留：宿主 rm -rf 删不动 uid 10001 的 rustfs 文件，某次非优雅退出留下 unclean-shutdown 脏标记，新容器带标记恢复后 S3 语义全坏（CreateBucket 报 NoSuchBucket；fresh 容器 boto3/手签 SigV4 实证正常）——清理改用 rustfs 镜像内 shell 清空数据目录。教训：共享树升级依赖后，被门控挡住 CI 视野的真容器腿必须本机复跑；e2e 清理只依赖宿主 rm 会留脏状态。
   - 附带：create/head 失败留 stderr 诊断（部署排障第一现场）；e2e endpoint 可 MEMEX_S3_ENDPOINT 覆盖（排障可指向原始 TCP 假服务器抓 SDK 请求字节）；桶引导幂等重试（healthy 与 S3 路由就绪的短窗口）。
 - [ ] R23-3 文件助手（自己↔自己）：备忘录文本 + 文件传输统一收件箱（含「手机发自己=文件传输」）。
+  - 2026-10-05 块1（服务端面）收口（127ba66）：store 层 memos 表＋五 API（owner 过滤即权限、更新/删除 WHERE owner= 二次校验、不留修订史——修订历史属 R24-2）；files 加 kind 列迁移（R23-2 形态库事务化重建保数据，探针含「, kind）」整串防误判回退），秒传键扩为 UNIQUE(file_hash,owner,belong_gid,belong_uid,kind)——收件箱与个人空间互不秒传串用。FileServer：target=inbox（个人空间归属，落 users/{uid}/ 且 kind=inbox，「手机发自己=文件传输」）；/files/list?target=inbox 备忘录+文件时间倒序混排（memo 取 updated_ms、文件取 upload_ts）、分页混排后取窗；target=me 只列 kind=0（收件箱文件不混进个人空间列表）；/files/memo POST 建/改、GET 单条/列表、DELETE 删，判权走 AuthorizationService（personal-owner 仅本人，memo:create/read/update/delete 动作，他人 default-deny 不自造规则）。quota target=inbox=个人配额同账。
+  - 块1 顺带修两处存量缺陷（走查/迁移单测实录抓到）：①idx_files_kind 原在主 schema 串内——R23-2 形态旧库 kind 列尚不存在，open 即失败（索引引用缺列）；移出主串、迁移后补建。②GET/DELETE/HEAD 缺 Content-Length 一律 400（curl/浏览器/Qt QNAM 无体请求口径），改按方法放行为 0、带体方法仍强制。
+  - 验证边界（如实）：test_files_meta（kind 空间隔离/备忘录 CRUD/owner 隔离/持久化/R23-2 形态迁移重开幂等）；test_files_api 真 TCP（备忘录全链路＋跨账号 403＋未登录 401＋inbox 上传秒传隔离＋混排分页＋me 隔离＋无 Content-Length 回归）；ctest 30/30 绿；真容器 e2e（MEMEX_S3_E2E=1）复跑绿；本机真 TCP 走查 /files/memo 与 inbox 上传列举全链路（建/改/删/混排/下载过真 RustFS/跨账号 403/未登录 401/配额同账）实录通过。
+  - 剩余块：块2=客户端 UI 面（桌面文件助手会话：备忘录编辑+收件箱混排流+「发送给自己」入口）；块3=iOS/Android 接线（鸿蒙按卷首后置令只写代码注明待真机验证）。
 - [ ] R23-4 外网单向 uplink + 外网模式客户端：唯一落点=文件助手、两套路由两套 scope（upload-only，下载端点对外网 token 恒 403）、上传全审计、**默认关闭显式开启开启时明示暴露范围**；内网用户转发进群（安全缓冲）。
 - [ ] R23-5 防护：杀毒扫描钩子 + 类型/大小白名单 + 外网登录二次验证。
 
