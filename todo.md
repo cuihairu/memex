@@ -2,6 +2,7 @@
 
 > 依据《建设方案评审报告 V10.0》拆解：R 条目＝需求与验收口径，A 条目＝第一期验收标准，任务按四期拆到可验收粒度。
 > 追加需求（评审报告之后由建设方下达）以「R17／R18」编号进入本清单。状态：`[ ]` 未开始 · `[~]` 进行中 · `[x]` 完成。
+> **鸿蒙后置（2026-10-04 用户令，长期有效）**：所有 HarmonyOS／NEXT 相关任务（含 T6.2 桌面矩阵项、T6.6 鸿蒙手机版）一律排到队列末尾，让位非鸿蒙任务；且降为**只写代码、不做本地测试验证**（当前无真机环境，验证做了也不作数，编译过即可）；代码照常提交推送但注明「待真机验证」。
 
 ## 零、留痕原则（铁律，任何任务不得与之冲突）
 
@@ -128,7 +129,7 @@
 ### 阶段 6：平台矩阵扩展（手机端优先序 2026-10-04 用户令：Android 排前 → iOS 进行中·代码-only＋CI 验证 → 其他手机端排后·代码-only＋CI；桌面 macOS 已落地、鸿蒙 NEXT 照原计划不受手机端令影响）
 
 - [x] T6.1 macOS 产物与每日构建三平台安装包：客户端 dmg（Memex.app）＋服务端 dmg（内含 pkg 引导安装），arm64（官方 Qt 6.10.3＋vcpkg 静态非 Qt 依赖）；Linux 补 deb/rpm、Windows 补 Inno setup.exe；install.sh／install.ps1 一键安装（OS/架构检测、装后 --version 真验证、幂等）（A23）。
-- [ ] T6.2 鸿蒙（HarmonyOS NEXT）客户端（**桌面矩阵项**——2026-10-04 用户令：鸿蒙 NEXT 属 Qt 桌面矩阵，不受手机端口径令影响，照原计划）：OHOS SDK 交叉编译链（arm64-v8a）、HAP 打包、真机验收（Qt 官方支持口径：HarmonyOS 6.1 起、API 23+）。依赖：DevEco Studio 环境、应用签名证书、真机各一。手机端规则与桌面一致——初始化设服务端域名、无匿名聊天。前置：一期桌面主线清零后再启动。
+- [ ] T6.2 鸿蒙（HarmonyOS NEXT）客户端（**桌面矩阵项**——2026-10-04 用户令：鸿蒙 NEXT 属 Qt 桌面矩阵；同日鸿蒙后置令（卷首注）：全部鸿蒙任务排队列末尾、只写代码不验证、注明待真机验证）：OHOS SDK 交叉编译链（arm64-v8a）、HAP 打包、真机验收（Qt 官方支持口径：HarmonyOS 6.1 起、API 23+）。依赖：DevEco Studio 环境、应用签名证书、真机各一。手机端规则与桌面一致——初始化设服务端域名、无匿名聊天。前置：一期桌面主线清零后再启动。
   受阻（2026-10-04 环境探测）：`hvigor`／`hdc`／`ohpm` 均 NOT FOUND，未检出 OHOS SDK 与 DevEco Studio 目录；签名证书、真机亦无。三项依赖（工具链＋证书＋真机）齐备前无法开工，解锁后即启动。（原随本项落地的 R17／R18、T4.8、手机端通知规则已按 2026-10-04 用户令改由 Android／iOS 承载，见 T6.3／T6.4。）
 - [x] T6.3 **Android 手机端（已落地）**：`apps/android` 从零（Kotlin），对齐桌面端功能面——登录（R17 初始化向导设服务器地址＋连通校验、R18 无匿名入口，随本块落地）、会话列表、单聊／群聊收发、消息推送横幅＋震动（对齐桌面端三级通知语义：普通站内／重要横幅强提醒／紧急横幅需确认）、移动端适配。
   验收：功能面＝登录／会话／收发／消息推送横幅震动对齐桌面端；**做完一块提交推送一块**（path-scoped，测试全绿后推）。
@@ -139,7 +140,7 @@
   验收（2026-10-04 用户令）：本机无 iOS 环境，**只写代码不做本地验证**；构建＋测试全走 GitHub Actions macOS runner（swift build／test 腿），红了修到绿。
   进展（2026-10-04 首块·工程骨架＋登录＋会话列表＋收发：全量代码-only）：`apps/ios` 从零——SwiftPM 包 MemexKit（core 面移植 Android 实现：ServerAddress 解析、FrameCodec 对齐 frame.cpp、ChatStore 会话聚合（msg_id 去重/未读仅计接收/撤回仅展示层）、ChatSession 长连接（单 TCP＋后台读线程：LOGIN 帧 device_kind=mobile、TEXT 本地立落库＋ACK(seq) 回执、收到 TEXT 按 peer 归会话群=group:N、ACK(msg_id) 清离线队列、KICK 互踢、LOGOUT）、MemexClient 探测/登录、RouteGuard/LoginState）；SwiftUI App 壳（XcodeGen project.yml 组装：RouteGuard 守卫三态路由、初始化向导（地址校验 PING→PONG 通过才保存）、登录页（attach 一次建连防双连接互踢）、会话列表（未读角标＋时间＋发起会话 sheet）、聊天页（气泡/撤回置灰/自动滚底）、NotificationManager（UNUserNotificationCenter 三级：normal 站内/important 横幅+声音/urgent 横幅+声音+需确认 category）＋APNs 注册）；protocol 生成代码 CI 侧 protoc→swift-protobuf 生成（默认命名前缀 Memex_Protocol_V1_，生成参数仅 Visibility=Public，protoc-gen-swift 不存在 PackageName 参数）；单测 37 用例（ServerAddress 10、FrameCodec 8、ChatStore 7、ChatSession 7 真 socket 假服务端、MemexClient 4、RouteGuard/LoginState 2）；CI 腿 `.github/workflows/ios.yml`（macOS runner：brew protobuf/swift-protobuf/xcodegen → 生成 → `swift test` → xcodegen＋xcodebuild 模拟器编译）。CI 绿后收口：真机 APNs 设备台账上报（T2.1/T3.3）与通知中心块；移动端适配（动态字体/深色模式随 SwiftUI 自适应，真机验证腿末块）。
   收口（2026-10-04 CI 全绿）：协议生成（protoc→swift-protobuf，Memex_Protocol_V1_ 前缀）→ MemexKit core 编译 → `swift test` 37 用例全绿（真机假服务端真 socket 全链路）→ xcodegen＋xcodebuild 模拟器 App 壳编译绿（macos-26 runner，Swift 6.1+；Apple 壳一次踩坑：部署目标 iOS 16 引用了 iOS 17+ 的 Color.tertiary，改 UIColor.tertiaryLabel）。测试竞态收口：ACK 断言改有界轮询快照读（5s bounded、不删断言）。遗留：APNs 真机设备台账上报（T2.1/T3.3）与通知中心块需真机验证；动态字体/深色模式随 SwiftUI 自适应，真机走查腿末块。
-- [~] 其他手机端（鸿蒙手机版等，2026-10-04 用户令）：排在 Android／iOS 之后；只写代码不本地验证，验证走 CI 可用平台。注：早前「手机端只做 Android、iOS 不做」口径已被后两道令覆盖——最终口径＝Android 排前、iOS 进行中（代码-only＋CI）、其他排后（代码-only＋CI）。
+- [~] 其他手机端（鸿蒙手机版等，2026-10-04 用户令）：排在 Android／iOS 之后；只写代码不本地验证，验证走 CI 可用平台。注：早前「手机端只做 Android、iOS 不做」口径已被后两道令与同日鸿蒙后置令（卷首注）覆盖——最终口径＝Android 排前、iOS 进行中（代码-only＋CI）、鸿蒙排到队列末尾、只写代码不做测试验证（编译过即可，CI 逻辑腿照跑），提交注明待真机验证。
   进展（2026-10-04 鸿蒙手机版·两块全量代码-only）：`apps/harmony` 从零（ArkTS，HarmonyOS NEXT，stage 模型）——第一块 core 纯 TS 逻辑层（hvigor har @memex/core，Node 可测）：wire.ts 手写 protobuf 编解码（canonical proto3：零值标量/空串不上线、oneof presence 空 message 照写；与 protobufjs 加载 common/proto/memex.proto 单一事实源**双向字节交叉**背书）、frame_codec.ts 镜像 client/core frame.cpp（4 字节大端前缀/ZERO_LENGTH/TOO_LARGE 同口径）、address/route/chat_store/format 移植 Android 同语义、session/client/wire_channel 长连接会话与探测登录（互踢/ACK(seq) 受理/ACK(msg_id) 去重/群=group:N 归会话/KICK 断开/NOTICE 分级）；Node 单测 73 用例（tsc strict＋node:test；wire 双向交叉、假服务端真 socket 全链路：登录/被拒/收发线格式/ACK/去重/群/KICK/三级通知/probe 四态；断言前一律有界轮询消读侧竞态）；CI `.github/workflows/harmony.yml`（ubuntu＋Node 22 npm test）绿。交叉验证揪出并修掉两处真实编码器缺陷（body 零值标量与 login_result ok=false 被无条件上线——被 protobufjs fromObject 非 canonical 行为掩盖成假匹配，canonical 对照后暴露）。第二块 ArkTS 壳（entry HAP，依赖 @memex/core file:../core）：HarmonyTransport（@ohos.net.socket 实现 core Transport）、AppState（preferences 初始化态＋内存登录态＋ChatHolder/ChatManager 合并桥）、五页（Index 守卫/InitPage R17 向导 PING→PONG 才落盘/LoginPage R18 attach 一次建连防互踢/MainPage 会话列表未读角标/ChatPage 气泡自动滚底清未读长按复制）、NoticeManager 三级推送（普通=仅站内；重要=横幅+震动不看前后台；紧急=前台确认弹窗排队/后台 isOngoing 常驻+震动，确认收悉撤销）、INTERNET/VIBRATE 权限。**验证边界（如实）**：本机与 CI 均无 OHOS 工具链（hvigor/ohpm/hdc NOT FOUND），Node 逻辑层 CI 全绿；ArkTS 编译腿（hvigor→HAP）待 OHOS runner＋SDK 可用后补，CI 与 apps/harmony/README.md 已如实注记，不造假绿。遗留：编译腿、真机走查（通知横幅/震动/互踢实景）、后台紧急横幅 wantAgent 动作按钮路径。
 
 
