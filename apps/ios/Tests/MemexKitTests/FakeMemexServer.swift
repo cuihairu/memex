@@ -21,30 +21,34 @@ final class FakeMemexServer {
     var onEnvelope: ((Memex_Protocol_V1_Envelope, Int32) -> Void)?
 
     init() throws {
-        listenFd = socket(AF_INET, SOCK_STREAM, 0)
-        guard listenFd >= 0 else {
+        // 全程用局部 fd：init 内 withUnsafePointer 闭包若引用成员会在
+        // 全部成员初始化完成前捕获 self（Swift 不允许）
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else {
             throw NSError(domain: "fake-server", code: 1, userInfo: [NSLocalizedDescriptionKey: "socket 失败"])
         }
         var one: Int32 = 1
-        setsockopt(listenFd, SOL_SOCKET, SO_REUSEADDR, &one, socklen_t(MemoryLayout<Int32>.size))
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, socklen_t(MemoryLayout<Int32>.size))
         var addr = sockaddr_in()
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_addr.s_addr = inet_addr("127.0.0.1")
         addr.sin_port = 0
         let bindRC = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(listenFd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard bindRC == 0, listen(listenFd, 8) == 0 else {
+        guard bindRC == 0, listen(fd, 8) == 0 else {
+            close(fd)
             throw NSError(domain: "fake-server", code: 2, userInfo: [NSLocalizedDescriptionKey: "bind/listen 失败"])
         }
         var len = socklen_t(MemoryLayout<sockaddr_in>.size)
         withUnsafeMutablePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                getsockname(listenFd, $0, &len)
+                getsockname(fd, $0, &len)
             }
         }
+        listenFd = fd
         port = Int(addr.sin_port.bigEndian)
         start()
     }
