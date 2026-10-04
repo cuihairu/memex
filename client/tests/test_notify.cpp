@@ -25,8 +25,19 @@
 #include <QTimer>
 #include <QWidget>
 
+#include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <functional>
+#include <thread>
 #include <utility>
+
+#if defined(__GNUC__)
+#include <unistd.h> // _exit
+// 显式落覆盖率（退出段硬着陆用）：weak——无覆盖率编译（Release 本地跑）时
+// 符号空置不调用，--coverage 构建（CI 门禁）下指向 libgcov 真实现
+extern "C" void __gcov_dump(void) __attribute__((weak));
+#endif
 
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
@@ -61,6 +72,22 @@ int g_failures = 0;
     }                                                                        \
   } while (false)
 
+// —— 卡死定位（CI 慢机上曾经整跑 240s 超时且日志尾部被块缓冲吞掉）：
+// 相位标记＋看门狗。wait_until 每圈推进 g_progress；任一相位超过
+// WATCHDOG_TICKS×2s 无进展即打印卡点相位并硬退（ctest 上界内自行报红点名，
+// 不再留给超时杀手）。相位串全部为静态字面量，看门狗线程无锁直读。
+std::atomic<const char*> g_phase{"boot"};
+std::atomic<int> g_progress{0};
+constexpr int WATCHDOG_TICKS = 60; // 60×2s＝120s 无进展即判卡死
+
+#define PHASE(p)                                                             \
+  do {                                                                       \
+    g_phase.store(p, std::memory_order_relaxed);                             \
+    g_progress.fetch_add(1, std::memory_order_relaxed);                      \
+    qInfo("phase: %s", p);                                                   \
+    std::fflush(nullptr);                                                    \
+  } while (false)
+
 bool wait_until(const std::function<bool()>& cond, int timeout_ms) {
   QElapsedTimer timer;
   timer.start();
@@ -68,6 +95,7 @@ bool wait_until(const std::function<bool()>& cond, int timeout_ms) {
     if (timer.elapsed() > timeout_ms) return false;
     QCoreApplication::processEvents(QEventLoop::AllEvents, 30);
     QThread::msleep(5);
+    g_progress.fetch_add(1, std::memory_order_relaxed);
   }
   return true;
 }
@@ -95,6 +123,21 @@ QWidget* find_top(const QString& name) {
     if (w->objectName() == name) return w;
   }
   return nullptr;
+}
+
+// 有界 CLI 跑法：QProcess::execute 无超时上界（CLI 卡住＝整测挂死），统一
+// 走 start＋waitForFinished，超时杀进程并报 false。断言仍由调用方 CHECK。
+bool run_cli(const QString& bin, const QStringList& args,
+             int timeout_ms = 15000) {
+  QProcess p;
+  p.start(bin, args);
+  if (!p.waitForStarted(5000)) return false;
+  if (!p.waitForFinished(timeout_ms)) {
+    p.kill();
+    p.waitForFinished(2000);
+    return false;
+  }
+  return p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
 }
 
 // 阻塞式 POST /hook/<path>：读到服务端 Connection: close 落 EOF。
@@ -382,12 +425,13 @@ void test_e2e(const QString& tmp_path) {
                                     QStringLiteral("pass-a")},
         std::pair<QString, QString>{QStringLiteral("bob"),
                                     QStringLiteral("pass-b")}}) {
-    CHECK(QProcess::execute(server_bin,
-                            {QStringLiteral("account"), QStringLiteral("add"),
-                             row.first, row.second, QStringLiteral("--db"),
-                             db}) == 0);
+    PHASE("e2e:account-add");
+    CHECK(run_cli(server_bin, {QStringLiteral("account"), QStringLiteral("add"),
+                               row.first, row.second, QStringLiteral("--db"),
+                               db}));
   }
 
+  PHASE("e2e:server-start");
   const quint16 port = free_port();
   const quint16 wh_port = free_port();
   QProcess server;
@@ -402,6 +446,7 @@ void test_e2e(const QString& tmp_path) {
 
   // 建 webhook（CLI 真跑，token 从 stdout 解析——与运维口径一致）
   const auto make_webhook = [&](const QString& target) {
+    PHASE("e2e:webhook-create");
     QProcess p;
     p.start(server_bin, {QStringLiteral("webhook"), QStringLiteral("create"),
                          QStringLiteral("--target"), target,
@@ -450,6 +495,7 @@ void test_e2e(const QString& tmp_path) {
                    [&](const QString&, const QString&) { a_in = true; });
   QObject::connect(&b, &CollabEngine::logged_in, &b,
                    [&](const QString&, const QString&) { b_in = true; });
+  PHASE("e2e:login");
   a.login(QStringLiteral("127.0.0.1"), port, QStringLiteral("alice"),
           QStringLiteral("pass-a"));
   b.login(QStringLiteral("127.0.0.1"), port, QStringLiteral("bob"),
@@ -460,6 +506,7 @@ void test_e2e(const QString& tmp_path) {
   CHECK(!tok_personal.isEmpty());
 
   // 个人·普通 → 站内消息渲染（chat 面）＋分级入口，但默认不弹
+  PHASE("e2e:post-normal");
   QString resp;
   int status = http_post(
       wh_port, QStringLiteral("/hook/") + tok_personal,
@@ -483,6 +530,7 @@ void test_e2e(const QString& tmp_path) {
   }
 
   // 个人·重要 → 桌面通知强提醒（托盘信号）＋分级入口
+  PHASE("e2e:post-important");
   status = http_post(
       wh_port, QStringLiteral("/hook/") + tok_personal,
       QStringLiteral(R"({"title":"巡检通报","content":"磁盘水位 82%",)"
@@ -493,6 +541,7 @@ void test_e2e(const QString& tmp_path) {
   CHECK(toast == 1);
 
   // 建群（引擎真跑）→ 群 webhook → 双引擎扇出＋紧急弹窗
+  PHASE("e2e:create-group");
   bool grp_ok = false;
   quint64 gid = 0;
   QObject::connect(&a, &CollabEngine::group_result, &a,
@@ -510,6 +559,7 @@ void test_e2e(const QString& tmp_path) {
   const QString tok_group =
       make_webhook(QStringLiteral("group:") + QString::number(gid));
   CHECK(!tok_group.isEmpty());
+  PHASE("e2e:post-urgent-group");
   status = http_post(
       wh_port, QStringLiteral("/hook/") + tok_group,
       QStringLiteral(R"({"title":"紧急通知","content":"机房割接",)"
@@ -521,6 +571,7 @@ void test_e2e(const QString& tmp_path) {
   CHECK(wait_until([&] { return group_a == 1; }, 3000));
 
   // 紧急群通知 → 置顶弹窗（真实端到端弹出）→ 抓图 → 确认收悉
+  PHASE("e2e:urgent-dialog");
   QDialog* dlg = nullptr;
   CHECK(wait_until(
       [&] {
@@ -547,6 +598,7 @@ void test_e2e(const QString& tmp_path) {
   CHECK(toast == 1); // 群紧急走弹窗，不加托盘计数
 
   // 前后对账：本地库与服务端同源 compose（个人 2 条＋群 1 条／双方各见各的）
+  PHASE("e2e:reconcile");
   CHECK(wait_until(
       [&] {
         return store_a
@@ -569,6 +621,7 @@ void test_e2e(const QString& tmp_path) {
     }
   }
 
+  PHASE("e2e:logout");
   a.logout();
   b.logout();
   server.terminate();
@@ -590,17 +643,60 @@ int main(int argc, char** argv) {
   QTemporaryDir tmp;
   CHECK(tmp.isValid());
 
+  // 看门狗线程：120s 无进展 → 打印卡点相位硬退（ctest 240s 上界内自行报红
+  // 点名，日志尾部不再被块缓冲吞掉）。正常跑完经 g_done 收队。
+  std::atomic<bool> g_done{false};
+  std::thread watchdog([&g_done] {
+    int stall = 0;
+    int last = g_progress.load(std::memory_order_relaxed);
+    while (!g_done.load(std::memory_order_relaxed)) {
+      std::this_thread::sleep_for(std::chrono::seconds(2));
+      const int now = g_progress.load(std::memory_order_relaxed);
+      stall = (now == last) ? stall + 1 : 0;
+      last = now;
+      if (stall >= WATCHDOG_TICKS) {
+        std::fprintf(stderr,
+                     "WATCHDOG: 相位「%s」已 %ds 无进展，判卡死硬退(70)\n",
+                     g_phase.load(std::memory_order_relaxed),
+                     stall * 2);
+        std::fflush(nullptr);
+        _exit(70); // 跳过退出链：此刻任何析构都可能正是卡点
+      }
+    }
+  });
+
+  PHASE("decide-matrix");
   test_decide_matrix();
+  PHASE("prefs-roundtrip");
   test_prefs_roundtrip();
+  PHASE("center-execution");
   test_center_execution();
+  PHASE("fullscreen-defer");
   test_fullscreen_defer();
+  PHASE("settings-dialog");
   test_settings_dialog();
+  PHASE("e2e");
   test_e2e(tmp.path());
+
+  g_done.store(true);
+  watchdog.join();
 
   if (g_failures == 0) {
     qInfo("notify tests: all passed");
-    return 0;
+  } else {
+    qCritical("notify tests: %d failure(s)", g_failures);
   }
-  qCritical("notify tests: %d failure(s)", g_failures);
-  return 1;
+
+  // 退出段硬着陆：曾疑似卡在进程退出链（QApplication/静态析构/atexit 的
+  // gcov 落盘在共享慢机上等待）。显式落覆盖率后 _exit，跳过全部退出析构；
+  // 覆盖率数据不丢，退出挂死面归零。临时目录手动清（跳过其析构）。
+  tmp.remove();
+  env.remove();
+  std::fflush(nullptr);
+#if defined(__GNUC__)
+  if (&__gcov_dump) __gcov_dump();
+  _exit(g_failures == 0 ? 0 : 1);
+#else
+  return g_failures == 0 ? 0 : 1;
+#endif
 }
