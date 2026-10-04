@@ -30,7 +30,7 @@ target_link_libraries(memex_common PUBLIC
   nlohmann_json::nlohmann_json
   protobuf::libprotobuf)
 
-target_compile_features(memex_common PUBLIC cxx_std_20)
+target_compile_features(memex_common PUBLIC cxx_std_17)
 
 if(MEMEX_BUILD_TESTS)
   add_executable(test_protocol tests/test_protocol.cpp)

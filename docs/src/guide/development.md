@@ -2,7 +2,7 @@
 
 ## 环境要求
 
-- CMake 4.x、C++20 编译器（GCC 15 或 MSVC）
+- CMake 4.x、C++17 编译器（GCC 15 或 MSVC）
 - [vcpkg](https://github.com/microsoft/vcpkg)：所有第三方依赖经 manifest 管理
 - Linux 编译 Qt 客户端所需的系统开发包（vcpkg 不代管 X11/GL 等系统库；Ubuntu 参考：
   `autoconf autoconf-archive automake libtool`（gperf 等 autotools 端口源码构建所需，缺则 qtbase 依赖链在 gperf 处失败）；

@@ -19,7 +19,7 @@ add_library(memex_server_core STATIC
   src/webhook.cpp
   src/storage.cpp)
 target_include_directories(memex_server_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_compile_features(memex_server_core PUBLIC cxx_std_20)
+target_compile_features(memex_server_core PUBLIC cxx_std_17)
 target_link_libraries(memex_server_core PUBLIC
   memex_common
   asio::asio
@@ -29,7 +29,7 @@ target_link_libraries(memex_server_core PUBLIC
   aws-cpp-sdk-core)
 
 add_executable(memex_server src/main.cpp)
-target_compile_features(memex_server PRIVATE cxx_std_20)
+target_compile_features(memex_server PRIVATE cxx_std_17)
 target_link_libraries(memex_server PRIVATE memex_server_core)
 target_compile_definitions(memex_server PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 

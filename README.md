@@ -9,11 +9,11 @@
   <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov 覆盖率" /></a>
   <a href="https://cuihairu.github.io/memex/"><img src="https://img.shields.io/website?url=https%3A%2F%2Fcuihairu.github.io%2Fmemex%2F&up_message=%E5%9C%A8%E7%BA%BF&down_message=%E7%A6%BB%E7%BA%BF&label=%E6%96%87%E6%A1%A3%E7%AB%99&color=e16531" alt="文档站" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%E5%9B%BD%E4%BA%A7%20UOS%2F%E9%BA%92%E9%BA%9F%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-e16531" alt="平台支持" />
-  <img src="https://img.shields.io/badge/C%2B%2B20-Qt%206-e16531" alt="C++20 / Qt 6" />
+  <img src="https://img.shields.io/badge/C%2B%2B20-Qt%206-e16531" alt="C++17 / Qt 6" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
 </p>
 
-内网物理隔离环境下的办公即时通讯系统，参照企业微信的功能范围，覆盖沟通、办公、组织与归档检索能力。业务层全部自写，底座采用开源组件：Qt 6、asio、protobuf、SQLite、OpenSSL、AWS SDK（S3 接口，对接 RustFS），清单与许可见 [third_party/](third_party/README.md)；不基于任何开源 IM 二次开发，不集成 AGPL／SSPL 等强传染性许可组件。桌面客户端 C++20 + Qt；手机端 Android（Kotlin，已落地）／iOS（Swift，代码-only＋CI 验证）；服务端 C++20 单进程单库。
+内网物理隔离环境下的办公即时通讯系统，参照企业微信的功能范围，覆盖沟通、办公、组织与归档检索能力。业务层全部自写，底座采用开源组件：Qt 6、asio、protobuf、SQLite、OpenSSL、AWS SDK（S3 接口，对接 RustFS），清单与许可见 [third_party/](third_party/README.md)；不基于任何开源 IM 二次开发，不集成 AGPL／SSPL 等强传染性许可组件。桌面客户端 C++17 + Qt；手机端 Android（Kotlin，已落地）／iOS（Swift，代码-only＋CI 验证）；服务端 C++17 单进程单库。
 
 - 产品定义与分期依据：[docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
 - 产品定位一页纸：[docs/src/guide/product.md](docs/src/guide/product.md)
@@ -39,14 +39,14 @@
 
 ```
 memex/
-├── client/               # Qt C++20 桌面客户端（Windows / UOS / 麒麟 / macOS）
+├── client/               # Qt C++17 桌面客户端（Windows / UOS / 麒麟 / macOS）
 │   ├── app/              # 入口与主窗口、系统集成（托盘、通知、开机启动）、
 │   │                     #   截图标注、主题、通知偏好（界面层并入 app）
 │   ├── engine/direct/    # 直连引擎：UDP 发现、点对点消息与文件
 │   ├── engine/collab/    # 协作引擎：长连接、消息同步、离线与补传
 │   ├── core/             # 共享内核：本地库（SQLite）、会话、文件传输
 │   └── tests/            # 桌面端单测
-├── server/               # C++20 协作服务端（单台集中部署）
+├── server/               # C++17 协作服务端（单台集中部署）
 │   └── src/              # 单进程单库实现评审报告六模块职能（网关／账号设备／
 │                         #   组织架构／消息归档／策略／文件元数据）：
 │                         #   server.cpp session.cpp（网关与消息）
