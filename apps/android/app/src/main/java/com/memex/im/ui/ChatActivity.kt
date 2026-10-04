@@ -1,5 +1,8 @@
 package com.memex.im.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
@@ -10,9 +13,11 @@ import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.memex.im.MemexApp
 import com.memex.im.R
 import com.memex.im.core.ChatHolder
 import com.memex.im.core.ChatManager
+import com.memex.im.core.NoticeGrade
 import com.memex.im.core.Session
 import com.memex.im.core.StoredMessage
 import java.text.SimpleDateFormat
@@ -64,14 +69,17 @@ class ChatActivity : AppCompatActivity(), ChatManager.Listener {
 
     override fun onResume() {
         super.onResume()
+        (application as? MemexApp)?.openPeer = peer // 前台推送裁决：正看该会话不弹横幅
         ChatHolder.manager?.let { mgr ->
             mgr.addListener(this)
+            mgr.store.markRead(peer) // 进会话即清未读（列表角标同步）
             render()
         }
     }
 
     override fun onPause() {
         super.onPause()
+        (application as? MemexApp)?.openPeer = null
         ChatHolder.manager?.removeListener(this)
     }
 
@@ -79,6 +87,16 @@ class ChatActivity : AppCompatActivity(), ChatManager.Listener {
     override fun onNewMessage(p: String) {
         if (p == peer) render()
     }
+
+    /** 站内通知：弹窗由常驻 NotificationHelper 裁决，本页只随 onNewMessage 刷新 */
+    override fun onNotice(
+        peer: String,
+        grade: NoticeGrade,
+        title: String,
+        content: String,
+        jumpUrl: String,
+        msgId: String,
+    ) = Unit
 
     override fun onSent(seq: Long) = Unit
 
@@ -128,6 +146,16 @@ class ChatActivity : AppCompatActivity(), ChatManager.Listener {
             view.findViewById<TextView>(android.R.id.text2).apply {
                 text = if (m.recalled) getString(R.string.chat_recalled) else m.text
                 if (m.recalled) alpha = 0.4f else alpha = 1f
+                // 移动端适配：长按复制消息原文
+                setOnLongClickListener {
+                    val cm =
+                        getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("memex", m.text))
+                    Toast.makeText(
+                        this@ChatActivity, R.string.chat_copied, Toast.LENGTH_SHORT
+                    ).show()
+                    true
+                }
             }
             return view
         }

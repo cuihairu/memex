@@ -35,6 +35,13 @@
     <string name="chat_me">我</string>
     <string name="chat_recalled">（已撤回）</string>
     <string name="chat_not_connected">未连接，请重新登录</string>
+    <string name="chat_copied">已复制</string>
+
+    <!-- 消息推送（T6.3 第三块：通知渠道与紧急确认，对齐桌面 T4.10 三级） -->
+    <string name="channel_message">聊天消息</string>
+    <string name="channel_important">重要通知</string>
+    <string name="channel_urgent">紧急通知</string>
+    <string name="notify_confirm">确认收悉</string>
 
     <!-- 校验失败原因（与 core 探测结果一一对应） -->
     <string name="err_addr_empty">服务器地址不能为空</string>

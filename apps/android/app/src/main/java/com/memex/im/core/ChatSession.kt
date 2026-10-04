@@ -46,6 +46,16 @@ class ChatSession(
         /** 收到一条新消息（已落库；msgId 空=自己刚发的受理暂存） */
         fun onMessage(peer: String, msgId: String, mine: Boolean)
 
+        /** 收到站内通知（NOTICE，T6.3 三级推送；peer 已落库，分级弹窗由上层裁决） */
+        fun onNotice(
+            peer: String,
+            grade: NoticeGrade,
+            title: String,
+            content: String,
+            jumpUrl: String,
+            msgId: String,
+        )
+
         /** 发送受理回执（服务端 ACK(seq)） */
         fun onSent(seq: Long)
 
@@ -221,6 +231,7 @@ class ChatSession(
                 val env = wire?.readEnvelope() ?: return
                 when (env.type) {
                     MsgType.TEXT -> onIncomingText(env)
+                    MsgType.NOTICE -> onIncomingNotice(env)
                     MsgType.ACK -> onAck(env)
                     MsgType.KICK -> {
                         val reason = env.kick.reason.ifEmpty { "账号已在其他设备登录" }
@@ -250,22 +261,55 @@ class ChatSession(
         )
         // 已收取回执（msg_id 非空即回；离线补投去重后照回 ACK——服务端按
         // 账号清离线队列，重复 ACK 无害）
-        if (env.msgId.isNotEmpty()) {
-            try {
-                wire?.send(
-                    Envelope.newBuilder()
-                        .setType(MsgType.ACK)
-                        .setSeq(seqGen.getAndIncrement())
-                        .setFrom(account)
-                        .setTo("server")
-                        .setTsMs(System.currentTimeMillis())
-                        .setAck(memex.protocol.v1.Memex.Ack.newBuilder().setMsgId(env.msgId))
-                        .build()
+        if (env.msgId.isNotEmpty()) sendAck(env.msgId)
+        if (inserted) dispatch { listener?.onMessage(peer, env.msgId, mine = false) }
+    }
+
+    /**
+     * 收到站内通知（NOTICE；webhook 接入推送，T6.3 三级推送数据面）。
+     * 语义对齐桌面 collab_engine.handle_notice：归档形态 compose_notice_text
+     * 「标题：正文[ 跳转]」、peer 规则同 TEXT（群=to，个人=from「通知」）、
+     * 服务端通知无会话 seq（恒 0）则本地分配单调 seq、回 ACK(msg_id) 清离线
+     * 队列；分级弹窗（普通不弹/重要横幅强提醒/紧急需确认收悉）由上层裁决。
+     */
+    private fun onIncomingNotice(env: Envelope) {
+        if (!env.hasNotice()) return
+        val n = env.notice
+        val ts = if (env.tsMs > 0) env.tsMs else System.currentTimeMillis()
+        val peer = if (env.to.startsWith("group:")) env.to else env.from
+        val inserted = store.append(
+            StoredMessage(
+                id = 0, peer = peer, from = env.from, to = env.to,
+                seq = if (env.seq > 0) env.seq else store.nextLocalSeq(env.from),
+                tsMs = ts, text = composeNoticeText(n.title, n.content, n.jumpUrl),
+                source = "collab", msgId = env.msgId, recalled = false,
+            )
+        )
+        if (env.msgId.isNotEmpty()) sendAck(env.msgId)
+        if (inserted) {
+            dispatch {
+                listener?.onNotice(
+                    peer, NoticeGrade.fromProtoNumber(n.urgencyValue),
+                    n.title, n.content, n.jumpUrl, env.msgId,
                 )
-            } catch (_: IOException) {
             }
         }
-        if (inserted) dispatch { listener?.onMessage(peer, env.msgId, mine = false) }
+    }
+
+    private fun sendAck(msgId: String) {
+        try {
+            wire?.send(
+                Envelope.newBuilder()
+                    .setType(MsgType.ACK)
+                    .setSeq(seqGen.getAndIncrement())
+                    .setFrom(account)
+                    .setTo("server")
+                    .setTsMs(System.currentTimeMillis())
+                    .setAck(memex.protocol.v1.Memex.Ack.newBuilder().setMsgId(msgId))
+                    .build()
+            )
+        } catch (_: IOException) {
+        }
     }
 
     private fun onAck(env: Envelope) {

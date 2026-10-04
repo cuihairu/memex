@@ -1,6 +1,9 @@
 package com.memex.im.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
@@ -16,6 +19,7 @@ import com.memex.im.R
 import com.memex.im.core.ChatHolder
 import com.memex.im.core.ChatManager
 import com.memex.im.core.Conversation
+import com.memex.im.core.NoticeGrade
 import com.memex.im.core.PrefsInitStore
 import com.memex.im.core.Route
 import com.memex.im.core.RouteGuard
@@ -83,6 +87,19 @@ class MainActivity : AppCompatActivity(), ChatManager.Listener {
                 val conv = convsAdapter.getItem(position)
                 if (conv != null) openChat(conv.peer)
             }
+
+        requestNotificationPermissionIfNeeded()
+    }
+
+    /** Android 13+ 通知权限：推送横幅需授权；未授权静默降级为站内（不阻塞主流程） */
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF_PERM)
     }
 
     override fun onResume() {
@@ -100,6 +117,16 @@ class MainActivity : AppCompatActivity(), ChatManager.Listener {
 
     // —— ChatManager.Listener（UI 线程）——
     override fun onNewMessage(peer: String) = render()
+
+    /** 站内通知：弹窗由常驻 NotificationHelper 裁决，列表随 onNewMessage 刷新 */
+    override fun onNotice(
+        peer: String,
+        grade: NoticeGrade,
+        title: String,
+        content: String,
+        jumpUrl: String,
+        msgId: String,
+    ) = Unit
 
     override fun onSent(seq: Long) = Unit
 
@@ -167,5 +194,9 @@ class MainActivity : AppCompatActivity(), ChatManager.Listener {
         } catch (_: Exception) {
             ""
         }
+    }
+
+    companion object {
+        private const val REQ_NOTIF_PERM = 1
     }
 }

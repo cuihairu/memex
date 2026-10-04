@@ -93,17 +93,31 @@ class ChatSessionTest {
 
     private class RecordingListener : ChatSession.Listener {
         val messages = CopyOnWriteArrayList<Pair<String, String>>() // peer, msgId
+        val notices = CopyOnWriteArrayList<Triple<String, NoticeGrade, String>>() // peer, grade, title
         val sent = CopyOnWriteArrayList<Long>()
         val kicked = CopyOnWriteArrayList<String>()
         val disconnected = CopyOnWriteArrayList<String>()
         // 只等首次事件；重复去重断言用集合 size 验证，不靠 latch 计数
         val onMessage = CountDownLatch(1)
+        val onNotice = CountDownLatch(1)
         val onSent = CountDownLatch(1)
         val onKicked = CountDownLatch(1)
 
         override fun onMessage(peer: String, msgId: String, mine: Boolean) {
             messages.add(peer to msgId)
             onMessage.countDown()
+        }
+
+        override fun onNotice(
+            peer: String,
+            grade: NoticeGrade,
+            title: String,
+            content: String,
+            jumpUrl: String,
+            msgId: String,
+        ) {
+            notices.add(Triple(peer, grade, title))
+            onNotice.countDown()
         }
 
         override fun onSent(seq: Long) {
@@ -413,4 +427,125 @@ class ChatSessionTest {
     /** 取假服务端当前存活连接（用于主动注入帧）；serve 后 accept 过才有 */
     private fun lastServerConnection(server: FakeMemexServer): Socket? =
         server.connections.firstOrNull { !it.isClosed }
+
+    /** 组一帧服务端通知（对齐 webhook deliver_notice：from=「通知」、msg_id 必带、seq=0） */
+    private fun noticeFrame(
+        to: String,
+        msgId: String,
+        title: String,
+        content: String,
+        urgency: memex.protocol.v1.Memex.Notice.Urgency =
+            memex.protocol.v1.Memex.Notice.Urgency.IMPORTANT,
+        jumpUrl: String = "",
+    ): Envelope = Envelope.newBuilder()
+        .setType(MsgType.NOTICE)
+        .setSeq(0)
+        .setFrom("通知")
+        .setTo(to)
+        .setTsMs(System.currentTimeMillis())
+        .setMsgId(msgId)
+        .setNotice(
+            memex.protocol.v1.Memex.Notice.newBuilder()
+                .setTitle(title)
+                .setContent(content)
+                .setUrgency(urgency)
+                .setJumpUrl(jumpUrl)
+                .build()
+        )
+        .build()
+
+    @Test
+    fun `个人通知落库归档态回 ACK 并回调分级`() {
+        val server = FakeMemexServer()
+        server.serve()
+        val store = InMemoryChatStore()
+        val listener = RecordingListener()
+        val (session, outcome) = connect(server, store = store, listener = listener)
+        assertTrue(outcome is ChatSession.ConnectOutcome.Ok)
+
+        val conn = lastServerConnection(server)!!
+        server.send(conn, noticeFrame(to = "alice", msgId = "n1", title = "发布", content = "新版本上线"))
+        waitLatch(listener.onNotice)
+
+        // 归档形态「标题：正文」（compose_notice_text 同源）；peer=from「通知」
+        val hist = store.history("通知")
+        assertEquals(1, hist.size)
+        assertEquals("发布：新版本上线", hist[0].text)
+        assertEquals("n1", hist[0].msgId)
+        assertEquals(NoticeGrade.IMPORTANT, listener.notices.single().second)
+        // 已回 ACK(msg_id) 清服务端离线队列；通知不走 onMessage（列表刷新由上层桥接）
+        assertEquals("n1", server.received.first { it.type == MsgType.ACK }.ack.msgId)
+        assertTrue(listener.messages.isEmpty())
+
+        session.close()
+        server.close()
+    }
+
+    @Test
+    fun `群通知按 to 归会话 跳转随文留痕 未指定紧急度按普通`() {
+        val server = FakeMemexServer()
+        server.serve()
+        val store = InMemoryChatStore()
+        val listener = RecordingListener()
+        val (session, outcome) = connect(server, store = store, listener = listener)
+        assertTrue(outcome is ChatSession.ConnectOutcome.Ok)
+
+        val conn = lastServerConnection(server)!!
+        server.send(
+            conn,
+            noticeFrame(
+                to = "group:9", msgId = "g9", title = "会议", content = "十点开始",
+                urgency = memex.protocol.v1.Memex.Notice.Urgency.URGENCY_UNSPECIFIED,
+                jumpUrl = "https://example.com/a",
+            ),
+        )
+        waitLatch(listener.onNotice)
+
+        assertEquals("group:9", store.history("group:9").single().peer)
+        assertEquals("会议：十点开始 https://example.com/a", store.history("group:9").single().text)
+        assertEquals(NoticeGrade.NORMAL, listener.notices.single().second)
+
+        session.close()
+        server.close()
+    }
+
+    @Test
+    fun `紧急通知分级映射与去重不重复回调但照回 ACK`() {
+        val server = FakeMemexServer()
+        server.serve()
+        val store = InMemoryChatStore()
+        val listener = RecordingListener()
+        val (session, outcome) = connect(server, store = store, listener = listener)
+        assertTrue(outcome is ChatSession.ConnectOutcome.Ok)
+
+        val conn = lastServerConnection(server)!!
+        val frame = noticeFrame(
+            to = "alice", msgId = "u1", title = "安全",
+            content = "异常登录", urgency = memex.protocol.v1.Memex.Notice.Urgency.URGENT,
+        )
+        server.send(conn, frame)
+        waitLatch(listener.onNotice)
+        server.send(conn, frame) // 重复补投
+        Thread.sleep(300)
+
+        assertEquals(1, listener.notices.size)
+        assertEquals(NoticeGrade.URGENT, listener.notices.single().second)
+        assertEquals(1, store.history("通知").size)
+        // 去重后照回 ACK（服务端按账号清离线队列，重复 ACK 无害）
+        assertEquals(2, server.received.count { it.type == MsgType.ACK })
+
+        session.close()
+        server.close()
+    }
+
+    @Test
+    fun `通知分级映射未识别按普通`() {
+        assertEquals(NoticeGrade.NORMAL, NoticeGrade.fromProtoNumber(0))
+        assertEquals(NoticeGrade.NORMAL, NoticeGrade.fromProtoNumber(1))
+        assertEquals(NoticeGrade.IMPORTANT, NoticeGrade.fromProtoNumber(2))
+        assertEquals(NoticeGrade.URGENT, NoticeGrade.fromProtoNumber(3))
+        assertEquals(NoticeGrade.NORMAL, NoticeGrade.fromProtoNumber(99))
+        assertEquals("发布：新版本", composeNoticeText("发布", "新版本", ""))
+        assertEquals("发布：新版本 https://e.cn/a", composeNoticeText("发布", "新版本", "https://e.cn/a"))
+    }
 }

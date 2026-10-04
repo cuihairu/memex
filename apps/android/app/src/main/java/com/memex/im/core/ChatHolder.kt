@@ -9,6 +9,10 @@ object ChatHolder {
     var manager: ChatManager? = null
         private set
 
+    /** 常驻通知器（T6.3 三级推送）；manager 重建（重新登录）后自动重挂。 */
+    @Volatile
+    private var notifier: ChatManager.Listener? = null
+
     /** 建立并挂载管理器（登录页调用；重复挂载先关旧的）。 */
     fun establish(): ChatManager {
         val prev = manager
@@ -16,7 +20,16 @@ object ChatHolder {
             prev.logoutAndClear()
             manager = null
         }
-        return ChatManager(ChatStoreFactory.memory()).also { manager = it }
+        return ChatManager(ChatStoreFactory.memory()).also { m ->
+            manager = m
+            notifier?.let { m.addListener(it) }
+        }
+    }
+
+    /** 应用启动时挂一次常驻通知器（logoutAndClear 清听众后由 establish 重挂）。 */
+    fun attachNotifier(l: ChatManager.Listener) {
+        notifier = l
+        manager?.addListener(l)
     }
 
     fun clear() {

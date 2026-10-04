@@ -22,8 +22,18 @@ class ChatManager(
 
     /** UI 订阅回调（UI 线程投递）。 */
     interface Listener {
-        /** 新消息（peer 维度；mine=自己刚发的受理暂存） */
+        /** 新消息（peer 维度；mine=自己刚发的受理暂存；通知也走本回调刷新列表） */
         fun onNewMessage(peer: String)
+
+        /** 站内通知（NOTICE 三级推送；peer 已落库，弹窗裁决由实现决定） */
+        fun onNotice(
+            peer: String,
+            grade: NoticeGrade,
+            title: String,
+            content: String,
+            jumpUrl: String,
+            msgId: String,
+        )
 
         /** 发送已受理 */
         fun onSent(seq: Long)
@@ -91,6 +101,22 @@ class ChatManager(
     override fun onMessage(peer: String, msgId: String, mine: Boolean) {
         uiHandler.post {
             for (l in sessionListeners.toList()) l.onNewMessage(peer)
+        }
+    }
+
+    override fun onNotice(
+        peer: String,
+        grade: NoticeGrade,
+        title: String,
+        content: String,
+        jumpUrl: String,
+        msgId: String,
+    ) {
+        uiHandler.post {
+            for (l in sessionListeners.toList()) {
+                l.onNewMessage(peer) // 通知已落库，列表/聊天窗照常刷新
+                l.onNotice(peer, grade, title, content, jumpUrl, msgId)
+            }
         }
     }
 

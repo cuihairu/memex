@@ -9,8 +9,12 @@
 
     <!-- 协作态长连接（TCP 24360 起） -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 消息推送横幅＋震动（T6.3 第三块）：Android 13+ 运行时申请 POST_NOTIFICATIONS -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
+        android:name="com.memex.im.MemexApp"
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.Memex"
@@ -37,6 +41,15 @@
         <activity
             android:name="com.memex.im.ui.ChatActivity"
             android:exported="false" />
+
+        <!-- 紧急通知「确认收悉」动作（点按后才允许滑除该横幅） -->
+        <receiver
+            android:name="com.memex.im.ui.MemexNotifyReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.memex.im.NOTICE_CONFIRM" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
