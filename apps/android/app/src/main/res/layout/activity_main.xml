@@ -1,57 +1,61 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 主界面占位（T6.3 后续块：会话列表/收发/通知）。仅初始化且登录后可达。 -->
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- 主界面＝会话列表（T6.3）。仅初始化且登录后可达（RouteGuard）。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true"
+    android:orientation="vertical"
     android:fitsSystemWindows="true">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp"
+        android:text="@string/main_title"
+        android:textSize="18sp"
+        android:textStyle="bold" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="24dp">
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp">
 
-        <TextView
-            android:layout_width="match_parent"
+        <EditText
+            android:id="@+id/et_peer"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="@string/main_title"
-            android:textSize="20sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/tv_server"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:textSize="14sp" />
-
-        <TextView
-            android:id="@+id/tv_account"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textSize="14sp" />
-
-        <TextView
-            android:id="@+id/tv_display"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textSize="14sp" />
+            android:layout_weight="1"
+            android:hint="@string/main_peer_hint"
+            android:inputType="text"
+            android:maxLines="1" />
 
         <Button
-            android:id="@+id/btn_logout"
-            android:layout_width="match_parent"
+            android:id="@+id/btn_new_chat"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="@string/main_logout" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="@string/main_note"
-            android:textSize="12sp" />
+            android:text="@string/main_new_chat" />
     </LinearLayout>
-</ScrollView>
+
+    <TextView
+        android:id="@+id/tv_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="24dp"
+        android:text="@string/main_empty"
+        android:textSize="14sp"
+        android:visibility="gone" />
+
+    <ListView
+        android:id="@+id/lv_conversations"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <Button
+        android:id="@+id/btn_logout"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="12dp"
+        android:text="@string/main_logout" />
+</LinearLayout>

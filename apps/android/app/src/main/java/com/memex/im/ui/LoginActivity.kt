@@ -11,24 +11,25 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.memex.im.BuildConfig
 import com.memex.im.R
+import com.memex.im.core.ChatHolder
+import com.memex.im.core.ChatSession
+import com.memex.im.core.DeviceIdentity
 import com.memex.im.core.InitStore
-import com.memex.im.core.LoginOutcome
-import com.memex.im.core.MemexClient
 import com.memex.im.core.PrefsInitStore
 import com.memex.im.core.ServerAddress
 import com.memex.im.core.Session
-import com.memex.im.core.DeviceIdentity
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
  * 登录页（R18）：移动端全部为协作态，必须登录后使用。
  * 本页自身也守卫：未初始化（例如清除了应用数据）一律改道向导。
+ * 登录验证与长连接建立一次完成（ChatManager.attach）：成功即移交
+ * ChatHolder，主界面/聊天页直接消费；避免「验证连接＋常连接」双连接互踢。
  */
 class LoginActivity : AppCompatActivity() {
 
     private lateinit var store: InitStore
-    private val client = MemexClient()
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
 
     private lateinit var etAccount: EditText
@@ -80,10 +81,12 @@ class LoginActivity : AppCompatActivity() {
         }
         setBusy(true)
         executor.execute {
-            val outcome = client.login(
+            val manager = ChatHolder.establish()
+            val outcome = manager.attach(
                 address = address,
-                account = account,
                 password = password,
+                account = account,
+                displayName = account,
                 deviceFingerprint = deviceFingerprint(),
                 deviceName = android.os.Build.MODEL,
                 clientVersion = BuildConfig.VERSION_NAME,
@@ -92,19 +95,24 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
-    private fun renderLogin(outcome: LoginOutcome, account: String) {
+    private fun renderLogin(outcome: ChatSession.ConnectOutcome, account: String) {
         when (outcome) {
-            is LoginOutcome.Success -> {
-                Session.instance.signIn(account, outcome.displayName)
+            is ChatSession.ConnectOutcome.Ok -> {
+                Session.instance.signIn(account, displayName(account))
                 startActivity(Intent(this, MainActivity::class.java))
                 finish()
             }
-            is LoginOutcome.Rejected -> showError(outcome.reason)
-            is LoginOutcome.Unreachable -> showError(getString(R.string.err_unreachable))
-            is LoginOutcome.Timeout -> showError(getString(R.string.err_timeout))
-            is LoginOutcome.NotMemex -> showError(getString(R.string.err_not_memex))
+            is ChatSession.ConnectOutcome.Rejected -> showError(outcome.reason)
+            is ChatSession.ConnectOutcome.Unreachable -> showError(getString(R.string.err_unreachable))
+            is ChatSession.ConnectOutcome.Timeout -> showError(getString(R.string.err_timeout))
+            is ChatSession.ConnectOutcome.NotMemex -> showError(getString(R.string.err_not_memex))
         }
     }
+
+    private fun displayName(account: String): String =
+        // 展示名由服务端 LOGIN_RESULT.display_name 回填；当前协议版本服务端
+        // 未回填时用账号兜底（对齐桌面端 CollabEngine 的显示逻辑）
+        account
 
     private fun showError(text: String) {
         tvError.text = text

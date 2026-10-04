@@ -33,6 +33,10 @@
         <activity
             android:name="com.memex.im.ui.LoginActivity"
             android:exported="false" />
+
+        <activity
+            android:name="com.memex.im.ui.ChatActivity"
+            android:exported="false" />
     </application>
 
 </manifest>

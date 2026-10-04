@@ -20,13 +20,21 @@
     <string name="login_change_server">修改服务器地址</string>
     <string name="login_mode_note">移动端为协作态，登录后方可使用</string>
 
-    <!-- 主界面（会话列表随 T6.3 后续块落地） -->
-    <string name="main_title">已登录</string>
-    <string name="main_server">服务器：%1$s</string>
-    <string name="main_account">账号：%1$s</string>
-    <string name="main_display">显示名：%1$s</string>
+    <!-- 主界面＝会话列表（T6.3） -->
+    <string name="main_title">会话</string>
+    <string name="main_peer_hint">输入对端账号开始聊天</string>
+    <string name="main_new_chat">发起</string>
+    <string name="main_empty">暂无会话：在下方输入对端账号发起聊天。</string>
     <string name="main_logout">退出登录</string>
-    <string name="main_note">即时消息、群聊与通讯录界面随后续版本提供。</string>
+    <string name="group_display">群 %1$s</string>
+    <string name="unread_count">（%1$d 未读）</string>
+
+    <!-- 聊天窗（T6.3） -->
+    <string name="chat_send">发送</string>
+    <string name="chat_input_hint">输入消息…</string>
+    <string name="chat_me">我</string>
+    <string name="chat_recalled">（已撤回）</string>
+    <string name="chat_not_connected">未连接，请重新登录</string>
 
     <!-- 校验失败原因（与 core 探测结果一一对应） -->
     <string name="err_addr_empty">服务器地址不能为空</string>
