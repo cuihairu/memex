@@ -13,7 +13,7 @@
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
 </p>
 
-内网物理隔离环境下的办公即时通讯系统，参照企业微信的功能范围的沟通、办公、组织与归档检索能力。业务层全部自写，底座采用开源组件：Qt 6、asio、protobuf、SQLite、OpenSSL、AWS SDK（S3 接口，对接 RustFS），清单与许可见 [third_party/](third_party/README.md)；不基于任何开源 IM 二次开发，不集成 AGPL／SSPL 等强传染性许可组件。桌面客户端 C++20 + Qt；手机端 Android（Kotlin，已落地）／iOS（Swift，代码-only＋CI 验证）；服务端 C++20 单进程单库。
+内网物理隔离环境下的办公即时通讯系统，参照企业微信的功能范围，覆盖沟通、办公、组织与归档检索能力。业务层全部自写，底座采用开源组件：Qt 6、asio、protobuf、SQLite、OpenSSL、AWS SDK（S3 接口，对接 RustFS），清单与许可见 [third_party/](third_party/README.md)；不基于任何开源 IM 二次开发，不集成 AGPL／SSPL 等强传染性许可组件。桌面客户端 C++20 + Qt；手机端 Android（Kotlin，已落地）／iOS（Swift，代码-only＋CI 验证）；服务端 C++20 单进程单库。
 
 - 产品定义与分期依据：[docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
 - 产品定位一页纸：[docs/src/guide/product.md](docs/src/guide/product.md)
