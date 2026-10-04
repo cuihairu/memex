@@ -234,7 +234,7 @@ if(MEMEX_BUILD_TESTS)
   add_test(NAME notify COMMAND test_notify)
   set_tests_properties(notify PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
-    TIMEOUT 90)
+    TIMEOUT 240) # CI 共享机全链路（真实服务端+webhook+弹窗）超 90s，与 direct_file 同档
 
   # A23 图标面验收：qrc logo 资产（多尺寸可载＋品牌橙恒定）、主窗窗口
   # 图标非空、帮助→关于页真弹（logo 标签抓图入库）、开机启动 .desktop Icon
