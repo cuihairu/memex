@@ -16,7 +16,8 @@ target_include_directories(memex_engine_direct PUBLIC ${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(memex_engine_direct PUBLIC memex_core memex_common Qt6::Core Qt6::Network)
 
 add_library(memex_engine_collab STATIC
-  engine/collab/collab_engine.cpp)
+  engine/collab/collab_engine.cpp
+  engine/collab/files_client.cpp)
 target_include_directories(memex_engine_collab PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(memex_engine_collab PUBLIC memex_core memex_common Qt6::Core Qt6::Network)
 target_compile_definitions(memex_engine_collab PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
@@ -38,7 +39,9 @@ qt_add_executable(memex_client
   app/theme.cpp
   app/theme.hpp
   app/theme_settings_page.cpp
-  app/theme_settings_page.hpp)
+  app/theme_settings_page.hpp
+  app/file_assistant.cpp
+  app/file_assistant.hpp)
 target_include_directories(memex_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_compile_definitions(memex_client PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 target_link_libraries(memex_client PRIVATE
@@ -152,11 +155,40 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # R23-3 文件助手客户端面验收：真实服务端进程（--files-port，无 S3＝
+  # 元数据面全链路）——备忘录建/改/查/删、inbox 列表混排条目、跨账号
+  # 403、错口令 401、未登录拒发、存储未配置上传 503 边界
+  add_executable(test_files_client engine/collab/tests/test_files_client.cpp)
+  target_link_libraries(test_files_client PRIVATE memex_engine_collab)
+  target_compile_definitions(test_files_client PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME files_client COMMAND test_files_client)
+  set_tests_properties(files_client PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
+  # R23-3 文件助手窗口冒烟：真服务端进程 × 离屏 QDialog——连接→存备忘录
+  # →流列表落地→编辑→删除；上传错误通道（无 S3=503 明示）
+  add_executable(test_files_assistant
+    app/tests/test_files_assistant.cpp
+    app/file_assistant.cpp)
+  target_link_libraries(test_files_assistant PRIVATE
+    memex_engine_collab Qt6::Widgets)
+  target_include_directories(test_files_assistant PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_files_assistant PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME files_assistant COMMAND test_files_assistant)
+  set_tests_properties(files_assistant PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # T2.4 模式切换与降级验收：不重启切换、历史合并展示（来源字段）、
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
     app/main_window.cpp
+    app/file_assistant.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -180,6 +212,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_tray
     tests/test_tray.cpp
     app/main_window.cpp
+    app/file_assistant.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -201,6 +234,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_screenshot
     tests/test_screenshot.cpp
     app/main_window.cpp
+    app/file_assistant.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -241,6 +275,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_icon
     tests/test_icon.cpp
     app/main_window.cpp
+    app/file_assistant.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -263,6 +298,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_theme
     tests/test_theme.cpp
     app/main_window.cpp
+    app/file_assistant.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp

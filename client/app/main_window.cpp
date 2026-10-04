@@ -19,6 +19,8 @@
 #include <QLabel>
 #include <QMenuBar>
 #include <QMenu>
+
+#include "file_assistant.hpp"
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
@@ -211,6 +213,17 @@ void MainWindow::build_ui() {
   connect(act_group_new, &QAction::triggered, this,
           [this] { create_group_dialog(); });
   connect(act_dgroup_new, &QAction::triggered, this, [this] { dgroup_dialog(); });
+  // R23-3 文件助手（自己↔自己）：备忘录 + 收件箱统一收件，独立文件面会话
+  auto* act_files = collab_menu->addAction(QStringLiteral("文件助手…"));
+  connect(act_files, &QAction::triggered, this, [this] {
+    if (!file_assistant_) {
+      file_assistant_ = new FileAssistantDialog(this);
+      file_assistant_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    file_assistant_->show();
+    file_assistant_->raise();
+    file_assistant_->activateWindow();
+  });
 
   // —— 设置：开机启动（T4.7；勾选态与登记文件同步）＋主题（R19 · T4.9）——
   auto* opt_menu = menuBar()->addMenu(QStringLiteral("设置"));
