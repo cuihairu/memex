@@ -81,6 +81,35 @@ bool LocalStore::ensure_schema() {
   // 对端维度查询索引（会话列表与历史加载）
   return q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_messages_peer_ts "
                                "ON messages(peer, ts_ms)"));
+// —— R23-1 存储抽象层基础：文件表（元文件记录、配额、秒传键）
+// 客户端仅落地元数据；对象存储交互通过 memex server 完成（直连对象存储被禁）。
+  q.exec(
+      "CREATE TABLE IF NOT EXISTS files ("
+      " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      " owner TEXT NOT NULL,"
+      " belong_gid TEXT NOT NULL DEFAULT '',"
+      " belong_uid TEXT NOT NULL DEFAULT '',"
+      " file_name TEXT NOT NULL,"
+      " file_size INTEGER NOT NULL DEFAULT 0,"
+      " file_hash TEXT NOT NULL DEFAULT '',"
+      " object_key TEXT NOT NULL DEFAULT '',"
+      " source TEXT NOT NULL DEFAULT '',"
+      " upload_ts INTEGER NOT NULL DEFAULT 0,"
+      " status INTEGER NOT NULL DEFAULT 0,"
+      " UNIQUE(file_hash, owner))");
+  // 群配额表：每个群的使用字节数
+  q.exec(
+      "CREATE TABLE IF NOT EXISTS group_quota ("
+      " gid TEXT PRIMARY KEY,"
+      " used_bytes INTEGER NOT NULL DEFAULT 0)");
+  // 用户配额表：每个人的使用字节数
+  q.exec(
+      "CREATE TABLE IF NOT EXISTS user_quota ("
+      " uid TEXT PRIMARY KEY,"
+      " used_bytes INTEGER NOT NULL DEFAULT 0)");
+  // 对文件表查询索引（按归属与哈希检索）
+  return q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_files_owner "
+                               "ON files(owner)"));
 }
 
 bool LocalStore::append(const StoredMessage& msg, bool* inserted) {
