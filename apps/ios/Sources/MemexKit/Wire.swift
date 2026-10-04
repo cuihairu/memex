@@ -41,7 +41,7 @@ final class Wire {
         do {
             try Self.connectWithTimeout(fd: s, addr: addr.pointee, timeoutMs: connectTimeoutMs)
         } catch {
-            closeFD(s)
+            Self.closeFD(s)
             throw error
         }
         fd = s
@@ -50,12 +50,12 @@ final class Wire {
     }
 
     deinit {
-        closeFD(fd)
+        Self.closeFD(fd)
     }
 
     /// 显式关闭（幂等：重复关闭对已关闭 fd 只返回错误，无副作用）。
     func close() {
-        closeFD(fd)
+        Self.closeFD(fd)
     }
 
     func send(_ message: Memex_Protocol_V1_Envelope) throws {
@@ -144,7 +144,7 @@ final class Wire {
         String(cString: strerror(err))
     }
 
-    private func closeFD(_ s: Int32) {
+    private static func closeFD(_ s: Int32) {
         #if canImport(Darwin)
         Darwin.close(s)
         #else
