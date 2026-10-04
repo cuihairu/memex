@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Memex
   text: 内网办公即时通讯系统
-  tagline: 物理隔离内网下的双引擎 IM——收发不依赖服务端也能用，连上就全量归档，C++17 ＋ Qt 实现
+  tagline: 物理隔离内网 · 双引擎客户端 · 全量留痕归档 · 完全自行实现 C++／Qt · 对标企业微信分期推进
   image:
     src: /logo.svg
     alt: Memex
@@ -30,22 +30,19 @@ features:
     title: 组织架构与检索
     details: 部门树、直属上级、通讯录可见性策略；协作态消息按人员、时间、关键词归档检索，查阅行为自动入审计日志。
   - icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>'
-    title: 跨平台客户端
-    details: 桌面客户端 C++17 + Qt，覆盖 Windows、macOS 与国产 Linux（统信 UOS、麒麟）；手机端 Android（Kotlin，已落地）、iOS（Swift，代码-only＋CI）与鸿蒙 NEXT（ArkTS，代码-only＋CI）；服务端 C++ 单台集中部署；文件字节流点对点旁路，不经服务端。
+    title: 跨平台自行开发
+    details: 客户端 C++17 + Qt，覆盖 Windows 与国产 Linux（统信 UOS、麒麟）；服务端 C++ 单台集中部署；文件字节流点对点旁路，不经服务端。
 ---
 
 <script setup>
-const desktopSlides = [
+const slides = [
   { key: 'desktop-direct', title: '桌面端 · 未登录直连态', desc: '零配置自动发现同网段终端，本机留存，不入归档' },
-  { key: 'desktop-friends', title: '桌面端 · 好友列表', desc: '无对话即列表态：不摆聊天面板，点好友才展开会话' },
   { key: 'desktop-collab', title: '桌面端 · 登录协作态', desc: '长连接在线、消息全量归档、跨态会话显式标注' },
   { key: 'desktop-chat', title: '桌面端 · 单聊', desc: '归档起点可追溯、撤回原文留存、文件卡片与引用' },
   { key: 'desktop-group', title: '桌面端 · 群聊', desc: '公告、@提醒、群成员管理，群消息同样全量归档' },
   { key: 'desktop-org', title: '桌面端 · 组织架构', desc: '部门树、汇报链路、直属上级与可见性策略' },
   { key: 'desktop-files', title: '桌面端 · 文件传输', desc: '点对点直传不经服务端、断点续传、元数据入归档' },
-  { key: 'desktop-search', title: '桌面端 · 归档检索', desc: '按人员、时间、关键词检索归档，撤回原文留存可查' }
-]
-const mobileSlides = [
+  { key: 'desktop-search', title: '桌面端 · 归档检索', desc: '按人员、时间、关键词检索归档，撤回原文留存可查' },
   { key: 'mobile-init', title: '手机端 · 初始化向导', desc: '首次使用必须设置服务器地址，连通校验后才可进入' },
   { key: 'mobile-sessions', title: '手机端 · 会话列表', desc: '移动端全部为协作态，不提供免登录匿名使用' },
   { key: 'mobile-chat', title: '手机端 · 聊天', desc: '已读回执、文件卡片、归档状态随手可见' },
@@ -55,15 +52,9 @@ const mobileSlides = [
 
 ## 界面预览
 
-原型设计稿覆盖桌面端八屏与手机端四屏，品牌橙（#e16531）主色，浅色与深色两套均可查看。桌面端与手机端分列两组轮播，右上角按钮切换截图主题，支持自动轮播、左右箭头、键盘方向键与触屏滑动。（实况替换进度：桌面端七屏与手机端初始化向导/会话列表已换客户端实况截图，其余见[界面原型与预览](/guide/prototypes)。）
+原型设计稿覆盖桌面端七屏与手机端四屏，品牌橙（#e16531）主色，浅色与深色两套均可查看。右上角按钮切换截图主题，支持自动轮播、左右箭头、键盘方向键与触屏滑动。
 
-### 桌面端（Windows / UOS / 麒麟 / macOS）
-
-<ShowcaseCarousel :slides="desktopSlides" label="桌面端界面预览" />
-
-### 手机端（Android / iOS / 鸿蒙）
-
-<ShowcaseCarousel :slides="mobileSlides" label="手机端界面预览" />
+<ShowcaseCarousel :slides="slides" />
 
 完整的单屏大图与原型源文件见[界面原型与预览](/guide/prototypes)。
 
@@ -82,24 +73,22 @@ const mobileSlides = [
 
 ```
 memex/
-├── client/               # Qt C++17 桌面客户端（Windows / UOS / 麒麟 / macOS）
-│   ├── app/              # 入口与主窗口、系统集成（界面层并入 app）
+├── client/               # Qt C++17 客户端（Windows / UOS / 麒麟）
+│   ├── app/              # 入口与主窗口、系统集成
 │   ├── engine/direct/    # 直连引擎：UDP 发现、点对点消息与文件
 │   ├── engine/collab/    # 协作引擎：长连接、消息同步、离线与补传
 │   ├── core/             # 共享内核：本地库、会话、联系人、文件传输
-│   └── tests/            # 桌面端单测
-├── server/               # C++ 协作服务端（单进程实现评审报告六模块职能）
+│   └── ui/               # 界面层：会话、群聊、通讯录、检索、设置
+├── server/               # C++ 协作服务端（单台集中部署，六模块）
 ├── common/               # 双端共用：协议定义、序列化、公共工具
-├── apps/                 # 手机端：android（已落地）/ ios（代码-only＋CI）
-│                         #   / harmony（代码-only＋CI）
-├── admin/                # 管理后台（规划，README 占位）
+├── admin/                # 管理后台（第一期第四阶段起）
 ├── docs/                 # 文档站（VitePress）、评审报告、原型
 └── third_party/          # 第三方组件清单与许可核验（依赖经 vcpkg 管理）
 ```
 
 ### 构建
 
-依赖（asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / Qt6）经 vcpkg manifest 管理，构建入口为 CMake Presets：
+依赖（asio / protobuf / nlohmann-json / Qt6）经 vcpkg manifest 管理，构建入口为 CMake Presets：
 
 ```bash
 # 准备 vcpkg（一次性）
