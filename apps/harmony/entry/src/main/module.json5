@@ -1,0 +1,43 @@
+{
+  // entry 模块清单。R17/R18 口径：唯一入口 Index（onShow 经 RouteGuard 守卫），
+  // 未完成服务器地址初始化 → InitPage；未登录 → LoginPage；全应用无匿名形态。
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "deviceTypes": [
+      "phone"
+    ],
+    "requestPermissions": [
+      {
+        // 协作态长连接（TCP 24360 起，@ohos.net.socket）
+        "name": "ohos.permission.INTERNET"
+      },
+      {
+        // 消息推送横幅＋震动（三级通知；对齐 Android VIBRATE）
+        "name": "ohos.permission.VIBRATE"
+      }
+    ],
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "Memex 鸿蒙手机版主入口",
+        "icon": "$media:icon",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": [
+              "entity.system.home"
+            ],
+            "actions": [
+              "action.system.home"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

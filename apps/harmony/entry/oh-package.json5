@@ -1,0 +1,12 @@
+{
+  // entry 模块（HAP 壳）：UI 与平台能力；纯逻辑一律走 @memex/core。
+  "name": "entry",
+  "version": "0.1.0",
+  "description": "鸿蒙手机版 HAP 壳：R17 向导/R18 登录门禁/会话列表/单聊群聊收发/三级通知",
+  "main": "",
+  "author": "memex",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@memex/core": "file:../core"
+  }
+}

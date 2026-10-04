@@ -1,0 +1,11 @@
+{
+  // 应用级配置（bundle 名对齐 apps/android 的 com.memex.im 命名空间）。
+  // icon/label 未引用资源文件（本机无 OHOS SDK 无资产管线，编译腿待
+  // OHOS runner 后由 DevEco 生成默认图标并回填）。
+  "app": {
+    "bundleName": "com.memex.im.harmony",
+    "vendor": "memex",
+    "versionCode": 1000000,
+    "versionName": "0.1.0"
+  }
+}

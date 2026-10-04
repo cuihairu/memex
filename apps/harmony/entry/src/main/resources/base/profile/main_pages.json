@@ -1,0 +1,11 @@
+{
+  // 页面路由表：Index 为唯一 launcher 入口（守卫页），其余按 RouteGuard/
+  // InitGate 与用户操作跳转（对齐 Android 单一 MainActivity 入口口径）。
+  "src": [
+    "pages/Index",
+    "pages/InitPage",
+    "pages/LoginPage",
+    "pages/MainPage",
+    "pages/ChatPage"
+  ]
+}
