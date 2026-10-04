@@ -331,4 +331,79 @@ bool LocalStore::update_user_quota(const QString& uid, qint64 used_bytes) {
   return true;
 }
 
+// —— R23-3 文件助手（备忘录+文件传输，内网）客户端基础
+// 统一收件箱：备忘录文本 + 文件传输记录，仅本人可见
+// 外网来的文件需在内网人工转发后方可记录
+
+struct FwHelperRecord {
+  int64_t id{0};
+  QString owner;
+  QString memo_text;
+  QString file_hash;
+  qint64 file_size{0};
+  QString object_key;
+  int64_t upload_ts{0};
+  int status{0}; // 0=normal、1=forwarded、2=expired
+};
+
+bool LocalStore::add_helper_record(const QString& owner, const QString& memo_text,
+                                   const QString& file_hash, qint64 file_size,
+                                   const QString& object_key) {
+  if (!open_) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "INSERT OR IGNORE INTO helper_records"
+      " (owner, memo_text, file_hash, file_size, object_key, upload_ts, status)"
+      " VALUES (?, ?, ?, ?, ?, ?, ?)"));
+  q.bindValue(0, owner);
+  q.bindValue(1, memo_text);
+  q.bindValue(2, file_hash);
+  q.bindValue(3, file_size);
+  q.bindValue(4, object_key);
+  q.bindValue(5, QDateTime::currentMSecsSinceEpoch());
+  q.bindValue(6, static_cast<int>(0)); // status: 0=normal
+  if (!q.exec()) {
+    qWarning() << "[本地库] 写入文件助手记录失败：" << q.lastError().text();
+    return false;
+  }
+  return true;
+}
+
+QList<QSqlRecord> LocalStore::helper_list(const QString& owner) const {
+  if (!open_) return QList<QSqlRecord>();
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral("SELECT * FROM helper_records WHERE owner = ? ORDER BY upload_ts DESC"));
+  q.addBindValue(owner);
+  if (!q.exec()) {
+    qWarning() << "[本地库] 查询文件助手记录失败：" << q.lastError().text();
+    return QList<QSqlRecord>();
+  }
+  QList<QSqlRecord> out;
+  while (q.next()) out.append(q.record());
+  return out;
+}
+
+bool LocalStore::mark_helper_read(const QString& record_id) {
+  if (!open_) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral("UPDATE helper_records SET status = 1 WHERE id = ?"));
+  q.bindValue(0, record_id);
+  if (!q.exec()) {
+    qWarning() << "[本地库] 标记助手记录已读失败：" << q.lastError().text();
+    return false;
+  }
+  return q.numRowsAffected() > 0;
+}
+
+bool LocalStore::mark_helper_deleted(const QString& record_id) {
+  if (!open_) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral("DELETE FROM helper_records WHERE id = ?"));
+  if (!q.exec()) {
+    qWarning() << "[本地库] 删除助手记录失败：" << q.lastError().text();
+    return false;
+  }
+  return q.numRowsAffected() > 0;
+}
+
 } // namespace memex::client
