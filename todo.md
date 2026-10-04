@@ -132,6 +132,7 @@
   受阻（2026-10-04 环境探测）：`hvigor`／`hdc`／`ohpm` 均 NOT FOUND，未检出 OHOS SDK 与 DevEco Studio 目录；签名证书、真机亦无。三项依赖（工具链＋证书＋真机）齐备前无法开工，解锁后即启动。（原随本项落地的 R17／R18、T4.8、手机端通知规则已按 2026-10-04 用户令改由 Android／iOS 承载，见 T6.3／T6.4。）
 - [~] T6.3 **Android 手机端（排前，手机端第一优先）**：`apps/android` 从零（Kotlin），对齐桌面端功能面——登录（R17 初始化向导设服务器地址＋连通校验、R18 无匿名入口，随本块落地）、会话列表、单聊／群聊收发、消息推送横幅＋震动（对齐桌面端三级通知语义：普通站内／重要横幅强提醒／紧急横幅需确认）、移动端适配。
   验收：功能面＝登录／会话／收发／消息推送横幅震动对齐桌面端；**做完一块提交推送一块**（path-scoped，测试全绿后推）。
+  进展（2026-10-04 第一块·工程骨架＋登录块）：Gradle 8.14.3＋AGP 8.13.1＋Kotlin 2.2.21，`com.memex.im`；协议单一事实源跨目录引 `common/proto/memex.proto`（protoc 4.31.1 lite 代码生成，与 C++ 线格式一致）；core 纯 Kotlin（ServerAddress 解析、FrameCodec 对齐 frame.cpp、RouteGuard/InitGate 守卫、MemexClient 探测/登录）；UI 三面（Init/Login/Main，唯一 launcher 经守卫）；单测 39/39 绿＋debug/release 双 APK 产出。走查与 R17/R18 收口详见 T4.8 进展笔；下一块：会话列表与收发。
 - [~] T6.4 **iOS 手机端（进行中：代码-only＋CI 验证）**：`apps/ios` 从零（Swift／SwiftUI）——登录、会话列表、单聊／群聊收发、消息推送（APNs 横幅／震动，对齐桌面端三级通知语义；R17／R18 手机端规则同）、移动端适配。
   验收（2026-10-04 用户令）：本机无 iOS 环境，**只写代码不做本地验证**；构建＋测试全走 GitHub Actions macOS runner（swift build／test 腿），红了修到绿。
 - [ ] 其他手机端（鸿蒙手机版等，2026-10-04 用户令）：排在 Android／iOS 之后；只写代码不本地验证，验证走 CI 可用平台。注：早前「手机端只做 Android、iOS 不做」口径已被后两道令覆盖——最终口径＝Android 排前、iOS 进行中（代码-only＋CI）、其他排后（代码-only＋CI）。
