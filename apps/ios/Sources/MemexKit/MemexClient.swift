@@ -101,9 +101,8 @@ public final class MemexClient {
             while true {
                 let reply = try wire.readEnvelope()
                 if reply.type == .loginResult {
-                    guard let r = reply.loginResult else {
-                        return .notMemex(detail: "LOGIN_RESULT 缺载荷")
-                    }
+                    // oneof 便捷访问器非 Optional（未设置时返回空实例）
+                    let r = reply.loginResult
                     if r.ok {
                         return .success(displayName: r.displayName.isEmpty ? account : r.displayName)
                     }
@@ -114,7 +113,13 @@ public final class MemexClient {
                 }
             }
         } catch {
-            return classify(error: error)
+            // 复用探测归类再映射到登录结果（错误路径不会出现 .ok）
+            switch classify(error: error) {
+            case let .unreachable(d): return .unreachable(detail: d)
+            case let .timeout(d): return .timeout(detail: d)
+            case let .notMemex(d): return .notMemex(detail: d)
+            case .ok: return .notMemex(detail: "不可达")
+            }
         }
     }
 

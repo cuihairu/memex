@@ -107,10 +107,9 @@ public final class ChatSession {
             while true {
                 let reply = try w.readEnvelope()
                 if reply.type == .loginResult {
-                    guard let r = reply.loginResult else {
-                        safeClose()
-                        return .notMemex(detail: "LOGIN_RESULT 缺载荷")
-                    }
+                    // oneof 便捷访问器非 Optional（未设置时返回空实例）；
+                    // 线上 LOGIN_RESULT 必带载荷，空载荷即按拒绝处理
+                    let r = reply.loginResult
                     if !r.ok {
                         safeClose()
                         return .rejected(reason: r.reason.isEmpty ? "登录被拒绝" : r.reason)
@@ -204,12 +203,8 @@ public final class ChatSession {
                 case .ack:
                     onAck(env)
                 case .kick:
-                    let reason: String
-                    if let kick = env.kick, !kick.reason.isEmpty {
-                        reason = kick.reason
-                    } else {
-                        reason = "账号已在其他设备登录"
-                    }
+                    let reason = env.kick.reason.isEmpty
+                        ? "账号已在其他设备登录" : env.kick.reason
                     dispatch { [weak self] in
                         self?.listener?.onKicked(reason: reason)
                     }
@@ -231,7 +226,8 @@ public final class ChatSession {
     }
 
     private func onIncomingText(_ env: Memex_Protocol_V1_Envelope) {
-        guard let text = env.text else { return }
+        // proto3 空串与未设置同线格式，TEXT 缺载荷即空消息
+        let text = env.text
         // 群消息 peer=to 的 "group:N"；单聊 peer=from（对齐桌面 collab_engine）
         let peer = env.to.hasPrefix("group:") ? env.to : env.from
         let inserted = store.append(
