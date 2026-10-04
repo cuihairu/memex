@@ -219,4 +219,116 @@ bool LocalStore::mark_recalled(const std::string& msg_id) {
   return q.numRowsAffected() > 0;
 }
 
+// —— R23-2 群文件 + 个人文件（内网全功能）客户端基础
+// 文件增删改查与配额操作，均落地本地 SQLite（元数据层）；
+// 对象存储交互通过 memex server 完成，客户端仅管理本地记录。
+
+bool LocalStore::add_file(const QString& owner, const QString& belong_gid,
+                          const QString& belong_uid, const QString& file_name,
+                          qint64 file_size, const QString& file_hash,
+                          const QString& object_key, const QString& source) {
+  if (!open_) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "INSERT OR IGNORE INTO files"
+      " (owner, belong_gid, belong_uid, file_name, file_size, file_hash,"
+      " object_key, source, upload_ts, status)"
+      " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+  q.bindValue(0, owner);
+  q.bindValue(1, belong_gid);
+  q.bindValue(2, belong_uid);
+  q.bindValue(3, file_name);
+  q.bindValue(4, file_size);
+  q.bindValue(5, file_hash);
+  q.bindValue(6, object_key);
+  q.bindValue(7, source);
+  q.bindValue(8, QDateTime::currentMSecsSinceEpoch());
+  q.bindValue(9, static_cast<int>(0)); // status: 0=normal
+  if (!q.exec()) {
+    qWarning() << "[本地库] 写入文件记录失败：" << q.lastError().text();
+    return false;
+  }
+  return true;
+}
+
+QList<QSqlRecord> LocalStore::file_list(const QString& owner,
+                                        const QString& belong_gid) const {
+  if (!open_) return QList<QSqlRecord>();
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  if (!belong_gid.isEmpty()) {
+    q.prepare(QStringLiteral(
+        "SELECT * FROM files WHERE owner = ? AND belong_gid = ?"));
+    q.addBindValue(owner);
+    q.addBindValue(belong_gid);
+  } else {
+    q.prepare(QStringLiteral("SELECT * FROM files WHERE owner = ?"));
+    q.addBindValue(owner);
+  }
+  if (!q.exec()) {
+    qWarning() << "[本地库] 查询文件列表失败：" << q.lastError().text();
+    return QList<QSqlRecord>();
+  }
+  QList<QSqlRecord> out;
+  while (q.next()) out.append(q.record());
+  return out;
+}
+
+bool LocalStore::update_group_quota(const QString& gid, qint64 used_bytes) {
+  if (!open_) return false;
+  // 先取旧值
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral("SELECT used_bytes FROM group_quota WHERE gid = ?"));
+  q.addBindValue(gid);
+  if (!q.exec() || !q.next()) {
+    // 无记录则新增
+    QSqlQuery ins(QSqlDatabase::database(connection_name_));
+    ins.prepare(QStringLiteral(
+        "INSERT INTO group_quota (gid, used_bytes) VALUES (?, ?)"));
+    ins.bindValue(0, gid);
+    ins.bindValue(1, used_bytes);
+    if (!ins.exec()) {
+      qWarning() << "[本地库] 写入群配额失败：" << q.lastError().text();
+      return false;
+    }
+    return true;
+  }
+  q.prepare(QStringLiteral(
+      "UPDATE group_quota SET used_bytes = ? WHERE gid = ?"));
+  q.addBindValue(used_bytes);
+  q.addBindValue(gid);
+  if (!q.exec()) {
+    qWarning() << "[本地库] 更新群配额失败：" << q.lastError().text();
+    return false;
+  }
+  return true;
+}
+
+bool LocalStore::update_user_quota(const QString& uid, qint64 used_bytes) {
+  if (!open_) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral("SELECT used_bytes FROM user_quota WHERE uid = ?"));
+  q.addBindValue(uid);
+  if (!q.exec() || !q.next()) {
+    QSqlQuery ins(QSqlDatabase::database(connection_name_));
+    ins.prepare(QStringLiteral(
+        "INSERT INTO user_quota (uid, used_bytes) VALUES (?, ?)"));
+    ins.bindValue(0, uid);
+    ins.bindValue(1, used_bytes);
+    if (!ins.exec()) {
+      qWarning() << "[本地库] 写入用户配额失败：" << q.lastError().text();
+      return false;
+    }
+    return true;
+  }
+  q.prepare(QStringLiteral(
+      "UPDATE user_quota SET used_bytes = ? WHERE uid = ?"));
+  q.addBindValue(used_bytes);
+  q.addBindValue(uid);
+  if (!q.exec()) {
+    qWarning() << "[本地库] 更新用户配额失败：" << q.lastError().text();
+    return false;
+  }
+  return true;
+}
+
 } // namespace memex::client
