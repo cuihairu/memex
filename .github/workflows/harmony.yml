@@ -1,0 +1,45 @@
+# 鸿蒙手机版 CI：纯逻辑层 Node 单测（ubuntu 全绿）。
+#
+# 验证口径（apps/harmony/README.md 详述）：
+# - core 纯 TS 层在 Node 22 下全量单测——wire 与 protobufjs（加载
+#   common/proto/memex.proto 单一事实源）双向字节交叉验证、帧编解码镜像
+#   client/core frame.cpp、假服务端全链路会话（登录/收发/ACK/去重/KICK/
+#   三级通知/探测）。这层就是「线格式与桌面端字节级一致」的机器背书。
+# - ArkTS 编译腿（hvigor 构建 entry HAP）待 OHOS runner 与 SDK 可用后补：
+#   本仓库无可用 HarmonyOS 构建环境，不在此伪造编译通过（工程级/模块级
+#   hvigor 配置与 ohpm 依赖已就位，见 apps/harmony）。
+name: harmony
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/harmony/**'
+      - 'common/proto/**'
+      - '.github/workflows/harmony.yml'
+  pull_request:
+    paths:
+      - 'apps/harmony/**'
+      - 'common/proto/**'
+      - '.github/workflows/harmony.yml'
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/harmony/package-lock.json
+
+      - name: 安装依赖（含 devDependencies 与锁文件一致）
+        working-directory: apps/harmony
+        run: npm ci
+
+      - name: 构建（tsc strict）并跑全量单测
+        working-directory: apps/harmony
+        run: npm test

@@ -1,0 +1,12 @@
+node_modules/
+dist-test/
+oh_modules/
+.ohpm/
+.hvigor/
+build/
+entry/build/
+entry/.cxx/
+core/build/
+*.hap
+*.har
+local.properties

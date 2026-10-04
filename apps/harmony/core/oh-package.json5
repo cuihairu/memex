@@ -1,0 +1,11 @@
+{
+  // 纯逻辑库（har）：Node 单测与 ArkTS 壳共用。entry 通过本地依赖
+  // "@memex/core": "file:../core" 引用（ohpm 本地包模型）。
+  "name": "@memex/core",
+  "version": "0.1.0",
+  "description": "鸿蒙手机版纯逻辑层：协议 wire 编解码/帧编解码/地址解析/会话存储/长连接会话/探测登录",
+  "main": "./index.ets",
+  "author": "memex",
+  "license": "UNLICENSED",
+  "devDependencies": {}
+}

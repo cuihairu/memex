@@ -1,0 +1,15 @@
+{
+  "name": "memex-harmony",
+  "version": "0.1.0",
+  "private": true,
+  "description": "鸿蒙手机版客户端代码库：core 纯逻辑（Node 可测）＋ HarmonyOS NEXT ArkTS 壳。编译腿待 OHOS runner 后由 hvigor 负责，本包只管 CI 可跑的逻辑单测。",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"dist-test/test/*.test.js\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "protobufjs": "^7.4.0",
+    "typescript": "^5.6.0"
+  }
+}

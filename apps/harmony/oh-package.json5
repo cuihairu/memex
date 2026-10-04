@@ -1,0 +1,8 @@
+{
+  // 工程级包描述（ohpm 工作区根）。
+  "name": "memex-harmony",
+  "version": "0.1.0",
+  "description": "鸿蒙手机版客户端：entry（HAP 壳）+ core（har 纯逻辑库，Node 可测）",
+  "author": "memex",
+  "license": "UNLICENSED"
+}
