@@ -90,19 +90,19 @@ final class ChatSessionTests: XCTestCase {
         let server = try FakeMemexServer()
         defer { server.close() }
         let seen = DispatchSemaphore(value: 0)
-        var captured: MemexProto_Envelope?
+        var captured: Memex_Protocol_V1_Envelope?
         let captureLock = NSLock()
         server.onEnvelope = { env, c in
             if env.type == .login {
                 captureLock.lock(); captured = env; captureLock.unlock()
                 seen.signal()
-                server.send(c, MemexProto_Envelope.with { e in
+                server.send(c, Memex_Protocol_V1_Envelope.with { e in
                     e.type = .loginResult
                     e.seq = 1
                     e.from = "server"
                     e.to = env.login?.account ?? ""
                     e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
-                    e.loginResult = MemexProto_LoginResult.with { r in
+                    e.loginResult = Memex_Protocol_V1_LoginResult.with { r in
                         r.ok = true
                         r.displayName = "张三"
                     }
@@ -124,13 +124,13 @@ final class ChatSessionTests: XCTestCase {
         defer { server.close() }
         server.onEnvelope = { env, c in
             if env.type == .login {
-                server.send(c, MemexProto_Envelope.with { e in
+                server.send(c, Memex_Protocol_V1_Envelope.with { e in
                     e.type = .loginResult
                     e.seq = 1
                     e.from = "server"
                     e.to = env.login?.account ?? ""
                     e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
-                    e.loginResult = MemexProto_LoginResult.with { r in
+                    e.loginResult = Memex_Protocol_V1_LoginResult.with { r in
                         r.ok = false
                         r.reason = "账号不存在"
                     }
@@ -145,7 +145,7 @@ final class ChatSessionTests: XCTestCase {
         let server = try FakeMemexServer()
         defer { server.close() }
         let textSeen = DispatchSemaphore(value: 0)
-        var textEnvelope: MemexProto_Envelope?
+        var textEnvelope: Memex_Protocol_V1_Envelope?
         let textLock = NSLock()
         server.onEnvelope = { env, c in
             switch env.type {
@@ -153,7 +153,7 @@ final class ChatSessionTests: XCTestCase {
                 textLock.lock(); textEnvelope = env; textLock.unlock()
                 textSeen.signal()
                 // 服务端受理回执（对齐 session.cpp：ack 带原 seq、to=发送方）
-                server.send(c, MemexProto_Envelope.with { e in
+                server.send(c, Memex_Protocol_V1_Envelope.with { e in
                     e.type = .ack
                     e.seq = env.seq
                     e.from = "server"
@@ -161,13 +161,13 @@ final class ChatSessionTests: XCTestCase {
                     e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
                 })
             case .login:
-                server.send(c, MemexProto_Envelope.with { e in
+                server.send(c, Memex_Protocol_V1_Envelope.with { e in
                     e.type = .loginResult
                     e.seq = 1
                     e.from = "server"
                     e.to = env.login?.account ?? ""
                     e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
-                    e.loginResult = MemexProto_LoginResult.with { r in r.ok = true }
+                    e.loginResult = Memex_Protocol_V1_LoginResult.with { r in r.ok = true }
                 })
             default:
                 break
@@ -202,14 +202,14 @@ final class ChatSessionTests: XCTestCase {
         guard case .ok = outcome else { return XCTFail("期望 .ok，实得 \(outcome)") }
 
         // 带 msg_id 的推送（在线即投 / 离线补投共用同帧）
-        let textFrame = MemexProto_Envelope.with { e in
+        let textFrame = Memex_Protocol_V1_Envelope.with { e in
             e.type = .text
             e.seq = 7
             e.from = "bob"
             e.to = "alice"
             e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
             e.msgID = "sha256:bob:7"
-            e.text = MemexProto_Text.with { $0.text = "在吗" }
+            e.text = Memex_Protocol_V1_Text.with { $0.text = "在吗" }
         }
         let conn = server.lastConnection()!
         server.send(conn, textFrame)
@@ -244,14 +244,14 @@ final class ChatSessionTests: XCTestCase {
         guard case .ok = outcome else { return XCTFail("期望 .ok，实得 \(outcome)") }
 
         let conn = server.lastConnection()!
-        server.send(conn, MemexProto_Envelope.with { e in
+        server.send(conn, Memex_Protocol_V1_Envelope.with { e in
             e.type = .text
             e.seq = 3
             e.from = "bob"
             e.to = "group:9"
             e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
             e.msgID = "g1"
-            e.text = MemexProto_Text.with { $0.text = "群消息" }
+            e.text = Memex_Protocol_V1_Text.with { $0.text = "群消息" }
         })
         wait(listener.onMessage)
         XCTAssertEqual(store.history(peer: "group:9").map { $0.peer }, ["group:9"])
@@ -267,13 +267,13 @@ final class ChatSessionTests: XCTestCase {
         guard case .ok = outcome else { return XCTFail("期望 .ok，实得 \(outcome)") }
 
         let conn = server.lastConnection()!
-        server.send(conn, MemexProto_Envelope.with { e in
+        server.send(conn, Memex_Protocol_V1_Envelope.with { e in
             e.type = .kick
             e.seq = 2
             e.from = "server"
             e.to = "alice"
             e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
-            e.kick = MemexProto_Kick.with { k in
+            e.kick = Memex_Protocol_V1_Kick.with { k in
                 k.reason = "账号已在其他设备登录"
                 k.replacedBy = "Pixel 9"
             }

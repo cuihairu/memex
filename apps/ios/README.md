@@ -25,7 +25,7 @@ brew install protobuf swift-protobuf xcodegen
 
 # 2) 协议生成（单一事实源 common/proto/memex.proto）
 mkdir -p Sources/MemexKit/Proto
-protoc --swift_opt=PackageName=MemexProto --swift_opt=Visibility=Public \
+protoc --swift_opt=Visibility=Public \
   --swift_out=Sources/MemexKit/Proto ../../common/proto/memex.proto
 
 # 3) 核心逻辑测试

@@ -26,7 +26,7 @@ jobs:
       - name: Generate protocol Swift sources from proto single source of truth
         run: |
           mkdir -p apps/ios/Sources/MemexKit/Proto
-          protoc --swift_opt=PackageName=MemexProto --swift_opt=Visibility=Public \
+          protoc --swift_opt=Visibility=Public \
             --swift_out=apps/ios/Sources/MemexKit/Proto common/proto/memex.proto
 
       - name: Swift package tests (core)

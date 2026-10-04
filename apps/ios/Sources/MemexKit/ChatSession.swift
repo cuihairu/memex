@@ -88,13 +88,13 @@ public final class ChatSession {
             lock.lock()
             wire = w
             lock.unlock()
-            try w.send(MemexProto_Envelope.with { e in
+            try w.send(Memex_Protocol_V1_Envelope.with { e in
                 e.type = .login
                 e.seq = 1
                 e.from = account
                 e.to = "server"
                 e.tsMs = nowMs
-                e.login = MemexProto_Login.with { l in
+                e.login = Memex_Protocol_V1_Login.with { l in
                     l.account = account
                     l.password = password
                     l.deviceFingerprint = deviceFingerprint
@@ -145,13 +145,13 @@ public final class ChatSession {
         lock.unlock()
         let ts = nowMs
         do {
-            try w.send(MemexProto_Envelope.with { e in
+            try w.send(Memex_Protocol_V1_Envelope.with { e in
                 e.type = .text
                 e.seq = seq
                 e.from = account
                 e.to = to
                 e.tsMs = ts
-                e.text = MemexProto_Text.with { $0.text = text }
+                e.text = Memex_Protocol_V1_Text.with { $0.text = text }
             })
         } catch {
             notifyDisconnect(cause: "发送失败")
@@ -177,7 +177,7 @@ public final class ChatSession {
         let wasClosed = closed
         lock.unlock()
         if let w, !wasClosed {
-            try? w.send(MemexProto_Envelope.with { e in
+            try? w.send(Memex_Protocol_V1_Envelope.with { e in
                 e.type = .logout
                 e.seq = nextSeq()
                 e.from = account
@@ -230,7 +230,7 @@ public final class ChatSession {
         }
     }
 
-    private func onIncomingText(_ env: MemexProto_Envelope) {
+    private func onIncomingText(_ env: Memex_Protocol_V1_Envelope) {
         guard let text = env.text else { return }
         // 群消息 peer=to 的 "group:N"；单聊 peer=from（对齐桌面 collab_engine）
         let peer = env.to.hasPrefix("group:") ? env.to : env.from
@@ -244,13 +244,13 @@ public final class ChatSession {
         // 已收取回执（msg_id 非空即回；离线补投去重后照回 ACK——服务端按
         // 账号清离线队列，重复 ACK 无害）
         if !env.msgID.isEmpty, let w = wire {
-            try? w.send(MemexProto_Envelope.with { e in
+            try? w.send(Memex_Protocol_V1_Envelope.with { e in
                 e.type = .ack
                 e.seq = nextSeq()
                 e.from = account
                 e.to = "server"
                 e.tsMs = nowMs
-                e.ack = MemexProto_Ack.with { $0.msgID = env.msgID }
+                e.ack = Memex_Protocol_V1_Ack.with { $0.msgID = env.msgID }
             })
         }
         if inserted {
@@ -260,7 +260,7 @@ public final class ChatSession {
         }
     }
 
-    private func onAck(_ env: MemexProto_Envelope) {
+    private func onAck(_ env: Memex_Protocol_V1_Envelope) {
         guard env.seq != 0 else { return }
         dispatch { [weak self] in
             self?.listener?.onSent(seq: env.seq)

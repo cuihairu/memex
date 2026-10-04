@@ -47,7 +47,7 @@ public final class MemexClient {
                 connectTimeoutMs: connectTimeoutMs, readTimeoutMs: readTimeoutMs
             )
             defer { wire.close() }
-            try wire.send(MemexProto_Envelope.with { e in
+            try wire.send(Memex_Protocol_V1_Envelope.with { e in
                 e.type = .ping
                 e.seq = 1
                 e.from = "mobile-setup"
@@ -79,13 +79,13 @@ public final class MemexClient {
                 connectTimeoutMs: connectTimeoutMs, readTimeoutMs: readTimeoutMs
             )
             defer { wire.close() }
-            try wire.send(MemexProto_Envelope.with { e in
+            try wire.send(Memex_Protocol_V1_Envelope.with { e in
                 e.type = .login
                 e.seq = 1
                 e.from = account
                 e.to = "server"
                 e.tsMs = nowMs
-                e.login = MemexProto_Login.with { l in
+                e.login = Memex_Protocol_V1_Login.with { l in
                     l.account = account
                     l.password = password
                     l.deviceFingerprint = deviceFingerprint

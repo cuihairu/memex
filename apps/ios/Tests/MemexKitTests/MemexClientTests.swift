@@ -14,7 +14,7 @@ final class MemexClientTests: XCTestCase {
         defer { server.close() }
         server.onEnvelope = { env, c in
             if env.type == .ping {
-                server.send(c, MemexProto_Envelope.with { e in
+                server.send(c, Memex_Protocol_V1_Envelope.with { e in
                     e.type = .pong
                     e.seq = 1
                     e.from = "server"
@@ -34,13 +34,13 @@ final class MemexClientTests: XCTestCase {
         server.onEnvelope = { env, c in
             if env.type == .ping {
                 // 应答类型不符：不是 PONG
-                server.send(c, MemexProto_Envelope.with { e in
+                server.send(c, Memex_Protocol_V1_Envelope.with { e in
                     e.type = .loginResult
                     e.seq = 1
                     e.from = "server"
                     e.to = env.from
                     e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
-                    e.loginResult = MemexProto_LoginResult.with { r in r.ok = true }
+                    e.loginResult = Memex_Protocol_V1_LoginResult.with { r in r.ok = true }
                 })
             }
         }
@@ -53,13 +53,13 @@ final class MemexClientTests: XCTestCase {
         defer { server.close() }
         server.onEnvelope = { env, c in
             if env.type == .login {
-                server.send(c, MemexProto_Envelope.with { e in
+                server.send(c, Memex_Protocol_V1_Envelope.with { e in
                     e.type = .loginResult
                     e.seq = 1
                     e.from = "server"
                     e.to = env.login?.account ?? ""
                     e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
-                    e.loginResult = MemexProto_LoginResult.with { r in
+                    e.loginResult = Memex_Protocol_V1_LoginResult.with { r in
                         r.ok = false
                         r.reason = "账号不存在"
                     }

@@ -58,7 +58,7 @@ final class Wire {
         closeFD(fd)
     }
 
-    func send(_ message: MemexProto_Envelope) throws {
+    func send(_ message: Memex_Protocol_V1_Envelope) throws {
         let payload = try message.serializedData()
         let frame = try FrameCodec.encode(Array(payload))
         sendLock.lock()
@@ -79,7 +79,7 @@ final class Wire {
 
     /// 读一帧并解析；超时抛 timedOut，对端关闭抛 closedByPeer，
     /// 帧/载荷非法抛 ProtocolViolation。
-    func readEnvelope() throws -> MemexProto_Envelope {
+    func readEnvelope() throws -> Memex_Protocol_V1_Envelope {
         while pending.isEmpty {
             if readTimeoutMs > 0 {
                 try waitReadable(timeoutMs: readTimeoutMs)
@@ -99,7 +99,7 @@ final class Wire {
             }
             pending.append(contentsOf: result.frames)
         }
-        return try MemexProto_Envelope(serializedData: pending.removeFirst())
+        return try Memex_Protocol_V1_Envelope(serializedData: pending.removeFirst())
     }
 
     private func waitReadable(timeoutMs: Int) throws {

@@ -13,12 +13,12 @@ final class FakeMemexServer {
     let port: Int
     private let listenFd: Int32
     private let lock = NSLock()
-    private(set) var received: [MemexProto_Envelope] = []
-    private(set) var sent: [MemexProto_Envelope] = []
+    private(set) var received: [Memex_Protocol_V1_Envelope] = []
+    private(set) var sent: [Memex_Protocol_V1_Envelope] = []
     private(set) var connections: [Int32] = []
     private var running = true
     /// 每帧应答钩子（nil=默认：LOGIN→LOGIN_RESULT ok）
-    var onEnvelope: ((MemexProto_Envelope, Int32) -> Void)?
+    var onEnvelope: ((Memex_Protocol_V1_Envelope, Int32) -> Void)?
 
     init() throws {
         listenFd = socket(AF_INET, SOCK_STREAM, 0)
@@ -74,7 +74,7 @@ final class FakeMemexServer {
             if n <= 0 { break }
             let res = decoder.feed(Array(buf[0..<n]))
             for frame in res.frames {
-                guard let env = try? MemexProto_Envelope(serializedData: frame) else { continue }
+                guard let env = try? Memex_Protocol_V1_Envelope(serializedData: frame) else { continue }
                 lock.lock()
                 received.append(env)
                 lock.unlock()
@@ -83,7 +83,7 @@ final class FakeMemexServer {
         }
     }
 
-    private func respond(_ env: MemexProto_Envelope, conn: Int32) {
+    private func respond(_ env: Memex_Protocol_V1_Envelope, conn: Int32) {
         if let handler = onEnvelope {
             handler(env, conn)
             return
@@ -93,14 +93,14 @@ final class FakeMemexServer {
         }
     }
 
-    func loginOk(to: String, ok: Bool = true, reason: String = "") -> MemexProto_Envelope {
-        MemexProto_Envelope.with { e in
+    func loginOk(to: String, ok: Bool = true, reason: String = "") -> Memex_Protocol_V1_Envelope {
+        Memex_Protocol_V1_Envelope.with { e in
             e.type = .loginResult
             e.seq = 1
             e.from = "server"
             e.to = to
             e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
-            e.loginResult = MemexProto_LoginResult.with { r in
+            e.loginResult = Memex_Protocol_V1_LoginResult.with { r in
                 r.ok = ok
                 r.reason = reason
                 r.displayName = ok ? "张三" : ""
@@ -108,7 +108,7 @@ final class FakeMemexServer {
         }
     }
 
-    func send(_ conn: Int32, _ env: MemexProto_Envelope) {
+    func send(_ conn: Int32, _ env: Memex_Protocol_V1_Envelope) {
         lock.lock()
         sent.append(env)
         lock.unlock()
