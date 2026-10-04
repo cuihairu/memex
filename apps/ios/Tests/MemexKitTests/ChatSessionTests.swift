@@ -100,7 +100,7 @@ final class ChatSessionTests: XCTestCase {
                     e.type = .loginResult
                     e.seq = 1
                     e.from = "server"
-                    e.to = env.login?.account ?? ""
+                    e.to = env.login.account
                     e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
                     e.loginResult = Memex_Protocol_V1_LoginResult.with { r in
                         r.ok = true
@@ -115,8 +115,8 @@ final class ChatSessionTests: XCTestCase {
         guard case .ok = outcome else { return XCTFail("期望 .ok，实得 \(outcome)") }
         let login = captureLock.withLock { captured }!
         XCTAssertEqual(login.type, .login)
-        XCTAssertEqual(login.login?.account, "alice")
-        XCTAssertEqual(login.login?.deviceKind, "mobile")
+        XCTAssertEqual(login.login.account, "alice")
+        XCTAssertEqual(login.login.deviceKind, "mobile")
     }
 
     func testLoginRejectedClosesAndKeepsReason() throws {
@@ -128,7 +128,7 @@ final class ChatSessionTests: XCTestCase {
                     e.type = .loginResult
                     e.seq = 1
                     e.from = "server"
-                    e.to = env.login?.account ?? ""
+                    e.to = env.login.account
                     e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
                     e.loginResult = Memex_Protocol_V1_LoginResult.with { r in
                         r.ok = false
@@ -165,7 +165,7 @@ final class ChatSessionTests: XCTestCase {
                     e.type = .loginResult
                     e.seq = 1
                     e.from = "server"
-                    e.to = env.login?.account ?? ""
+                    e.to = env.login.account
                     e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
                     e.loginResult = Memex_Protocol_V1_LoginResult.with { r in r.ok = true }
                 })
@@ -188,7 +188,7 @@ final class ChatSessionTests: XCTestCase {
         XCTAssertEqual(env.seq, seq)
         XCTAssertEqual(env.from, "alice")
         XCTAssertEqual(env.to, "bob")
-        XCTAssertEqual(env.text?.text, "你好")
+        XCTAssertEqual(env.text.text, "你好")
         XCTAssertEqual(listener.sentSeqs, [seq])
     }
 
@@ -217,11 +217,11 @@ final class ChatSessionTests: XCTestCase {
 
         // 已回 ACK(msg_id)
         let ackFrame = server.received.first { $0.type == .ack }
-        XCTAssertEqual(ackFrame?.ack?.msgID, "sha256:bob:7")
+        XCTAssertEqual(ackFrame?.ack.msgID, "sha256:bob:7")
         XCTAssertEqual(ackFrame?.to, "server")
 
         // 落库且已回调
-        XCTAssertEqual(listener.messages.map { ($0.peer, $0.msgId) }, [("bob", "sha256:bob:7")])
+        XCTAssertEqual(listener.messages.map { "\($0.peer):\($0.msgId)" }, ["bob:sha256:bob:7"])
         let hist = store.history(peer: "bob")
         XCTAssertEqual(hist.count, 1)
         XCTAssertEqual(hist[0].text, "在吗")

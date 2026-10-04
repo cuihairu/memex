@@ -60,6 +60,7 @@ public protocol ChatStore: AnyObject {
     func append(_ msg: StoredMessage) -> Bool
 
     /// 某会话的本地历史：最近 limit 条按时间正序（聊天窗渲染方向）。
+    /// （协议要求不设默认参数，便捷调用走下方 extension。）
     func history(peer: String, limit: Int) -> [StoredMessage]
 
     /// 会话列表：有历史的对端按最近消息时间倒序（含未读数）。
@@ -74,6 +75,11 @@ public protocol ChatStore: AnyObject {
 
     /// 本端单调 seq（服务端起源消息用的本地序号分配，对齐桌面 next_local_seq）。
     func nextLocalSeq(_ from: String) -> Int64
+}
+
+public extension ChatStore {
+    /// 便捷调用：默认最近 200 条（协议要求不能带默认参数，放 extension）。
+    func history(peer: String) -> [StoredMessage] { history(peer: peer, limit: 200) }
 }
 
 /// 内存实现：单测与 App 首块用；与 SQLite 实现共用全部聚合/去重逻辑口径。

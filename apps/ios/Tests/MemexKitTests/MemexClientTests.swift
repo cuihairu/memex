@@ -57,7 +57,7 @@ final class MemexClientTests: XCTestCase {
                     e.type = .loginResult
                     e.seq = 1
                     e.from = "server"
-                    e.to = env.login?.account ?? ""
+                    e.to = env.login.account
                     e.tsMs = Int64(Date().timeIntervalSince1970 * 1000)
                     e.loginResult = Memex_Protocol_V1_LoginResult.with { r in
                         r.ok = false

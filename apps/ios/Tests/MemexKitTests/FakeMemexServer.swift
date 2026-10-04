@@ -89,7 +89,7 @@ final class FakeMemexServer {
             return
         }
         if env.type == .login {
-            send(conn, loginOk(to: env.login?.account ?? ""))
+            send(conn, loginOk(to: env.login.account))
         }
     }
 
