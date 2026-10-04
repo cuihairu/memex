@@ -579,6 +579,11 @@ void ScreenshotTool::showOverlays() {
             &ScreenshotTool::onOverlayEscape);
     overlays_.append(ov);
     ov->show();
+    // 部分 WM（Wayland/XWayland、焦点防抢策略）不吃 StaysOnTop 也不给
+    // 新窗焦点——show 后不抬不改焦，遮罩压在主窗后面＝「点截图没反应」
+    // （BUG-001）；逐屏 raise、末屏才 activateWindow（多次激活抢焦点闪烁）
+    ov->raise();
+    if (s == QGuiApplication::screens().last()) ov->activateWindow();
     ov->setFocus();
   }
 }

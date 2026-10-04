@@ -313,4 +313,25 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(theme PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
+
+  # BUG-001/002/003 聊天窗三入口点击验收：截图/发文件无会话守卫入状态栏、
+  # 表情全链（面板弹出→内置表情落输入框→面板自关）；链接面同 test_theme
+  add_executable(test_chat_actions
+    tests/test_chat_actions.cpp
+    app/main_window.cpp
+    app/file_assistant.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
+    app/theme.cpp
+    app/theme_settings_page.cpp)
+  target_include_directories(test_chat_actions PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_chat_actions PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+  add_test(NAME chat_actions COMMAND test_chat_actions)
+  set_tests_properties(chat_actions PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
 endif()

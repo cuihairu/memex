@@ -820,9 +820,14 @@ void MainWindow::show_emoji_panel() {
     auto* b = new QPushButton(e, dlg);
     b->setFixedSize(34, 34);
     b->setStyleSheet(QStringLiteral("QPushButton{border:none;font-size:18px;}"));
-    connect(b, &QPushButton::clicked, this, [this, e, dlg, &settings] {
+    connect(b, &QPushButton::clicked, this, [this, e, dlg] {
       input_box_->insert(e);
       input_box_->setFocus();
+      // QSettings 不可拷贝，原实现按引用捕获 show_emoji_panel 的栈对象——
+      // 面板常驻期间该引用已悬垂，点内置表情即 UB（BUG-003 排查抓到）；
+      // 用时重建（组织/应用名与建面板排序处同口径）
+      QSettings settings(QCoreApplication::organizationName(),
+                         QCoreApplication::applicationName());
       const QString key = QStringLiteral("emoji_use/") + e;
       settings.setValue(key, settings.value(key, 0).toInt() + 1);
       dlg->close();
@@ -878,7 +883,15 @@ void MainWindow::show_emoji_panel() {
     if (import_emoji(src)) dlg->close(); // 导入失败留下面板＋状态栏报因
   });
   grid->addWidget(imp, row + 1, 0, 1, 4);
+  // 锚定到「表情」按钮正下方并抬窗激活：Qt::Popup 默认位置交给 WM 摆，
+  // 部分环境摆到屏外/父窗后面＝「点表情没反应」（BUG-003）
+  if (emoji_btn_) {
+    dlg->move(
+        emoji_btn_->mapToGlobal(QPoint(0, emoji_btn_->height() + 4)));
+  }
   dlg->show();
+  dlg->raise();
+  dlg->activateWindow();
 }
 
 // —— T4.5 自定义表情：目录与导入 ——
@@ -1000,25 +1013,28 @@ bool MainWindow::direct_send_allowed() {
 }
 
 // —— T4.4 截图与标注 ——
-// 入口口径与「发文件」一致：仅直连单聊可发（群会话与协作会话无文件通道）；
-// 策略闸门（免登录／跨态）同样适用。
-void MainWindow::start_screenshot() {
-  if (current_peer_.isEmpty()) {
-    show_status(QStringLiteral("先选择设备再截图"));
-    return;
-  }
-  if (current_kind_ != QStringLiteral("direct")) {
-    show_status(QStringLiteral(
-        "群会话与协作会话暂不支持截图发送（截图走单聊点对点，同文件口径）"));
-    return;
-  }
-  if (!direct_send_allowed()) return; // T3.4 策略闸门（与文件同口径）
-  screenshot_tool_.start();
-}
+// 截图是本机捕获（BUG-001 用户拍板 2026-10-05）：不设设备/会话前置——
+// 截屏→本地预览/标注→发送到当前会话（直连/协作走既有文件通道）；
+// 落点校验移到发送端：无会话、群会话（文件通道本期仅单聊/协作）才在
+// 确认后拦，策略闸门（免登录／跨态）与「发文件」同口径。
+void MainWindow::start_screenshot() { screenshot_tool_.start(); }
 
-// 截图确认后发送：PNG 临时文件走既有文件通道（与「发文件」同路径）。
+// 截图确认后发送到当前会话：PNG 临时文件走既有文件通道（与「发文件」同路径）。
 void MainWindow::on_screenshot_confirmed(const QString& path) {
-  if (current_kind_ != QStringLiteral("direct") || current_peer_.isEmpty()) return;
+  if (current_peer_.isEmpty() || current_kind_ == QStringLiteral("group") ||
+      current_kind_ == QStringLiteral("dgroup") ||
+      (current_kind_ != QStringLiteral("collab") && !direct_send_allowed())) {
+    // 发送路径的临时文件清理挂在传输结束回调；这里不进传输，自己兜
+    QFile::remove(path);
+    if (current_peer_.isEmpty()) {
+      show_status(QStringLiteral("截图已取消：先选择会话再截图发送"));
+    } else if (current_kind_ == QStringLiteral("group") ||
+               current_kind_ == QStringLiteral("dgroup")) {
+      show_status(QStringLiteral(
+          "群会话暂不支持截图发送（文件通道本期仅单聊/协作）"));
+    }
+    return;
+  }
   const std::string tid =
       direct_engine_.send_file(current_peer_.toStdString(), path);
   if (tid.empty()) {
