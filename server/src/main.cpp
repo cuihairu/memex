@@ -19,6 +19,7 @@
 
 #include "cred.hpp"
 #include "server.hpp"
+#include "storage.hpp"
 #include "store.hpp"
 #include "webhook.hpp"
 
@@ -1080,6 +1081,92 @@ int cmd_webhook(int argc, char** argv, const std::string& db_path) {
   return 2;
 }
 
+// R23-1 RustFS compose 集成面：生成 compose／起停容器／健康检查。
+// 客户端永不直连对象存储——本子命令只管部署编排，不做任何数据面操作。
+int cmd_storage(int argc, char** argv, const std::string& /*db_path*/) {
+  if (argc < 1) {
+    std::cerr << "用法：storage compose [--out 路径] [--data-dir D] "
+                 "[--api-port N] [--console-port N] [--access-key AK] "
+                 "[--secret-key SK]\n"
+              << "      storage up <compose.yml> | down <compose.yml> | "
+                 "health <endpoint> [--timeout 秒]\n";
+    return 2;
+  }
+  const std::string_view sub = argv[0];
+  if (sub == "compose") {
+    std::string out = "rustfs-compose.yml", data_dir = "/var/lib/memex/rustfs";
+    std::string ak = "minioadmin", sk = "minioadmin";
+    int api_port = 9000, console_port = 9001;
+    for (int i = 1; i + 1 < argc; ++i) {
+      const std::string_view opt = argv[i];
+      if (opt == "--out") out = argv[++i];
+      else if (opt == "--data-dir") data_dir = argv[++i];
+      else if (opt == "--api-port") api_port = std::atoi(argv[++i]);
+      else if (opt == "--console-port") console_port = std::atoi(argv[++i]);
+      else if (opt == "--access-key") ak = argv[++i];
+      else if (opt == "--secret-key") sk = argv[++i];
+      else {
+        std::cerr << "未知选项：" << opt << "\n";
+        return 2;
+      }
+    }
+    if (!memex::server::RustFSCompose::write_compose_file(
+            out, data_dir, ak, sk, api_port, console_port)) {
+      std::cerr << "写 compose 失败：" << out << "\n";
+      return 1;
+    }
+    std::cout << "已生成 " << out << "（data=" << data_dir
+              << " api=" << api_port << " console=" << console_port << "）\n"
+              << "注意：rustfs 容器以 uid 10001 运行，起容器前须\n"
+              << "  chown 10001:10001 " << data_dir << "\n"
+              << "下一步：memex_server storage up " << out << "\n";
+    return 0;
+  }
+  if (sub == "up" || sub == "down") {
+    if (argc < 2) {
+      std::cerr << "用法：storage " << sub << " <compose.yml>\n";
+      return 2;
+    }
+    const bool ok = sub == "up"
+                        ? memex::server::RustFSCompose::up(argv[1])
+                        : memex::server::RustFSCompose::down(argv[1]);
+    if (!ok) {
+      std::cerr << "docker compose 失败（宿主须有 docker compose v2）\n";
+      return 1;
+    }
+    std::cout << (sub == "up" ? "已启动" : "已停止") << "（compose："
+              << argv[1] << "）\n";
+    if (sub == "up") {
+      std::cout << "健康检查：memex_server storage health "
+                   "http://127.0.0.1:<api-port>\n";
+    }
+    return 0;
+  }
+  if (sub == "health") {
+    if (argc < 2) {
+      std::cerr << "用法：storage health <endpoint> [--timeout 秒]\n";
+      return 2;
+    }
+    int timeout = 30;
+    for (int i = 2; i + 1 < argc; ++i) {
+      if (std::string_view(argv[i]) == "--timeout") {
+        timeout = std::atoi(argv[++i]);
+      } else {
+        std::cerr << "未知选项：" << argv[i] << "\n";
+        return 2;
+      }
+    }
+    if (!memex::server::RustFSCompose::health_check(argv[1], timeout)) {
+      std::cerr << "健康检查未通过：" << argv[1] << "\n";
+      return 1;
+    }
+    std::cout << "健康：" << argv[1] << "\n";
+    return 0;
+  }
+  std::cerr << "未知 storage 子命令：" << sub << "\n";
+  return 2;
+}
+
 int self_test() {
   asio::io_context io;
   asio::ip::tcp::acceptor a(
@@ -1126,6 +1213,7 @@ int main(int argc, char** argv) {
     if (cmd == "org") return cmd_org(sub_argc, sub_argv, db_path);
     if (cmd == "policy") return cmd_policy(sub_argc, sub_argv, db_path);
     if (cmd == "webhook") return cmd_webhook(sub_argc, sub_argv, db_path);
+    if (cmd == "storage") return cmd_storage(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
               << "用法：memex_server [serve [--port N] [--webhook-port N] "
                  "[--db P]] | account add … | "
@@ -1133,7 +1221,8 @@ int main(int argc, char** argv) {
                  "messages [账号] [--keyword K] [--since T] "
                  "[--until T] [--limit N] [--export 文件] | audit [N] | "
                  "cross [N] | favs <账号> | org … | "
-                 "webhook create|list|revoke | --version | --self-test\n";
+                 "webhook create|list|revoke | "
+                 "storage compose|up|down|health | --version | --self-test\n";
     return 2;
   }
   return cmd_serve(0, argv, kDefaultDb);

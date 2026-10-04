@@ -1965,7 +1965,23 @@ std::int64_t ServerStore::create_file_meta(const FileMeta& meta) {
   sqlite3_bind_int64(st, 9, meta.upload_ts);
   sqlite3_bind_int(st, 10, static_cast<int>(meta.status));
   std::int64_t id = 0;
-  if (sqlite3_step(st) == SQLITE_DONE) id = sqlite3_last_insert_rowid(db_);
+  if (sqlite3_step(st) == SQLITE_DONE) {
+    if (sqlite3_changes(db_) > 0) {
+      id = sqlite3_last_insert_rowid(db_);
+    } else {
+      // 秒传键冲突（UNIQUE(file_hash, owner) 已有行）：last_insert_rowid
+      // 会返回连接上上一次无关插入的 rowid，必须回查已有行的 id 返回。
+      sqlite3_finalize(st);
+      const char* lookup = "SELECT id FROM files WHERE file_hash=? AND owner=?;";
+      if (sqlite3_prepare_v2(db_, lookup, -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, meta.file_hash.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, meta.owner.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+          id = sqlite3_column_int64(st, 0);
+        }
+      }
+    }
+  }
   sqlite3_finalize(st);
   return id;
 }

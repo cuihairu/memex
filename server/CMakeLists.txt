@@ -4,6 +4,9 @@ find_package(asio CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(aws-cpp-sdk-s3 CONFIG REQUIRED)
+# storage.cpp 直接消费 aws-cpp-sdk-core 符号（SecureMemClear 等）：部分 vcpkg
+# 安装树里 s3 包不传递 core，按「显式声明依赖」规矩单独 find+链接。
+find_package(aws-cpp-sdk-core CONFIG REQUIRED)
 
 # 服务端核心库：会话、账号、存储、S3 抽象层（测试直链，不起进程）
 add_library(memex_server_core STATIC
@@ -20,7 +23,8 @@ target_link_libraries(memex_server_core PUBLIC
   asio::asio
   OpenSSL::Crypto
   unofficial::sqlite3::sqlite3
-  aws-cpp-sdk-s3)
+  aws-cpp-sdk-s3
+  aws-cpp-sdk-core)
 
 add_executable(memex_server src/main.cpp)
 target_compile_features(memex_server PRIVATE cxx_std_20)
@@ -104,4 +108,18 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_webhook PRIVATE memex_server_core)
   add_test(NAME webhook COMMAND test_webhook)
   set_tests_properties(webhook PROPERTIES TIMEOUT 60)
+
+  # R23-1 存储抽象层验收：文件元数据表、秒传哈希去重、群/人两级配额、
+  # 外网收件箱留痕、RustFS compose 生成契约（纯库级，不涉网/不涉 docker）
+  add_executable(test_files_meta tests/test_files_meta.cpp)
+  target_link_libraries(test_files_meta PRIVATE memex_server_core)
+  add_test(NAME files_meta COMMAND test_files_meta)
+  set_tests_properties(files_meta PROPERTIES TIMEOUT 60)
+
+  # R23-1 真容器集成（默认 SKIP；MEMEX_S3_E2E=1 且宿主有 docker 才全量跑：
+  # RustFS compose up→S3Storage 全接口往返→down）
+  add_executable(test_s3_e2e tests/test_s3_e2e.cpp)
+  target_link_libraries(test_s3_e2e PRIVATE memex_server_core)
+  add_test(NAME s3_e2e COMMAND test_s3_e2e)
+  set_tests_properties(s3_e2e PROPERTIES TIMEOUT 300)
 endif()

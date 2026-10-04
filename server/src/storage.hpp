@@ -52,6 +52,9 @@ class S3Storage {
 
   virtual ~S3Storage() = default;
 
+  // 桶引导（部署时一次；已存在时幂等成功）
+  virtual bool create_bucket() = 0;
+
   // 简单上传（小文件 ≤5MB 建议直传；大文件走分片）
   virtual bool put_object(const std::string& key,
                           const std::string& body,

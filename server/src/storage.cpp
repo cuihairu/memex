@@ -11,8 +11,11 @@
 #include <aws/core/utils/Outcome.h>
 #include <aws/s3/S3Client.h>
 #include <aws/s3/S3ClientConfiguration.h>
+#include <aws/s3/S3Errors.h>
 #include <aws/s3/model/AbortMultipartUploadRequest.h>
 #include <aws/s3/model/CompleteMultipartUploadRequest.h>
+#include <aws/s3/model/CreateBucketRequest.h>
+#include <aws/s3/model/HeadBucketRequest.h>
 #include <aws/s3/model/CreateMultipartUploadRequest.h>
 #include <aws/s3/model/DeleteObjectRequest.h>
 #include <aws/s3/model/DeleteObjectsRequest.h>
@@ -46,6 +49,21 @@ class S3StorageImpl final : public S3Storage {
         client_cfg,
         Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
         false);
+  }
+
+  bool create_bucket() override {
+    // 幂等：已存在直接成功（桶引导在部署时可能被重复调用）
+    Aws::S3::Model::HeadBucketRequest hb;
+    hb.SetBucket(cfg_.bucket);
+    if (client_->HeadBucket(hb).IsSuccess()) return true;
+    Aws::S3::Model::CreateBucketRequest cb;
+    cb.SetBucket(cfg_.bucket);
+    auto outcome = client_->CreateBucket(cb);
+    if (outcome.IsSuccess()) return true;
+    // 兼容层竞态/语义差异：他人已建也视为引导完成（私有部署单凭据场景）
+    const auto t = outcome.GetError().GetErrorType();
+    return t == Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU ||
+           t == Aws::S3::S3Errors::BUCKET_ALREADY_EXISTS;
   }
 
   bool put_object(const std::string& key,
@@ -244,8 +262,12 @@ std::string RustFSCompose::generate_compose(const std::string& data_dir,
                                             int api_port,
                                             int console_port) {
   std::ostringstream oss;
-  oss << "version: '3.8'\n\n"
-      << "services:\n"
+  // 实测 rustfs/rustfs:1.0.1（真容器验证，见 tests/test_s3_e2e）：
+  // - RUSTFS_ADDRESS 必须是「:端口」格式（裸 ":" 会 FATAL Invalid port format）
+  // - healthcheck 命令须是 `rustfs info`（无 admin 子命令）
+  // - 容器以 uid 10001(rustfs) 运行：bind mount 的数据目录须其可写
+  //  （部署时 chown 10001:10001 <data-dir>，否则首写即 FATAL Permission denied）
+  oss << "services:\n"
       << "  rustfs:\n"
       << "    image: rustfs/rustfs:latest\n"
       << "    container_name: memex-rustfs\n"
@@ -253,7 +275,7 @@ std::string RustFSCompose::generate_compose(const std::string& data_dir,
       << "    environment:\n"
       << "      RUSTFS_ACCESS_KEY: \"" << access_key << "\"\n"
       << "      RUSTFS_SECRET_KEY: \"" << secret_key << "\"\n"
-      << "      RUSTFS_ADDRESS: \":\"  # 监听所有接口\n"
+      << "      RUSTFS_ADDRESS: \":9000\"  # 监听所有接口 9000\n"
       << "    ports:\n"
       << "      - \"" << api_port << ":9000\"   # S3 API\n"
       << "      - \"" << console_port << ":9001\" # 控制台\n"
@@ -261,7 +283,7 @@ std::string RustFSCompose::generate_compose(const std::string& data_dir,
       << "      - \"" << data_dir << ":/data\"\n"
       << "    command: [\"server\", \"/data\"]\n"
       << "    healthcheck:\n"
-      << "      test: [\"CMD\", \"rustfs\", \"admin\", \"info\", \"--json\"]\n"
+      << "      test: [\"CMD\", \"rustfs\", \"info\"]\n"
       << "      interval: 10s\n"
       << "      timeout: 5s\n"
       << "      retries: 5\n"
