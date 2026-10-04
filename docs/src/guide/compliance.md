@@ -1,6 +1,6 @@
 # 合规与命名一致性（T5.3）
 
-> 对应验收项 A22（组件许可清单）与 A23（系统标识一致性）。核验日期：2026-10-03。
+> 对应验收项 A22（组件许可清单）与 A23（系统标识一致性）。核验日期：2026-10-03；2026-10-04 增补（R23 存储抽象层引入 aws-sdk-cpp:s3，manifest 服务端依赖 sqlite3／openssl 一并登记，见 `third_party/组件清单.md`）。
 
 ## A22 组件许可核验记录
 
@@ -9,7 +9,7 @@
 
 | 核验点 | 结论 |
 | --- | --- |
-| 强传染性许可（AGPL／SSPL 等） | 无——清单仅覆盖 asio（BSL-1.0）、protobuf（BSD-3-Clause）、nlohmann/json（MIT）、vcpkg（MIT）、Qt（LGPL-3.0） |
+| 强传染性许可（AGPL／SSPL 等） | 无——清单仅覆盖 asio（BSL-1.0）、protobuf（BSD-3-Clause）、nlohmann/json（MIT）、sqlite3（Public Domain）、openssl（Apache-2.0）、aws-sdk-cpp:s3（Apache-2.0）、vcpkg（MIT）、Qt（LGPL-3.0） |
 | Qt 链接方式 | LGPL-3.0 动态链接（`x64-linux-dynamic` triplet），不静态链接、不修改 Qt 源码 |
 | 源码 vendoring | 仓库不 vendor 第三方源码，全部由 vcpkg 按 baseline 获取 |
 | 依赖升级路径 | 提升 `builtin-baseline` 一并更新清单版本列；`overrides` 当前空（无个别锁版） |

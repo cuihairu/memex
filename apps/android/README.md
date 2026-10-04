@@ -1,7 +1,16 @@
 # Memex Android 客户端（T6.3）
 
-内网办公 IM 的 Android 端，Kotlin 从零起步。当前已落地：**登录块**——
-手机端初始化向导（R17）＋登录（R18：移动端全部为协作态，必须登录后使用）。
+内网办公 IM 的 Android 端，Kotlin 从零起步。**T6.3 三块已全部落地**：
+
+1. **工程骨架＋登录块**——初始化向导（R17）＋登录（R18：移动端全部为协作态，必须登录后使用）；
+2. **会话列表与收发**——长连接会话（单 TCP 读线程、ACK 回执、msg_id 去重、KICK 互踢）、
+   会话列表（未读角标／发起会话／退出登录）、聊天页（气泡／撤回置灰／发送／自动滚底）；
+3. **消息推送横幅＋震动＋移动端适配**——三级通知语义（普通＝仅站内、重要＝横幅＋声音＋震动、
+   紧急＝常驻需「确认收悉」）、通知渠道、Android 13+ POST_NOTIFICATIONS 运行时申请、
+   进会话清未读、长按复制消息。
+
+单测 57/57 绿（debug 变体；release 变体在本机存在 2–3 处偶发红，时序敏感，
+登记 BUGS.md BUG-005 只登记未修）。遗留：会话本地持久化（现内存实现，SQLite 随需要补）。
 
 ## 口径
 
@@ -19,9 +28,12 @@ apps/android/
   settings.gradle.kts / build.gradle.kts / gradle.properties
   app/
     src/main/java/com/memex/im/
-      core/   # 纯 Kotlin：地址解析、帧编解码、路由守卫、探测/登录客户端
-      ui/     # InitActivity / LoginActivity / MainActivity（launcher+守卫）
-    src/test/ # JVM 单测（含假服务端的探测/登录全链路）
+      core/   # 纯 Kotlin：地址解析、帧编解码、路由守卫、探测/登录客户端、
+              #   ChatStore/ChatSession/ChatManager/ChatHolder 长连接收发、
+              #   NoticeGrade 三级通知分级、InitStore 配置持久化
+      ui/     # InitActivity / LoginActivity / MainActivity（launcher+守卫）/
+              #   ChatActivity / NotificationHelper / MemexNotifyReceiver
+    src/test/ # JVM 单测（57 用例：假服务端探测/登录/收发/群归会话/ACK/去重/KICK/三级通知）
 ```
 
 协议单一事实源＝仓库根 `common/proto/memex.proto`（构建时跨目录引入，protoc
@@ -43,6 +55,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 `build-server/server/memex_server serve`，建号
 `memex_server account add <账号> <口令> --name <显示名>`）。
 
-## 登录块之后的排期
+## 后续排期
 
-会话列表、单聊/群聊收发、三级通知（横幅/强提醒/需确认）随 T6.3 后续块落地。
+会话本地持久化（现内存实现，SQLite 随需要补）；「我」屏（设备管理等，随需要启动）；
+深色主题实况走查截图（补文档站手机端深色实况）。

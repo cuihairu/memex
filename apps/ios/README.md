@@ -46,5 +46,6 @@ CI（`.github/workflows/ios.yml`，macOS runner）执行 2–4 步。
 - important 重要：横幅＋声音（前台同样展示横幅）；
 - urgent 紧急：横幅＋声音＋交互确认（category `MEMEX_URGENT`）。
 
-APNs 设备令牌注册后经登录设备台账路径上报（T2.1/T3.3）；未配置 APNs 时
+APNs 设备令牌注册后经登录设备台账路径上报（T2.1/T3.3，代码路径已接、真机验证
+待补——本机无 iOS 环境，验证腿走 CI／真机）；未配置 APNs 时
 降级为应用内/本地通知横幅。

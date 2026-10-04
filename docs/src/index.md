@@ -31,7 +31,7 @@ features:
     details: 部门树、直属上级、通讯录可见性策略；协作态消息按人员、时间、关键词归档检索，查阅行为自动入审计日志。
   - icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>'
     title: 跨平台自研
-    details: 客户端 C++17 + Qt，覆盖 Windows 与国产 Linux（统信 UOS、麒麟）；服务端 C++ 单台集中部署；文件字节流点对点旁路，不经服务端。
+    details: 桌面客户端 C++20 + Qt，覆盖 Windows、macOS 与国产 Linux（统信 UOS、麒麟）；手机端 Android（Kotlin，已落地）、iOS（Swift，代码-only＋CI）与鸿蒙 NEXT（ArkTS，代码-only＋CI）；服务端 C++ 单台集中部署；文件字节流点对点旁路，不经服务端。
 ---
 
 <script setup>
@@ -52,7 +52,7 @@ const slides = [
 
 ## 界面预览
 
-原型设计稿覆盖桌面端七屏与手机端四屏，品牌橙（#e16531）主色，浅色与深色两套均可查看。右上角按钮切换截图主题，支持自动轮播、左右箭头、键盘方向键与触屏滑动。
+原型设计稿覆盖桌面端七屏与手机端四屏，品牌橙（#e16531）主色，浅色与深色两套均可查看。右上角按钮切换截图主题，支持自动轮播、左右箭头、键盘方向键与触屏滑动。（实况替换进度：桌面端七屏与手机端初始化向导/会话列表已换客户端实况截图，其余见[界面原型与预览](/guide/prototypes)。）
 
 <ShowcaseCarousel :slides="slides" />
 
@@ -73,22 +73,24 @@ const slides = [
 
 ```
 memex/
-├── client/               # Qt C++17 客户端（Windows / UOS / 麒麟）
-│   ├── app/              # 入口与主窗口、系统集成
+├── client/               # Qt C++20 桌面客户端（Windows / UOS / 麒麟 / macOS）
+│   ├── app/              # 入口与主窗口、系统集成（界面层并入 app）
 │   ├── engine/direct/    # 直连引擎：UDP 发现、点对点消息与文件
 │   ├── engine/collab/    # 协作引擎：长连接、消息同步、离线与补传
 │   ├── core/             # 共享内核：本地库、会话、联系人、文件传输
-│   └── ui/               # 界面层：会话、群聊、通讯录、检索、设置
-├── server/               # C++ 协作服务端（单台集中部署，六模块）
+│   └── tests/            # 桌面端单测
+├── server/               # C++ 协作服务端（单进程实现评审报告六模块职能）
 ├── common/               # 双端共用：协议定义、序列化、公共工具
-├── admin/                # 管理后台（第一期第四阶段起）
+├── apps/                 # 手机端：android（已落地）/ ios（代码-only＋CI）
+│                         #   / harmony（代码-only＋CI）
+├── admin/                # 管理后台（规划，README 占位）
 ├── docs/                 # 文档站（VitePress）、评审报告、原型
 └── third_party/          # 第三方组件清单与许可核验（依赖经 vcpkg 管理）
 ```
 
 ### 构建
 
-依赖（asio / protobuf / nlohmann-json / Qt6）经 vcpkg manifest 管理，构建入口为 CMake Presets：
+依赖（asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / Qt6）经 vcpkg manifest 管理，构建入口为 CMake Presets：
 
 ```bash
 # 准备 vcpkg（一次性）

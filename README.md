@@ -8,16 +8,16 @@
   <a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov 覆盖率" /></a>
   <a href="https://cuihairu.github.io/memex/"><img src="https://img.shields.io/website?url=https%3A%2F%2Fcuihairu.github.io%2Fmemex%2F&up_message=%E5%9C%A8%E7%BA%BF&down_message=%E7%A6%BB%E7%BA%BF&label=%E6%96%87%E6%A1%A3%E7%AB%99&color=e16531" alt="文档站" /></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%E5%9B%BD%E4%BA%A7%20UOS%2F%E9%BA%92%E9%BA%9F%20%7C%20macOS%20%7C%20%E9%B8%BF%E8%92%99%EF%BC%88%E6%8E%92%E6%9C%9F%EF%BC%89-e16531" alt="平台支持" />
-  <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" />
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%E5%9B%BD%E4%BA%A7%20UOS%2F%E9%BA%92%E9%BA%9F%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-e16531" alt="平台支持" />
+  <img src="https://img.shields.io/badge/C%2B%2B20-Qt%206-e16531" alt="C++20 / Qt 6" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
 </p>
 
-内网物理隔离环境下的办公即时通讯系统，对标企业微信的沟通、办公、组织与归档检索能力。纯自研：不基于开源即时通讯软件二次开发，不集成 AGPL／SSPL 等强传染性许可组件。客户端 C++17 + Qt，服务端 C++。
+内网物理隔离环境下的办公即时通讯系统，对标企业微信的沟通、办公、组织与归档检索能力。纯自研：不基于开源即时通讯软件二次开发，不集成 AGPL／SSPL 等强传染性许可组件。桌面客户端 C++20 + Qt；手机端 Android（Kotlin，已落地）／iOS（Swift，代码-only＋CI 验证）；服务端 C++20 单进程单库。
 
 - 产品定义与分期依据：[docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
 - 产品定位一页纸：[docs/src/guide/product.md](docs/src/guide/product.md)
-- 需求与任务清单（R1–R19、四期拆解、验收口径）：[todo.md](todo.md)
+- 需求与任务清单（R1–R19 主线、R23–R27 追加批次、四期拆解、验收口径）：[todo.md](todo.md)
 - 评审组决策清单（十五项 + 一项可选）：[docs/src/guide/decisions.md](docs/src/guide/decisions.md)
 - 文档站（界面预览、快速预览、架构与合规）：`docs/`（VitePress，构建 `pnpm docs:build`，部署于 GitHub Pages `/memex/`）
 - 原型设计稿：`docs/design/prototypes/`（桌面 7 屏 + 移动 4 屏），截图 `docs/src/public/screenshots/`
@@ -39,30 +39,38 @@
 
 ```
 memex/
-├── client/               # Qt C++17 客户端（Windows / UOS / 麒麟 / macOS）
-│   ├── app/              # 入口与主窗口、系统集成（托盘、通知、开机启动）
+├── client/               # Qt C++20 桌面客户端（Windows / UOS / 麒麟 / macOS）
+│   ├── app/              # 入口与主窗口、系统集成（托盘、通知、开机启动）、
+│   │                     #   截图标注、主题、通知偏好（界面层并入 app）
 │   ├── engine/direct/    # 直连引擎：UDP 发现、点对点消息与文件
 │   ├── engine/collab/    # 协作引擎：长连接、消息同步、离线与补传
-│   ├── core/             # 共享内核：本地库（SQLite）、会话、联系人、文件传输
-│   └── ui/               # 界面层：会话、群聊、通讯录、检索、设置
-├── server/               # C++ 协作服务端（单台集中部署）
-│   ├── gateway/          # 接入网关：长连接与消息路由
-│   ├── account/          # 账号与设备：认证、设备台账、桌面端单点在线
-│   ├── org/              # 组织架构：部门、成员、直属上级、权限
-│   ├── archive/          # 消息与归档：落库、检索、导出（只追加，不抹除）
-│   ├── policy/           # 策略服务：按部门下发开关
-│   └── filemeta/         # 文件元数据服务（文件字节流旁路，不经服务端）
-├── common/               # 双端共用：协议定义、序列化、公共工具
-├── admin/                # 管理后台（第一期第四阶段起）
+│   ├── core/             # 共享内核：本地库（SQLite）、会话、文件传输
+│   └── tests/            # 桌面端单测
+├── server/               # C++20 协作服务端（单台集中部署）
+│   └── src/              # 单进程单库实现评审报告六模块职能（网关／账号设备／
+│                         #   组织架构／消息归档／策略／文件元数据）：
+│                         #   server.cpp session.cpp（网关与消息）
+│                         #   store.cpp authz.cpp cred.cpp（账号/组织/策略/归档）
+│                         #   files_server.cpp storage.cpp（R23 文件面与 S3 存储抽象）
+│                         #   webhook.cpp（T4.10 通知接入）
+├── common/               # 双端共用：协议定义（common/proto/memex.proto）、
+│                         #   序列化、公共工具
+├── apps/                 # 手机端客户端
+│   ├── android/          # Android（Kotlin，T6.3 已落地：R17/R18 + 会话列表收发
+│   │                     #   + 三级推送横幅震动）
+│   ├── ios/              # iOS（Swift/SwiftUI，T6.4 代码-only＋CI 验证）
+│   ├── harmony/          # 鸿蒙 NEXT（ArkTS，T6.6 代码-only＋CI 逻辑验证，
+│   │                     #   编译腿待 OHOS 工具链）
+├── admin/                # 管理后台（规划；背面见 server CLI/HTTP，README 占位）
 ├── docs/                 # 文档站（VitePress）、评审报告、产品文档、原型
 └── third_party/          # 第三方组件清单与许可核验（A22；依赖经 vcpkg manifest 管理）
 ```
 
-模块边界对应评审报告第四章：两套引擎各自完整、不共享通信状态，只通过共享内核（本地消息库、会话列表、联系人视图、文件传输模块）交汇；服务端六模块与数据模型见报告第五章。
+模块边界对应评审报告第四章：两套引擎各自完整、不共享通信状态，只通过共享内核（本地消息库、会话列表、联系人视图、文件传输模块）交汇；服务端六模块以单进程形式集聚（评审决策第 7 项：单进程单库实现，预留逻辑拆分），数据模型见报告第五章。
 
 ## 构建
 
-依赖（asio / protobuf / nlohmann-json / Qt6）经 vcpkg manifest 统一管理（`vcpkg.json`，版本由 `builtin-baseline` 钉住），CMake 经 `CMakePresets.json` 一条命令构建：
+依赖（asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / Qt6）经 vcpkg manifest 统一管理（`vcpkg.json`，版本由 `builtin-baseline` 钉住），CMake 经 `CMakePresets.json` 一条命令构建：
 
 ```bash
 # 1. 准备 vcpkg（一次性；建议把 VCPKG_ROOT 写入 shell profile）

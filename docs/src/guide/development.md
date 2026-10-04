@@ -12,7 +12,8 @@
 
 ## 依赖管理（vcpkg manifest）
 
-仓库根 `vcpkg.json` 声明全部第三方依赖（asio、protobuf、nlohmann-json、qtbase），
+仓库根 `vcpkg.json` 声明全部第三方依赖（asio、protobuf、nlohmann-json、sqlite3、
+openssl、aws-sdk-cpp:s3、qtbase），
 版本由 `builtin-baseline` 钉在 vcpkg 上游某一次提交；个别需要锁版本的包写进
 `overrides`（当前为空占位）。CI 与每日构建把 vcpkg 钉在同一 commit，
 启用 GitHub Actions 二进制缓存（`x-gha`）+ 安装树缓存，跨 run 复用编译产物。
@@ -22,7 +23,11 @@
 | 依赖 | 用途 | 说明 |
 | --- | --- | --- |
 | `asio` | 服务端网络 I／O | header-only，默认安装 |
+| `protobuf` | 协议载荷编解码（libprotobuf + protoc 生成） | 默认安装；Android/iOS/鸿蒙端由各自工具链按同一 `common/proto/memex.proto` 生成 |
 | `nlohmann-json` | 协议 JSON 编解码 | 默认安装（≥3.11.3） |
+| `sqlite3` | 服务端本地库（账号/设备/归档/文件元数据） | 默认安装 |
+| `openssl` | 凭据 PBKDF2、设备指纹 SHA-256（仅 libcrypto） | 默认安装 |
+| `aws-sdk-cpp` | R23 存储抽象层（S3 兼容对象存储客户端） | 默认安装，`s3` feature |
 | `qtbase` | 客户端界面框架 | `client` feature，启用 `glib`／`xkb`／`xkbcommon-x11` |
 | `gcovr` | CI 覆盖率汇总 | vcpkg 无此 port，由 CI 系统包提供（宿主工具，不随产物分发） |
 
@@ -101,4 +106,4 @@ pnpm docs:preview  # 本地预览构建产物
 
 ## 模块边界
 
-Monorepo 结构与模块边界对应评审报告第四章／第五章：两套引擎各自完整、不共享通信状态，只通过共享内核交汇；服务端六模块（网关、账号与设备、组织架构、消息与归档、策略、文件元数据）。完整说明见仓库 [README](https://github.com/cuihairu/memex#readme)。
+Monorepo 结构与模块边界对应评审报告第四章／第五章：两套引擎各自完整、不共享通信状态，只通过共享内核交汇；服务端六模块（网关、账号与设备、组织架构、消息与归档、策略、文件元数据）以单进程单库形式集聚实现。完整结构见仓库 [README](https://github.com/cuihairu/memex#readme)（含 `apps/` 手机端三端）。
