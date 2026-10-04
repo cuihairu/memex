@@ -256,7 +256,7 @@ final class ChatSessionTests: XCTestCase {
         wait(listener.onMessage)
         XCTAssertEqual(store.history(peer: "group:9").map { $0.peer }, ["group:9"])
         XCTAssertEqual(store.history(peer: "group:9").map { $0.text }, ["群消息"])
-        XCTAssertEqual(server.received.first { $0.type == .ack }?.ack?.msgID, "g1")
+        XCTAssertEqual(server.received.first { $0.type == .ack }?.ack.msgID, "g1")
     }
 
     func testKickDisconnectsAndStopsSends() throws {
