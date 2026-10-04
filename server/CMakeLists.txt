@@ -3,21 +3,24 @@
 find_package(asio CONFIG REQUIRED)
 find_package(OpenSSL CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(aws-cpp-sdk-s3 CONFIG REQUIRED)
 
-# 服务端核心库：会话、账号、存储（测试直链，不起进程）
+# 服务端核心库：会话、账号、存储、S3 抽象层（测试直链，不起进程）
 add_library(memex_server_core STATIC
   src/server.cpp
   src/session.cpp
   src/store.cpp
   src/cred.cpp
-  src/webhook.cpp)
+  src/webhook.cpp
+  src/storage.cpp)
 target_include_directories(memex_server_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_features(memex_server_core PUBLIC cxx_std_20)
 target_link_libraries(memex_server_core PUBLIC
   memex_common
   asio::asio
   OpenSSL::Crypto
-  unofficial::sqlite3::sqlite3)
+  unofficial::sqlite3::sqlite3
+  aws-cpp-sdk-s3)
 
 add_executable(memex_server src/main.cpp)
 target_compile_features(memex_server PRIVATE cxx_std_20)
