@@ -83,7 +83,7 @@ void DirectTransport::on_inbound_ready(QTcpSocket* socket) {
     return;
   }
   for (const auto& payload : payloads) {
-    if (!inbound_decoders_.contains(socket)) return; // 已移交或清理
+    if (inbound_decoders_.find(socket) == inbound_decoders_.end()) return; // 已移交或清理
     handle_payload(socket, payload);
   }
 }
@@ -137,7 +137,7 @@ void DirectTransport::handle_payload(QTcpSocket* socket, const std::string& payl
 void DirectTransport::send_text(const QHostAddress& target, quint16 target_port,
                                 const std::string& to_id, std::uint64_t seq,
                                 const std::string& text) {
-  if (pending_.contains(seq)) {
+  if (pending_.find(seq) != pending_.end()) {
     emit delivered(seq, false);
     return;
   }

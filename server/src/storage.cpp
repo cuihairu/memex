@@ -25,9 +25,11 @@
 #include <aws/s3/model/PutObjectRequest.h>
 #include <aws/s3/model/UploadPartRequest.h>
 
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <thread>
 #include <vector>
 
 namespace memex::server {
@@ -347,7 +349,7 @@ bool RustFSCompose::health_check(const std::string& endpoint,
   std::string cmd = "curl -sf " + endpoint + "/minio/health/live >/dev/null";
   for (int i = 0; i < timeout_seconds; ++i) {
     if (std::system(cmd.c_str()) == 0) return true;
-    sleep(1);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
   }
   return false;
 }

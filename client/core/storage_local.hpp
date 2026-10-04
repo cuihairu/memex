@@ -110,7 +110,7 @@ class StorageLocal : public StorageInterface {
 
   bool get_quota(const std::string& id, QuotaMeta& meta) override {
     if (!store_) return false;
-    if (id.starts_with("gid:")) {
+    if (id.rfind("gid:", 0) == 0) {
       qint64 used = 0;
       bool ok = store_->update_group_quota(QString::fromStdString(id.mid(4)), used);
       // 实际上是查询，但 LocalStore 没有专用查询，这里先返回 used=0 占位
