@@ -1572,17 +1572,39 @@ void MainWindow::show_about() {
   dlg.exec();
 }
 
+// BUG-004 托盘激活：隐藏→弹出、最小化→还原（保留最大化态），随后置顶聚焦。
+// 三平台同一路径（Qt 抽象层），无平台分支。
+void MainWindow::activate_from_tray() {
+  setWindowState((windowState() & ~Qt::WindowMinimized) | Qt::WindowActive);
+  show();
+  raise();
+  activateWindow();
+}
+
+// BUG-004 主流托盘交互：单击/双击都激活主界面（Qt 惯例，微信/企业微信同类）；
+// 右键（Context）留给上下文菜单，中键/未知不响应。
+// 「最小化到托盘」气泡（closeEvent 里 tray_notify）在托盘图标上方挡 5 秒，
+// 第一击常落在气泡上而非图标——气泡点击（messageClicked）同样激活主界面，
+// 保证隐藏后第一击必弹（实测：不接线时第一击只把气泡点没，窗口不出）。
+void MainWindow::wire_tray_activation(QSystemTrayIcon* tray) {
+  connect(tray, &QSystemTrayIcon::activated, this,
+          [this](QSystemTrayIcon::ActivationReason reason) {
+            if (reason == QSystemTrayIcon::Trigger ||
+                reason == QSystemTrayIcon::DoubleClick) {
+              activate_from_tray();
+            }
+          });
+  connect(tray, &QSystemTrayIcon::messageClicked, this,
+          [this] { activate_from_tray(); });
+}
+
 void MainWindow::setup_tray() {
   if (!QSystemTrayIcon::isSystemTrayAvailable()) return; // 无托盘环境跳过
   tray_ = new QSystemTrayIcon(brand_icon(), this);
   tray_->setToolTip(QStringLiteral("Memex（直连态：消息不进归档）"));
   auto* menu = new QMenu(this);
   auto* act_show = menu->addAction(QStringLiteral("显示主窗口"));
-  connect(act_show, &QAction::triggered, this, [this] {
-    show();
-    raise();
-    activateWindow();
-  });
+  connect(act_show, &QAction::triggered, this, [this] { activate_from_tray(); });
   auto* act_tray_auto = menu->addAction(QStringLiteral("开机启动"));
   act_tray_auto->setCheckable(true);
   act_tray_auto->setChecked(autostart_enabled());
@@ -1602,14 +1624,7 @@ void MainWindow::setup_tray() {
   });
   tray_->setContextMenu(menu);
   tray_->show();
-  connect(tray_, &QSystemTrayIcon::activated, this,
-          [this](QSystemTrayIcon::ActivationReason reason) {
-            if (reason == QSystemTrayIcon::Trigger && !isVisible()) {
-              show();
-              raise();
-              activateWindow();
-            }
-          });
+  wire_tray_activation(tray_);
 }
 
 void MainWindow::tray_notify(const QString& title, const QString& text) {

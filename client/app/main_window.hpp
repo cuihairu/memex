@@ -82,6 +82,11 @@ public:
   bool tray_available() const; // 托盘是否可用（offscreen 等环境为假）
   bool autostart_enabled() const; // 开机启动是否已登记
   void set_autostart(bool on);    // 登记／撤销开机启动（freedesktop .desktop）
+  // —— BUG-004 托盘激活（验收面）——
+  // 单击/双击托盘 → 激活主界面（右键 Context 留给菜单，不接线）；
+  // 测试用裸 QSystemTrayIcon 复用生产接线（发 activated 信号即走同一路径）。
+  void wire_tray_activation(QSystemTrayIcon* tray);
+  void activate_from_tray(); // 隐藏→弹出、最小化→还原（保留最大化），随后置顶聚焦
 
 private:
   void build_ui();

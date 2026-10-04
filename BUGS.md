@@ -22,3 +22,15 @@
   平台：待复现确认。
 
 （三处均为「点击无响应」，疑似入口按钮没接线或面板没弹出，逐条独立定位、独立验收，修一条关一条。）
+
+- [x] BUG-004 托盘图标（右下角）双击不弹主界面
+  现象（原话）：托盘图标（右下角）双击不弹主界面——现在必须右键菜单选「主界面」才显示，与主流软件交互不一致，影响体验。
+  定位（2026-10-04）：`client/app/main_window.cpp` setup_tray() 的 `QSystemTrayIcon::activated` 槽只接 `Trigger`（单击）且仅 `!isVisible()` 时才 show——双击（`DoubleClick`）完全不处理，最小化态单击也不管。
+  修法口径（用户令）：① 双击托盘图标＝显示/激活主界面（隐藏时弹出、最小化时还原＋置顶聚焦）；② 单击行为对齐同类软件（Qt 惯例默认激活主界面）；③ 右键菜单保留原样；三平台行为一致（Windows/macOS/Linux）。
+  平台：三平台（Qt 抽象层同一代码路径，无平台分支）。
+  修复记录（2026-10-04）：
+  - 接线重构：新 `MainWindow::activate_from_tray()`（去最小化＋保留最大化态＋show/raise/置顶聚焦）与 `wire_tray_activation(tray)`（Trigger/DoubleClick 激活、Context 留菜单、中键/未知不响应），菜单「显示主窗口」同走此路径——三平台同一代码路径。
+  - 排查中发现并一并修复的真机坑：closeEvent 关窗即弹 5 秒「已最小化到托盘」气泡（tray_notify→showMessage），气泡盖在图标上方，隐藏后第一击常落在气泡上被吃掉（Qt 气泡标准行为）——表现为「隐藏后第一次单击不弹、第二次才弹」。修法：`wire_tray_activation` 同时接 `QSystemTrayIcon::messageClicked`→激活主界面，气泡被点也弹窗（微信同类惯用法）；unit 测试⑦覆盖。
+  - 单测：`client/tests/test_tray.cpp` 7 块（双击隐藏弹出/单击激活幂等/Context·中键·未知不弹/最小化还原/最大化保留/直调同路径/气泡点击激活），offscreen 裸 QSystemTrayIcon 发真实信号驱动生产接线，ctest `tray` 绿。
+  - 真机走查：`scripts/bug-004-tray-walkthrough/run.sh`（裸 Xvfb＋假托盘宿主＋xdotool 真点击，无 DE 可复跑），5 门禁全过、5 截图入档 `docs/src/public/screenshots/bug-004-tray-{1..5}.png`：①启动 ②隐藏进托盘（气泡在屏）③双击还原 ④单击还原 ⑤右键菜单（显示主窗口/开机启动/通知偏好/退出 照旧）。补充实证：隐藏后第一击无论落气泡（messageClicked）还是落图标（Trigger）都弹窗，两轮连测均通过。
+  - 环境备注（如实）：走查环境曾有用户 fontconfig 缓存与随链 Qt 错位导致 xcb 首布局崩溃，已清理 `~/.cache/fontconfig/*.cache-*`（可再生缓存，非项目资产）；走查脚本 ⑤ 须在无点击历史态抓图（裸 X 合成输入下点过左键后右键 press 不再送达，合成环境现象、真桌面无此问题），run.sh 内有注释与顺序说明。

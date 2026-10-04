@@ -174,6 +174,27 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # BUG-004 托盘交互验收：单击/双击激活主界面（隐藏弹出、最小化还原保留最大化），
+  # 右键留给菜单；裸 QSystemTrayIcon 发真实 activated 信号驱动生产接线
+  # wire_tray_activation（offscreen 可跑，无 DE 依赖）。
+  add_executable(test_tray
+    tests/test_tray.cpp
+    app/main_window.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
+    app/theme.cpp
+    app/theme_settings_page.cpp)
+  target_include_directories(test_tray PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_tray PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+  add_test(NAME tray COMMAND test_tray)
+  set_tests_properties(tray PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
+
   # T4.4 截图与标注验收：标注画布（涂鸦/箭头/马赛克/文字/撤销/保存）、
   # 多屏区域数学（跨屏/负坐标/高 DPI）、端到端（注入截屏→标注→确认→
   # 主窗发送→对端引擎收到文件）
