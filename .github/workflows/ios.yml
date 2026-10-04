@@ -1,0 +1,41 @@
+name: ios
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/ios/**'
+      - 'common/proto/**'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    paths:
+      - 'apps/ios/**'
+      - 'common/proto/**'
+      - '.github/workflows/ios.yml'
+
+jobs:
+  ios:
+    runs-on: macos-14
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install protobuf toolchain and xcodegen
+        run: brew install protobuf swift-protobuf xcodegen
+
+      - name: Generate protocol Swift sources from proto single source of truth
+        run: |
+          mkdir -p apps/ios/Sources/MemexKit/Proto
+          protoc --swift_opt=PackageName=MemexProto --swift_opt=Visibility=Public \
+            --swift_out=apps/ios/Sources/MemexKit/Proto common/proto/memex.proto
+
+      - name: Swift package tests (core)
+        run: swift test --package-path apps/ios
+
+      - name: Build iOS app for simulator
+        run: |
+          cd apps/ios
+          xcodegen generate
+          xcodebuild -project Memex.xcodeproj -scheme Memex \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build

@@ -1,0 +1,10 @@
+# SwiftPM 构建产物与依赖
+.build/
+DerivedData/
+
+# XcodeGen 生成物（CI/开发者按 project.yml 再生成）
+Memex.xcodeproj/
+Sources/MemexApp/Info.plist
+
+# 协议生成代码（CI 由 protoc --swift_out 生成，见 .github/workflows/ios.yml）
+Sources/MemexKit/Proto/
