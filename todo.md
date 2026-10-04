@@ -186,7 +186,8 @@
   - 2026-10-05 块1（服务端面）收口（127ba66）：store 层 memos 表＋五 API（owner 过滤即权限、更新/删除 WHERE owner= 二次校验、不留修订史——修订历史属 R24-2）；files 加 kind 列迁移（R23-2 形态库事务化重建保数据，探针含「, kind）」整串防误判回退），秒传键扩为 UNIQUE(file_hash,owner,belong_gid,belong_uid,kind)——收件箱与个人空间互不秒传串用。FileServer：target=inbox（个人空间归属，落 users/{uid}/ 且 kind=inbox，「手机发自己=文件传输」）；/files/list?target=inbox 备忘录+文件时间倒序混排（memo 取 updated_ms、文件取 upload_ts）、分页混排后取窗；target=me 只列 kind=0（收件箱文件不混进个人空间列表）；/files/memo POST 建/改、GET 单条/列表、DELETE 删，判权走 AuthorizationService（personal-owner 仅本人，memo:create/read/update/delete 动作，他人 default-deny 不自造规则）。quota target=inbox=个人配额同账。
   - 块1 顺带修两处存量缺陷（走查/迁移单测实录抓到）：①idx_files_kind 原在主 schema 串内——R23-2 形态旧库 kind 列尚不存在，open 即失败（索引引用缺列）；移出主串、迁移后补建。②GET/DELETE/HEAD 缺 Content-Length 一律 400（curl/浏览器/Qt QNAM 无体请求口径），改按方法放行为 0、带体方法仍强制。
   - 验证边界（如实）：test_files_meta（kind 空间隔离/备忘录 CRUD/owner 隔离/持久化/R23-2 形态迁移重开幂等）；test_files_api 真 TCP（备忘录全链路＋跨账号 403＋未登录 401＋inbox 上传秒传隔离＋混排分页＋me 隔离＋无 Content-Length 回归）；ctest 30/30 绿；真容器 e2e（MEMEX_S3_E2E=1）复跑绿；本机真 TCP 走查 /files/memo 与 inbox 上传列举全链路（建/改/删/混排/下载过真 RustFS/跨账号 403/未登录 401/配额同账）实录通过。
-  - 剩余块：块2=客户端 UI 面（桌面文件助手会话：备忘录编辑+收件箱混排流+「发送给自己」入口）；块3=iOS/Android 接线（鸿蒙按卷首后置令只写代码注明待真机验证）。
+  - 块2（客户端面）收口（5aa338a）：FilesClient 引擎（FileServer HTTP Qt 封装——Bearer 令牌内存持有、memo CRUD/收件箱混排/上传/下载/删除、request_failed 统一失败通道、QSaveFile 流式下载重名加序号，字节面同走 FileServer 不直连对象存储）＋FileAssistantDialog 会话窗（连接区同源账号/files_port 落 QSettings、混排流角色化条目+空态占位、备忘录建改删+文件上传下载删、编辑再点取消语义）＋主窗协作菜单入口。测试：test_files_client 引擎级（进程级真服务端：错口令/登出拒发/memo 全链路/403/503 边界）＋test_files_assistant UI 冒烟（offscreen：连接失败明示→空态→存→编辑流更新）。ctest 32/32 绿。顺带修：五个单编 main_window.cpp 的测试目标未挂 file_assistant.cpp 致链接失败——全部补入。
+  - 剩余块：块3=iOS/Android 接线（鸿蒙按卷首后置令只写代码注明待真机验证）。
 - [ ] R23-4 外网单向 uplink + 外网模式客户端：唯一落点=文件助手、两套路由两套 scope（upload-only，下载端点对外网 token 恒 403）、上传全审计、**默认关闭显式开启开启时明示暴露范围**；内网用户转发进群（安全缓冲）。
 - [ ] R23-5 防护：杀毒扫描钩子 + 类型/大小白名单 + 外网登录二次验证。
 
