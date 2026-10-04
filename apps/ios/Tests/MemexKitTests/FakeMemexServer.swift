@@ -74,7 +74,7 @@ final class FakeMemexServer {
             if n <= 0 { break }
             let res = decoder.feed(Array(buf[0..<n]))
             for frame in res.frames {
-                guard let env = try? Memex_Protocol_V1_Envelope(serializedData: frame) else { continue }
+                guard let env = try? Memex_Protocol_V1_Envelope(serializedData: Data(frame)) else { continue }
                 lock.lock()
                 received.append(env)
                 lock.unlock()

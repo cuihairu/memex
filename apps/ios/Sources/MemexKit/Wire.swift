@@ -99,23 +99,21 @@ final class Wire {
             }
             pending.append(contentsOf: result.frames)
         }
-        return try Memex_Protocol_V1_Envelope(serializedData: pending.removeFirst())
+        return try Memex_Protocol_V1_Envelope(serializedData: Data(pending.removeFirst()))
     }
 
+    /// poll 等可读（select 的 fd_set/FD_ZERO/FD_SET 在 Darwin Swift 侧不暴露，poll 两平台通吃）
     private func waitReadable(timeoutMs: Int) throws {
-        var fds = fd_set()
-        FD_ZERO(&fds)
-        FD_SET(fd, &fds)
-        var tv = timeval(tv_sec: timeoutMs / 1000, tv_usec: (timeoutMs % 1000) * 1000)
-        let r = select(fd + 1, &fds, nil, nil, &tv)
+        var pfd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        let r = poll(&pfd, 1, Int32(timeoutMs))
         if r < 0 {
-            if errno == EINTR { return try waitReadable(timeoutMs: max(timeoutMs - 1, 1)) }
-            throw SocketError.ioError("select 失败：\(String(cString: strerror(errno)))")
+            if errno == EINTR { return try waitReadable(timeoutMs: timeoutMs) } // EINTR 未消耗时间预算
+            throw SocketError.ioError("poll 失败：\(String(cString: strerror(errno)))")
         }
         if r == 0 { throw SocketError.timedOut }
     }
 
-    /// 非阻塞 connect + select（POSIX 平台通用）。
+    /// 非阻塞 connect + poll 等可写（POSIX 平台通用）。
     private static func connectWithTimeout(
         fd: Int32, addr: addrinfo, timeoutMs: Int
     ) throws {
@@ -129,11 +127,8 @@ final class Wire {
             if errno != EINPROGRESS {
                 throw SocketError.connectFailed(strerrorText(errno))
             }
-            var fds = fd_set()
-            FD_ZERO(&fds)
-            FD_SET(fd, &fds)
-            var tv = timeval(tv_sec: timeoutMs / 1000, tv_usec: (timeoutMs % 1000) * 1000)
-            let s = select(fd + 1, nil, &fds, nil, &tv)
+            var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+            let s = poll(&pfd, 1, Int32(timeoutMs))
             if s < 0 {
                 throw SocketError.connectFailed(strerrorText(errno))
             }
