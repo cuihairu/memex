@@ -5,6 +5,7 @@
  * AppState，主界面/聊天页直接消费；避免「验证连接＋常连接」双连接互踢。
  */
 import router from '@ohos.router';
+import { ConnectOutcome } from '@memex/core';
 import { appState, CLIENT_VERSION, newTransport } from '../common/AppState';
 
 @Entry
@@ -36,7 +37,7 @@ struct LoginPage {
     }
     this.busy = true;
     const session = appState.establish(account);
-    let outcome;
+    let outcome: ConnectOutcome;
     try {
       outcome = await session.connect(
         newTransport(),

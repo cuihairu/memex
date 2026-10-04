@@ -91,8 +91,15 @@ export class HarmonyTransport implements Transport {
     if (t === null || this.closed) {
       throw new TransportError('network', '连接未建立或已关闭');
     }
-    // Uint8Array 的 buffer 即帧字节（视图零拷贝）；send 只接受 ArrayBuffer
-    t.send({ data: bytes.buffer });
+    // 帧字节来自 encodeFrame 新建数组（视图起点=0）；防御非整底视图：
+    // 不对齐时复制出精确区间，绝不把前缀脏字节带上线。send 只接受 ArrayBuffer
+    let ab: ArrayBuffer;
+    if (bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength) {
+      ab = bytes.buffer;
+    } else {
+      ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    }
+    t.send({ data: ab });
   }
 
   close(): void {

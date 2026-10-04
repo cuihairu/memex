@@ -118,7 +118,7 @@ struct ChatPage {
         .padding({ top: 8, bottom: 8 })
 
       List({ scroller: this.scroller, space: 8 }) {
-        ForEach(this.rows, (m: MsgRow) => {
+        ForEach(this.rows, (m: MsgRow, idx: number) => {
           ListItem() {
             Row() {
               Column() {
@@ -145,7 +145,7 @@ struct ChatPage {
                 })
             )
           }
-        }, (m: MsgRow) => `${m.who}:${m.time}:${m.text}`)
+        }, (m: MsgRow, idx: number) => `${idx}:${m.who}:${m.time}:${m.text}`)
       }
       .layoutWeight(1)
       .width('100%')
