@@ -33,9 +33,12 @@ public struct ServerAddress: Equatable {
     }
 
     // 主机名/IPv4：字母数字开头结尾，中间允许点、横线、下划线
-    private static let hostRE = /^[A-Za-z0-9_](?:[A-Za-z0-9._-]*[A-Za-z0-9_])?$/
+    // （不用 /…/ 正则字面量：部分工具链按除号解析，字符串构造无歧义）
+    private static let hostRegex = try! Regex(
+        "^[A-Za-z0-9_](?:[A-Za-z0-9._-]*[A-Za-z0-9_])?$"
+    )
     // 方括号内裸 IPv6：十六进制与冒号
-    private static let ipv6RE = /^[0-9A-Fa-f:.]+$/
+    private static let ipv6Regex = try! Regex("^[0-9A-Fa-f:.]+$")
 
     public static func parse(_ raw: String) -> Parsed {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -63,7 +66,7 @@ public struct ServerAddress: Equatable {
                 if !rest.hasPrefix(":") || rest.count == 1 { return .err(.ipv6Form) }
                 portStr = String(rest.dropFirst())
             }
-            if host.wholeMatch(of: ipv6RE) == nil { return .err(.badHost) }
+            if host.wholeMatch(of: ipv6Regex) == nil { return .err(.badHost) }
         } else {
             let colon = s.lastIndex(of: ":")
             if let colon {
@@ -74,7 +77,7 @@ public struct ServerAddress: Equatable {
             } else {
                 host = s
             }
-            if host.isEmpty || host.wholeMatch(of: hostRE) == nil {
+            if host.isEmpty || host.wholeMatch(of: hostRegex) == nil {
                 return .err(.badHost)
             }
         }
