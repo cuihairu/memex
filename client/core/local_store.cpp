@@ -406,4 +406,98 @@ bool LocalStore::mark_helper_deleted(const QString& record_id) {
   return q.numRowsAffected() > 0;
 }
 
+// —— R23-5 杀毒扫描钩子 + 白名单客户端基础
+// 客户端本地白名单与扫描状态，服务端最终裁决（权限层）
+// 外网上传默认关闭，开启时须通过配置显式开启并明示范围
+
+enum class ScanStatus { Unknown = 0, Scanning, Clean, Quarantined, Error };
+
+struct ScanWhitelist {
+  // 允许的文件扩展名（小写）
+  QStringList allowed_extensions;
+  // 允许的 MIME 类型
+  QStringList allowed_mime_types;
+  // 最大文件大小（字节），0=不限制
+  qint64 max_file_size{0};
+};
+
+bool LocalStore::set_scan_whitelist(const ScanWhitelist& whitelist) {
+  if (!open_) return false;
+  // Store whitelist as JSON in a config table or key-value pair
+  // 此处简化：直接写入系统设置备注，实际应持久化到元数据层
+  QJsonObject obj;
+  obj["allowed_extensions"] = QJsonArray::fromStringList(whitelist.allowed_extensions);
+  obj["allowed_mime_types"] = QJsonArray::fromStringList(whitelist.allowed_mime_types);
+  obj["max_file_size"] = whitelist.max_file_size;
+  QJsonDocument doc(obj);
+  // 写入本地配置文件或键值存储
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  settings.setValue("scan_whitelist", doc.toJson());
+  return true;
+}
+
+QScopedPointer<ScanWhitelist> LocalStore::get_scan_whitelist() {
+  if (!open_) return nullptr;
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  QJsonDocument doc = QSettings::value("scan_whitelist").toJsonDocument();
+  if (doc.isNull()) return nullptr;
+  auto whitelist = QScopedPointer<ScanWhitelist>(new ScanWhitelist());
+  QJsonObject obj = doc.object();
+  if (obj.contains("allowed_extensions")) {
+    whitelist->allowed_extensions = obj["allowed_extensions"].toArray()
+        .toVariantList()
+        .toList()
+        .toVariant()
+        .toStringList();
+  }
+  if (obj.contains("allowed_mime_types")) {
+    whitelist->allowed_mime_types = obj["allowed_mime_types"].toArray()
+        .toVariantList()
+        .toList()
+        .toVariant()
+        .toStringList();
+  }
+  if (obj.contains("max_file_size")) {
+    whitelist->max_file_size = obj["max_file_size"].toVariant().toLongLong();
+  }
+  return whitelist;
+}
+
+enum class ScanResult { Unknown, Clean, Quarantined, Error };
+
+bool LocalStore::record_scan(const QString& file_hash, ScanResult result, qint64 file_size) {
+  if (!open_) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "INSERT OR IGNORE INTO scan_results"
+      " (file_hash, result, file_size, scan_ts)"
+      " VALUES (?, ?, ?, ?)"));
+  q.bindValue(0, file_hash);
+  q.bindValue(1, static_cast<int>(result));
+  q.bindValue(2, file_size);
+  q.bindValue(3, QDateTime::currentMSecsSinceEpoch());
+  if (!q.exec()) {
+    qWarning() << "[本地库] 记录扫描结果失败：" << q.lastError().text();
+    return false;
+  }
+  return true;
+}
+
+QList<QSqlRecord> LocalStore::scan_history(const QString& file_hash) const {
+  if (!open_) return QList<QSqlRecord>();
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "SELECT * FROM scan_results WHERE file_hash = ? ORDER BY scan_ts DESC"));
+  q.addBindValue(file_hash);
+  if (!q.exec()) {
+    qWarning() << "[本地库] 查询扫描历史失败：" << q.lastError().text();
+    return QList<QSqlRecord>();
+  }
+  QList<QSqlRecord> out;
+  while (q.next()) out.append(q.record());
+  return out;
+}
+
 } // namespace memex::client
