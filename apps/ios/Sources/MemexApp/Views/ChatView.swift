@@ -96,7 +96,8 @@ private struct MessageRow: View {
                         .foregroundColor(.secondary)
                     Text(timeText)
                         .font(.caption2)
-                        .foregroundColor(.tertiary)
+                        // 部署目标 iOS 16：Color.tertiary 是 iOS 17+
+                        .foregroundColor(Color(UIColor.tertiaryLabel))
                 }
                 Text(message.recalled ? "（已撤回）" : message.text)
                     .font(.body)
