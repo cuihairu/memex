@@ -15,6 +15,7 @@ add_library(memex_server_core STATIC
   src/store.cpp
   src/authz.cpp
   src/cred.cpp
+  src/files_server.cpp
   src/webhook.cpp
   src/storage.cpp)
 target_include_directories(memex_server_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -123,6 +124,13 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_authz PRIVATE memex_server_core)
   add_test(NAME authz COMMAND test_authz)
   set_tests_properties(authz PROPERTIES TIMEOUT 60)
+
+  # R23-2 文件面走查：真 TCP HTTP 全链路 × 群主/管理员/成员/非成员四视角
+  #（会话/上传/秒传/下载/列表/置顶/删除/配额/回滚；对象层内存 Fake）
+  add_executable(test_files_api tests/test_files_api.cpp)
+  target_link_libraries(test_files_api PRIVATE memex_server_core)
+  add_test(NAME files_api COMMAND test_files_api)
+  set_tests_properties(files_api PROPERTIES TIMEOUT 60)
 
   # R23-1 真容器集成（默认 SKIP；MEMEX_S3_E2E=1 且宿主有 docker 才全量跑：
   # RustFS compose up→S3Storage 全接口往返→down）

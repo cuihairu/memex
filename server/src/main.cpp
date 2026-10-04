@@ -18,6 +18,7 @@
 #include <memex/protocol/messages.hpp>
 
 #include "cred.hpp"
+#include "files_server.hpp"
 #include "server.hpp"
 #include "storage.hpp"
 #include "store.hpp"
@@ -41,6 +42,9 @@ constexpr const char* kDefaultDb = "memex-server.db";
 int cmd_serve(int argc, char** argv, const std::string& db_path) {
   std::uint16_t port = kDefaultPort;
   int webhook_port = kDefaultWebhookPort; // int 才能表达 0＝关闭
+  int files_port = 0; // 文件面默认关闭：须显式 --files-port 且给 S3 配置
+  memex::server::S3Config s3;
+  s3.region = "auto";
   for (int i = 0; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--port" && i + 1 < argc) {
@@ -55,7 +59,39 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
         std::cerr << "无效 webhook 端口（0＝关闭接入）\n";
         return 2;
       }
+    } else if (arg == "--files-port" && i + 1 < argc) {
+      files_port = std::atoi(argv[++i]);
+      if (files_port < 0 || files_port > 65535) {
+        std::cerr << "无效文件面端口（0＝关闭文件面）\n";
+        return 2;
+      }
+    } else if (arg == "--s3-endpoint" && i + 1 < argc) {
+      s3.endpoint = argv[++i];
+    } else if (arg == "--s3-bucket" && i + 1 < argc) {
+      s3.bucket = argv[++i];
+    } else if (arg == "--s3-access-key" && i + 1 < argc) {
+      s3.access_key = argv[++i];
+    } else if (arg == "--s3-secret-key" && i + 1 < argc) {
+      s3.secret_key = argv[++i];
+    } else if (arg == "--s3-region" && i + 1 < argc) {
+      s3.region = argv[++i];
+    } else if (arg == "--s3-use-ssl") {
+      s3.use_ssl = true;
     }
+  }
+  // 文件面装配（R23-2）：端口给了但 S3 没配齐 → 明示降级（面整体 503）；
+  // S3 配齐但端口没给 → 文件面不开。内网 http + path-style 为默认。
+  std::shared_ptr<memex::server::S3Storage> s3_storage;
+  const bool s3_ready =
+      !s3.endpoint.empty() && !s3.bucket.empty() &&
+      !s3.access_key.empty() && !s3.secret_key.empty();
+  if (files_port > 0 && s3_ready) {
+    s3.path_style = true;
+    s3_storage = memex::server::S3Storage::create(s3);
+  } else if (files_port > 0) {
+    std::cerr << "[MEMEX] 文件面已给端口但 S3 配置不齐"
+                 "（--s3-endpoint/--s3-bucket/--s3-access-key/--s3-secret-key），"
+                 "起面后一律 503\n";
   }
 
   memex::server::ServerStore store;
@@ -67,6 +103,18 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
   try {
     asio::io_context io;
     memex::server::CollabServer server(io, store, port);
+    // 文件面（R23-2）：独立端口，绑定失败只降级为「文件面未启用」，
+    // 消息主通道不受影响；存储实例空＝面内一律 503。
+    std::unique_ptr<memex::server::FileServer> files;
+    if (files_port > 0) {
+      try {
+        files = std::make_unique<memex::server::FileServer>(
+            io, store, s3_storage, static_cast<std::uint16_t>(files_port));
+      } catch (const std::exception& e) {
+        std::cerr << "[MEMEX] 文件面端口绑定失败，文件面未启用"
+                     "（消息主通道不受影响）：" << e.what() << std::endl;
+      }
+    }
     // webhook 接入（T4.10）：独立端口；端口占用等绑定失败只降级为
     // 「接入未启用」并明示，消息主通道不受影响。
     std::unique_ptr<memex::server::WebhookServer> webhook;
@@ -86,6 +134,7 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
     });
     server.start_accept();
     if (webhook) webhook->start_accept();
+    if (files) files->start_accept();
     io.run();
   } catch (const std::exception& e) {
     std::cerr << "服务端异常退出：" << e.what() << std::endl;

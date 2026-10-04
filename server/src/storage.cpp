@@ -26,6 +26,7 @@
 #include <aws/s3/model/UploadPartRequest.h>
 
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <vector>
 
@@ -34,6 +35,11 @@ namespace memex::server {
 class S3StorageImpl final : public S3Storage {
  public:
   explicit S3StorageImpl(const S3Config& cfg) : cfg_(cfg) {
+    // 新式 S3ClientConfiguration 全量携带（含 payloadSigningPolicy）。
+    // 实测（R23-2 块2 排障）：旧式 4 参构造（credentials, cfg, signing,
+    // useVirtualAddressing）在新版 aws-sdk-cpp 的桥接路径里 endpointOverride
+    // 会被丢弃——请求打到默认 AWS 端点，自建兼容层全数 NoSuchBucket。
+    // 必须走新式主构造，让配置以 S3ClientConfiguration 原样进客户端。
     Aws::S3::S3ClientConfiguration client_cfg;
     client_cfg.endpointOverride = cfg.endpoint;
     client_cfg.region = cfg.region;
@@ -44,24 +50,42 @@ class S3StorageImpl final : public S3Storage {
     if (cfg.path_style) {
       client_cfg.useVirtualAddressing = false;  // path-style
     }
+    client_cfg.payloadSigningPolicy =
+        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never;
     client_ = std::make_unique<Aws::S3::S3Client>(
         Aws::Auth::AWSCredentials(cfg.access_key, cfg.secret_key),
-        client_cfg,
-        Aws::Client::AWSAuthV4Signer::PayloadSigningPolicy::Never,
-        false);
+        nullptr /* endpointProvider：默认即可 */, client_cfg);
   }
 
   bool create_bucket() override {
     // 幂等：已存在直接成功（桶引导在部署时可能被重复调用）
     Aws::S3::Model::HeadBucketRequest hb;
     hb.SetBucket(cfg_.bucket);
-    if (client_->HeadBucket(hb).IsSuccess()) return true;
+    const auto hb_outcome = client_->HeadBucket(hb);
+    if (hb_outcome.IsSuccess()) return true;
+    if (hb_outcome.GetError().GetErrorType() !=
+        Aws::S3::S3Errors::RESOURCE_NOT_FOUND) {
+      // 非「桶不存在」的探查失败（连接/签名等）也留现场
+      std::cerr << "[MEMEX] s3 head_bucket " << cfg_.bucket
+                << " 失败: " << hb_outcome.GetError().GetExceptionName()
+                << " - " << hb_outcome.GetError().GetMessage() << std::endl;
+    }
     Aws::S3::Model::CreateBucketRequest cb;
     cb.SetBucket(cfg_.bucket);
+    // 不带 LocationConstraint：RustFS/MinIO 兼容层对 region="auto" 等非常规
+    // 值的 body 会回 NoSuchBucket（实测 1.0.1）；无 body 建桶实测成功。
     auto outcome = client_->CreateBucket(cb);
     if (outcome.IsSuccess()) return true;
     // 兼容层竞态/语义差异：他人已建也视为引导完成（私有部署单凭据场景）
-    const auto t = outcome.GetError().GetErrorType();
+    const auto& err = outcome.GetError();
+    const auto t = err.GetErrorType();
+    if (t != Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU &&
+        t != Aws::S3::S3Errors::BUCKET_ALREADY_EXISTS) {
+      // 引导失败不静默：网络/签名/兼容层问题在此最先暴露（部署排障第一现场）
+      std::cerr << "[MEMEX] s3 create_bucket " << cfg_.bucket
+                << " 失败: " << err.GetExceptionName() << " - "
+                << err.GetMessage() << std::endl;
+    }
     return t == Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU ||
            t == Aws::S3::S3Errors::BUCKET_ALREADY_EXISTS;
   }
