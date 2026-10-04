@@ -87,7 +87,10 @@ class S3Storage {
   virtual bool abort_multipart_upload(const std::string& key,
                                       const std::string& upload_id) = 0;
 
-  // 预签名 URL（客户端直传/直下时用；server 只管签名不走字节）
+  // 预签名 URL。铁律张力警示：设计铁律=客户端永不直连对象存储（所有读写
+  // 过 memex server），内网文件面（R23-2/3）不得用本组方法做直传直下；
+  // 当前无消费者。若未来外网 uplink（R23-4）确需直传，须先过设计评审
+  // 明示暴露范围，否则应删除（见 docs/design/文件存储与外网单向传输.md）
   virtual std::string presign_put(const std::string& key,
                                   int expires_seconds = 3600) = 0;
   virtual std::string presign_get(const std::string& key,

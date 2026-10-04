@@ -170,7 +170,10 @@
 
 ## R23 文件存储与外网单向传输（2026-10-04 用户拍板，设计=docs/design/文件存储与外网单向传输.md）
 
-- [ ] R23-1 存储抽象层（S3 兼容）+ RustFS compose 集成：元数据表/群人两级配额/秒传（哈希去重）；客户端永不直连对象存储、权限只在元数据层判。
+- [x] R23-1 存储抽象层（S3 兼容）+ RustFS compose 集成：元数据表/群人两级配额/秒传（哈希去重）；客户端永不直连对象存储、权限只在元数据层判。
+  - 2026-10-04 收口：核心实现（S3Storage 抽象+AWS SDK 实现、RustFSCompose、store 元数据层 files/group_quota/user_quota/uplink_logs、秒传 UNIQUE(file_hash,owner)、配额 UPSERT/0=不限/负数拒绝）来自并行 lane 已在 main；本轮补验证收口＋修三处实现缺陷（ceca13e）：①create_file_meta 秒传冲突时返回 last_insert_rowid（陈旧/错表 rowid）→改回查已有行 id；②compose 生成 RUSTFS_ADDRESS 裸 ":" 对 rustfs 1.0.1 非法（FATAL 起不来）→":9000"；③healthcheck `rustfs admin info` 子命令不存在→`rustfs info`。抽象层补 create_bucket（桶引导缺口）；CLI 新增 storage compose|up|down|health（数据目录须 chown 10001:10001——容器 uid 10001，真容器实证首写 FATAL Permission denied）；CMake 显式链 aws-cpp-sdk-core。
+  - 验证边界（如实）：test_files_meta 纯库级单测（元数据/秒传/配额/留痕/compose 契约）CI 常跑；**真容器 e2e（test_s3_e2e，MEMEX_S3_E2E=1 门控）＝compose 起停→健康检查→S3 全接口往返（桶引导/put/get/head/list/预签名 curl 实传实取/两片分片合流/中止/批量删），本机 docker+RustFS 1.0.1 全绿**；CI 无 docker-compose-RustFS 腿（该测试在 CI 明跳，不造假绿）。本机 ctest 28/28 绿。
+  - 决策留档：AuthorizationService 骨架本轮不立——R23-1 无 HTTP 判权消费者（抽象层只被测试直链），空架子违背谨慎原则；第一个消费者是 R23-2 的 upload/download/list 端点，**R23-2 开工时先立骨架再动端点**。server 启动时的 S3Config 加载/存储实例接线同留 R23-2。presign_put/get 与「客户端永不直连」铁律相悖，已在 storage.hpp 注明铁律张力警示（当前无消费者；R23-2/3 内网面不得使用，R23-4 若需直传须过设计评审明示暴露范围）。
 - [ ] R23-2 群文件 + 个人文件（内网全功能）：群成员可读、群主/管理员可管（删/置顶/配额）；个人私有。
 - [ ] R23-3 文件助手（自己↔自己）：备忘录文本 + 文件传输统一收件箱（含「手机发自己=文件传输」）。
 - [ ] R23-4 外网单向 uplink + 外网模式客户端：唯一落点=文件助手、两套路由两套 scope（upload-only，下载端点对外网 token 恒 403）、上传全审计、**默认关闭显式开启开启时明示暴露范围**；内网用户转发进群（安全缓冲）。
