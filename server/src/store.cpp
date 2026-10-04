@@ -208,7 +208,44 @@ bool ServerStore::ensure_schema() {
       "  target TEXT NOT NULL,"
       "  name TEXT NOT NULL DEFAULT '',"
       "  created_ms INTEGER NOT NULL,"
-      "  revoked INTEGER NOT NULL DEFAULT 0);"; // 本段为 schema 字符串最后一段
+      "  revoked INTEGER NOT NULL DEFAULT 0);"
+      // R23-1 文件存储元数据：文件表（秒传键 file_hash、归属、对象键、来源、状态）
+      "CREATE TABLE IF NOT EXISTS files ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  owner TEXT NOT NULL,"
+      "  belong_gid TEXT NOT NULL DEFAULT '',"
+      "  belong_uid TEXT NOT NULL DEFAULT '',"
+      "  file_name TEXT NOT NULL,"
+      "  file_size INTEGER NOT NULL DEFAULT 0,"
+      "  file_hash TEXT NOT NULL DEFAULT '',"
+      "  object_key TEXT NOT NULL DEFAULT '',"
+      "  source INTEGER NOT NULL DEFAULT 0,"  // 0=internal, 1=uplink
+      "  upload_ts INTEGER NOT NULL DEFAULT 0,"
+      "  status INTEGER NOT NULL DEFAULT 0,"  // 0=normal, 1=quarantine, 2=expired
+      "  UNIQUE(file_hash, owner));"
+      "CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner);"
+      "CREATE INDEX IF NOT EXISTS idx_files_belong_gid ON files(belong_gid);"
+      "CREATE INDEX IF NOT EXISTS idx_files_belong_uid ON files(belong_uid);"
+      // 群配额：每个群的使用字节数与上限
+      "CREATE TABLE IF NOT EXISTS group_quota ("
+      "  gid TEXT PRIMARY KEY,"
+      "  used_bytes INTEGER NOT NULL DEFAULT 0,"
+      "  limit_bytes INTEGER NOT NULL DEFAULT 0);"
+      // 用户配额：每个人的使用字节数与上限
+      "CREATE TABLE IF NOT EXISTS user_quota ("
+      "  uid TEXT PRIMARY KEY,"
+      "  used_bytes INTEGER NOT NULL DEFAULT 0,"
+      "  limit_bytes INTEGER NOT NULL DEFAULT 0);"
+      // 外网上传流水（审计）：谁/何时/什么/落点
+      "CREATE TABLE IF NOT EXISTS uplink_logs ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  uploader TEXT NOT NULL,"
+      "  file_name TEXT NOT NULL,"
+      "  file_size INTEGER NOT NULL DEFAULT 0,"
+      "  file_hash TEXT NOT NULL DEFAULT '',"
+      "  object_key TEXT NOT NULL DEFAULT '',"
+      "  upload_ts INTEGER NOT NULL DEFAULT 0);"
+      "CREATE INDEX IF NOT EXISTS idx_uplink_logs_uploader ON uplink_logs(uploader);"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -1904,6 +1941,256 @@ bool ServerStore::webhook_revoke(std::int64_t id) {
   const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
   sqlite3_finalize(st);
   return ok;
+}
+
+// —— R23-1 文件存储元数据（服务端权限/配额判断层）——
+// 秒传键 UNIQUE(file_hash, owner)：同属主同哈希复用对象键，不重复落字节。
+
+std::int64_t ServerStore::create_file_meta(const FileMeta& meta) {
+  if (meta.owner.empty() || meta.file_name.empty()) return 0;
+  const char* sql =
+      "INSERT OR IGNORE INTO files(owner, belong_gid, belong_uid, file_name,"
+      " file_size, file_hash, object_key, source, upload_ts, status)"
+      " VALUES(?,?,?,?,?,?,?,?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, meta.owner.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, meta.belong_gid.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, meta.belong_uid.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, meta.file_name.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, meta.file_size);
+  sqlite3_bind_text(st, 6, meta.file_hash.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 7, meta.object_key.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 8, static_cast<int>(meta.source));
+  sqlite3_bind_int64(st, 9, meta.upload_ts);
+  sqlite3_bind_int(st, 10, static_cast<int>(meta.status));
+  std::int64_t id = 0;
+  if (sqlite3_step(st) == SQLITE_DONE) id = sqlite3_last_insert_rowid(db_);
+  sqlite3_finalize(st);
+  return id;
+}
+
+std::optional<ServerStore::FileMeta> ServerStore::check_second_transfer(
+    const std::string& owner, const std::string& file_hash) {
+  if (owner.empty() || file_hash.empty()) return std::nullopt;
+  const char* sql =
+      "SELECT id, owner, belong_gid, belong_uid, file_name, file_size,"
+      " file_hash, object_key, source, upload_ts, status"
+      " FROM files WHERE owner=? AND file_hash=? AND status=0 LIMIT 1;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_text(st, 1, owner.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, file_hash.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<FileMeta> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    FileMeta r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.owner = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.belong_gid = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.belong_uid = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    r.file_name = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    r.file_size = sqlite3_column_int64(st, 5);
+    r.file_hash = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    r.object_key = reinterpret_cast<const char*>(sqlite3_column_text(st, 7));
+    r.source = static_cast<FileSource>(sqlite3_column_int(st, 8));
+    r.upload_ts = sqlite3_column_int64(st, 9);
+    r.status = static_cast<FileStatus>(sqlite3_column_int(st, 10));
+    out = std::move(r);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::FileMeta> ServerStore::list_files(
+    const std::string& belong_gid, const std::string& belong_uid, int limit,
+    int offset) {
+  std::vector<FileMeta> out;
+  const char* sql =
+      "SELECT id, owner, belong_gid, belong_uid, file_name, file_size,"
+      " file_hash, object_key, source, upload_ts, status"
+      " FROM files"
+      " WHERE (? = '' OR belong_gid = ?) AND (? = '' OR belong_uid = ?)"
+      " ORDER BY id DESC LIMIT ? OFFSET ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, belong_gid.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, belong_gid.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, belong_uid.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, belong_uid.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 5, limit);
+  sqlite3_bind_int(st, 6, offset);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    FileMeta r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.owner = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.belong_gid = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.belong_uid = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    r.file_name = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    r.file_size = sqlite3_column_int64(st, 5);
+    r.file_hash = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    r.object_key = reinterpret_cast<const char*>(sqlite3_column_text(st, 7));
+    r.source = static_cast<FileSource>(sqlite3_column_int(st, 8));
+    r.upload_ts = sqlite3_column_int64(st, 9);
+    r.status = static_cast<FileStatus>(sqlite3_column_int(st, 10));
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::delete_file_meta(std::int64_t file_id) {
+  const char* sql = "DELETE FROM files WHERE id=?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, file_id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+namespace {
+// 配额行读取（两级：群/人；无行=0 用量、0 上限=不限）。
+ServerStore::QuotaInfo read_quota(sqlite3* db, const char* sql,
+                                  const std::string& key) {
+  ServerStore::QuotaInfo q;
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) != SQLITE_OK) return q;
+  sqlite3_bind_text(st, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    q.gid = key;
+    q.uid = key;
+    q.used_bytes = sqlite3_column_int64(st, 1);
+    q.limit_bytes = sqlite3_column_int64(st, 2);
+  } else {
+    q.gid = key;
+    q.uid = key;
+  }
+  sqlite3_finalize(st);
+  return q;
+}
+bool add_quota_used(sqlite3* db, const char* table, const char* key_col,
+                    const std::string& key, std::int64_t delta) {
+  std::string upsert = std::string("INSERT INTO ") + table + "(" + key_col +
+                       ", used_bytes, limit_bytes) VALUES(?,?,0)"
+                       " ON CONFLICT(" +
+                       key_col +
+                       ") DO UPDATE SET used_bytes=used_bytes+excluded.used_bytes;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db, upsert.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 2, delta);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+bool set_quota_limit(sqlite3* db, const char* table, const char* key_col,
+                     const std::string& key, std::int64_t limit) {
+  std::string upsert = std::string("INSERT INTO ") + table + "(" + key_col +
+                       ", used_bytes, limit_bytes) VALUES(?,0,?)"
+                       " ON CONFLICT(" +
+                       key_col + ") DO UPDATE SET limit_bytes=excluded.limit_bytes;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db, upsert.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 2, limit);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+} // namespace
+
+std::optional<ServerStore::QuotaInfo> ServerStore::get_group_quota(
+    const std::string& gid) {
+  if (gid.empty()) return std::nullopt;
+  return read_quota(db_,
+                    "SELECT gid, used_bytes, limit_bytes FROM group_quota"
+                    " WHERE gid=?;",
+                    gid);
+}
+
+std::optional<ServerStore::QuotaInfo> ServerStore::get_user_quota(
+    const std::string& uid) {
+  if (uid.empty()) return std::nullopt;
+  return read_quota(db_,
+                    "SELECT uid, used_bytes, limit_bytes FROM user_quota"
+                    " WHERE uid=?;",
+                    uid);
+}
+
+bool ServerStore::add_group_quota_used(const std::string& gid,
+                                       std::int64_t delta_bytes) {
+  if (gid.empty()) return false;
+  return add_quota_used(db_, "group_quota", "gid", gid, delta_bytes);
+}
+
+bool ServerStore::add_user_quota_used(const std::string& uid,
+                                      std::int64_t delta_bytes) {
+  if (uid.empty()) return false;
+  return add_quota_used(db_, "user_quota", "uid", uid, delta_bytes);
+}
+
+bool ServerStore::set_group_quota_limit(const std::string& gid,
+                                        std::int64_t limit_bytes) {
+  if (gid.empty() || limit_bytes < 0) return false;
+  return set_quota_limit(db_, "group_quota", "gid", gid, limit_bytes);
+}
+
+bool ServerStore::set_user_quota_limit(const std::string& uid,
+                                       std::int64_t limit_bytes) {
+  if (uid.empty() || limit_bytes < 0) return false;
+  return set_quota_limit(db_, "user_quota", "uid", uid, limit_bytes);
+}
+
+bool ServerStore::add_uplink_log(const UplinkLog& log) {
+  if (log.uploader.empty() || log.file_name.empty()) return false;
+  const char* sql =
+      "INSERT INTO uplink_logs(uploader, file_name, file_size, file_hash,"
+      " object_key, upload_ts) VALUES(?,?,?,?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, log.uploader.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, log.file_name.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, log.file_size);
+  sqlite3_bind_text(st, 4, log.file_hash.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 5, log.object_key.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 6, log.upload_ts);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ServerStore::UplinkLog> ServerStore::list_uplink_logs(
+    const std::string& uploader, int limit) {
+  std::vector<UplinkLog> out;
+  const char* sql =
+      "SELECT id, uploader, file_name, file_size, file_hash, object_key,"
+      " upload_ts FROM uplink_logs"
+      " WHERE (? = '' OR uploader = ?)"
+      " ORDER BY id DESC LIMIT ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, uploader.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, uploader.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 3, limit);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    UplinkLog r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.uploader = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.file_name = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.file_size = sqlite3_column_int64(st, 3);
+    r.file_hash = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    r.object_key = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    r.upload_ts = sqlite3_column_int64(st, 6);
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
 }
 
 } // namespace memex::server

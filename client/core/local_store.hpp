@@ -4,6 +4,7 @@
 #pragma once
 
 #include <QList>
+#include <QSqlRecord>
 #include <QString>
 #include <QStringList>
 
@@ -54,10 +55,23 @@ public:
 
   // 某对端的本地历史：取最近 limit 条，按时间正序返回。
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;
-
   // 有历史的对端列表（按最近消息时间倒序）。source 过滤：
   // 空=全部，"collab"=协作会话（T2.4 会话列表），"direct"=直连会话。
   QStringList peers(const QString& source = {}) const;
+
+  // —— R23-1 存储抽象层（客户端元数据层）——
+  // 文件增删改查与配额只落本地 SQLite；对象字节经 memex server 走，
+  // 客户端永不直连对象存储。status：0=正常。
+  bool add_file(const QString& owner, const QString& belong_gid,
+                const QString& belong_uid, const QString& file_name,
+                qint64 file_size, const QString& file_hash,
+                const QString& object_key, const QString& source);
+  // 某属主的文件列表（belong_gid 为空=全部归属；否则按群过滤）。
+  QList<QSqlRecord> file_list(const QString& owner,
+                              const QString& belong_gid = {}) const;
+  // 配额用量写（无行则建行；覆盖式更新，调用方先读后算）。
+  bool update_group_quota(const QString& gid, qint64 used_bytes);
+  bool update_user_quota(const QString& uid, qint64 used_bytes);
 
 private:
   bool ensure_schema();

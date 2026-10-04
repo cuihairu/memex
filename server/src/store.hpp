@@ -382,6 +382,60 @@ public:
   // 某条消息的全部已读行（按上报序）
   std::vector<ReadRow> readers_for(const std::string& msg_id);
 
+
+  // —— R23-1 文件存储元数据（服务端权限/配额判断层） ——
+  // 文件来源：internal（内网上传）、uplink（外网单向上传）
+  enum class FileSource : int { Internal = 0, Uplink = 1 };
+  // 文件状态：normal、quarantine（隔离/杀毒待审）、expired（过期清理）
+  enum class FileStatus : int { Normal = 0, Quarantine = 1, Expired = 2 };
+
+  struct FileMeta {
+    int64_t id{0};
+    std::string owner;
+    std::string belong_gid;
+    std::string belong_uid;
+    std::string file_name;
+    int64_t file_size{0};
+    std::string file_hash;
+    std::string object_key;
+    FileSource source{FileSource::Internal};
+    int64_t upload_ts{0};
+    FileStatus status{FileStatus::Normal};
+  };
+
+  struct QuotaInfo {
+    std::string gid;
+    std::string uid;
+    int64_t used_bytes{0};
+    int64_t limit_bytes{0};
+  };
+
+  int64_t create_file_meta(const FileMeta& meta);
+  std::optional<FileMeta> check_second_transfer(const std::string& owner,
+                                                const std::string& file_hash);
+  std::vector<FileMeta> list_files(const std::string& belong_gid,
+                                   const std::string& belong_uid,
+                                   int limit = 200, int offset = 0);
+  bool delete_file_meta(int64_t file_id);
+  std::optional<QuotaInfo> get_group_quota(const std::string& gid);
+  std::optional<QuotaInfo> get_user_quota(const std::string& uid);
+  bool add_group_quota_used(const std::string& gid, int64_t delta_bytes);
+  bool add_user_quota_used(const std::string& uid, int64_t delta_bytes);
+  bool set_group_quota_limit(const std::string& gid, int64_t limit_bytes);
+  bool set_user_quota_limit(const std::string& uid, int64_t limit_bytes);
+
+  struct UplinkLog {
+    int64_t id{0};
+    std::string uploader;
+    std::string file_name;
+    int64_t file_size{0};
+    std::string file_hash;
+    std::string object_key;
+    int64_t upload_ts{0};
+  };
+  bool add_uplink_log(const UplinkLog& log);
+  std::vector<UplinkLog> list_uplink_logs(const std::string& uploader,
+                                          int limit = 200);
 private:
   bool ensure_schema();
 
