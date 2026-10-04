@@ -20,6 +20,13 @@ final class FakeMemexServer {
     /// 每帧应答钩子（nil=默认：LOGIN→LOGIN_RESULT ok）
     var onEnvelope: ((Memex_Protocol_V1_Envelope, Int32) -> Void)?
 
+    /// 线程安全快照（测试线程在服务端读线程记账期间轮询用）
+    func snapshotReceived() -> [Memex_Protocol_V1_Envelope] {
+        lock.lock()
+        defer { lock.unlock() }
+        return received
+    }
+
     init() throws {
         // 全程用局部 fd：init 内 withUnsafePointer 闭包若引用成员会在
         // 全部成员初始化完成前捕获 self（Swift 不允许）

@@ -84,6 +84,22 @@ final class ChatSessionTests: XCTestCase {
         )
     }
 
+    /// 有界轮询服务端已收帧（客户端 ACK 在读线程异步回、回调走独立队列，
+    /// 事件信号不蕴含服务端已记账，需等一拍避免竞态）
+    private func awaitReceived(
+        _ server: FakeMemexServer,
+        _ predicate: @escaping (Memex_Protocol_V1_Envelope) -> Bool,
+        _ file: StaticString = #filePath, _ line: UInt = #line
+    ) -> Memex_Protocol_V1_Envelope? {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if let m = server.snapshotReceived().first(where: predicate) { return m }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        XCTFail("等待服务端收到匹配帧超时", file: file, line: line)
+        return nil
+    }
+
     // MARK: - 用例
 
     func testLoginSucceedsWithFullLoginFields() throws {
@@ -216,7 +232,7 @@ final class ChatSessionTests: XCTestCase {
         wait(listener.onMessage)
 
         // 已回 ACK(msg_id)
-        let ackFrame = server.received.first { $0.type == .ack }
+        let ackFrame = awaitReceived(server) { $0.type == .ack }
         XCTAssertEqual(ackFrame?.ack.msgID, "sha256:bob:7")
         XCTAssertEqual(ackFrame?.to, "server")
 
@@ -256,7 +272,7 @@ final class ChatSessionTests: XCTestCase {
         wait(listener.onMessage)
         XCTAssertEqual(store.history(peer: "group:9").map { $0.peer }, ["group:9"])
         XCTAssertEqual(store.history(peer: "group:9").map { $0.text }, ["群消息"])
-        XCTAssertEqual(server.received.first { $0.type == .ack }?.ack.msgID, "g1")
+        XCTAssertEqual(awaitReceived(server) { $0.type == .ack }?.ack.msgID, "g1")
     }
 
     func testKickDisconnectsAndStopsSends() throws {
