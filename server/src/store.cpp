@@ -210,8 +210,9 @@ bool ServerStore::ensure_schema() {
       "  created_ms INTEGER NOT NULL,"
       "  revoked INTEGER NOT NULL DEFAULT 0);"
       // R23-1 文件存储元数据：文件表（秒传键 file_hash、归属、对象键、来源、状态）
-      // R23-2 起秒传键含归属：UNIQUE(file_hash, owner, belong_gid, belong_uid)
-      // ——同属主同哈希在「同一目标」内复用对象；换群/换人空间是不同文件
+      // R23-2 起秒传键含归属，R23-3 起再含类目 kind：
+      // UNIQUE(file_hash, owner, belong_gid, belong_uid, kind)——同属主同
+      // 哈希在「同一目标同一空间」内复用对象；换群/换人/换类目是不同文件
       // 行（对象前缀 groups/{gid}/ 与 users/{uid}/ 本就隔离，见设计铁律 3）。
       // pin=置顶（群主/管理员管群文件、本人管个人文件）。
       "CREATE TABLE IF NOT EXISTS files ("
@@ -227,10 +228,20 @@ bool ServerStore::ensure_schema() {
       "  upload_ts INTEGER NOT NULL DEFAULT 0,"
       "  status INTEGER NOT NULL DEFAULT 0,"  // 0=normal, 1=quarantine, 2=expired
       "  pin INTEGER NOT NULL DEFAULT 0,"
-      "  UNIQUE(file_hash, owner, belong_gid, belong_uid));"
+      "  kind INTEGER NOT NULL DEFAULT 0,"    // 0=personal, 1=inbox（R23-3）
+      "  UNIQUE(file_hash, owner, belong_gid, belong_uid, kind));"
       "CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner);"
       "CREATE INDEX IF NOT EXISTS idx_files_belong_gid ON files(belong_gid);"
       "CREATE INDEX IF NOT EXISTS idx_files_belong_uid ON files(belong_uid);"
+      // R23-3 文件助手备忘录：本人文本条目（纯元数据，不入对象存储）；
+      // 自备忘录不留修订史（修订历史属 R24-2 群备忘录，另表另设计）。
+      "CREATE TABLE IF NOT EXISTS memos ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  owner TEXT NOT NULL,"
+      "  content TEXT NOT NULL,"
+      "  created_ms INTEGER NOT NULL,"
+      "  updated_ms INTEGER NOT NULL);"
+      "CREATE INDEX IF NOT EXISTS idx_memos_owner ON memos(owner);"
       // 群配额：每个群的使用字节数与上限
       "CREATE TABLE IF NOT EXISTS group_quota ("
       "  gid TEXT PRIMARY KEY,"
@@ -311,6 +322,8 @@ bool ServerStore::ensure_schema() {
   // UNIQUE(file_hash, owner, belong_gid, belong_uid)＋补 pin 列。旧键把
   // 「同内容传第二个群」误判成秒传（行永不落新归属）。事务化重建，失败
   // 回滚保数据；pin 缺列的中间态库单独 ALTER。
+  // 探针不含收尾括号：R23-3 起新键是 UNIQUE(..., belong_uid, kind)，
+  // 若按「…belong_uid）」整串找会把新形表误判成 legacy 而回退重建。
   {
     bool legacy = false;
     sqlite3_stmt* st = nullptr;
@@ -322,7 +335,7 @@ bool ServerStore::ensure_schema() {
             reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
         legacy = ddl && std::string(ddl).find(
                               "UNIQUE(file_hash, owner, belong_gid,"
-                              " belong_uid)") == std::string::npos;
+                              " belong_uid") == std::string::npos;
       }
       sqlite3_finalize(st);
     }
@@ -367,6 +380,74 @@ bool ServerStore::ensure_schema() {
       if (!migrated) sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
     }
   }
+  // 旧库迁移（R23-3）：files 秒传键补类目 kind 列，键扩为
+  // UNIQUE(file_hash, owner, belong_gid, belong_uid, kind)——收件箱与
+  // 个人空间互不秒传串用。存量行全部 kind=0（personal）。事务化重建，
+  // 失败回滚保数据；探针含「, kind）」整串：R23-2 形态库才会进来。
+  {
+    bool legacy = false;
+    sqlite3_stmt* st = nullptr;
+    const char* probe =
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='files';";
+    if (sqlite3_prepare_v2(db_, probe, -1, &st, nullptr) == SQLITE_OK) {
+      if (sqlite3_step(st) == SQLITE_ROW) {
+        const char* ddl =
+            reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+        legacy = ddl && std::string(ddl).find(
+                              "UNIQUE(file_hash, owner, belong_gid,"
+                              " belong_uid, kind)") == std::string::npos;
+      }
+      sqlite3_finalize(st);
+    }
+    if (legacy) {
+      const char* steps[] = {
+          "BEGIN;",
+          "ALTER TABLE files RENAME TO files_legacy;",
+          "CREATE TABLE files ("
+          "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+          "  owner TEXT NOT NULL,"
+          "  belong_gid TEXT NOT NULL DEFAULT '',"
+          "  belong_uid TEXT NOT NULL DEFAULT '',"
+          "  file_name TEXT NOT NULL,"
+          "  file_size INTEGER NOT NULL DEFAULT 0,"
+          "  file_hash TEXT NOT NULL DEFAULT '',"
+          "  object_key TEXT NOT NULL DEFAULT '',"
+          "  source INTEGER NOT NULL DEFAULT 0,"
+          "  upload_ts INTEGER NOT NULL DEFAULT 0,"
+          "  status INTEGER NOT NULL DEFAULT 0,"
+          "  pin INTEGER NOT NULL DEFAULT 0,"
+          "  kind INTEGER NOT NULL DEFAULT 0,"
+          "  UNIQUE(file_hash, owner, belong_gid, belong_uid, kind));",
+          "INSERT INTO files(id, owner, belong_gid, belong_uid, file_name,"
+          " file_size, file_hash, object_key, source, upload_ts, status,"
+          " pin, kind)"
+          " SELECT id, owner, belong_gid, belong_uid, file_name, file_size,"
+          " file_hash, object_key, source, upload_ts, status, pin, 0"
+          " FROM files_legacy;",
+          "DROP TABLE files_legacy;",
+          "CREATE INDEX IF NOT EXISTS idx_files_owner ON files(owner);",
+          "CREATE INDEX IF NOT EXISTS idx_files_belong_gid"
+          " ON files(belong_gid);",
+          "CREATE INDEX IF NOT EXISTS idx_files_belong_uid"
+          " ON files(belong_uid);",
+          "CREATE INDEX IF NOT EXISTS idx_files_kind ON files(kind);",
+          "COMMIT;",
+      };
+      bool migrated = true;
+      for (const char* s : steps) {
+        if (sqlite3_exec(db_, s, nullptr, nullptr, nullptr) != SQLITE_OK) {
+          migrated = false;
+          break;
+        }
+      }
+      if (!migrated) sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+    }
+  }
+  // kind 索引收尾：主 schema 串不能含它——R23-2 形态库 kind 列尚未存在，
+  // 放主串会让 open 直接失败（迁移失败时这里也静默，表已按新形重建则成）。
+  sqlite3_exec(db_, "CREATE INDEX IF NOT EXISTS idx_files_kind"
+                    " ON files(kind)",
+              nullptr, nullptr, nullptr);
   // 旧库迁移：群成员补组内角色列（权限模型：群主/管理员/成员；缺省=成员）
   sqlite3_exec(db_, "ALTER TABLE group_members ADD COLUMN"
                     " role TEXT NOT NULL DEFAULT 'member'",
@@ -2039,8 +2120,8 @@ std::int64_t ServerStore::create_file_meta(const FileMeta& meta) {
   if (meta.owner.empty() || meta.file_name.empty()) return 0;
   const char* sql =
       "INSERT OR IGNORE INTO files(owner, belong_gid, belong_uid, file_name,"
-      " file_size, file_hash, object_key, source, upload_ts, status)"
-      " VALUES(?,?,?,?,?,?,?,?,?,?);";
+      " file_size, file_hash, object_key, source, upload_ts, status, kind)"
+      " VALUES(?,?,?,?,?,?,?,?,?,?,?);";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
   sqlite3_bind_text(st, 1, meta.owner.c_str(), -1, SQLITE_TRANSIENT);
@@ -2053,22 +2134,25 @@ std::int64_t ServerStore::create_file_meta(const FileMeta& meta) {
   sqlite3_bind_int(st, 8, static_cast<int>(meta.source));
   sqlite3_bind_int64(st, 9, meta.upload_ts);
   sqlite3_bind_int(st, 10, static_cast<int>(meta.status));
+  sqlite3_bind_int(st, 11, static_cast<int>(meta.kind));
   std::int64_t id = 0;
   if (sqlite3_step(st) == SQLITE_DONE) {
     if (sqlite3_changes(db_) > 0) {
       id = sqlite3_last_insert_rowid(db_);
     } else {
-      // 秒传键冲突（UNIQUE(file_hash, owner) 已有行）：last_insert_rowid
-      // 会返回连接上上一次无关插入的 rowid，必须回查已有行的 id 返回。
+      // 秒传键冲突（UNIQUE(file_hash, owner, belong_gid, belong_uid, kind)
+      // 已有行）：last_insert_rowid 会返回连接上上一次无关插入的 rowid，
+      // 必须回查已有行的 id 返回。
       sqlite3_finalize(st);
       const char* lookup =
           "SELECT id FROM files WHERE file_hash=? AND owner=?"
-          " AND belong_gid=? AND belong_uid=?;";
+          " AND belong_gid=? AND belong_uid=? AND kind=?;";
       if (sqlite3_prepare_v2(db_, lookup, -1, &st, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(st, 1, meta.file_hash.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 2, meta.owner.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 3, meta.belong_gid.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 4, meta.belong_uid.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(st, 5, static_cast<int>(meta.kind));
         if (sqlite3_step(st) == SQLITE_ROW) {
           id = sqlite3_column_int64(st, 0);
         }
@@ -2081,15 +2165,16 @@ std::int64_t ServerStore::create_file_meta(const FileMeta& meta) {
 
 std::optional<ServerStore::FileMeta> ServerStore::check_second_transfer(
     const std::string& owner, const std::string& file_hash,
-    const std::string& belong_gid, const std::string& belong_uid) {
+    const std::string& belong_gid, const std::string& belong_uid,
+    FileKind kind) {
   if (owner.empty() || file_hash.empty()) return std::nullopt;
-  // 秒传按「属主+哈希+归属」判：同属主同哈希在另一群/个人空间不算命中
-  //（对象前缀本就按归属隔离，见设计铁律 3）。
+  // 秒传按「属主+哈希+归属+类目」判：同属主同哈希在另一群/个人空间/
+  // 收件箱不算命中（对象前缀本就按归属隔离，见设计铁律 3）。
   const char* sql =
       "SELECT id, owner, belong_gid, belong_uid, file_name, file_size,"
-      " file_hash, object_key, source, upload_ts, status, pin"
+      " file_hash, object_key, source, upload_ts, status, pin, kind"
       " FROM files WHERE owner=? AND file_hash=? AND status=0"
-      " AND belong_gid=? AND belong_uid=? LIMIT 1;";
+      " AND belong_gid=? AND belong_uid=? AND kind=? LIMIT 1;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
     return std::nullopt;
@@ -2098,6 +2183,7 @@ std::optional<ServerStore::FileMeta> ServerStore::check_second_transfer(
   sqlite3_bind_text(st, 2, file_hash.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 3, belong_gid.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 4, belong_uid.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 5, static_cast<int>(kind));
   std::optional<FileMeta> out;
   if (sqlite3_step(st) == SQLITE_ROW) {
     FileMeta r;
@@ -2113,6 +2199,7 @@ std::optional<ServerStore::FileMeta> ServerStore::check_second_transfer(
     r.upload_ts = sqlite3_column_int64(st, 9);
     r.status = static_cast<FileStatus>(sqlite3_column_int(st, 10));
     r.pin = sqlite3_column_int(st, 11) != 0;
+    r.kind = static_cast<FileKind>(sqlite3_column_int(st, 12));
     out = std::move(r);
   }
   sqlite3_finalize(st);
@@ -2121,13 +2208,15 @@ std::optional<ServerStore::FileMeta> ServerStore::check_second_transfer(
 
 std::vector<ServerStore::FileMeta> ServerStore::list_files(
     const std::string& belong_gid, const std::string& belong_uid, int limit,
-    int offset) {
+    int offset, int kind) {
   std::vector<FileMeta> out;
+  // kind<0 不过滤类目（全量）；0/1 只列对应类目（R23-3 空间隔离）
   const char* sql =
       "SELECT id, owner, belong_gid, belong_uid, file_name, file_size,"
-      " file_hash, object_key, source, upload_ts, status, pin"
+      " file_hash, object_key, source, upload_ts, status, pin, kind"
       " FROM files"
       " WHERE (? = '' OR belong_gid = ?) AND (? = '' OR belong_uid = ?)"
+      " AND (? < 0 OR kind = ?)"
       " ORDER BY pin DESC, id DESC LIMIT ? OFFSET ?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
@@ -2135,8 +2224,10 @@ std::vector<ServerStore::FileMeta> ServerStore::list_files(
   sqlite3_bind_text(st, 2, belong_gid.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 3, belong_uid.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 4, belong_uid.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_int(st, 5, limit);
-  sqlite3_bind_int(st, 6, offset);
+  sqlite3_bind_int(st, 5, kind);
+  sqlite3_bind_int(st, 6, kind);
+  sqlite3_bind_int(st, 7, limit);
+  sqlite3_bind_int(st, 8, offset);
   while (sqlite3_step(st) == SQLITE_ROW) {
     FileMeta r;
     r.id = sqlite3_column_int64(st, 0);
@@ -2151,6 +2242,7 @@ std::vector<ServerStore::FileMeta> ServerStore::list_files(
     r.upload_ts = sqlite3_column_int64(st, 9);
     r.status = static_cast<FileStatus>(sqlite3_column_int(st, 10));
     r.pin = sqlite3_column_int(st, 11) != 0;
+    r.kind = static_cast<FileKind>(sqlite3_column_int(st, 12));
     out.push_back(std::move(r));
   }
   sqlite3_finalize(st);
@@ -2341,7 +2433,7 @@ std::optional<ServerStore::FileMeta> ServerStore::file_by_id(
     std::int64_t file_id) {
   const char* sql =
       "SELECT id, owner, belong_gid, belong_uid, file_name, file_size,"
-      " file_hash, object_key, source, upload_ts, status, pin"
+      " file_hash, object_key, source, upload_ts, status, pin, kind"
       " FROM files WHERE id=?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
@@ -2363,6 +2455,7 @@ std::optional<ServerStore::FileMeta> ServerStore::file_by_id(
     r.upload_ts = sqlite3_column_int64(st, 9);
     r.status = static_cast<FileStatus>(sqlite3_column_int(st, 10));
     r.pin = sqlite3_column_int(st, 11) != 0;
+    r.kind = static_cast<FileKind>(sqlite3_column_int(st, 12));
     out = std::move(r);
   }
   sqlite3_finalize(st);
@@ -2401,6 +2494,107 @@ std::int64_t ServerStore::count_file_refs(const std::string& object_key) {
   if (sqlite3_step(st) == SQLITE_ROW) n = sqlite3_column_int64(st, 0);
   sqlite3_finalize(st);
   return n;
+}
+
+// ---- R23-3 文件助手：备忘录（本人收件箱文本面） ----
+// 自备忘录不留修订史（修订史属 R24-2）；owner 过滤即权限边界，server 层再判权。
+
+std::int64_t ServerStore::create_memo(const std::string& owner,
+                                      const std::string& content,
+                                      std::int64_t ts_ms) {
+  if (owner.empty() || content.empty()) return 0;
+  const char* sql =
+      "INSERT INTO memos (owner, content, created_ms, updated_ms)"
+      " VALUES (?, ?, ?, ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, owner.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, content.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, ts_ms);
+  sqlite3_bind_int64(st, 4, ts_ms);
+  std::int64_t id = 0;
+  if (sqlite3_step(st) == SQLITE_DONE) id = sqlite3_last_insert_rowid(db_);
+  sqlite3_finalize(st);
+  return id;
+}
+
+std::optional<ServerStore::MemoRow> ServerStore::memo_by_id(std::int64_t id) {
+  const char* sql =
+      "SELECT id, owner, content, created_ms, updated_ms"
+      " FROM memos WHERE id=?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_int64(st, 1, id);
+  std::optional<MemoRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    MemoRow r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.owner = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.content = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.created_ms = sqlite3_column_int64(st, 3);
+    r.updated_ms = sqlite3_column_int64(st, 4);
+    out = std::move(r);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::MemoRow> ServerStore::list_memos(
+    const std::string& owner, int limit, int offset) {
+  std::vector<MemoRow> out;
+  if (owner.empty()) return out;
+  const char* sql =
+      "SELECT id, owner, content, created_ms, updated_ms"
+      " FROM memos WHERE owner=?"
+      " ORDER BY updated_ms DESC, id DESC LIMIT ? OFFSET ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, owner.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 2, limit);
+  sqlite3_bind_int(st, 3, offset);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    MemoRow r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.owner = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.content = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.created_ms = sqlite3_column_int64(st, 3);
+    r.updated_ms = sqlite3_column_int64(st, 4);
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::update_memo(std::int64_t id, const std::string& owner,
+                              const std::string& content,
+                              std::int64_t ts_ms) {
+  if (owner.empty() || content.empty()) return false;
+  // WHERE owner= 二次校验：仅本人可改自己的行。
+  const char* sql =
+      "UPDATE memos SET content=?, updated_ms=? WHERE id=? AND owner=?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, content.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 2, ts_ms);
+  sqlite3_bind_int64(st, 3, id);
+  sqlite3_bind_text(st, 4, owner.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::delete_memo(std::int64_t id, const std::string& owner) {
+  if (owner.empty()) return false;
+  const char* sql = "DELETE FROM memos WHERE id=? AND owner=?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, id);
+  sqlite3_bind_text(st, 2, owner.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
 }
 
 bool ServerStore::charge_group_quota(const std::string& gid,

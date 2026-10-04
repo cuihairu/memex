@@ -391,6 +391,11 @@ public:
   // 文件状态：normal、quarantine（隔离/杀毒待审）、expired（过期清理）
   enum class FileStatus : int { Normal = 0, Quarantine = 1, Expired = 2 };
 
+  // 文件类目（R23-3）：Personal=常规个人/群空间；Inbox=文件助手本人收件箱
+  //（手机发自己=文件传输落这里）。类目入秒传键：同属主同哈希的收件箱文件
+  // 与个人空间文件是两个空间，互不秒传串用。
+  enum class FileKind : int { Personal = 0, Inbox = 1 };
+
   struct FileMeta {
     int64_t id{0};
     std::string owner;
@@ -404,6 +409,7 @@ public:
     int64_t upload_ts{0};
     FileStatus status{FileStatus::Normal};
     bool pin{false};  // 置顶（群主/管理员管群文件、本人管个人文件）
+    FileKind kind{FileKind::Personal};
   };
 
   struct QuotaInfo {
@@ -414,14 +420,18 @@ public:
   };
 
   int64_t create_file_meta(const FileMeta& meta);
-  // 秒传按「属主+哈希+归属」判（R23-2：换群/换人空间不算命中）
+  // 秒传按「属主+哈希+归属+类目」判（R23-2：换群/换人空间不算命中；
+  // R23-3：收件箱与个人空间互不串用）。kind 缺省 Personal 兼容既有调用。
   std::optional<FileMeta> check_second_transfer(const std::string& owner,
                                                 const std::string& file_hash,
                                                 const std::string& belong_gid,
-                                                const std::string& belong_uid);
+                                                const std::string& belong_uid,
+                                                FileKind kind = FileKind::Personal);
+  // kind=-1 不按类目过滤（缺省）；0/1 只列对应类目
   std::vector<FileMeta> list_files(const std::string& belong_gid,
                                    const std::string& belong_uid,
-                                   int limit = 200, int offset = 0);
+                                   int limit = 200, int offset = 0,
+                                   int kind = -1);
   std::optional<FileMeta> file_by_id(int64_t file_id);
   bool delete_file_meta(int64_t file_id);
   bool set_file_pin(int64_t file_id, bool pin);
@@ -455,6 +465,28 @@ public:
   bool add_uplink_log(const UplinkLog& log);
   std::vector<UplinkLog> list_uplink_logs(const std::string& uploader,
                                           int limit = 200);
+
+  // —— R23-3 文件助手备忘录（memos：本人文本，不入对象存储）——
+  // 历史留痕不在本层：自备忘录不留修订史（修订历史属 R24-2 群备忘录）。
+  struct MemoRow {
+    std::int64_t id{0};
+    std::string owner;
+    std::string content;
+    std::int64_t created_ms{0};
+    std::int64_t updated_ms{0};
+  };
+  // 建备忘录：owner/content 非空才收（无主/空文不落库）；返回 id，拒=0
+  std::int64_t create_memo(const std::string& owner,
+                           const std::string& content, std::int64_t ts_ms);
+  std::optional<MemoRow> memo_by_id(std::int64_t id);
+  // 本人列表（updated_ms 倒序）——owner 过滤即权限（owner 之外查不到）
+  std::vector<MemoRow> list_memos(const std::string& owner, int limit = 200,
+                                  int offset = 0);
+  // 更新/删除带 owner 二次校验（WHERE owner=）：异属主操作落不到行
+  bool update_memo(std::int64_t id, const std::string& owner,
+                   const std::string& content, std::int64_t ts_ms);
+  bool delete_memo(std::int64_t id, const std::string& owner);
+
 private:
   bool ensure_schema();
 

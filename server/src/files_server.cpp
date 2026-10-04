@@ -1,5 +1,6 @@
 #include "files_server.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <chrono>
@@ -53,13 +54,16 @@ struct FileSession {
   std::int64_t expires_ms{0};
 };
 
-// "group:3" / "me" → is_group/gid/uid；非法返回 false
+// "group:3" / "me" / "inbox" → is_group/gid/uid/is_inbox；非法返回 false
+// inbox=文件助手收件箱：个人空间归属（uid=本人），类目由调用方落 kind
 bool parse_target(const std::string& t, const std::string& me, bool& is_group,
-                  std::uint64_t& gid, std::string& uid) {
-  if (t == "me") {
+                  std::uint64_t& gid, std::string& uid, bool& is_inbox) {
+  is_inbox = false;
+  if (t == "me" || t == "inbox") {
     is_group = false;
     gid = 0;
     uid = me;
+    is_inbox = t == "inbox";
     return !me.empty();
   }
   if (t.rfind("group:", 0) == 0) {
@@ -228,7 +232,7 @@ struct FileServer::Impl {
   UploadOutcome handle_upload(const std::string& account, bool is_group,
                               std::uint64_t gid, const std::string& uid,
                               const std::string& file_name,
-                              const std::string& body) {
+                              const std::string& body, bool is_inbox) {
     UploadOutcome out;
     if (!storage) {
       out.http_status = 503;
@@ -244,9 +248,13 @@ struct FileServer::Impl {
     }
     const std::string hash = sha256_hex(body);
     const std::string gid_s = is_group ? std::to_string(gid) : "";
-    // 秒传：同属主+同哈希+同归属 → 复用，不扣费不落字节
+    // 类目入秒传键：收件箱与个人空间是两个空间，互不秒传串用
+    const ServerStore::FileKind kind = is_inbox
+                                           ? ServerStore::FileKind::Inbox
+                                           : ServerStore::FileKind::Personal;
+    // 秒传：同属主+同哈希+同归属+同类目 → 复用，不扣费不落字节
     if (const auto hit =
-            store.check_second_transfer(account, hash, gid_s, uid)) {
+            store.check_second_transfer(account, hash, gid_s, uid, kind)) {
       out.file_id = hit->id;
       out.second_transfer = true;
       return out;
@@ -281,6 +289,7 @@ struct FileServer::Impl {
     meta.file_hash = hash;
     meta.object_key = object_key;
     meta.upload_ts = now_ms();
+    meta.kind = kind;
     out.file_id = store.create_file_meta(meta);
     if (out.file_id <= 0) {
       if (is_group) store.add_group_quota_used(gid_s, -static_cast<std::int64_t>(body.size()));
@@ -454,8 +463,13 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         file_name_ = val;
       }
     }
-    if (!seen_content_length_ ||
-        content_length_ == static_cast<std::size_t>(-1)) {
+    // 无请求体方法缺 Content-Length 视为 0（curl/浏览器/Qt QNAM 的
+    // GET/HEAD 都不发该头，R23-3 走查实录）；带体方法仍强制。
+    if (!seen_content_length_ && (method_ == "GET" || method_ == "DELETE" ||
+                                  method_ == "HEAD")) {
+      content_length_ = 0;
+    } else if (!seen_content_length_ ||
+               content_length_ == static_cast<std::size_t>(-1)) {
       respond_json(400, {{"ok", false}, {"error", "Content-Length 缺失或非法"}});
       return false;
     }
@@ -498,6 +512,16 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/manage/quota" && method_ == "POST") {
       return route_quota_set(body);
+    }
+    // R23-3 文件助手备忘录：POST 建/改、GET 单条/列表、DELETE 删
+    if (path_ == "/files/memo" && method_ == "POST") {
+      return route_memo_write(body);
+    }
+    if (path_ == "/files/memo" && method_ == "GET") {
+      return route_memo();
+    }
+    if (path_ == "/files/memo" && method_ == "DELETE") {
+      return route_memo_delete();
     }
     respond_json(404, {{"ok", false}, {"error", "路径不存在"}});
   }
@@ -546,11 +570,12 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (account.empty()) return;
     const std::string target = query_param(query_, "target");
     bool is_group = false;
+    bool is_inbox = false;
     std::uint64_t gid = 0;
     std::string uid;
-    if (!parse_target(target, account, is_group, gid, uid)) {
+    if (!parse_target(target, account, is_group, gid, uid, is_inbox)) {
       respond_json(400, {{"ok", false},
-                         {"error", "target 须为 group:<数字> 或 me"}});
+                         {"error", "target 须为 group:<数字>、me 或 inbox"}});
       return;
     }
     const std::string resource = is_group ? "group:" + std::to_string(gid)
@@ -563,7 +588,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       return;
     }
     const auto r = impl_.handle_upload(account, is_group, gid, uid,
-                                       file_name_, body);
+                                       file_name_, body, is_inbox);
     if (r.http_status != 200) {
       respond_json(r.http_status, {{"ok", false}, {"error", r.error}});
       return;
@@ -638,11 +663,12 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (account.empty()) return;
     const std::string target = query_param(query_, "target");
     bool is_group = false;
+    bool is_inbox = false;
     std::uint64_t gid = 0;
     std::string uid;
-    if (!parse_target(target, account, is_group, gid, uid)) {
+    if (!parse_target(target, account, is_group, gid, uid, is_inbox)) {
       respond_json(400, {{"ok", false},
-                         {"error", "target 须为 group:<数字> 或 me"}});
+                         {"error", "target 须为 group:<数字>、me 或 inbox"}});
       return;
     }
     const std::string resource = is_group ? "group:" + std::to_string(gid)
@@ -665,10 +691,57 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                             std::string::npos) {
       offset = std::atoi(off.c_str());
     }
-    const auto rows = impl_.store.list_files(is_group ? std::to_string(gid)
-                                                      : "",
-                                             is_group ? "" : account, limit,
-                                             offset);
+    if (is_inbox) {
+      // 文件助手统一收件箱：备忘录 + 收件箱文件按时间倒序混排，
+      // 分页在混排后取窗（memo 取 updated_ms，文件取 upload_ts）。
+      const auto files =
+          impl_.store.list_files("", account, -1, 0,
+                                 static_cast<int>(ServerStore::FileKind::Inbox));
+      const auto memos = impl_.store.list_memos(account, -1, 0);
+      struct Item {
+        std::int64_t ts{0};
+        bool is_memo{false};
+        ServerStore::FileMeta file;
+        ServerStore::MemoRow memo;
+      };
+      std::vector<Item> merged;
+      merged.reserve(files.size() + memos.size());
+      for (const auto& f : files) merged.push_back(Item{f.upload_ts, false, f, {}});
+      for (const auto& m : memos) merged.push_back(Item{m.updated_ms, true, {}, m});
+      std::stable_sort(merged.begin(), merged.end(),
+                       [](const Item& a, const Item& b) { return a.ts > b.ts; });
+      const std::size_t begin =
+          offset > 0 ? static_cast<std::size_t>(offset) : 0;
+      const std::size_t end =
+          std::min(merged.size(), begin + static_cast<std::size_t>(limit));
+      json arr = json::array();
+      for (std::size_t i = begin; i < end; ++i) {
+        const Item& it = merged[i];
+        if (it.is_memo) {
+          arr.push_back({{"type", "memo"},
+                         {"id", it.memo.id},
+                         {"content", it.memo.content},
+                         {"created_ms", it.memo.created_ms},
+                         {"updated_ms", it.memo.updated_ms}});
+        } else {
+          arr.push_back({{"type", "file"},
+                         {"id", it.file.id},
+                         {"file_name", it.file.file_name},
+                         {"file_size", it.file.file_size},
+                         {"file_hash", it.file.file_hash},
+                         {"pin", it.file.pin},
+                         {"status", static_cast<int>(it.file.status)},
+                         {"upload_ts", it.file.upload_ts}});
+        }
+      }
+      respond_json(200, {{"ok", true}, {"items", arr}});
+      return;
+    }
+    // 个人空间只列 kind=0：收件箱文件不混进个人文件列表（R23-3 空间隔离）
+    const auto rows =
+        impl_.store.list_files(is_group ? std::to_string(gid) : "",
+                               is_group ? "" : account, limit, offset,
+                               is_group ? -1 : 0);
     json arr = json::array();
     for (const auto& m : rows) {
       arr.push_back({{"id", m.id},
@@ -688,11 +761,12 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (account.empty()) return;
     const std::string target = query_param(query_, "target");
     bool is_group = false;
+    bool is_inbox = false;
     std::uint64_t gid = 0;
     std::string uid;
-    if (!parse_target(target, account, is_group, gid, uid)) {
+    if (!parse_target(target, account, is_group, gid, uid, is_inbox)) {
       respond_json(400, {{"ok", false},
-                         {"error", "target 须为 group:<数字> 或 me"}});
+                         {"error", "target 须为 group:<数字>、me 或 inbox"}});
       return;
     }
     const std::string resource = is_group ? "group:" + std::to_string(gid)
@@ -781,9 +855,11 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       return;
     }
     bool is_group = false;
+    bool is_inbox = false;
     std::uint64_t gid = 0;
     std::string uid;
-    if (!parse_target(target, account, is_group, gid, uid) || !is_group) {
+    if (!parse_target(target, account, is_group, gid, uid, is_inbox) ||
+        !is_group) {
       respond_json(400, {{"ok", false},
                          {"error", "target 须为 group:<数字>"}});
       return;
@@ -818,6 +894,171 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(500, {{"ok", false}, {"error", "配额设置失败"}});
       return;
     }
+    respond_json(200, {{"ok", true}});
+  }
+
+  // —— R23-3 备忘录（文件助手文本面）：判权走 AuthorizationService，
+  //    personal-owner 仅本人（resource "user:{owner}/memo:{id}" 前缀匹配
+  //    即中、不限 action），他人一律 default-deny——不自造权限规则 ——
+  static std::string memo_resource(const std::string& owner,
+                                   std::int64_t id) {
+    return "user:" + owner + "/memo:" + std::to_string(id);
+  }
+
+  void route_memo_write(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("content") || !j["content"].is_string() ||
+        j["content"].get<std::string>().empty()) {
+      respond_json(400, {{"ok", false},
+                         {"error", "缺少字段：content（非空字符串）"}});
+      return;
+    }
+    const std::string content = j["content"].get<std::string>();
+    if (j.contains("id")) {
+      if (!j["id"].is_number_integer()) {
+        respond_json(400, {{"ok", false}, {"error", "id 须为整数"}});
+        return;
+      }
+      const std::int64_t id = j["id"].get<std::int64_t>();
+      const auto row = impl_.store.memo_by_id(id);
+      if (!row.has_value()) {
+        respond_json(404, {{"ok", false}, {"error", "备忘录不存在"}});
+        return;
+      }
+      const Decision d = impl_.az.authorize(
+          {account, "memo:update", memo_resource(row->owner, id),
+           "owner=" + account});
+      if (!d.allowed) {
+        respond_json(403,
+                     {{"ok", false}, {"error", "无权编辑（" + d.reason + "）"}});
+        return;
+      }
+      if (!impl_.store.update_memo(id, account, content, now_ms())) {
+        respond_json(500, {{"ok", false}, {"error", "备忘录更新失败"}});
+        return;
+      }
+      std::cout << "[MEMEX] files memo update account=" << account
+                << " id=" << id << std::endl;
+      respond_json(200, {{"ok", true}, {"id", id}});
+      return;
+    }
+    const Decision d = impl_.az.authorize(
+        {account, "memo:create", "user:" + account, "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403,
+                   {{"ok", false}, {"error", "无权新建（" + d.reason + "）"}});
+      return;
+    }
+    const std::int64_t id = impl_.store.create_memo(account, content, now_ms());
+    if (id <= 0) {
+      respond_json(500, {{"ok", false}, {"error", "备忘录落库失败"}});
+      return;
+    }
+    std::cout << "[MEMEX] files memo create account=" << account
+              << " id=" << id << std::endl;
+    respond_json(200, {{"ok", true}, {"id", id}});
+  }
+
+  void route_memo() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    const std::string id_s = query_param(query_, "id");
+    if (!id_s.empty()) {
+      if (id_s.find_first_not_of("0123456789") != std::string::npos) {
+        respond_json(400, {{"ok", false}, {"error", "id 须为数字"}});
+        return;
+      }
+      const std::int64_t id = std::strtoll(id_s.c_str(), nullptr, 10);
+      const auto row = impl_.store.memo_by_id(id);
+      if (!row.has_value()) {
+        respond_json(404, {{"ok", false}, {"error", "备忘录不存在"}});
+        return;
+      }
+      const Decision d = impl_.az.authorize(
+          {account, "memo:read", memo_resource(row->owner, id),
+           "owner=" + account});
+      if (!d.allowed) {
+        respond_json(403,
+                     {{"ok", false}, {"error", "无权读取（" + d.reason + "）"}});
+        return;
+      }
+      respond_json(200,
+                   {{"ok", true},
+                    {"memo",
+                     {{"id", row->id},
+                      {"owner", row->owner},
+                      {"content", row->content},
+                      {"created_ms", row->created_ms},
+                      {"updated_ms", row->updated_ms}}}});
+      return;
+    }
+    const Decision d = impl_.az.authorize(
+        {account, "memo:read", "user:" + account, "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403,
+                   {{"ok", false}, {"error", "无权列表（" + d.reason + "）"}});
+      return;
+    }
+    int limit = 200, offset = 0;
+    const std::string lim = query_param(query_, "limit");
+    const std::string off = query_param(query_, "offset");
+    if (!lim.empty() &&
+        lim.find_first_not_of("0123456789") == std::string::npos) {
+      limit = std::atoi(lim.c_str());
+    }
+    if (!off.empty() &&
+        off.find_first_not_of("0123456789") == std::string::npos) {
+      offset = std::atoi(off.c_str());
+    }
+    const auto rows = impl_.store.list_memos(account, limit, offset);
+    json arr = json::array();
+    for (const auto& m : rows) {
+      arr.push_back({{"id", m.id},
+                     {"owner", m.owner},
+                     {"content", m.content},
+                     {"created_ms", m.created_ms},
+                     {"updated_ms", m.updated_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"memos", arr}});
+  }
+
+  void route_memo_delete() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    const std::string id_s = query_param(query_, "id");
+    if (id_s.empty() ||
+        id_s.find_first_not_of("0123456789") != std::string::npos) {
+      respond_json(400, {{"ok", false}, {"error", "id 须为数字"}});
+      return;
+    }
+    const std::int64_t id = std::strtoll(id_s.c_str(), nullptr, 10);
+    const auto row = impl_.store.memo_by_id(id);
+    if (!row.has_value()) {
+      respond_json(404, {{"ok", false}, {"error", "备忘录不存在"}});
+      return;
+    }
+    const Decision d = impl_.az.authorize(
+        {account, "memo:delete", memo_resource(row->owner, id),
+         "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403,
+                   {{"ok", false}, {"error", "无权删除（" + d.reason + "）"}});
+      return;
+    }
+    if (!impl_.store.delete_memo(id, account)) {
+      respond_json(500, {{"ok", false}, {"error", "备忘录删除失败"}});
+      return;
+    }
+    std::cout << "[MEMEX] files memo delete account=" << account
+              << " id=" << id << std::endl;
     respond_json(200, {{"ok", true}});
   }
 

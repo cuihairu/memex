@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include <sqlite3.h>
+
 #include "storage.hpp"
 #include "store.hpp"
 
@@ -329,6 +331,183 @@ int main() {
       CHECK(rows.size() == 1 && rows[0].file_hash == "H1");
       CHECK(s.check_second_transfer("alice", "H1", "g1", "").has_value());
       CHECK(s.get_group_quota("g1")->limit_bytes == 4096);
+    }
+    std::remove(path.c_str());
+  }
+
+  // —— R23-3 kind 空间隔离：收件箱与个人空间互不秒传串用、列表按类目过滤 ——
+  {
+    ServerStore s;
+    CHECK(s.open(":memory:"));
+    const auto idp =
+        s.create_file_meta(mk("alice", "H1", "", "u1", "a.bin", "users/u1/H1"));
+    CHECK(idp > 0);
+    ServerStore::FileMeta mi =
+        mk("alice", "H1", "", "u1", "a.bin", "users/u1/H1");
+    mi.kind = ServerStore::FileKind::Inbox;
+    const auto idi = s.create_file_meta(mi);
+    CHECK(idi > 0 && idi != idp); // 同属主同哈希同归属、类目不同 = 两行
+
+    // 秒传按类目判：各自命中自己的行，跨类目不串用
+    auto hit = s.check_second_transfer("alice", "H1", "", "u1");
+    CHECK(hit.has_value() && hit->id == idp &&
+          hit->kind == ServerStore::FileKind::Personal);
+    hit = s.check_second_transfer("alice", "H1", "", "u1",
+                                  ServerStore::FileKind::Inbox);
+    CHECK(hit.has_value() && hit->id == idi &&
+          hit->kind == ServerStore::FileKind::Inbox);
+
+    // 同类目重放建行：冲突回查带 kind，回本类目行 id
+    CHECK(s.create_file_meta(mi) == idi);
+
+    // 列表类目过滤：缺省全量、0=个人、1=收件箱
+    CHECK(s.list_files("", "u1", 200, 0).size() == 2);
+    CHECK(s.list_files("", "u1", 200, 0, 0).size() == 1);
+    CHECK(s.list_files("", "u1", 200, 0, 0)[0].id == idp);
+    CHECK(s.list_files("", "u1", 200, 0, 1).size() == 1);
+    CHECK(s.list_files("", "u1", 200, 0, 1)[0].id == idi);
+    // file_by_id 回读 kind
+    CHECK(s.file_by_id(idi)->kind == ServerStore::FileKind::Inbox);
+    CHECK(s.file_by_id(idp)->kind == ServerStore::FileKind::Personal);
+  }
+
+  // —— R23-3 备忘录：建/查/改/删、owner 隔离、空参拒绝、时间倒序 ——
+  {
+    ServerStore s;
+    CHECK(s.open(":memory:"));
+    // 空参拒绝（留痕原则：无主/空文不落库）
+    CHECK(s.create_memo("", "x", 1) == 0);
+    CHECK(s.create_memo("alice", "", 1) == 0);
+    const auto m1 = s.create_memo("alice", "first", 100);
+    const auto m2 = s.create_memo("alice", "second", 200);
+    CHECK(m1 > 0 && m2 > 0 && m1 != m2);
+    CHECK(s.create_memo("bob", "bob note", 300) > 0);
+
+    auto row = s.memo_by_id(m1);
+    CHECK(row.has_value() && row->owner == "alice" &&
+          row->content == "first" && row->created_ms == 100 &&
+          row->updated_ms == 100);
+    CHECK(!s.memo_by_id(99999).has_value());
+
+    // 列表 updated_ms 倒序；owner 过滤即权限（他人查不到）
+    auto notes = s.list_memos("alice");
+    CHECK(notes.size() == 2 && notes[0].id == m2 && notes[1].id == m1);
+    CHECK(s.list_memos("bob").size() == 1);
+    CHECK(s.list_memos("carol").empty());
+    CHECK(s.list_memos("").empty());
+    // 分页
+    CHECK(s.list_memos("alice", 1, 0).size() == 1 &&
+          s.list_memos("alice", 1, 0)[0].id == m2);
+    CHECK(s.list_memos("alice", 200, 1).size() == 1);
+
+    // 更新：内容与 updated_ms 落地、created_ms 不动；异属主改不动
+    CHECK(s.update_memo(m1, "alice", "first v2", 300));
+    row = s.memo_by_id(m1);
+    CHECK(row->content == "first v2" && row->updated_ms == 300 &&
+          row->created_ms == 100);
+    CHECK(!s.update_memo(m1, "bob", "hijack", 160));
+    CHECK(s.memo_by_id(m1)->content == "first v2");
+    CHECK(!s.update_memo(99999, "alice", "ghost", 1));
+    CHECK(!s.update_memo(m1, "", "x", 1));
+    CHECK(!s.update_memo(m1, "alice", "", 1));
+
+    // 更新时间序生效：m1 冲到最前
+    notes = s.list_memos("alice");
+    CHECK(notes[0].id == m1);
+
+    // 删除：异属主删不动；本人删后查无、再删 false
+    CHECK(!s.delete_memo(m2, "bob"));
+    CHECK(s.delete_memo(m2, "alice"));
+    CHECK(!s.delete_memo(m2, "alice"));
+    CHECK(s.list_memos("alice").size() == 1);
+    CHECK(!s.delete_memo(99999, "alice"));
+  }
+
+  // —— R23-3 备忘录持久化：重开数据仍在 ——
+  {
+    const std::string path = "/tmp/memex_test_memos.db";
+    std::remove(path.c_str());
+    {
+      ServerStore s;
+      CHECK(s.open(path));
+      CHECK(s.create_memo("alice", "keep", 111) > 0);
+    }
+    {
+      ServerStore s;
+      CHECK(s.open(path));
+      auto rows = s.list_memos("alice");
+      CHECK(rows.size() == 1 && rows[0].content == "keep" &&
+            rows[0].created_ms == 111 && rows[0].updated_ms == 111);
+    }
+    std::remove(path.c_str());
+  }
+
+  // —— R23-3 迁移：R23-2 形态旧库（files 无 kind 列）→ open 迁移保数据 ——
+  {
+    const std::string path = "/tmp/memex_test_files_migrate_r233.db";
+    std::remove(path.c_str());
+    {
+      sqlite3* db = nullptr;
+      CHECK(sqlite3_open(path.c_str(), &db) == SQLITE_OK);
+      char* err = nullptr;
+      // 照抄 R23-2 迁移落地的新形 DDL（探针按前缀认它是 R23-2 已迁移形，
+      // R23-3 探针才判 legacy）；插两行：群文件一行、置顶个人文件一行
+      const bool ok = sqlite3_exec(
+          db,
+          "CREATE TABLE files ("
+          "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+          "  owner TEXT NOT NULL,"
+          "  belong_gid TEXT NOT NULL DEFAULT '',"
+          "  belong_uid TEXT NOT NULL DEFAULT '',"
+          "  file_name TEXT NOT NULL,"
+          "  file_size INTEGER NOT NULL DEFAULT 0,"
+          "  file_hash TEXT NOT NULL DEFAULT '',"
+          "  object_key TEXT NOT NULL DEFAULT '',"
+          "  source INTEGER NOT NULL DEFAULT 0,"
+          "  upload_ts INTEGER NOT NULL DEFAULT 0,"
+          "  status INTEGER NOT NULL DEFAULT 0,"
+          "  pin INTEGER NOT NULL DEFAULT 0,"
+          "  UNIQUE(file_hash, owner, belong_gid, belong_uid));"
+          "INSERT INTO files(owner, belong_gid, belong_uid, file_name,"
+          " file_size, file_hash, object_key, upload_ts)"
+          " VALUES('alice', 'g1', '', 'old.bin', 7, 'HOLD',"
+          " 'groups/g1/HOLD', 42);"
+          "INSERT INTO files(owner, belong_gid, belong_uid, file_name,"
+          " file_size, file_hash, object_key, upload_ts, pin)"
+          " VALUES('alice', '', 'u1', 'mine.bin', 9, 'HP', 'users/u1/HP',"
+          " 43, 1);",
+          nullptr, nullptr, &err) == SQLITE_OK;
+      if (err) sqlite3_free(err);
+      CHECK(ok);
+      sqlite3_close(db);
+    }
+    {
+      ServerStore s;
+      CHECK(s.open(path)); // open 内跑迁移：加 kind 列、键扩含 kind
+      // 存量行保留、kind=0（personal）、pin 保留
+      auto rows = s.list_files("g1", "", 200, 0);
+      CHECK(rows.size() == 1 && rows[0].file_hash == "HOLD" &&
+            rows[0].kind == ServerStore::FileKind::Personal &&
+            rows[0].file_size == 7);
+      auto mine = s.list_files("", "u1", 200, 0, 0);
+      CHECK(mine.size() == 1 && mine[0].pin &&
+            mine[0].kind == ServerStore::FileKind::Personal);
+      // 秒传语义保持：同归属同哈希 personal 命中旧行
+      CHECK(s.check_second_transfer("alice", "HOLD", "g1", "").has_value());
+      // 新键含 kind 生效：同哈希进收件箱是空白，不与个人空间串用
+      CHECK(!s.check_second_transfer("alice", "HP", "", "u1",
+                                     ServerStore::FileKind::Inbox)
+                 .has_value());
+      CHECK(s.list_files("", "u1", 200, 0, 1).empty());
+      // 迁移补建 memos 表可用
+      CHECK(s.create_memo("alice", "after migration", 1000) > 0);
+    }
+    {
+      // 重开幂等：二次 open 不再触发迁移，数据照旧
+      ServerStore s;
+      CHECK(s.open(path));
+      CHECK(s.list_files("", "", 200, 0, -1).size() == 2);
+      CHECK(s.list_memos("alice").size() == 1);
     }
     std::remove(path.c_str());
   }

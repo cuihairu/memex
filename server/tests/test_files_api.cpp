@@ -8,6 +8,7 @@
 #include <asio.hpp>
 
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -121,13 +122,14 @@ struct HttpReply {
 HttpReply http(std::uint16_t port, const std::string& method,
                const std::string& path,
                const std::map<std::string, std::string>& headers,
-               const std::string& body) {
+               const std::string& body, bool send_content_length = true) {
   HttpReply rep;
   asio::io_context io;
   asio::ip::tcp::socket s(io);
   s.connect({asio::ip::make_address("127.0.0.1"), port});
   std::string req = method + " " + path + " HTTP/1.1\r\n";
-  req += "Content-Length: " + std::to_string(body.size()) + "\r\n";
+  if (send_content_length)
+    req += "Content-Length: " + std::to_string(body.size()) + "\r\n";
   for (const auto& [k, v] : headers) req += k + ": " + v + "\r\n";
   req += "\r\n" + body;
   asio::write(s, asio::buffer(req));
@@ -418,6 +420,146 @@ int main() {
   const auto qg2 =
       http(port, "GET", "/files/quota?target=" + gtarget, H("member1"), "");
   CHECK(jint(qg2.body, "used_bytes") == 50);
+
+  // —— R23-3 备忘录：本人建/查/改/删全链路（真 TCP）；他人 default-deny ——
+  CHECK(http(port, "POST", "/files/memo", {},
+             "{\"content\":\"x\"}").status == 401);
+  const auto mc1 =
+      http(port, "POST", "/files/memo", H("member1"),
+           "{\"content\":\"first note\"}");
+  CHECK(mc1.status == 200);
+  const auto mid1 = jint(mc1.body, "id");
+  CHECK(mid1 > 0);
+  CHECK(http(port, "POST", "/files/memo", H("member1"), "{\"content\":\"second note\"}")
+            .status == 200);
+  // 空文 400；非法 JSON 400
+  CHECK(http(port, "POST", "/files/memo", H("member1"), "{\"content\":\"\"}")
+            .status == 400);
+  CHECK(http(port, "POST", "/files/memo", H("member1"), "not-json").status == 400);
+  // 单条读：本人 200；他人 403（default-deny）；不存在 404
+  const auto mg =
+      http(port, "GET", "/files/memo?id=" + std::to_string(mid1), H("member1"),
+           "");
+  CHECK(mg.status == 200);
+  CHECK(jstr(mg.body, "content") == "first note");
+  CHECK(http(port, "GET", "/files/memo?id=" + std::to_string(mid1), H("owner1"),
+             "").status == 403);
+  CHECK(http(port, "GET", "/files/memo?id=99999", H("member1"), "").status == 404);
+  // 列表：本人两条；他人列表不串别人条目
+  const auto mls = http(port, "GET", "/files/memo", H("member1"), "");
+  CHECK(mls.status == 200);
+  CHECK(mls.body.find("first note") != std::string::npos &&
+        mls.body.find("second note") != std::string::npos);
+  const auto mls_o = http(port, "GET", "/files/memo", H("owner1"), "");
+  CHECK(mls_o.status == 200);
+  CHECK(mls_o.body.find("first note") == std::string::npos);
+  // 编辑：带 id POST；改后内容回读一致；他人编辑 403
+  CHECK(http(port, "POST", "/files/memo", H("member1"),
+             "{\"id\":" + std::to_string(mid1) +
+                 ",\"content\":\"first note v2\"}").status == 200);
+  CHECK(jstr(http(port, "GET", "/files/memo?id=" + std::to_string(mid1),
+                  H("member1"), "").body,
+             "content") == "first note v2");
+  CHECK(http(port, "POST", "/files/memo", H("owner1"),
+             "{\"id\":" + std::to_string(mid1) +
+                 ",\"content\":\"hijack\"}").status == 403);
+  // 删除：他人 403；本人 200；删后查 404
+  CHECK(http(port, "DELETE",
+             "/files/memo?id=" + std::to_string(mid1 + 1), H("owner1"), "")
+            .status == 403);
+  CHECK(http(port, "DELETE", "/files/memo?id=" + std::to_string(mid1 + 1),
+             H("member1"), "").status == 200);
+  CHECK(http(port, "GET", "/files/memo?id=" + std::to_string(mid1 + 1),
+             H("member1"), "").status == 404);
+
+  // —— R23-3 收件箱（手机发自己=文件传输）：target=inbox 落 users/{uid}/、
+  //     kind=inbox；同哈希个人空间是另一行；inbox 列表=文件+备忘录混排 ——
+  const std::string inbox_blob = "from my phone\n"; // 14 字节
+  const auto upi = http(port, "POST", "/files/upload?target=inbox",
+                        {{"Authorization", "Bearer " + tok["member1"]},
+                         {"X-File-Name", "phone.jpg"}},
+                        inbox_blob);
+  CHECK(upi.status == 200);
+  const auto idi = jint(upi.body, "id");
+  CHECK(idi > 0);
+  // 对象键仍 users/{uid}/{hash}（收件箱共用个人前缀，kind 区分空间）
+  CHECK(fake->objects_.count("users/member1/" +
+                             memex::server::sha256_hex(inbox_blob)) == 1);
+  // 只扣个人配额：此前 member1 个人账 12（群文件两份在先、private.txt
+  // 删除退过费、idq1 删除退过费），加 14
+  CHECK(uq_used(store, "member1") == blob_n + 14);
+  // 同哈希进个人空间 = 新行（kind 入秒传键，跨空间不串用）
+  const auto upi2 = http(port, "POST", "/files/upload?target=me",
+                         {{"Authorization", "Bearer " + tok["member1"]},
+                          {"X-File-Name", "same-bytes-personal.jpg"}},
+                         inbox_blob);
+  CHECK(upi2.status == 200);
+  CHECK(jint(upi2.body, "id") != idi);
+  CHECK(uq_used(store, "member1") == blob_n + 28);
+  // 收件箱内重传 = 秒传命中（同 id、不再落字节）
+  const auto upi3 = http(port, "POST", "/files/upload?target=inbox",
+                         {{"Authorization", "Bearer " + tok["member1"]},
+                          {"X-File-Name", "phone.jpg"}},
+                         inbox_blob);
+  CHECK(upi3.status == 200);
+  CHECK(jint(upi3.body, "id") == idi);
+  CHECK(upi3.body.find("\"second_transfer\":true") != std::string::npos);
+  CHECK(fake->objects_.count("users/member1/" +
+                             memex::server::sha256_hex(inbox_blob)) == 1);
+  // 收件箱文件本人可读、字节一致
+  const auto dli = http(port, "GET", "/files/download?id=" + std::to_string(idi),
+                        H("member1"), "");
+  CHECK(dli.status == 200);
+  CHECK(dli.body == inbox_blob);
+
+  // inbox 列表混排时间序：备忘录（updated_ms）与文件（upload_ts）统一倒序。
+  // 用 sleep 拉开毫秒级时间差，顺序可断言：旧备忘录 < 收件箱文件 < 新备忘录
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  const auto lmb =
+      http(port, "POST", "/files/memo", H("member1"),
+           "{\"content\":\"third note\"}");
+  CHECK(lmb.status == 200);
+  const auto lsi =
+      http(port, "GET", "/files/list?target=inbox", H("member1"), "");
+  CHECK(lsi.status == 200);
+  const auto p_memo = lsi.body.find("\"type\":\"memo\"");
+  const auto p_file = lsi.body.find("\"type\":\"file\"");
+  CHECK(p_memo != std::string::npos && p_file != std::string::npos);
+  CHECK(p_memo < p_file); // 新备忘录在前
+  CHECK(jint(lsi.body, "id") == jint(lmb.body, "id")); // 首条=最新备忘录
+  CHECK(lsi.body.find("phone.jpg") != std::string::npos);
+  CHECK(lsi.body.find("first note v2") != std::string::npos);
+  // 分页在混排后取窗：limit=1 只出首条（新备忘录）
+  const auto lsi1 = http(port, "GET", "/files/list?target=inbox&limit=1",
+                         H("member1"), "");
+  CHECK(lsi1.status == 200);
+  CHECK(lsi1.body.find("third note") != std::string::npos);
+  CHECK(lsi1.body.find("phone.jpg") == std::string::npos);
+
+  // me 列表只出个人空间文件：不含收件箱行、无混排类型字段
+  const auto ls_me2 =
+      http(port, "GET", "/files/list?target=me", H("member1"), "");
+  CHECK(ls_me2.status == 200);
+  CHECK(ls_me2.body.find("same-bytes-personal.jpg") != std::string::npos);
+  CHECK(ls_me2.body.find("phone.jpg") == std::string::npos);
+  CHECK(ls_me2.body.find("\"type\":") == std::string::npos);
+  CHECK(ls_me2.body.find("first note") == std::string::npos);
+
+  // 配额视角：target=inbox 走个人配额（与 me 同账）
+  const auto qgi = http(port, "GET", "/files/quota?target=inbox", H("member1"),
+                        "");
+  CHECK(qgi.status == 200);
+  CHECK(jint(qgi.body, "used_bytes") == uq_used(store, "member1"));
+
+  // —— 无 Content-Length 头：GET/DELETE 放行（curl/浏览器/Qt QNAM 的
+  //     无体请求口径，R23-3 走查实录锁回归）；POST 仍 400 ——
+  CHECK(http(port, "GET", "/files/list?target=me", H("member1"), "", false)
+            .status == 200);
+  CHECK(http(port, "GET", "/files/memo", H("member1"), "", false).status == 200);
+  CHECK(http(port, "DELETE", "/files/memo?id=99999", H("member1"), "", false)
+            .status == 404);
+  CHECK(http(port, "POST", "/files/memo", H("member1"), "{\"content\":\"x\"}",
+             false).status == 400);
 
   // —— 存储未配置：面在、字节面 503、元数据面照常 ——
   {
