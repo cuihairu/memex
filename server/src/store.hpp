@@ -334,6 +334,8 @@ public:
                              const std::vector<std::string>& members);
   // 群详情；不存在返回 nullopt
   std::optional<GroupInfo> group_info(std::uint64_t group_id);
+  // 全量群列表（运维面：组织架构树/CLI group list）
+  std::vector<GroupInfo> groups_list();
   // 某账号加入的全部群
   std::vector<GroupInfo> groups_of(const std::string& account);
   // 是否群成员
@@ -401,6 +403,7 @@ public:
     FileSource source{FileSource::Internal};
     int64_t upload_ts{0};
     FileStatus status{FileStatus::Normal};
+    bool pin{false};  // 置顶（群主/管理员管群文件、本人管个人文件）
   };
 
   struct QuotaInfo {
@@ -411,16 +414,28 @@ public:
   };
 
   int64_t create_file_meta(const FileMeta& meta);
+  // 秒传按「属主+哈希+归属」判（R23-2：换群/换人空间不算命中）
   std::optional<FileMeta> check_second_transfer(const std::string& owner,
-                                                const std::string& file_hash);
+                                                const std::string& file_hash,
+                                                const std::string& belong_gid,
+                                                const std::string& belong_uid);
   std::vector<FileMeta> list_files(const std::string& belong_gid,
                                    const std::string& belong_uid,
                                    int limit = 200, int offset = 0);
+  std::optional<FileMeta> file_by_id(int64_t file_id);
   bool delete_file_meta(int64_t file_id);
+  bool set_file_pin(int64_t file_id, bool pin);
+  bool set_file_status(int64_t file_id, FileStatus status);
+  // 同一对象键仍被多少文件行引用（删除字节前判引用：内容寻址下多行可共用对象）
+  int64_t count_file_refs(const std::string& object_key);
   std::optional<QuotaInfo> get_group_quota(const std::string& gid);
   std::optional<QuotaInfo> get_user_quota(const std::string& uid);
   bool add_group_quota_used(const std::string& gid, int64_t delta_bytes);
   bool add_user_quota_used(const std::string& uid, int64_t delta_bytes);
+  // 受检扣费（原子）：limit=0 不限；used+delta 超限即拒（changes=0）。
+  // 上传受理前用这个，退额（删除）用上面的 add_*（不设限）。
+  bool charge_group_quota(const std::string& gid, int64_t delta_bytes);
+  bool charge_user_quota(const std::string& uid, int64_t delta_bytes);
   bool set_group_quota_limit(const std::string& gid, int64_t limit_bytes);
   bool set_user_quota_limit(const std::string& uid, int64_t limit_bytes);
 
@@ -433,6 +448,10 @@ public:
     std::string object_key;
     int64_t upload_ts{0};
   };
+  // 群内角色（权限模型：群主/管理员/成员）：""=非成员；owner 由 groups.owner 判
+  std::string group_role(std::uint64_t group_id, const std::string& account);
+  bool group_set_role(std::uint64_t group_id, const std::string& account,
+                      const std::string& role); // member|admin（owner 行拒改）
   bool add_uplink_log(const UplinkLog& log);
   std::vector<UplinkLog> list_uplink_logs(const std::string& uploader,
                                           int limit = 200);

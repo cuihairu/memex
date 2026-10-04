@@ -1081,6 +1081,62 @@ int cmd_webhook(int argc, char** argv, const std::string& db_path) {
   return 2;
 }
 
+// R23-2 群角色运维面：群一览／管理员任免（权限模型的群主动作；协议/UI
+// 未及之前先走 CLI）。角色改动即时生效：文件面等各判权消费方按库现值判。
+int cmd_group(int argc, char** argv, const std::string& db_path) {
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "打不开库：" << db_path << "\n";
+    return 1;
+  }
+  if (argc >= 1 && std::string_view(argv[0]) == "list") {
+    std::uint64_t only = 0;
+    for (int i = 1; i + 1 < argc + 1 && i < argc; ++i) {
+      if (std::string_view(argv[i]) == "--gid" && i + 1 < argc) {
+        only = std::strtoull(argv[++i], nullptr, 10);
+      }
+    }
+    std::cout << "群id\t名称\t群主\t成员数\t管理员\n";
+    for (const auto& g : store.groups_list()) {
+      if (only != 0 && g.group_id != only) continue;
+      std::string admins;
+      for (const auto& m : g.members) {
+        if (store.group_role(g.group_id, m) == "admin") {
+          admins += (admins.empty() ? "" : ",") + m;
+        }
+      }
+      std::cout << g.group_id << '\t' << g.name << '\t' << g.owner << '\t'
+                << g.members.size() << '\t'
+                << (admins.empty() ? "-" : admins) << '\n';
+    }
+    return 0;
+  }
+  if (argc >= 4 && std::string_view(argv[0]) == "set-role") {
+    const std::uint64_t gid = std::strtoull(argv[1], nullptr, 10);
+    const std::string account = argv[2];
+    const std::string role = argv[3];
+    const auto info = store.group_info(gid);
+    if (!info) {
+      std::cerr << "无此群：" << gid << "\n";
+      return 1;
+    }
+    if (account == info->owner) {
+      std::cerr << "群主角色不可改（owner 身份在 groups.owner）\n";
+      return 2;
+    }
+    if (!store.group_set_role(gid, account, role)) {
+      std::cerr << "任免失败（须 member|admin，且账号须已是群成员）\n";
+      return 1;
+    }
+    std::cout << "已设群 " << gid << " 成员 " << account << " 角色="
+              << role << "\n";
+    return 0;
+  }
+  std::cerr << "用法：group list [--gid N] | set-role <gid> <账号> "
+               "<member|admin>\n";
+  return 2;
+}
+
 // R23-1 RustFS compose 集成面：生成 compose／起停容器／健康检查。
 // 客户端永不直连对象存储——本子命令只管部署编排，不做任何数据面操作。
 int cmd_storage(int argc, char** argv, const std::string& /*db_path*/) {
@@ -1211,6 +1267,7 @@ int main(int argc, char** argv) {
     if (cmd == "cross") return cmd_cross(sub_argc, sub_argv, db_path);
     if (cmd == "favs") return cmd_favs(sub_argc, sub_argv, db_path);
     if (cmd == "org") return cmd_org(sub_argc, sub_argv, db_path);
+    if (cmd == "group") return cmd_group(sub_argc, sub_argv, db_path);
     if (cmd == "policy") return cmd_policy(sub_argc, sub_argv, db_path);
     if (cmd == "webhook") return cmd_webhook(sub_argc, sub_argv, db_path);
     if (cmd == "storage") return cmd_storage(sub_argc, sub_argv, db_path);
@@ -1220,7 +1277,7 @@ int main(int argc, char** argv) {
                  "logins [账号] [--device 指纹前缀] | device … | "
                  "messages [账号] [--keyword K] [--since T] "
                  "[--until T] [--limit N] [--export 文件] | audit [N] | "
-                 "cross [N] | favs <账号> | org … | "
+                 "cross [N] | favs <账号> | org … | group list|set-role | "
                  "webhook create|list|revoke | "
                  "storage compose|up|down|health | --version | --self-test\n";
     return 2;

@@ -78,37 +78,84 @@ int main() {
     CHECK(s.list_files("", "", 200, 0).size() == 1);
   }
 
-  // —— 秒传（哈希去重）：同属主同哈希复用，不重复落元数据 ——
+  // —— 秒传（哈希去重）：同属主+同哈希+同归属复用；换目标＝不同文件 ——
   {
     ServerStore s;
     CHECK(s.open(":memory:"));
     const auto id1 =
         s.create_file_meta(mk("alice", "H1", "g1", "", "a.bin"));
     CHECK(id1 > 0);
-    // 同属主同哈希再建（换文件名/换归属）：命中 UNIQUE 约束，必须回查
+    // 同属主同哈希同目标再建（换文件名）：命中 UNIQUE 约束，必须回查
     // 返回已有行 id——此前实现在冲突时返回 last_insert_rowid（连接上
     // 上一次无关插入的 rowid），本用例锁死该回归。
-    CHECK(s.create_file_meta(mk("alice", "H1", "", "u9", "b.bin")) == id1);
+    CHECK(s.create_file_meta(mk("alice", "H1", "g1", "", "b.bin")) == id1);
     CHECK(s.list_files("", "", 200, 0).size() == 1);
 
-    // 异属主同哈希：新行（秒传键含属主，跨属主不去重）
-    const auto id2 = s.create_file_meta(mk("bob", "H1", "g1"));
-    CHECK(id2 > 0 && id2 != id1);
+    // 同属主同哈希换目标（第二群/个人空间）：新行（R23-2 语义，归属入键）
+    CHECK(s.create_file_meta(mk("alice", "H1", "g2", "", "a.bin")) > 0);
+    CHECK(s.create_file_meta(mk("alice", "H1", "", "u1", "a.bin")) > 0);
+    CHECK(s.list_files("", "", 200, 0).size() == 3);
 
-    // check_second_transfer：命中回读对象键与来源；异哈希不命中
-    auto hit = s.check_second_transfer("alice", "H1");
+    // 异属主同哈希：新行（秒传键含属主，跨属主不去重）
+    const auto id4 = s.create_file_meta(mk("bob", "H1", "g1"));
+    CHECK(id4 > 0 && id4 != id1);
+
+    // check_second_transfer：命中限定在归属内；回读对象键
+    auto hit = s.check_second_transfer("alice", "H1", "g1", "");
     CHECK(hit.has_value() && hit->id == id1 &&
           hit->object_key == "groups/g1/H1");
-    CHECK(!s.check_second_transfer("alice", "H9").has_value());
-    CHECK(!s.check_second_transfer("", "H1").has_value());
-    CHECK(!s.check_second_transfer("alice", "").has_value());
+    CHECK(!s.check_second_transfer("alice", "H1", "g9", "").has_value());
+    CHECK(!s.check_second_transfer("alice", "H1", "", "u9").has_value());
+    CHECK(!s.check_second_transfer("alice", "H9", "g1", "").has_value());
+    CHECK(!s.check_second_transfer("", "H1", "g1", "").has_value());
+    CHECK(!s.check_second_transfer("alice", "", "g1", "").has_value());
 
     // 隔离态不参与秒传（杀毒待审的哈希不得放行复用）
     ServerStore::FileMeta q = mk("carol", "HQ", "g1");
     q.status = ServerStore::FileStatus::Quarantine;
     const auto idq = s.create_file_meta(q);
     CHECK(idq > 0);
-    CHECK(!s.check_second_transfer("carol", "HQ").has_value());
+    CHECK(!s.check_second_transfer("carol", "HQ", "g1", "").has_value());
+  }
+
+  // —— file_by_id / 置顶 / 状态迁移 / 对象引用计数 ——
+  {
+    ServerStore s;
+    CHECK(s.open(":memory:"));
+    const auto ida = s.create_file_meta(mk("alice", "H1", "g1"));
+    CHECK(ida > 0);
+    // 内容寻址：同群两属主同哈希共用一个对象键（对象层字节只落一份）
+    const auto idb = s.create_file_meta(mk("bob", "H1", "g1", "", "x.bin",
+                                          "groups/g1/H1"));
+    CHECK(idb > 0 && idb != ida);
+
+    auto byid = s.file_by_id(ida);
+    CHECK(byid.has_value() && byid->owner == "alice" &&
+          byid->file_hash == "H1" && !byid->pin);
+    CHECK(!s.file_by_id(99999).has_value());
+
+    // 置顶：set 后 list 首行是它；取消回原序
+    auto rows = s.list_files("g1", "", 200, 0);
+    CHECK(rows.size() == 2 && rows[0].id == idb); // id 倒序：b 后建在前
+    CHECK(s.set_file_pin(ida, true));
+    rows = s.list_files("g1", "", 200, 0);
+    CHECK(rows.size() == 2 && rows[0].id == ida && rows[0].pin); // 置顶优先
+    CHECK(!s.set_file_pin(99999, true));
+    CHECK(s.set_file_pin(ida, false));
+    CHECK(s.list_files("g1", "", 200, 0)[0].id == idb);
+
+    // 状态迁移（R23-5 杀毒钩子落点）：normal→quarantine 回读一致
+    CHECK(s.set_file_status(ida, ServerStore::FileStatus::Quarantine));
+    CHECK(s.file_by_id(ida)->status == ServerStore::FileStatus::Quarantine);
+    CHECK(!s.set_file_status(99999, ServerStore::FileStatus::Normal));
+
+    // 引用计数：两行共用对象=2；删一行仍 1；全删 0
+    CHECK(s.count_file_refs("groups/g1/H1") == 2);
+    CHECK(s.delete_file_meta(idb));
+    CHECK(s.count_file_refs("groups/g1/H1") == 1);
+    CHECK(s.delete_file_meta(ida));
+    CHECK(s.count_file_refs("groups/g1/H1") == 0);
+    CHECK(s.count_file_refs("") == 0);
   }
 
   // —— list_files：归属过滤（群/人/组合）、倒序、分页 ——
@@ -142,7 +189,7 @@ int main() {
     CHECK(s.delete_file_meta(id));
     CHECK(!s.delete_file_meta(id)); // 已删再删 = false
     CHECK(s.list_files("g1", "", 200, 0).empty());
-    CHECK(!s.check_second_transfer("alice", "H1").has_value());
+    CHECK(!s.check_second_transfer("alice", "H1", "g1", "").has_value());
   }
 
   // —— 配额两级（群/人）：无行默认、UPSERT 累加、上限设置、负数拒绝、独立 ——
@@ -184,6 +231,49 @@ int main() {
     CHECK(s.add_user_quota_used("u2", 9));
     CHECK(s.get_user_quota("u2")->used_bytes == 9);
     CHECK(s.get_user_quota("u1")->used_bytes == 123);
+
+    // 受检扣费（原子，R23-2 上传受理用）：limit 内成功、超限整单拒、
+    // 0=不限、负 delta 拒；扣费后 add（退额）不受限
+    CHECK(s.charge_group_quota("g1", 400));   // 500+400=900 ≤ 1000
+    CHECK(!s.charge_group_quota("g1", 200));  // 900+200 > 1000 → 拒
+    CHECK(s.get_group_quota("g1")->used_bytes == 900);
+    CHECK(s.charge_group_quota("g3", 10));    // 无行新建（limit=0 不限）
+    CHECK(s.get_group_quota("g3")->used_bytes == 10);
+    CHECK(!s.charge_group_quota("g3", -1));   // 负 delta 拒
+    CHECK(s.charge_user_quota("u9", 5));
+    CHECK(!s.charge_user_quota("", 5));
+    CHECK(s.add_group_quota_used("g1", 200)); // 退额通道不设限
+    CHECK(s.get_group_quota("g1")->used_bytes == 1100);
+    // 上限改小后：已超用量拒新增扣费
+    CHECK(s.set_group_quota_limit("g1", 500));
+    CHECK(!s.charge_group_quota("g1", 1));
+    CHECK(s.get_group_quota("g1")->used_bytes == 1100); // 原量不动
+  }
+
+  // —— 群内角色（权限模型）：默认 member、owner 行拒改、admin 可任免 ——
+  {
+    ServerStore s;
+    CHECK(s.open(":memory:"));
+    CHECK(s.create_account("owner1", "pw", "o1"));
+    CHECK(s.create_account("admin1", "pw", "a1"));
+    CHECK(s.create_account("member1", "pw", "m1"));
+    const auto gid = s.create_group(
+        "dev", "owner1", {"owner1", "admin1", "member1"});
+    CHECK(gid > 0);
+    // 缺省角色=member；owner 行查到 member（owner 身份由 groups.owner 判）
+    CHECK(s.group_role(gid, "member1") == "member");
+    CHECK(s.group_role(gid, "owner1") == "member");
+    CHECK(s.group_role(gid, "stranger") == "");  // 非成员
+    CHECK(s.group_role(gid, "") == "");
+    // 任免 admin；owner 行拒改；非法角色拒
+    CHECK(s.group_set_role(gid, "admin1", "admin"));
+    CHECK(s.group_role(gid, "admin1") == "admin");
+    CHECK(s.group_set_role(gid, "admin1", "member"));
+    CHECK(s.group_role(gid, "admin1") == "member");
+    CHECK(!s.group_set_role(gid, "owner1", "admin")); // owner 行拒改
+    CHECK(!s.group_set_role(gid, "member1", "boss")); // 非法角色
+    CHECK(!s.group_set_role(gid, "stranger", "admin")); // 非成员行不动
+    CHECK(!s.group_set_role(gid, "", "admin"));
   }
 
   // —— 外网收件箱留痕（uplink_logs）：追加/按人过滤/倒序/limit/空参拒绝 ——
@@ -237,7 +327,7 @@ int main() {
       CHECK(s.open(path)); // 二次 open 走既有表（schema 幂等）
       auto rows = s.list_files("g1", "", 200, 0);
       CHECK(rows.size() == 1 && rows[0].file_hash == "H1");
-      CHECK(s.check_second_transfer("alice", "H1").has_value());
+      CHECK(s.check_second_transfer("alice", "H1", "g1", "").has_value());
       CHECK(s.get_group_quota("g1")->limit_bytes == 4096);
     }
     std::remove(path.c_str());

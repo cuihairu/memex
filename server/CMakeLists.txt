@@ -13,6 +13,7 @@ add_library(memex_server_core STATIC
   src/server.cpp
   src/session.cpp
   src/store.cpp
+  src/authz.cpp
   src/cred.cpp
   src/webhook.cpp
   src/storage.cpp)
@@ -115,6 +116,13 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_files_meta PRIVATE memex_server_core)
   add_test(NAME files_meta COMMAND test_files_meta)
   set_tests_properties(files_meta PROPERTIES TIMEOUT 60)
+
+  # R23-2 判权骨架验收：冲突规则写死（Deny>Allow>Inherited>Default）、
+  # 同档确定性、理由留痕
+  add_executable(test_authz tests/test_authz.cpp)
+  target_link_libraries(test_authz PRIVATE memex_server_core)
+  add_test(NAME authz COMMAND test_authz)
+  set_tests_properties(authz PROPERTIES TIMEOUT 60)
 
   # R23-1 真容器集成（默认 SKIP；MEMEX_S3_E2E=1 且宿主有 docker 才全量跑：
   # RustFS compose up→S3Storage 全接口往返→down）
