@@ -1,8 +1,13 @@
 #include "local_store.hpp"
 
+#include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSettings>
 #include <QSqlDatabase>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -409,17 +414,10 @@ bool LocalStore::mark_helper_deleted(const QString& record_id) {
 // —— R23-5 杀毒扫描钩子 + 白名单客户端基础
 // 客户端本地白名单与扫描状态，服务端最终裁决（权限层）
 // 外网上传默认关闭，开启时须通过配置显式开启并明示范围
+// （ScanWhitelist / ScanResult 类型定义见 local_store.hpp）
 
+// 扫描过程态（对照 result 列外的本地进行中状态）
 enum class ScanStatus { Unknown = 0, Scanning, Clean, Quarantined, Error };
-
-struct ScanWhitelist {
-  // 允许的文件扩展名（小写）
-  QStringList allowed_extensions;
-  // 允许的 MIME 类型
-  QStringList allowed_mime_types;
-  // 最大文件大小（字节），0=不限制
-  qint64 max_file_size{0};
-};
 
 bool LocalStore::set_scan_whitelist(const ScanWhitelist& whitelist) {
   if (!open_) return false;
@@ -437,35 +435,27 @@ bool LocalStore::set_scan_whitelist(const ScanWhitelist& whitelist) {
   return true;
 }
 
-QScopedPointer<ScanWhitelist> LocalStore::get_scan_whitelist() {
+std::unique_ptr<ScanWhitelist> LocalStore::get_scan_whitelist() {
   if (!open_) return nullptr;
   QSettings settings(QCoreApplication::organizationName(),
                      QCoreApplication::applicationName());
-  QJsonDocument doc = QSettings::value("scan_whitelist").toJsonDocument();
+  QJsonDocument doc = settings.value("scan_whitelist").toJsonDocument();
   if (doc.isNull()) return nullptr;
-  auto whitelist = QScopedPointer<ScanWhitelist>(new ScanWhitelist());
+  auto whitelist = std::make_unique<ScanWhitelist>();
   QJsonObject obj = doc.object();
   if (obj.contains("allowed_extensions")) {
-    whitelist->allowed_extensions = obj["allowed_extensions"].toArray()
-        .toVariantList()
-        .toList()
-        .toVariant()
-        .toStringList();
+    const auto ext = obj["allowed_extensions"].toArray();
+    for (const auto& v : ext) whitelist->allowed_extensions << v.toString();
   }
   if (obj.contains("allowed_mime_types")) {
-    whitelist->allowed_mime_types = obj["allowed_mime_types"].toArray()
-        .toVariantList()
-        .toList()
-        .toVariant()
-        .toStringList();
+    const auto mime = obj["allowed_mime_types"].toArray();
+    for (const auto& v : mime) whitelist->allowed_mime_types << v.toString();
   }
   if (obj.contains("max_file_size")) {
     whitelist->max_file_size = obj["max_file_size"].toVariant().toLongLong();
   }
   return whitelist;
 }
-
-enum class ScanResult { Unknown, Clean, Quarantined, Error };
 
 bool LocalStore::record_scan(const QString& file_hash, ScanResult result, qint64 file_size) {
   if (!open_) return false;

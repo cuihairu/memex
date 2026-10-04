@@ -276,7 +276,14 @@ void test_center_execution() {
   NotificationCenter& c = NotificationCenter::instance();
   int toast = 0;
   QString last_title;
-  QObject::connect(&c, &NotificationCenter::want_tray_notify, &c,
+  // CI 挂死根因（2026-10-04）：context 曾挂单例 &c（永生），lambda 捕获的
+  // toast/last_title 是本函数栈——函数返回后连接仍活着，e2e 阶段第二条个人
+  // 通知（important→want_tray_notify）把悬垂 lambda 点燃，读死栈位（ASAN：
+  // stack-use-after-scope，经 dispatch→Toast 链；本地 Release 或崩或腐坏
+  // e2e 活栈，CI Debug/gcov 演成 240s 挂死）。改挂本函数栈上的 context：
+  // 返回即 auto 断连，断言与作用域内语义不变。
+  QObject scope;
+  QObject::connect(&c, &NotificationCenter::want_tray_notify, &scope,
                    [&](const QString& title, const QString&) {
                      ++toast;
                      last_title = title;
@@ -441,8 +448,8 @@ void test_e2e(const QString& tmp_path) {
                 QStringLiteral("--port"), QString::number(port),
                 QStringLiteral("--webhook-port"), QString::number(wh_port)});
   CHECK(server.waitForStarted(5000));
-  CHECK(wait_until([&] { return port_listening(port); }, 8000));
-  CHECK(wait_until([&] { return port_listening(wh_port); }, 8000));
+  CHECK(wait_until([&] { return port_listening(port); }, 15000));
+  CHECK(wait_until([&] { return port_listening(wh_port); }, 15000));
 
   // 建 webhook（CLI 真跑，token 从 stdout 解析——与运维口径一致）
   const auto make_webhook = [&](const QString& target) {
@@ -500,7 +507,7 @@ void test_e2e(const QString& tmp_path) {
           QStringLiteral("pass-a"));
   b.login(QStringLiteral("127.0.0.1"), port, QStringLiteral("bob"),
           QStringLiteral("pass-b"));
-  CHECK(wait_until([&] { return a_in && b_in; }, 8000));
+  CHECK(wait_until([&] { return a_in && b_in; }, 15000));
 
   const QString tok_personal = make_webhook(QStringLiteral("alice"));
   CHECK(!tok_personal.isEmpty());
@@ -515,7 +522,7 @@ void test_e2e(const QString& tmp_path) {
       &resp);
   CHECK(status == 200);
   CHECK(resp.contains(QStringLiteral("\"ok\":true")));
-  CHECK(wait_until([&] { return notice_a == 1; }, 5000));
+  CHECK(wait_until([&] { return notice_a == 1; }, 10000));
   CHECK(toast == 0); // 普通默认不弹
   {
     const auto hist = store_a.history(QStringLiteral("通知"));
@@ -537,7 +544,7 @@ void test_e2e(const QString& tmp_path) {
                      R"("urgency":"important","jump_url":"https://oa.local/d"})"),
       &resp);
   CHECK(status == 200);
-  CHECK(wait_until([&] { return notice_a == 2; }, 5000));
+  CHECK(wait_until([&] { return notice_a == 2; }, 10000));
   CHECK(toast == 1);
 
   // 建群（引擎真跑）→ 群 webhook → 双引擎扇出＋紧急弹窗
@@ -553,7 +560,7 @@ void test_e2e(const QString& tmp_path) {
                    });
   a.create_group(QStringLiteral("验收群"),
                  {QStringLiteral("alice"), QStringLiteral("bob")});
-  CHECK(wait_until([&] { return grp_ok; }, 8000));
+  CHECK(wait_until([&] { return grp_ok; }, 15000));
   CHECK(gid > 0);
 
   const QString tok_group =
@@ -567,8 +574,8 @@ void test_e2e(const QString& tmp_path) {
       &resp);
   CHECK(status == 200);
   CHECK(resp.contains(QStringLiteral("\"recipients\":2")));
-  CHECK(wait_until([&] { return notice_a == 3 && notice_b == 1; }, 5000));
-  CHECK(wait_until([&] { return group_a == 1; }, 3000));
+  CHECK(wait_until([&] { return notice_a == 3 && notice_b == 1; }, 10000));
+  CHECK(wait_until([&] { return group_a == 1; }, 6000));
 
   // 紧急群通知 → 置顶弹窗（真实端到端弹出）→ 抓图 → 确认收悉
   PHASE("e2e:urgent-dialog");
@@ -579,7 +586,7 @@ void test_e2e(const QString& tmp_path) {
             find_top(QStringLiteral("notice_urgent_dialog")));
         return dlg != nullptr;
       },
-      3000));
+      6000));
   if (dlg) {
     const QString png = QDir::current().absoluteFilePath(
         QStringLiteral("notify_urgent_dialog.png"));
@@ -592,7 +599,7 @@ void test_e2e(const QString& tmp_path) {
             return find_top(QStringLiteral("notice_urgent_dialog")) ==
                    nullptr;
           },
-          3000));
+          6000));
     }
   }
   CHECK(toast == 1); // 群紧急走弹窗，不加托盘计数

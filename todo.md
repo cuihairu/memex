@@ -202,3 +202,18 @@
 - [ ] R27-2 Provider SPI + L1 跳转框架：capabilities 声明制（L1 跳转/L2 只读/L3 双向），detailUrl 必带。
 - [ ] R27-3 首批 provider：GitHub Issues、飞书任务（Task v2）、钉钉待办——各做到能力声明深度。
 - [ ] R27-4 二批 provider：Jira/Linear（按需启动）；禅道只接 L1 跳转；Teambition 不接。
+
+## 平台化改造（2026-10-04 用户计划书，蓝图=docs/design/基础平台化改造计划（身份-组织-授权-归档）.md）
+
+- [ ] 平台-1 授权统一服务 AuthorizationService：subject/action/resource/context→ALLOW/DENY+reason；数据过滤（Server Query→Filter→Allowed Records）；冲突规则（Explicit Deny>Allow>Inherited>Default）写死——一期必做。
+- [ ] 平台-2 Identity 模型补全：Credential 独立（Password/Token/Certificate/SSO/Device Credential 预留）、Session 加 device_id/expire/logout_reason、IdentityBinding。
+- [ ] 平台-3 Organization 与授权拆开：Account 拆 Membership/RoleAssignment/ReportingLine 三关联（一人多部门/多角色/临时代理）。
+- [ ] 平台-4 Archive Event Sourcing：Message immutable + MessageEvent append-only（created/delivered/read/recalled/edited）；重投演示可重建。
+- [ ] 平台-5 留存策略：废除「永久留存」口径→Retention Policy（30d/6m/1y/3y/Indefinite，管理员配置）；删除=Retention Purge（who/when/what/why/policy/approval，双人审批高风险）。
+- [ ] 平台-6 审计独立角色：SecurityAuditor≠SystemAdmin（SystemAdmin 不自动可读消息）；审计本身留痕（audit.message.search/view/export）。
+- [ ] 平台-7 降级显式化：DEGRADED 态「未归档通信」全面标识（顶部状态栏/会话标记/输入框提示/恢复补传规则）。
+- [ ] 平台-8 Direct 安全：发现只做发现，TCP 上 Device Identity+握手+X25519+AEAD（消息/文件加密边界）。
+- [ ] 平台-9 协议幂等：客户端至少一次+服务端 message_id 去重；本地 Sync State 状态机（LOCAL/PENDING/SENDING/SERVER_ACKED/ARCHIVED/FAILED）。
+- [ ] 平台-10 文件授权：FileAuthorization 走统一 AuthorizationService（收发/下载/跨部门/再转发四问）。
+- [ ] 平台-11 远程协助 Security Domain 模型（consent/audit/粒度权限 view/keyboard/mouse/clipboard/file_transfer）。
+- [ ] 平台-12 P2 起按计划书 P0-P4 分阶段推进（高级权限等二期，Authorization 框架一期做）。

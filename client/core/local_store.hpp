@@ -9,6 +9,7 @@
 #include <QStringList>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace memex::client {
@@ -28,6 +29,17 @@ struct StoredMessage {
   // 撤回标记（仅界面展示用，原文保留在本地与服务端归档）。
   bool recalled{false};
 };
+
+// —— R23-5 杀毒扫描白名单（本地侧）——
+// 允许的扩展名/MIME 小写；max_file_size=0 表示不限制。
+struct ScanWhitelist {
+  QStringList allowed_extensions;
+  QStringList allowed_mime_types;
+  qint64 max_file_size{0};
+};
+
+// 扫描结论枚举（与 scan_results.result 列一一对应，勿改已落库值）。
+enum class ScanResult { Unknown = 0, Clean, Quarantined, Error };
 
 class LocalStore {
 public:
@@ -72,6 +84,27 @@ public:
   // 配额用量写（无行则建行；覆盖式更新，调用方先读后算）。
   bool update_group_quota(const QString& gid, qint64 used_bytes);
   bool update_user_quota(const QString& uid, qint64 used_bytes);
+
+  // —— R23-3 文件助手（备忘录+文件传输统一收件箱，仅本人可见）——
+  // 外网来的文件需内网人工转发后方可记录；status：0=normal、1=read、
+  // 2=deleted（mark_* 更新）。
+  bool add_helper_record(const QString& owner, const QString& memo_text,
+                         const QString& file_hash, qint64 file_size,
+                         const QString& object_key);
+  // 某属主的收件箱记录（按上传时间倒序）。
+  QList<QSqlRecord> helper_list(const QString& owner) const;
+  bool mark_helper_read(const QString& record_id);
+  bool mark_helper_deleted(const QString& record_id);
+
+  // —— R23-5 杀毒扫描勾子 + 白名单（本地侧）——
+  // 白名单与扫描状态由服务端最终裁决（权限层），本地仅公开写入接口与
+  // 查询历史（record_id 为表主键的字符串形式）。
+  bool set_scan_whitelist(const ScanWhitelist& whitelist);
+  // 空指针=无白名单记录。
+  std::unique_ptr<ScanWhitelist> get_scan_whitelist();
+  bool record_scan(const QString& file_hash, ScanResult result,
+                   qint64 file_size);
+  QList<QSqlRecord> scan_history(const QString& file_hash) const;
 
 private:
   bool ensure_schema();

@@ -10,6 +10,7 @@
 #include <aws/core/utils/HashingUtils.h>
 #include <aws/core/utils/Outcome.h>
 #include <aws/s3/S3Client.h>
+#include <aws/s3/S3ClientConfiguration.h>
 #include <aws/s3/model/AbortMultipartUploadRequest.h>
 #include <aws/s3/model/CompleteMultipartUploadRequest.h>
 #include <aws/s3/model/CreateMultipartUploadRequest.h>
@@ -30,7 +31,7 @@ namespace memex::server {
 class S3StorageImpl final : public S3Storage {
  public:
   explicit S3StorageImpl(const S3Config& cfg) : cfg_(cfg) {
-    Aws::Client::ClientConfiguration client_cfg;
+    Aws::S3::S3ClientConfiguration client_cfg;
     client_cfg.endpointOverride = cfg.endpoint;
     client_cfg.region = cfg.region;
     client_cfg.scheme = cfg.use_ssl ? Aws::Http::Scheme::HTTPS : Aws::Http::Scheme::HTTP;
@@ -179,22 +180,17 @@ class S3StorageImpl final : public S3Storage {
 
   std::string presign_put(const std::string& key,
                           int expires_seconds) override {
-    Aws::S3::Model::PutObjectRequest req;
-    req.SetBucket(cfg_.bucket);
-    req.SetKey(key);
-    auto url = client_->GeneratePresignedUrl(req, Aws::Http::HttpMethod::HTTP_PUT,
-                                             expires_seconds);
-    return url.GetURIString();
+    // SDK 新 API：request 重载已移除，改传 bucket/key（无需构造 request）
+    auto url = client_->GeneratePresignedUrl(
+        cfg_.bucket, key, Aws::Http::HttpMethod::HTTP_PUT, expires_seconds);
+    return url;
   }
 
   std::string presign_get(const std::string& key,
                           int expires_seconds) override {
-    Aws::S3::Model::GetObjectRequest req;
-    req.SetBucket(cfg_.bucket);
-    req.SetKey(key);
-    auto url = client_->GeneratePresignedUrl(req, Aws::Http::HttpMethod::HTTP_GET,
-                                             expires_seconds);
-    return url.GetURIString();
+    auto url = client_->GeneratePresignedUrl(
+        cfg_.bucket, key, Aws::Http::HttpMethod::HTTP_GET, expires_seconds);
+    return url;
   }
 
   bool head_object(const std::string& key,
