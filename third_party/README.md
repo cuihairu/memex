@@ -1,5 +1,5 @@
 # Memex 第三方组件登记（持续事项：引入任何第三方组件即登记名称、版本、
-# 许可证、引入方式）。纯自研口径：以下均为宽松许可或同类义务明确的组件；
+# 许可证、引入方式）。许可口径：以下均为宽松许可或同类义务明确的组件；
 # 无 AGPL/SSPL **链接**进 memex 二进制（OnlyOffice 以独立容器进程运行，
 # 进程边界即许可边界，见 AGPL 合规条）。
 #
@@ -45,6 +45,6 @@
 | ImageMagick `convert` | client/resources/logo.ico 由正典 logo.svg 机械渲染（见 qrc 注释），仅构建期使用 |
 | protoc（随 protobuf） | memex.proto → C++ 生成码（构建树内，不入库） |
 
-## 自研声明
-client/、server/、common/ 下全部手工代码为 Memex 自研；
-单测断言为手写宏（无 gtest/doctest 等单测框架依赖）。
+## 代码来源声明
+client/、server/、common/ 下为本项目自写代码——业务层不含任何开源 IM 的二开代码，
+底座依赖即上表开源组件；单测断言为手写宏（无 gtest/doctest 等单测框架依赖）。

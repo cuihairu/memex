@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Memex
   text: 内网办公即时通讯系统
-  tagline: 物理隔离内网 · 双引擎客户端 · 全量留痕归档 · 纯自研 C++／Qt · 对标企业微信分期推进
+  tagline: 物理隔离内网下的双引擎 IM——收发不依赖服务端也能用，连上就全量归档，C++20 ＋ Qt 实现
   image:
     src: /logo.svg
     alt: Memex
@@ -30,7 +30,7 @@ features:
     title: 组织架构与检索
     details: 部门树、直属上级、通讯录可见性策略；协作态消息按人员、时间、关键词归档检索，查阅行为自动入审计日志。
   - icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>'
-    title: 跨平台自研
+    title: 跨平台客户端
     details: 桌面客户端 C++20 + Qt，覆盖 Windows、macOS 与国产 Linux（统信 UOS、麒麟）；手机端 Android（Kotlin，已落地）、iOS（Swift，代码-only＋CI）与鸿蒙 NEXT（ArkTS，代码-only＋CI）；服务端 C++ 单台集中部署；文件字节流点对点旁路，不经服务端。
 ---
 
