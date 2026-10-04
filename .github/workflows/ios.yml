@@ -16,8 +16,8 @@ on:
 jobs:
   ios:
     # Swift 6.1+ 工具链：brew 的 protoc-gen-swift 生成的代码含 nonisolated
-    # 存储属性（SE-0449，Xcode 16.3+ 才支持），macos-14 默认工具链过旧
-    runs-on: macos-15
+    # 存储属性（SE-0449，Xcode 16.3+ 才支持），旧镜像默认工具链过旧/容量紧张
+    runs-on: macos-26
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
