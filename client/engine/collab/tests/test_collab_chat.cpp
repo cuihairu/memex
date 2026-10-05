@@ -208,8 +208,11 @@ int main(int argc, char** argv) {
   CHECK(server2.waitForStarted(5000));
   CHECK(wait_until([&] { return port_listening(port); }, 8000));
   CHECK(wait_until([&] { return a_re && b_re; }, 20000));
-  CHECK(a.is_logged_in());
-  CHECK(b.is_logged_in());
+  // 等双端稳态登录而非读到 reconnected 就断言：双端同刻重连时，服务端
+  // 处理后到者登录（PBKDF2 等约 1s）会堵住先到者的心跳回包，测试心跳
+  // 300ms×2 会把刚重连的会话判死一次再重试——reconnected 信号可能在
+  // 重试窗内到达，只有稳态登录才是可依赖断言面
+  CHECK(wait_until([&] { return a.is_logged_in() && b.is_logged_in(); }, 20000));
 
   // 重连后通道可用（若期间有消息已入离线队，登录补投路径同上）
   const quint64 s4 = a.send_text(QStringLiteral("bob"), QStringLiteral("重启后续达"));
