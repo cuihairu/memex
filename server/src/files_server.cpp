@@ -489,6 +489,11 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
 
   void process(const std::string& body) {
     // —— 路由 ——
+    // 健康探针（无鉴权）：容器 HEALTHCHECK／运维探活用；只回固定 ok，
+    // 不泄账号/配置信息
+    if (path_ == "/files/health" && method_ == "GET") {
+      return respond_json(200, {{"ok", true}});
+    }
     if (path_ == "/files/session") {
       return route_session(body);
     }

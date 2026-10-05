@@ -1,0 +1,69 @@
+# 服务端镜像出仓：推 tag（v*）即构建并推 ghcr.io。构建全程在容器内
+# （docker build 多阶段，server/Dockerfile）——与宿主/CI 的 vcpkg 树互不
+# 干扰；依赖层（vcpkg 静态编译 aws-sdk 等）走 buildx gha 缓存，vcpkg.json
+# 不变则跨 run 秒级复用。
+name: docker
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write # 推 ghcr.io
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/memex-server
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # vcpkg 源经 named context 注入（Dockerfile 不走网络克隆）；基线钉在
+      # Dockerfile 的 VCPKG_COMMIT（与 vcpkg.json builtin-baseline 同值），
+      # 从此处 grep 出来免得两处各写一份。CI 侧干净检出无 downloads 缓存、
+      # 无 bootstrap 二进制 → 容器内走 bootstrap + 源码包下载（GHA 网络原生可达）。
+      - name: 取 vcpkg 快照（named context）
+        run: |
+          VCPKG_COMMIT="$(grep -oP '(?<=^ARG VCPKG_COMMIT=)[0-9a-f]+' server/Dockerfile)"
+          git init vcpkg-src
+          git -C vcpkg-src remote add origin https://github.com/microsoft/vcpkg
+          git -C vcpkg-src fetch --depth 1 origin "$VCPKG_COMMIT"
+          git -C vcpkg-src checkout --quiet FETCH_HEAD
+
+      - name: 登录 ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: buildx（gha 缓存）
+        uses: docker/setup-buildx-action@v3
+
+      - name: 元数据（tag 名 + latest）
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 构建并推送
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: server/Dockerfile
+          build-contexts: |
+            vcpkgsrc=./vcpkg-src
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -13,6 +13,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include <memex/protocol/messages.hpp>
@@ -79,6 +80,17 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
       s3.use_ssl = true;
     }
   }
+  // S3 配置环境变量兜底（旗标优先）：容器部署密钥走 env 免进 ps/日志的
+  // 命令行；变量名与 e2e 排障用的 MEMEX_S3_ENDPOINT 同族——旗标在场时
+  // 该 env 即使被排障脚本改写也不影响服务端（旗标恒赢）
+  const auto env_or = [](const char* name) {
+    const char* v = std::getenv(name);
+    return v != nullptr ? std::string(v) : std::string();
+  };
+  if (s3.endpoint.empty()) s3.endpoint = env_or("MEMEX_S3_ENDPOINT");
+  if (s3.bucket.empty()) s3.bucket = env_or("MEMEX_S3_BUCKET");
+  if (s3.access_key.empty()) s3.access_key = env_or("MEMEX_S3_ACCESS_KEY");
+  if (s3.secret_key.empty()) s3.secret_key = env_or("MEMEX_S3_SECRET_KEY");
   // 文件面装配（R23-2）：端口给了但 S3 没配齐 → 明示降级（面整体 503）；
   // S3 配齐但端口没给 → 文件面不开。内网 http + path-style 为默认。
   std::shared_ptr<memex::server::S3Storage> s3_storage;
@@ -88,10 +100,25 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
   if (files_port > 0 && s3_ready) {
     s3.path_style = true;
     s3_storage = memex::server::S3Storage::create(s3);
+    // 桶引导（幂等，含 head 先查）：容器/compose 部署不该手建桶。对端
+    // healthy 与 S3 路由就绪有短窗口差（e2e 同款重试口径）；引导失败明示
+    // 且面照起——上传一律 503，健康探针语义（进程活着）不受牵连
+    bool bucket_ok = false;
+    for (int i = 1; i <= 10 && !(bucket_ok = s3_storage->create_bucket());
+         ++i) {
+      std::cerr << "[MEMEX] 桶引导未就绪（第 " << i
+                << "/10 次，2s 后重试）\n";
+      std::this_thread::sleep_for(std::chrono::seconds(2));
+    }
+    if (!bucket_ok) {
+      std::cerr << "[MEMEX] 桶引导失败：" << s3.bucket
+                << "（对象存储不可达/凭据错？）上传一律 503\n";
+    }
   } else if (files_port > 0) {
     std::cerr << "[MEMEX] 文件面已给端口但 S3 配置不齐"
-                 "（--s3-endpoint/--s3-bucket/--s3-access-key/--s3-secret-key），"
-                 "起面后一律 503\n";
+                 "（--s3-endpoint/--s3-bucket/--s3-access-key/--s3-secret-key"
+                 " 或环境变量 MEMEX_S3_ENDPOINT/MEMEX_S3_BUCKET/"
+                 "MEMEX_S3_ACCESS_KEY/MEMEX_S3_SECRET_KEY），起面后一律 503\n";
   }
 
   memex::server::ServerStore store;

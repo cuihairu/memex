@@ -1,0 +1,69 @@
+# memex 服务端一键起：memex-server（SQLite 持久卷）+ RustFS（S3 兼容对象
+# 存储，文件面后端）。用法：`docker compose up -d`，两服务 healthy 即就绪；
+# 客户端连 <宿主机>:24360（协作面）与 <宿主机>:24561（文件面）。
+# 口令面：生产部署把 MEMEX_S3_ACCESS_KEY/SECRET_KEY 写进同目录 .env 再起
+# （示例口令仅限本机试跑）；RustFS 数据与 SQLite 都在命名卷里，up/down 不丢。
+# RustFS 容器契约（1.0.1 实测，与 server storage compose 生成器同口径）：
+# RUSTFS_ADDRESS 必须「:端口」格式；healthcheck 只能 `rustfs info`；
+# S3 API 9000 / 控制台 9001。
+# 镜像构建（--build / 本地无镜像时 up 自动构建）需注入 vcpkg 源快照：
+#   VCPKG_SRC=<vcpkg 检出> docker compose up --build
+# 检出须含 vcpkg.json builtin-baseline 那个 commit；建议干净 clone（见 README
+# 部署节），默认取 ./vcpkg-src。已建好镜像后直接 up 不触发构建、无需该路径。
+services:
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: memex-rustfs
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: "${MEMEX_S3_ACCESS_KEY:-memexdemo}"
+      RUSTFS_SECRET_KEY: "${MEMEX_S3_SECRET_KEY:-memexdemo-secret}"
+      RUSTFS_ADDRESS: ":9000"
+    command: ["server", "/data"]
+    volumes:
+      - rustfs-data:/data
+    healthcheck:
+      test: ["CMD", "rustfs", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+      additional_contexts:
+        vcpkgsrc: "${VCPKG_SRC:-./vcpkg-src}"
+      args:
+        # apt 镜像源（出境受限时设 UBUNTU_MIRROR=mirrors.aliyun.com 等）
+        UBUNTU_MIRROR: "${UBUNTU_MIRROR:-}"
+    image: ghcr.io/cuihairu/memex-server:local
+    container_name: memex-server
+    restart: unless-stopped
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    environment:
+      # S3 配置走环境变量（服务端旗标优先，此处无旗标即全 env 生效）；
+      # path-style 由服务端内置（内网 http 默认）
+      MEMEX_S3_ENDPOINT: "http://rustfs:9000"
+      MEMEX_S3_BUCKET: "memex"
+      MEMEX_S3_ACCESS_KEY: "${MEMEX_S3_ACCESS_KEY:-memexdemo}"
+      MEMEX_S3_SECRET_KEY: "${MEMEX_S3_SECRET_KEY:-memexdemo-secret}"
+    volumes:
+      - server-data:/var/lib/memex
+    ports:
+      - "24360:24360" # 协作面（TCP/protobuf）
+      - "24561:24561" # 文件面（HTTP：/files/*）
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -sf http://127.0.0.1:24561/files/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  server-data:
+  rustfs-data:

@@ -86,6 +86,46 @@ ctest --preset dev
 
 Preset 一览：`dev`（开发构建）、`ci`（Debug+覆盖率，CI 门禁）、`server-release` / `client-release`（每日构建产物口径）。默认只装服务端依赖，带 Qt 桌面的构建启用 manifest 的 `client` feature。首次配置会编译 qtbase，耗时较长；vcpkg 二进制缓存（默认 `~/.cache/vcpkg/archives`）在后续配置中复用编译产物，秒级完成。CI 与每日构建使用 GitHub Actions 缓存（`x-gha` 二进制缓存 + 安装树整取）加速。
 
+## 部署
+
+### Docker（推荐）
+
+多阶段构建（`server/Dockerfile`）：依赖层按 vcpkg manifest 静态编译（vcpkg.json 变更才失效）、构建层出单二进制、运行层 `ubuntu:24.04` 非 root（uid 10001）运行。依赖口径：asio／nlohmann-json 头文件即用；protobuf／openssl(libcrypto)／sqlite3／aws-sdk-cpp(s3) 静态链接进二进制——运行层零 `.so`。容器构建与宿主开发树（`x64-linux-dynamic`，Qt 客户端同树）互不相干。
+
+vcpkg 源不走网络克隆：经 buildx named context 注入快照（须含 `vcpkg.json` builtin-baseline 对应 commit；干净 clone 一份、把该 commit checkout 出来即可，快照带 `downloads/` 缓存则依赖层全离线装）。CI 侧由 workflow 自动取快照，本地从源码构建需指定：
+
+```bash
+# 首次从源码构建镜像：注入 vcpkg 快照
+git clone https://github.com/microsoft/vcpkg vcpkg-src
+git -C vcpkg-src checkout 10541e317a660f4165ba4ac2851ab54a8d4577b1
+docker buildx build --build-context vcpkgsrc=./vcpkg-src \
+  -f server/Dockerfile -t ghcr.io/cuihairu/memex-server:local .
+
+# 一键起：服务端（SQLite 持久卷）+ RustFS（S3 兼容对象存储）
+# （compose 默认也走上述构建：VCPKG_SRC 环境变量改指快照，默认 ./vcpkg-src；
+#  已有镜像后直接 up 不触发构建、无需快照）
+docker compose up -d
+docker compose ps        # 两服务 healthy 即就绪
+# 客户端连接：<宿主机>:24360（协作面）、<宿主机>:24561（文件面）
+```
+
+对象存储口令生产环境写同目录 `.env`（`MEMEX_S3_ACCESS_KEY`／`MEMEX_S3_SECRET_KEY`）再起；示例口令仅限本机试跑。服务端 S3 配置旗标优先、环境变量兜底（`MEMEX_S3_ENDPOINT`／`MEMEX_S3_BUCKET`／`MEMEX_S3_ACCESS_KEY`／`MEMEX_S3_SECRET_KEY`），桶在起面时幂等自建（含对端就绪重试）。健康探针＝文件面无鉴权 `GET /files/health`（改文件面端口时同步设容器 `MEMEX_FILES_PORT`）。
+
+镜像发布：推 `v*` tag 由 CI（`.github/workflows/docker.yml`）构建并推 `ghcr.io/<owner>/memex-server`（tag 名 + latest），依赖层走 buildx gha 缓存。
+
+### 裸机 / 虚机
+
+```bash
+# 每日构建口径（Release·仅服务端）
+cmake --preset server-release && cmake --build --preset server-release
+./build-server/server/memex_server serve --db /var/lib/memex/memex.db \
+  --port 24360 --webhook-port 0 --files-port 24561 \
+  --s3-endpoint http://127.0.0.1:9000 --s3-bucket memex \
+  --s3-access-key ... --s3-secret-key ...
+```
+
+RustFS 对象存储可用 `./build-server/server/memex_server storage compose`（生成 `docker compose` 文件）或直接 `docker run rustfs/rustfs:latest`（监听契约见 `server/src/storage.cpp` 注记）。
+
 ## 工程纪律
 
 全量测试绿才允许 commit／push，push 前先 `git fetch origin && git rebase origin/main`；每个可验收增量一笔提交，不打 tag、不发 release、不 force push。许可上不引入 AGPL／SSPL 组件，宽松许可组件登记进 `third_party/` 清单。命名按报告第五章第六节：代号 Memex，服务名 MemexServer，数据库与日志前缀 `memex`。

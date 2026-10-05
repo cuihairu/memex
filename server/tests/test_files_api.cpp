@@ -213,6 +213,15 @@ int main() {
   files.start_accept();
   std::thread th([&io] { io.run(); });
 
+  // —— 健康探针：无鉴权 GET 恒 200（容器 HEALTHCHECK 口径），不动方法/路径
+  //    语义（POST /files/health 仍 404）——
+  {
+    const auto h = http(port, "GET", "/files/health", {}, "");
+    CHECK(h.status == 200);
+    CHECK(h.body.find("\"ok\":true") != std::string::npos);
+    CHECK(http(port, "POST", "/files/health", {}, "").status == 404);
+  }
+
   // —— 会话令牌：错口令/未知账号 401；四人各换 token ——
   CHECK(http(port, "POST", "/files/session", {},
              "{\"account\":\"member1\",\"password\":\"wrong\"}").status == 401);
