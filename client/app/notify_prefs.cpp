@@ -11,6 +11,7 @@ namespace {
 constexpr auto kPopupNormal = "notify/popup_normal";
 constexpr auto kPopupImportant = "notify/popup_important";
 constexpr auto kPopupUrgent = "notify/popup_urgent";
+constexpr auto kFlashAlert = "notify/flash_alert";
 constexpr auto kDnd = "notify/dnd";
 constexpr auto kDndStart = "notify/dnd_start";
 constexpr auto kDndEnd = "notify/dnd_end";
@@ -29,6 +30,7 @@ NotifyPrefs NotifyPrefs::load() {
   p.popup_normal = s.value(kPopupNormal, p.popup_normal).toBool();
   p.popup_important = s.value(kPopupImportant, p.popup_important).toBool();
   p.popup_urgent = s.value(kPopupUrgent, p.popup_urgent).toBool();
+  p.flash_alert = s.value(kFlashAlert, p.flash_alert).toBool();
   p.dnd = s.value(kDnd, p.dnd).toBool();
   p.dnd_start = s.value(kDndStart, p.dnd_start).toString();
   p.dnd_end = s.value(kDndEnd, p.dnd_end).toString();
@@ -43,6 +45,7 @@ void NotifyPrefs::save() const {
   s.setValue(kPopupNormal, popup_normal);
   s.setValue(kPopupImportant, popup_important);
   s.setValue(kPopupUrgent, popup_urgent);
+  s.setValue(kFlashAlert, flash_alert);
   s.setValue(kDnd, dnd);
   s.setValue(kDndStart, dnd_start);
   s.setValue(kDndEnd, dnd_end);

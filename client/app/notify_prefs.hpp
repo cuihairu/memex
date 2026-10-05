@@ -23,6 +23,7 @@ struct NotifyPrefs {
   bool popup_normal{false};     // 普通默认不弹（＝仅站内会话消息）
   bool popup_important{true};   // 重要默认桌面通知强提醒
   bool popup_urgent{true};      // 紧急默认置顶弹窗需确认收悉
+  bool flash_alert{true};       // 新消息窗口/任务栏闪烁（仅非激活时；默认开）
   bool dnd{false};              // 免打扰时段启用
   QString dnd_start{QStringLiteral("22:00")}; // "HH:mm"
   QString dnd_end{QStringLiteral("08:00")};   // 可跨零点

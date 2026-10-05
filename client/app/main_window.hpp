@@ -76,6 +76,7 @@ public:
   QString banner_text() const;   // 归档提示条文案（直连／协作两态）
   QString status_text() const;   // 状态栏当前文案（降级提示在此）
   QString chat_html() const;     // 聊天区富文本（合并展示断言）
+  int alert_count() const;       // 新消息闪烁累计次数（合并窗内只记 1）
   // —— T4.3 消息状态与多端（验收面）——
   QString delivery_text() const; // 最近一条发出消息的状态（发送中／已送达／失败／已读）
   QString kick_text() const;     // 最近一次互踢提示（空=本会话未被踢）
@@ -120,6 +121,9 @@ private:
     bool at_mode{false}; // 群聊：@账号 高亮
   };
   void show_status(const QString& text);
+  // 新消息闪烁提醒（用户令 2026-10-05）：仅窗口非激活时；同窗多条合并；
+  // 设置「通知偏好→新消息闪烁提醒」可关（默认开）。
+  void alert_attention();
   void update_banner();          // 按当前形态切换归档提示条
   void seed_collab_peers();      // 登录后从本地库补入历史协作会话
   void show_collab_login_dialog();
@@ -178,6 +182,8 @@ private:
   bool chat_showing_guidance_{false}; // 聊天区当前是否为引导态
   QVector<ChatRow> chat_rows_;       // 当前会话的聊天行记录（重渲用）
   QString status_hint_;               // 状态栏事件提示（引擎态前缀实时拼）
+  bool alert_active_{false};          // 闪烁合并窗进行中（窗内消息不叠加）
+  int alert_count_{0};                // 实际触发的闪烁次数（验收断言面）
 
   QString last_groups_json_;          // 最近一次群列表数据（T4.1）
   QString last_fav_json_;             // 最近一次常用联系人（T4.5）

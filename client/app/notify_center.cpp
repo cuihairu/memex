@@ -173,6 +173,14 @@ void NotificationCenter::show_settings() {
   cb_urgent->setChecked(prefs.popup_urgent);
   lay->addWidget(cb_urgent);
 
+  auto* cb_flash = new QCheckBox(
+      QStringLiteral(
+          "新消息闪烁提醒（收消息时窗口/任务栏闪烁；仅窗口非激活时，"
+          "激活中不闪）"), &dlg);
+  cb_flash->setObjectName(QStringLiteral("chk_flash"));
+  cb_flash->setChecked(prefs.flash_alert);
+  lay->addWidget(cb_flash);
+
   auto* dnd_title = new QLabel(QStringLiteral("免打扰时段"), &dlg);
   dnd_title->setObjectName(QStringLiteral("lbl_dnd"));
   QFont bf = dnd_title->font();
@@ -214,7 +222,8 @@ void NotificationCenter::show_settings() {
 
   auto* note = new QLabel(
       QStringLiteral("免打扰时段支持跨零点（如 22:00–08:00）；"
-                     "紧急通知不受免打扰影响，必须确认收悉。"),
+                     "紧急通知不受免打扰影响，必须确认收悉。闪烁开关只管"
+                     "窗口/任务栏闪烁——托盘气泡走上方分级偏好，不受它影响。"),
       &dlg);
   note->setObjectName(QStringLiteral("lbl_note"));
   note->setWordWrap(true);
@@ -238,6 +247,7 @@ void NotificationCenter::show_settings() {
     out.dnd_start = t_start->time().toString(QStringLiteral("HH:mm"));
     out.dnd_end = t_end->time().toString(QStringLiteral("HH:mm"));
     out.fullscreen_allow = cmb_fs->currentIndex() == 1;
+    out.flash_alert = cb_flash->isChecked();
     out.save();
   });
   dlg.exec();

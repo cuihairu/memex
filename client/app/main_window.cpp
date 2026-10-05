@@ -25,6 +25,8 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QRegularExpression>
+#include <QTimer>
+#include <QWindow>
 #include <QScrollBar>
 #include <QSettings>
 #include <QSize>
@@ -58,6 +60,11 @@ namespace {
 
 // 当前令牌（界面颜色唯一来源，R19 · T4.9）——不再散落十六进制字面量
 const ThemeTokens& tk() { return ThemeManager::instance().tokens(); }
+
+// 新消息闪烁的合并窗：窗内后续消息不叠加（同会话/跨会话短时间多条
+// 合并成一次闪烁）；窗口激活时 Qt 自行取消当前闪烁，窗状态另由触发点
+// 的 isActiveWindow 判定管
+constexpr int kFlashAlertMs = 2000;
 
 } // namespace
 
@@ -437,6 +444,7 @@ void MainWindow::wire_engines() {
             if (!isActiveWindow()) {
               tray_notify(QStringLiteral("新消息"),
                           QStringLiteral("来自 %1：%2").arg(from, text));
+              alert_attention(); // 任务栏/窗口闪烁（开关与合并窗在实现内）
             }
           });
   connect(&direct_engine_, &DirectEngine::text_delivered, this,
@@ -598,6 +606,7 @@ void MainWindow::wire_collab() {
             if (!isActiveWindow()) {
               tray_notify(QStringLiteral("新消息"),
                           QStringLiteral("来自 %1 的协作消息").arg(from));
+              alert_attention();
             }
           });
   connect(&collab_engine_, &CollabEngine::text_delivered, this,
@@ -666,6 +675,7 @@ void MainWindow::wire_collab() {
               tray_notify(QStringLiteral("新消息"),
                           QStringLiteral("来自群「%1」%2 的消息")
                               .arg(gname.isEmpty() ? group_key : gname, sender));
+              alert_attention();
             }
           });
   // —— T4.10 分级推送接入：通知中心按个人偏好裁决普通／重要／紧急三级
@@ -1655,6 +1665,22 @@ void MainWindow::setup_tray() {
   tray_->show();
   wire_tray_activation(tray_);
 }
+
+// 新消息闪烁提醒（用户令 2026-10-05）：QWindow::alert 走平台原生注意 API
+// ——Windows FlashWindowEx／macOS requestUserAttention／X11 urgency 任务栏
+// 闪烁；Wayland 无该协议（平台降级边界，BUGS/走查注明）。开关＝通知偏好
+// 的 flash_alert（默认开），关了完全不闪；合并窗内只触发一次不叠加。
+void MainWindow::alert_attention() {
+  if (!NotifyPrefs::load().flash_alert) return;
+  if (isActiveWindow()) return;   // 激活中不闪（触发点已判，双保险）
+  if (alert_active_) return;      // 合并窗内不叠加
+  alert_active_ = true;
+  ++alert_count_;
+  if (QWindow* handle = windowHandle()) handle->alert(kFlashAlertMs);
+  QTimer::singleShot(kFlashAlertMs, this, [this] { alert_active_ = false; });
+}
+
+int MainWindow::alert_count() const { return alert_count_; }
 
 void MainWindow::tray_notify(const QString& title, const QString& text) {
   last_notify_ = title + QStringLiteral("：") + text; // 无托盘也记录（断言面）

@@ -334,4 +334,25 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(chat_actions PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 60)
+
+  # 新消息闪烁提醒验收：真直连对端发消息→主窗 alert_count（非激活才闪/
+  # 合并窗 2s 内不叠加/开关关了不闪/开关落盘往返）；链接面同 test_chat_actions
+  add_executable(test_flash_alert
+    tests/test_flash_alert.cpp
+    app/main_window.cpp
+    app/file_assistant.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
+    app/theme.cpp
+    app/theme_settings_page.cpp)
+  target_include_directories(test_flash_alert PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_flash_alert PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+  add_test(NAME flash_alert COMMAND test_flash_alert)
+  set_tests_properties(flash_alert PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
 endif()
