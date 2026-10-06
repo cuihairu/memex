@@ -25,14 +25,16 @@ RUN if [ -n "$UBUNTU_MIRROR" ]; then \
       ca-certificates python3 \
     && rm -rf /var/lib/apt/lists/*
 # vcpkg 源不走网络克隆：经 buildx named context「vcpkgsrc」注入（本地
-# --build-context vcpkgsrc=<检出路径>，CI 先 clone 再传入）。注入的快照
-# 用 git 校验钉在与 vcpkg.json builtin-baseline 相同的 commit（宿主同款
-# 快照）；快照已带 bootstrap 出的 vcpkg 二进制则直接用（离线），否则
-# 回退 bootstrap 下载 vcpkg-tool（CI 克隆的干净检出走这条）。
-# 快照带 downloads/ 缓存（源码包）时 vcpkg install 全程离线可装。
+#   --build-context vcpkgsrc=<vcpkg 检出目录>，CI 先 clone 再传入）。
+# 注入的 context 根即 vcpkg 检出本身（含 .git、downloads/ 源码包缓存、
+# bootstrap 出的 vcpkg 二进制）。快照带 .git 时用 git 校验钉在与
+# vcpkg.json builtin-baseline 相同的 commit（宿主同款快照），并 checkout 到位。
 COPY --from=vcpkgsrc . /opt/vcpkg
-RUN git -C /opt/vcpkg rev-parse --verify "${VCPKG_COMMIT}^{commit}" >/dev/null \
-    && git -C /opt/vcpkg checkout --quiet "${VCPKG_COMMIT}" \
+RUN if [ -d /opt/vcpkg/.git ]; then \
+      git -C /opt/vcpkg rev-parse --verify "${VCPKG_COMMIT}^{commit}" >/dev/null \
+      && git -C /opt/vcpkg checkout --quiet "${VCPKG_COMMIT}"; \
+    fi \
+    && chmod +x /opt/vcpkg/bootstrap-vcpkg.sh \
     && if [ ! -x /opt/vcpkg/vcpkg ]; then \
          /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics; \
        fi
@@ -42,6 +44,8 @@ ENV VCPKG_ROOT=/opt/vcpkg
 ENV VCPKG_FORCE_SYSTEM_BINARIES=1
 WORKDIR /src
 COPY vcpkg.json ./
+# downloads/ 源码包缓存在快照里则全程离线可装；种子无缓存（CI 干净检出）
+# 则走源码包下载（GHA 网络原生可达）
 RUN /opt/vcpkg/vcpkg install --triplet x64-linux \
       --x-manifest-root=/src --x-install-root=/src/vcpkg_installed \
       --keep-going

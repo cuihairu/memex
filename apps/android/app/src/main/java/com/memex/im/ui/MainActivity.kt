@@ -73,6 +73,10 @@ class MainActivity : AppCompatActivity(), ChatManager.Listener {
             openChat(peer)
         }
 
+        findViewById<Button>(R.id.btn_file_assistant).setOnClickListener {
+            startActivity(Intent(this, FileAssistantActivity::class.java))
+        }
+
         findViewById<Button>(R.id.btn_logout).setOnClickListener {
             ChatHolder.manager?.removeListener(this)
             ChatHolder.clear()

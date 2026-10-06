@@ -42,6 +42,11 @@
             android:name="com.memex.im.ui.ChatActivity"
             android:exported="false" />
 
+        <!-- 文件助手（R23-3 块3）：备忘录＋统一收件箱，入口在主界面 -->
+        <activity
+            android:name="com.memex.im.ui.FileAssistantActivity"
+            android:exported="false" />
+
         <!-- 紧急通知「确认收悉」动作（点按后才允许滑除该横幅） -->
         <receiver
             android:name="com.memex.im.ui.MemexNotifyReceiver"

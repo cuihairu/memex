@@ -82,4 +82,7 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.google.protobuf:protobuf-javalite:$protobufVersion")
     testImplementation("junit:junit:4.13.2")
+    // org.json：主代码用 Android 内置实现；JVM 单测的 android.jar 里
+    // org.json 是占位桩（调用即 not mocked），用独立 artifact 顶掉同名类
+    testImplementation("org.json:json:20240303")
 }

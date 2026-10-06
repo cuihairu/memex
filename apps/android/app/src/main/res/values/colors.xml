@@ -4,4 +4,7 @@
     <color name="brand_orange">#e16531</color>
     <color name="brand_orange_dark">#c04f20</color>
     <color name="ic_launcher_background">@color/brand_orange</color>
+
+    <!-- 错误提示文字（文件助手失败明示行等） -->
+    <color name="error_text">#c62828</color>
 </resources>
