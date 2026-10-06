@@ -1,5 +1,5 @@
 # 服务端部署链末端：main 镜像（docker workflow 产出 sha-<完整 sha>）落到
-# runner-Docker（自托管 runner，192.168.5.5，注册 label memex-deploy）。
+# runner-Docker（自托管 runner，192.168.5.5，注册 label memex-docker100）。
 #   拉不可变 sha tag → compose up → 有界轮询容器 healthcheck + 宿主真 HTTP
 #   探活（/files/health 200）→ 失败自动回滚上一 tag 并验证回滚体健康。
 # 宿主 /data/deploy/memex/.env 记当前 TAG（本 workflow 改写；S3 凭据等运行
@@ -24,7 +24,7 @@ permissions:
   packages: read
 
 concurrency:
-  group: memex-deploy
+  group: memex-docker100
   cancel-in-progress: false
 
 env:
@@ -35,8 +35,8 @@ env:
 
 jobs:
   deploy:
-    # 仅自托管 runner-Docker（注册时带 memex-deploy label；装机见 README 部署节）
-    runs-on: [self-hosted, memex-deploy]
+    # 仅自托管 runner-Docker（注册时带 memex-docker100 label；装机见 README 部署节）
+    runs-on: [self-hosted, memex-docker100]
     timeout-minutes: 20
     steps:
       - name: 取 compose 定义

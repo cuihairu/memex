@@ -120,11 +120,11 @@ docker compose ps        # 两服务 healthy 即就绪
 runner-Docker 一次性装机（在该机上执行）：
 
 ```bash
-# 1) actions runner：注册时 custom label 填 memex-deploy（deploy.yml runs-on 依赖）
+# 1) actions runner：注册时 custom label 填 memex-docker100（deploy.yml runs-on 依赖）
 mkdir -p ~/actions-runner && cd ~/actions-runner
 # 从 repo Settings→Actions→Runners 取 latest 包地址与 TOKEN（会过期，现取现用）
 tar xzf actions-runner-linux-x64-*.tar.gz
-./config.sh --url https://github.com/cuihairu/memex --token <TOKEN> --labels memex-deploy
+./config.sh --url https://github.com/cuihairu/memex --token <TOKEN> --labels memex-docker100
 sudo ./svc.sh install && sudo ./svc.sh start
 
 # 2) ghcr 拉取凭据（包私有时装到 runner 用户；设为 public 包可跳过）
