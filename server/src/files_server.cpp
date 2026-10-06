@@ -52,6 +52,9 @@ const char* reason_phrase(int status) {
 struct FileSession {
   std::string account;
   std::int64_t expires_ms{0};
+  // 令牌 scope（R23-4 两套路由两套 scope）：false=内网文件面全量；
+  // true=外网单向 uplink（只许 /uplink/* 写入，内网面一律 403）
+  bool uplink{false};
 };
 
 // "group:3" / "me" / "inbox" → is_group/gid/uid/is_inbox；非法返回 false
@@ -96,16 +99,34 @@ std::string query_param(const std::string& query, const char* key) {
 
 } // namespace
 
+// 会话库实体（hpp 前置声明的 memex::server::FileSessions）：双实例部署时
+// 内外两面共享一份——scope 闸才有实体：uplink 令牌打内网面被识别后 403
+// 「外网会话只许写入」（而非当作未知令牌 401）、内网令牌打 uplink 面 403
+// 「须外网 uplink 会话」同理；单实例缺省自建句柄，行为不变。
+struct FileSessions {
+  std::unordered_map<std::string, FileSession> map;
+};
+
+std::shared_ptr<FileSessions> make_file_sessions() {
+  return std::make_shared<FileSessions>();
+}
+
 struct FileServer::Impl {
   ServerStore& store;
   std::shared_ptr<S3Storage> storage;
   AuthorizationService az;
-  // 会话令牌：sha256(token) → 会话。单 io_context 线程驱动（与消息面/
-  // webhook 同一线程模型），不加锁。
-  std::unordered_map<std::string, FileSession> sessions;
+  // R23-4：true=外网单向面实例（只挂 /uplink/* 写入端点）
+  bool uplink_mode{false};
+  // 会话令牌库：共享句柄（R23-4 双实例一面一份没意义，见 FileSessions
+  // 注）。单 io_context 线程驱动（与消息面/webhook 同一线程模型），不加锁。
+  std::shared_ptr<FileSessions> sessions;
 
-  explicit Impl(ServerStore& s, std::shared_ptr<S3Storage> st)
-      : store(s), storage(std::move(st)) {
+  explicit Impl(ServerStore& s, std::shared_ptr<S3Storage> st,
+                bool uplink = false,
+                std::shared_ptr<FileSessions> shared_sessions = {})
+      : store(s), storage(std::move(st)), uplink_mode(uplink),
+        sessions(shared_sessions ? std::move(shared_sessions)
+                                 : std::make_shared<FileSessions>()) {
     register_policies();
   }
 
@@ -188,33 +209,45 @@ struct FileServer::Impl {
   }
 
   // —— 会话令牌 ——
-  std::string mint_session(const std::string& account) {
+  std::string mint_session(const std::string& account, bool uplink = false) {
     prune_sessions();
     const std::string token = random_salt_hex(); // 16B 熵 → 32 hex
     if (token.empty()) return "";
-    sessions[sha256_hex(token)] = FileSession{account, now_ms() + kSessionTtlMs};
+    sessions->map[sha256_hex(token)] =
+        FileSession{account, now_ms() + kSessionTtlMs, uplink};
     return token;
+  }
+  // 有效回会话；无效/过期回空。scope 判定走它（R23-4 两道闸之一）。
+  std::optional<FileSession> auth_session_full(
+      const std::string& header_value) {
+    const std::string prefix = "Bearer ";
+    if (header_value.rfind(prefix, 0) != 0) return std::nullopt;
+    const std::string token = header_value.substr(prefix.size());
+    if (token.empty()) return std::nullopt;
+    prune_sessions();
+    const auto it = sessions->map.find(sha256_hex(token));
+    if (it == sessions->map.end()) return std::nullopt;
+    if (it->second.expires_ms < now_ms()) {
+      sessions->map.erase(it);
+      return std::nullopt;
+    }
+    return it->second;
   }
   // 有效返回账号；无效/过期返回空串
   std::string auth_session(const std::string& header_value) {
-    const std::string prefix = "Bearer ";
-    if (header_value.rfind(prefix, 0) != 0) return "";
-    const std::string token = header_value.substr(prefix.size());
-    if (token.empty()) return "";
-    prune_sessions();
-    const auto it = sessions.find(sha256_hex(token));
-    if (it == sessions.end()) return "";
-    if (it->second.expires_ms < now_ms()) {
-      sessions.erase(it);
-      return "";
-    }
-    return it->second.account;
+    const auto s = auth_session_full(header_value);
+    return s.has_value() ? s->account : "";
+  }
+  // 请求头里是否 uplink 令牌（内网面读端点前的单向闸，解析失败=否）
+  bool is_uplink_token(const std::string& header_value) {
+    const auto s = auth_session_full(header_value);
+    return s.has_value() && s->uplink;
   }
   void prune_sessions() {
     const std::int64_t now = now_ms();
-    for (auto it = sessions.begin(); it != sessions.end();) {
+    for (auto it = sessions->map.begin(); it != sessions->map.end();) {
       if (it->second.expires_ms < now) {
-        it = sessions.erase(it);
+        it = sessions->map.erase(it);
       } else {
         ++it;
       }
@@ -228,11 +261,14 @@ struct FileServer::Impl {
     std::string error;
     std::int64_t file_id{0};
     bool second_transfer{false};
+    std::string file_hash;  // 带回给审计流水（R23-4 uplink）
+    std::string object_key; // 同上（落点留痕：谁/何时/什么/落到哪个键）
   };
-  UploadOutcome handle_upload(const std::string& account, bool is_group,
-                              std::uint64_t gid, const std::string& uid,
-                              const std::string& file_name,
-                              const std::string& body, bool is_inbox) {
+  UploadOutcome handle_upload(
+      const std::string& account, bool is_group, std::uint64_t gid,
+      const std::string& uid, const std::string& file_name,
+      const std::string& body, bool is_inbox,
+      ServerStore::FileSource source = ServerStore::FileSource::Internal) {
     UploadOutcome out;
     if (!storage) {
       out.http_status = 503;
@@ -257,6 +293,8 @@ struct FileServer::Impl {
             store.check_second_transfer(account, hash, gid_s, uid, kind)) {
       out.file_id = hit->id;
       out.second_transfer = true;
+      out.file_hash = hit->file_hash;
+      out.object_key = hit->object_key;
       return out;
     }
     // 对象键按内容寻址于目标前缀内（设计铁律 3：groups/{gid}/、users/{uid}/）
@@ -288,8 +326,11 @@ struct FileServer::Impl {
     meta.file_size = static_cast<std::int64_t>(body.size());
     meta.file_hash = hash;
     meta.object_key = object_key;
+    meta.source = source;
     meta.upload_ts = now_ms();
     meta.kind = kind;
+    out.file_hash = hash;
+    out.object_key = object_key;
     out.file_id = store.create_file_meta(meta);
     if (out.file_id <= 0) {
       if (is_group) store.add_group_quota_used(gid_s, -static_cast<std::int64_t>(body.size()));
@@ -474,7 +515,9 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       return false;
     }
     // 路由感知上限：upload 收大字节，其余路由只收小 JSON/空 body
-    body_cap_ = path_ == "/files/upload" ? kMaxUpload : kMaxJsonBody;
+    body_cap_ = (path_ == "/files/upload" || path_ == "/uplink/upload")
+                    ? kMaxUpload
+                    : kMaxJsonBody;
     return true;
   }
 
@@ -490,9 +533,36 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
   void process(const std::string& body) {
     // —— 路由 ——
     // 健康探针（无鉴权）：容器 HEALTHCHECK／运维探活用；只回固定 ok，
-    // 不泄账号/配置信息
-    if (path_ == "/files/health" && method_ == "GET") {
+    // 不泄账号/配置信息（uplink 面同款 /uplink/health，探活口径一致）
+    if ((path_ == "/files/health" || path_ == "/uplink/health") &&
+        method_ == "GET") {
       return respond_json(200, {{"ok", true}});
+    }
+    // R23-4 外网单向面：只挂写入端点，无任何下载/读取内网数据的路由
+    //（404 兜底）。物理面分离＝独立监听口；scope 闸见各 route。
+    if (impl_.uplink_mode) {
+      if (path_ == "/uplink/session") {
+        return route_session(body, /*uplink=*/true);
+      }
+      if (path_ == "/uplink/upload" && method_ == "POST") {
+        return route_uplink_upload(body);
+      }
+      if (path_ == "/uplink/mine" && method_ == "GET") {
+        return route_uplink_mine();
+      }
+      if (path_ == "/uplink/delete" && method_ == "POST") {
+        return route_uplink_delete();
+      }
+      respond_json(404, {{"ok", false}, {"error", "路径不存在"}});
+      return;
+    }
+    // 单向性第二道闸：uplink 令牌打到内网端口，读端点一律 403
+    //（session/health 无需会话，豁免）
+    if (path_.rfind("/files/", 0) == 0 && path_ != "/files/session" &&
+        impl_.is_uplink_token(authorization_)) {
+      respond_json(403, {{"ok", false},
+                         {"error", "外网会话只许写入（单向 uplink）"}});
+      return;
     }
     if (path_ == "/files/session") {
       return route_session(body);
@@ -531,7 +601,9 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     respond_json(404, {{"ok", false}, {"error", "路径不存在"}});
   }
 
-  void route_session(const std::string& body) {
+  // 换会话令牌：内网面 /files/session（scope=internal）与外网面
+  // /uplink/session（scope=uplink，只许写入）同源账号库同 PBKDF2。
+  void route_session(const std::string& body, bool uplink = false) {
     if (method_ != "POST") {
       respond_json(405, {{"ok", false}, {"error", "方法不支持：请用 POST"}});
       return;
@@ -558,16 +630,131 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       // 摘要比对用常量时间思路不引入（内网面 v1 与消息面同口径）
       token = pbkdf2_sha256_hex(password, row->salt_hex, 60000) ==
                       row->digest_hex
-                  ? impl_.mint_session(account)
+                  ? impl_.mint_session(account, uplink)
                   : "";
     }
     if (token.empty()) {
       respond_json(401, {{"ok", false}, {"error", "账号或口令错误"}});
       return;
     }
+    respond_json(200,
+                 {{"ok", true},
+                  {"token", token},
+                  {"expires_in", kSessionTtlMs / 1000},
+                  {"scope", uplink ? "uplink" : "internal"}});
+  }
+
+  // —— R23-4 外网单向 uplink：铁律=外网会话只有「写入」权限，永远没有
+  //     「读取内网数据」的权限（唯一落点=文件助手收件箱；内网用户转发进
+  //     群走内网面，人工过一道目）——
+
+  // uplink 面鉴权：无效令牌 401；有效但非 uplink scope 403（内网令牌
+  // 打到 uplink 端口同样拒）
+  std::string uplink_account_or_respond() {
+    const auto s = impl_.auth_session_full(authorization_);
+    if (!s.has_value()) {
+      respond_json(401, {{"ok", false},
+                         {"error", "会话无效或过期（先 POST /uplink/session）"}});
+      return "";
+    }
+    if (!s->uplink) {
+      respond_json(403, {{"ok", false},
+                         {"error", "须外网 uplink 会话（内网令牌不通用）"}});
+      return "";
+    }
+    return s->account;
+  }
+
+  // 上传：唯一落点=文件助手收件箱（target 参数不收——外网面无选择权），
+  // 全量审计（uplink_logs 流水＋控制台留痕：谁/何时/什么/落点）
+  void route_uplink_upload(const std::string& body) {
+    const std::string account = uplink_account_or_respond();
+    if (account.empty()) return;
+    const Decision d = impl_.az.authorize(
+        {account, "file:upload", "user:" + account, "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403, {{"ok", false},
+                         {"error", "无权上传（" + d.reason + "）"}});
+      return;
+    }
+    const auto r =
+        impl_.handle_upload(account, /*is_group=*/false, /*gid=*/0, account,
+                            file_name_, body, /*is_inbox=*/true,
+                            ServerStore::FileSource::Uplink);
+    if (r.http_status != 200) {
+      respond_json(r.http_status, {{"ok", false}, {"error", r.error}});
+      return;
+    }
+    impl_.store.add_uplink_log(
+        {0, account, file_name_, static_cast<std::int64_t>(body.size()),
+         r.file_hash, r.object_key, now_ms()});
+    std::cout << "[MEMEX] uplink upload account=" << account
+              << " id=" << r.file_id << " size=" << body.size()
+              << " key=" << r.object_key
+              << (r.second_transfer ? " second-transfer" : "") << std::endl;
     respond_json(200, {{"ok", true},
-                       {"token", token},
-                       {"expires_in", kSessionTtlMs / 1000}});
+                       {"id", r.file_id},
+                       {"second_transfer", r.second_transfer}});
+  }
+
+  // 我的上传记录（只有记录：无任何取回内网数据的端点）
+  void route_uplink_mine() {
+    const std::string account = uplink_account_or_respond();
+    if (account.empty()) return;
+    int limit = 200, offset = 0;
+    const std::string lim = query_param(query_, "limit");
+    const std::string off = query_param(query_, "offset");
+    if (!lim.empty() &&
+        lim.find_first_not_of("0123456789") == std::string::npos) {
+      limit = std::atoi(lim.c_str());
+    }
+    if (!off.empty() &&
+        off.find_first_not_of("0123456789") == std::string::npos) {
+      offset = std::atoi(off.c_str());
+    }
+    const auto rows = impl_.store.list_uplink_files(account, limit, offset);
+    json arr = json::array();
+    for (const auto& m : rows) {
+      arr.push_back({{"id", m.id},
+                     {"file_name", m.file_name},
+                     {"file_size", m.file_size},
+                     {"file_hash", m.file_hash},
+                     {"upload_ts", m.upload_ts}});
+    }
+    respond_json(200, {{"ok", true}, {"files", arr}});
+  }
+
+  // 删自己的上传：只许 source=uplink 且 owner=自己（内网文件/他人记录
+  // 一律 403，不借道 handle_delete 的判权放宽）
+  void route_uplink_delete() {
+    const std::string account = uplink_account_or_respond();
+    if (account.empty()) return;
+    const std::string id_s = query_param(query_, "id");
+    if (id_s.empty() ||
+        id_s.find_first_not_of("0123456789") != std::string::npos) {
+      respond_json(400, {{"ok", false}, {"error", "id 须为数字"}});
+      return;
+    }
+    const std::int64_t id = std::strtoll(id_s.c_str(), nullptr, 10);
+    const auto meta = impl_.store.file_by_id(id);
+    if (!meta.has_value()) {
+      respond_json(404, {{"ok", false}, {"error", "文件不存在"}});
+      return;
+    }
+    if (meta->source != ServerStore::FileSource::Uplink ||
+        meta->owner != account) {
+      respond_json(
+          403, {{"ok", false}, {"error", "外网会话只能删除自己的上传"}});
+      return;
+    }
+    const auto r = impl_.handle_delete(account, id);
+    if (r.http_status != 200) {
+      respond_json(r.http_status, {{"ok", false}, {"error", r.error}});
+      return;
+    }
+    std::cout << "[MEMEX] uplink delete account=" << account << " id=" << id
+              << std::endl;
+    respond_json(200, {{"ok", true}});
   }
 
   void route_upload(const std::string& body) {
@@ -1115,8 +1302,11 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
 } // namespace
 
 FileServer::FileServer(asio::io_context& io, ServerStore& store,
-                       std::shared_ptr<S3Storage> storage, std::uint16_t port)
-    : impl_(std::make_unique<Impl>(store, std::move(storage))),
+                       std::shared_ptr<S3Storage> storage, std::uint16_t port,
+                       bool uplink_mode,
+                       std::shared_ptr<FileSessions> sessions)
+    : impl_(std::make_unique<Impl>(store, std::move(storage), uplink_mode,
+                                   std::move(sessions))),
       acceptor_(io, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port)) {}
 
 FileServer::~FileServer() = default;
@@ -1126,8 +1316,19 @@ std::uint16_t FileServer::port() const {
 }
 
 void FileServer::start_accept() {
-  std::cout << "[MEMEX] Files 监听 0.0.0.0:" << port()
-            << (impl_->storage ? "" : "（存储未配置：一律 503）") << std::endl;
+  if (impl_->uplink_mode) {
+    // 安全默认（用户硬要求）：外网入口默认关闭、显式开启、开启时明示
+    // 暴露范围——审计面日志固定带这行
+    std::cout << "[MEMEX] uplink 监听 0.0.0.0:" << port()
+              << "（外网单向：仅 /uplink/session|upload|mine|delete 与"
+              << " /uplink/health；无任何下载/读取内网数据端点；上传全审计）"
+              << (impl_->storage ? "" : "（存储未配置：一律 503）")
+              << std::endl;
+  } else {
+    std::cout << "[MEMEX] Files 监听 0.0.0.0:" << port()
+              << (impl_->storage ? "" : "（存储未配置：一律 503）")
+              << std::endl;
+  }
   do_accept();
 }
 

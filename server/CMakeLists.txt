@@ -132,6 +132,15 @@ if(MEMEX_BUILD_TESTS)
   add_test(NAME files_api COMMAND test_files_api)
   set_tests_properties(files_api PROPERTIES TIMEOUT 60)
 
+  # R23-4 外网单向 uplink 走查：双实例真 TCP（内网面×uplink 面）——scope
+  # 两道闸（内网令牌打 uplink 面 403／uplink 令牌打内网面 403）、唯一落点=
+  # 收件箱＋审计流水＋配额、mine 只列本人、delete 只许自己的上传、
+  # uplink 口无任何下载/读取内网数据路由（404 兜底）
+  add_executable(test_uplink tests/test_uplink.cpp)
+  target_link_libraries(test_uplink PRIVATE memex_server_core)
+  add_test(NAME uplink COMMAND test_uplink)
+  set_tests_properties(uplink PROPERTIES TIMEOUT 60)
+
   # R23-1 真容器集成（默认 SKIP；MEMEX_S3_E2E=1 且宿主有 docker 才全量跑：
   # RustFS compose up→S3Storage 全接口往返→down）
   add_executable(test_s3_e2e tests/test_s3_e2e.cpp)

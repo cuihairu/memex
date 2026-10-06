@@ -465,6 +465,11 @@ public:
   bool add_uplink_log(const UplinkLog& log);
   std::vector<UplinkLog> list_uplink_logs(const std::string& uploader,
                                           int limit = 200);
+  // 外网 uplink 面的「我的上传」列表：只列 source=uplink 的收件箱文件
+  //（/uplink/mine 数据源；uplink 面无任何读内网数据的端点，本查询只回
+  // 本人自己的记录）。按 id 倒序（上传时间同源）。
+  std::vector<FileMeta> list_uplink_files(const std::string& owner,
+                                          int limit = 200, int offset = 0);
 
   // —— R23-3 文件助手备忘录（memos：本人文本，不入对象存储）——
   // 历史留痕不在本层：自备忘录不留修订史（修订历史属 R24-2 群备忘录）。

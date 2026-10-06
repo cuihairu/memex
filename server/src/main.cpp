@@ -44,6 +44,9 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
   std::uint16_t port = kDefaultPort;
   int webhook_port = kDefaultWebhookPort; // int 才能表达 0＝关闭
   int files_port = 0; // 文件面默认关闭：须显式 --files-port 且给 S3 配置
+  // 外网单向 uplink 面（R23-4）默认关闭：须显式 --uplink-port 开启
+  //（安全默认：开启即明示暴露范围，见装配处日志）
+  int uplink_port = 0;
   memex::server::S3Config s3;
   s3.region = "auto";
   for (int i = 0; i < argc; ++i) {
@@ -64,6 +67,12 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
       files_port = std::atoi(argv[++i]);
       if (files_port < 0 || files_port > 65535) {
         std::cerr << "无效文件面端口（0＝关闭文件面）\n";
+        return 2;
+      }
+    } else if (arg == "--uplink-port" && i + 1 < argc) {
+      uplink_port = std::atoi(argv[++i]);
+      if (uplink_port < 0 || uplink_port > 65535) {
+        std::cerr << "无效 uplink 端口（0＝关闭外网入口）\n";
         return 2;
       }
     } else if (arg == "--s3-endpoint" && i + 1 < argc) {
@@ -120,6 +129,14 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
                  " 或环境变量 MEMEX_S3_ENDPOINT/MEMEX_S3_BUCKET/"
                  "MEMEX_S3_ACCESS_KEY/MEMEX_S3_SECRET_KEY），起面后一律 503\n";
   }
+  // uplink 面（R23-4）依附同一存储实例；S3 未配齐也给起（面内一律 503），
+  // 但默认关闭口径不变：不给 --uplink-port 就不创建监听。
+  if (uplink_port > 0) {
+    std::cout << "[MEMEX] 外网入口已显式开启（--uplink-port " << uplink_port
+              << "）：暴露范围=外网单向上传（/uplink/session|upload|mine|"
+                 "delete；无任何下载/读取内网数据端点，上传全审计）。"
+                 "生产建议该口随隧道单独出网、内网面不出网\n";
+  }
 
   memex::server::ServerStore store;
   if (!store.open(db_path)) {
@@ -133,13 +150,33 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
     // 文件面（R23-2）：独立端口，绑定失败只降级为「文件面未启用」，
     // 消息主通道不受影响；存储实例空＝面内一律 503。
     std::unique_ptr<memex::server::FileServer> files;
+    // 会话库两面共享一份（R23-4）：uplink 面启用时才显式建共享句柄，
+    // scope 闸认得出跨面令牌；纯内网部署缺省自建，行为不变。
+    std::shared_ptr<memex::server::FileSessions> file_sessions;
     if (files_port > 0) {
       try {
+        if (uplink_port > 0) {
+          file_sessions = memex::server::make_file_sessions();
+        }
         files = std::make_unique<memex::server::FileServer>(
-            io, store, s3_storage, static_cast<std::uint16_t>(files_port));
+            io, store, s3_storage, static_cast<std::uint16_t>(files_port),
+            /*uplink_mode=*/false, file_sessions);
       } catch (const std::exception& e) {
         std::cerr << "[MEMEX] 文件面端口绑定失败，文件面未启用"
                      "（消息主通道不受影响）：" << e.what() << std::endl;
+      }
+    }
+    // 外网单向 uplink 面（R23-4）：独立监听口（物理面分离——隧道出网只
+    // 出这个口）；绑定失败只降级为「外网入口未启用」并明示。
+    std::unique_ptr<memex::server::FileServer> uplink;
+    if (uplink_port > 0) {
+      try {
+        uplink = std::make_unique<memex::server::FileServer>(
+            io, store, s3_storage, static_cast<std::uint16_t>(uplink_port),
+            /*uplink_mode=*/true, file_sessions);
+      } catch (const std::exception& e) {
+        std::cerr << "[MEMEX] uplink 端口绑定失败，外网入口未启用"
+                     "（内网面不受影响）：" << e.what() << std::endl;
       }
     }
     // webhook 接入（T4.10）：独立端口；端口占用等绑定失败只降级为
@@ -162,6 +199,7 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
     server.start_accept();
     if (webhook) webhook->start_accept();
     if (files) files->start_accept();
+    if (uplink) uplink->start_accept();
     io.run();
   } catch (const std::exception& e) {
     std::cerr << "服务端异常退出：" << e.what() << std::endl;

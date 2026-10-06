@@ -2426,6 +2426,43 @@ std::vector<ServerStore::UplinkLog> ServerStore::list_uplink_logs(
   return out;
 }
 
+std::vector<ServerStore::FileMeta> ServerStore::list_uplink_files(
+    const std::string& owner, int limit, int offset) {
+  std::vector<FileMeta> out;
+  // 只列本人 uplink 来源的收件箱文件（source/kind 双过滤：内网收件箱
+  // 文件不出现在外网面；他人记录同理不可见）
+  const char* sql =
+      "SELECT id, owner, belong_gid, belong_uid, file_name, file_size,"
+      " file_hash, object_key, source, upload_ts, status, pin, kind"
+      " FROM files"
+      " WHERE owner = ? AND source = 1 AND kind = 1"
+      " ORDER BY id DESC LIMIT ? OFFSET ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, owner.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 2, limit);
+  sqlite3_bind_int(st, 3, offset);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    FileMeta r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.owner = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.belong_gid = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.belong_uid = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    r.file_name = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    r.file_size = sqlite3_column_int64(st, 5);
+    r.file_hash = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    r.object_key = reinterpret_cast<const char*>(sqlite3_column_text(st, 7));
+    r.source = static_cast<FileSource>(sqlite3_column_int(st, 8));
+    r.upload_ts = sqlite3_column_int64(st, 9);
+    r.status = static_cast<FileStatus>(sqlite3_column_int(st, 10));
+    r.pin = sqlite3_column_int(st, 11) != 0;
+    r.kind = static_cast<FileKind>(sqlite3_column_int(st, 12));
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
 // —— R23-2 文件管理面：按 id 取/置顶/状态、对象引用计数、受检配额扣费、
 //    群内角色（权限模型：群主/管理员/成员）——
 
