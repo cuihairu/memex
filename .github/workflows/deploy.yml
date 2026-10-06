@@ -1,0 +1,114 @@
+# 服务端部署链末端：main 镜像（docker workflow 产出 sha-<完整 sha>）落到
+# runner-Docker（自托管 runner，192.168.5.5，注册 label memex-deploy）。
+#   拉不可变 sha tag → compose up → 有界轮询容器 healthcheck + 宿主真 HTTP
+#   探活（/files/health 200）→ 失败自动回滚上一 tag 并验证回滚体健康。
+# 宿主 /data/deploy/memex/.env 记当前 TAG（本 workflow 改写；S3 凭据等运行
+# 面配置同文件宿主管，流程中永不打印）。触发：docker workflow 成功完结
+# （main）或手动 dispatch；并发上锁防双部署互踩。
+name: deploy
+
+on:
+  workflow_run:
+    workflows: [docker]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '部署的镜像 tag（留空=docker workflow 最近一次 main 产出 sha tag；sha-xxx 可显式指定用于回滚）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: memex-deploy
+  cancel-in-progress: false
+
+env:
+  DEPLOY_DIR: /data/deploy/memex
+  IMAGE: ghcr.io/${{ github.repository_owner }}/memex-server
+  PROBE_URL: http://127.0.0.1:24561/files/health
+  PROBE_ROUNDS: 30 # 有界轮询：30×10s=5min 上限（healthcheck start_period 30s 内已应起）
+
+jobs:
+  deploy:
+    # 仅自托管 runner-Docker（注册时带 memex-deploy label；装机见 README 部署节）
+    runs-on: [self-hosted, memex-deploy]
+    timeout-minutes: 20
+    steps:
+      - name: 取 compose 定义
+        uses: actions/checkout@v7
+        with:
+          # workflow_run 触发时对齐被部署的那次 main 提交；dispatch 直接 HEAD
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: 定位要部署的 tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            want="${{ github.event.inputs.tag }}"
+          else
+            want="sha-${{ github.event.workflow_run.head_sha || github.sha }}"
+          fi
+          docker pull "$IMAGE:$want" # 拉不动即失败，不做半套部署
+          echo "tag=$want" >> "$GITHUB_OUTPUT"
+
+      - name: 部署 + 健康轮询 + 失败自动回滚
+        run: |
+          set -euo pipefail
+          cd /tmp
+          want="${{ steps.tag.outputs.tag }}"
+          mkdir -p "$DEPLOY_DIR"; touch "$DEPLOY_DIR/.env"
+          cp "$DEPLOY_DIR/.env" "$DEPLOY_DIR/.env.prev"
+          set_tag() { # 只动 TAG 行，S3 凭据等其余行原样保留（不打印 .env 内容）
+            if grep -q '^TAG=' "$DEPLOY_DIR/.env"; then
+              sed -i "s|^TAG=.*|TAG=$1|" "$DEPLOY_DIR/.env"
+            else
+              printf 'TAG=%s\n' "$1" >> "$DEPLOY_DIR/.env"
+            fi
+          }
+          prev_tag="$(grep '^TAG=' "$DEPLOY_DIR/.env.prev" | tail -1 | cut -d= -f2- || true)"
+          prev_tag="${prev_tag:-latest}"
+          compose() { docker compose --project-directory "$DEPLOY_DIR" --env-file "$DEPLOY_DIR/.env" -f "$GITHUB_WORKSPACE/docker-compose.yml" "$@"; }
+          probe() { # 真 HTTP 探活（宿主口映射），不健康不给过
+            local code
+            code="$(curl -sf -o /dev/null -w '%{http_code}' --max-time 5 "$PROBE_URL" 2>/dev/null || true)"
+            [ "$code" = "200" ]
+          }
+          wait_healthy() {
+            local i state
+            for i in $(seq 1 $PROBE_ROUNDS); do
+              state="$(docker inspect --format '{{.State.Health.Status}}' memex-server 2>/dev/null || echo missing)"
+              if [ "$state" = healthy ] && probe; then return 0; fi
+              sleep 10
+            done
+            return 1
+          }
+
+          set_tag "$want"
+          if ! compose up -d; then
+            echo "::error::compose up 失败（tag=$want），尝试回滚 $prev_tag"
+            set_tag "$prev_tag"; compose up -d
+            wait_healthy && { echo "回滚 $prev_tag 后健康"; exit 1; }
+            echo "::error::回滚体 $prev_tag 也不健康——需要上机处置（凭据从运行中容器 printenv 取，不外泄）"
+            exit 2
+          fi
+          if wait_healthy; then
+            echo "部署 $want 健康（容器 healthcheck=healthy + $PROBE_URL=200）"
+            rm -f "$DEPLOY_DIR/.env.prev"
+            exit 0
+          fi
+          # 新 tag 起不来：回滚上一 tag 并验证回滚体真能回 200
+          echo "::warning::tag=$want 未过健康闸，自动回滚 $prev_tag"
+          set_tag "$prev_tag"
+          compose up -d
+          if wait_healthy; then
+            echo "回滚 $prev_tag 完成、健康（新 tag 已弃用，镜像保留在宿主备查）"
+            exit 1 # 回滚成功也算部署失败：红就是红，回滚只是止损
+          fi
+          echo "::error::回滚体 $prev_tag 也不健康——需要上机处置"
+          exit 2

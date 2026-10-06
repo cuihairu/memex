@@ -1,11 +1,13 @@
-# 服务端镜像出仓：推 tag（v*）即构建并推 ghcr.io。构建全程在容器内
-# （docker build 多阶段，server/Dockerfile）——与宿主/CI 的 vcpkg 树互不
-# 干扰；依赖层（vcpkg 静态编译 aws-sdk 等）走 buildx gha 缓存，vcpkg.json
-# 不变则跨 run 秒级复用。
+# 服务端镜像出仓：推 tag（v*）或推 main 即构建并推 ghcr.io。main 推送产
+# 出不可变 sha-<完整 sha>（CI 部署链的回滚币）与 latest；v* 另出 semver。
+# 构建全程在容器内（docker build 多阶段，server/Dockerfile）——与宿主/CI
+# 的 vcpkg 树互不干扰；依赖层（vcpkg 静态编译 aws-sdk 等）走 buildx gha
+# 缓存，vcpkg.json 不变则跨 run 秒级复用。
 name: docker
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 
@@ -45,12 +47,13 @@ jobs:
       - name: buildx（gha 缓存）
         uses: docker/setup-buildx-action@v3
 
-      - name: 元数据（tag 名 + latest）
+      - name: 元数据（sha 不可变 + semver + latest）
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
+            type=raw,value=sha-${{ github.sha }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}

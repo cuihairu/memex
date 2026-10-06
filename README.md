@@ -111,7 +111,34 @@ docker compose ps        # 两服务 healthy 即就绪
 
 对象存储口令生产环境写同目录 `.env`（`MEMEX_S3_ACCESS_KEY`／`MEMEX_S3_SECRET_KEY`）再起；示例口令仅限本机试跑。服务端 S3 配置旗标优先、环境变量兜底（`MEMEX_S3_ENDPOINT`／`MEMEX_S3_BUCKET`／`MEMEX_S3_ACCESS_KEY`／`MEMEX_S3_SECRET_KEY`），桶在起面时幂等自建（含对端就绪重试）。健康探针＝文件面无鉴权 `GET /files/health`（改文件面端口时同步设容器 `MEMEX_FILES_PORT`）。
 
-镜像发布：推 `v*` tag 由 CI（`.github/workflows/docker.yml`）构建并推 `ghcr.io/<owner>/memex-server`（tag 名 + latest），依赖层走 buildx gha 缓存。
+镜像发布：推 `v*` tag 或推 main 由 CI（`.github/workflows/docker.yml`）构建并推 `ghcr.io/<owner>/memex-server`（main＝不可变 `sha-<完整 sha>` + latest；v* 另出 semver），依赖层走 buildx gha 缓存。
+
+### CI 部署链（runner-Docker，192.168.5.5）
+
+链路：ci（测试）绿 → docker（构建推 ghcr）→ **deploy**（`.github/workflows/deploy.yml`，自托管 runner）：拉不可变 `sha-<完整 sha>` → 在 `/data/deploy/memex` compose up（只改写 `.env` 的 `TAG=` 行，S3 凭据等宿主配置原样保留且流程中永不打印）→ 有界轮询（30×10s）容器 healthcheck + 宿主真 HTTP 探活 `/files/health`=200 → 不过闸自动回滚上一 tag 并验证回滚体健康。手动 `workflow_dispatch` 可指定 `sha-xxx` 显式回滚（回滚币＝历史 sha 镜像，宿主保留）。
+
+runner-Docker 一次性装机（在该机上执行）：
+
+```bash
+# 1) actions runner：注册时 custom label 填 memex-deploy（deploy.yml runs-on 依赖）
+mkdir -p ~/actions-runner && cd ~/actions-runner
+# 从 repo Settings→Actions→Runners 取 latest 包地址与 TOKEN（会过期，现取现用）
+tar xzf actions-runner-linux-x64-*.tar.gz
+./config.sh --url https://github.com/cuihairu/memex --token <TOKEN> --labels memex-deploy
+sudo ./svc.sh install && sudo ./svc.sh start
+
+# 2) ghcr 拉取凭据（包私有时装到 runner 用户；设为 public 包可跳过）
+docker login ghcr.io   # 用户名 cuihairu，PAT 需 read:packages
+
+# 3) 部署目录与运行面配置（TAG 行由 deploy workflow 维护，其余手管）
+mkdir -p /data/deploy/memex && cd /data/deploy/memex
+cat > .env <<'EOF'
+MEMEX_S3_ACCESS_KEY=<生产口令>
+MEMEX_S3_SECRET_KEY=<生产口令>
+EOF
+```
+
+回滚演练（验收口径：故意让一次部署失败，证明回滚链路真能回 200）——dispatch 部署一个不存在的 sha：`gh workflow run deploy -f tag=sha-deadbeef`；预期：拉取即失败或起后不过健康闸，workflow 自动回滚上一 tag 并探活 200（run 日志见「回滚 … 健康」），线上服务不中断。手工修复口径：凭据从运行中容器取（`docker exec memex-server printenv | grep ^MEMEX_S3_`），不打印到外部渠道。
 
 ### 裸机 / 虚机
 

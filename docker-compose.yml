@@ -10,6 +10,9 @@
 #   VCPKG_SRC=<vcpkg 检出> docker compose up --build
 # 检出须含 vcpkg.json builtin-baseline 那个 commit；建议干净 clone（见 README
 # 部署节），默认取 ./vcpkg-src。已建好镜像后直接 up 不触发构建、无需该路径。
+# CI 部署链：TAG 指向 ghcr 上的不可变镜像 tag（sha-<完整 sha> 为回滚币，
+# latest 兜底）；宿主 .env 记当前部署 TAG（deploy workflow 自动改写，回滚
+# 同批换回），缺省 local＝本地自建镜像。
 services:
   rustfs:
     image: rustfs/rustfs:latest
@@ -38,7 +41,7 @@ services:
       args:
         # apt 镜像源（出境受限时设 UBUNTU_MIRROR=mirrors.aliyun.com 等）
         UBUNTU_MIRROR: "${UBUNTU_MIRROR:-}"
-    image: ghcr.io/cuihairu/memex-server:local
+    image: ghcr.io/cuihairu/memex-server:${TAG:-local}
     container_name: memex-server
     restart: unless-stopped
     depends_on:
