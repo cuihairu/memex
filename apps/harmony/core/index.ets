@@ -10,3 +10,7 @@ export { Transport, TransportError } from './transport'
 export { WireChannel, classifyFailure } from './wire_channel'
 export { MemexClient } from './client'
 export { ChatSession, ChatSessionListener, ConnectOutcome } from './session'
+export {
+  FilesApiError, FilesClient, DEFAULT_FILES_PORT,
+  utf8ToLatin1, restoreUtf8Name, sanitizeFileName, dedupeFileName,
+} from './files_client'
