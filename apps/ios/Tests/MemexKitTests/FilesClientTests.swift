@@ -130,8 +130,8 @@ final class FilesClientTests: XCTestCase {
     func testListInboxMixedItemsAndPaging() throws {
         try loginFirst()
         StubFilesProtocol.handler = { req in
-            XCTAssertEqual(URLComponents(url: req.url!, resolvingAgainstBaseURL: false)?.queryItems
-                .first(where: { $0.name == "target" })?.value, "inbox")
+            XCTAssertEqual(URLComponents(url: req.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "target" })?.value, "inbox")
             return (200, ["Content-Type": "application/json"],
                     """
                 {"ok":true,"items":[
