@@ -303,9 +303,11 @@ class ChatSessionTest {
         server.send(conn!!, textFrame)
         waitLatch(listener.onMessage)
 
-        // 已回 ACK(msg_id)
-        val ackFrame = server.received.firstOrNull { it.type == MsgType.ACK }
-        assertEquals("sha256:bob:7", ackFrame!!.ack.msgId)
+        // 已回 ACK(msg_id)——等假服务端收到再断言（客户端回调先落、服务端
+        // 读线程记账在后，即时取 received 会偶发取空；等稳态而非撞时序）
+        assertTrue(waitUntil { server.received.any { it.type == MsgType.ACK } })
+        val ackFrame = server.received.first { it.type == MsgType.ACK }
+        assertEquals("sha256:bob:7", ackFrame.ack.msgId)
         assertEquals("server", ackFrame.to)
 
         // 落库且已回调
@@ -362,7 +364,8 @@ class ChatSessionTest {
         waitLatch(listener.onMessage)
         assertEquals("group:9", store.history("group:9").single().peer)
         assertEquals("群消息", store.history("group:9").single().text)
-        assertEquals(server.received.firstOrNull { it.type == MsgType.ACK }!!.ack.msgId, "g1")
+        assertTrue(waitUntil { server.received.any { it.type == MsgType.ACK } })
+        assertEquals("g1", server.received.first { it.type == MsgType.ACK }.ack.msgId)
         session.close()
         server.close()
     }
@@ -399,9 +402,9 @@ class ChatSessionTest {
         )
         waitLatch(listener.onKicked)
         assertEquals(listOf("账号已在其他设备登录"), listener.kicked)
-        // 关闭后发送不再受理
-        val seq = session.sendText("bob", "x")
-        assertEquals(0L, seq)
+        // 关闭后发送不再受理——回调先落、closed 标志落定在后，重试至拒绝
+        // 才是稳态断言面（过早单发一次会偶发拿到尚未失效的 seq）
+        assertTrue(waitUntil { session.sendText("bob", "x") == 0L })
         server.close()
     }
 
@@ -422,6 +425,16 @@ class ChatSessionTest {
 
         session.close()
         server.close()
+    }
+
+    /** 轮询至条件成立或超时（稳态断言面；桌面 collab_chat 同款教训） */
+    private fun waitUntil(timeoutMs: Long = 5_000, cond: () -> Boolean): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (cond()) return true
+            Thread.sleep(10)
+        }
+        return cond()
     }
 
     /** 取假服务端当前存活连接（用于主动注入帧）；serve 后 accept 过才有 */
@@ -474,6 +487,7 @@ class ChatSessionTest {
         assertEquals("n1", hist[0].msgId)
         assertEquals(NoticeGrade.IMPORTANT, listener.notices.single().second)
         // 已回 ACK(msg_id) 清服务端离线队列；通知不走 onMessage（列表刷新由上层桥接）
+        assertTrue(waitUntil { server.received.any { it.type == MsgType.ACK } })
         assertEquals("n1", server.received.first { it.type == MsgType.ACK }.ack.msgId)
         assertTrue(listener.messages.isEmpty())
 
