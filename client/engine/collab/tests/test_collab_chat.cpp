@@ -199,8 +199,11 @@ int main(int argc, char** argv) {
 
   server.kill();
   CHECK(server.waitForFinished(5000));
-  CHECK(wait_until([&] { return a_lost && b_lost; }, 8000));
-  CHECK(!a.is_logged_in());
+  // 判死断言用稳态登出态而非一次性 connection_lost 信号：kill 若落在某端
+  // 的重连待命窗（前一串心跳判死后的退避期内，引擎本就不在登录态），
+  // disconnected 路径的 was_logged_in 条件不成立、信号不会二次补发——
+  // 「服务端死透后客户端不停留在登录态」才是可依赖断言面
+  CHECK(wait_until([&] { return !a.is_logged_in() && !b.is_logged_in(); }, 8000));
 
   QProcess server2;
   server2.setProcessChannelMode(QProcess::ForwardedChannels);
