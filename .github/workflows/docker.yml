@@ -23,17 +23,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # vcpkg 源经 named context 注入（Dockerfile 不走网络克隆）；基线钉在
+      # vcpkg 源经 named context 注入（Dockerfile 不走构建期克隆）；基线钉在
       # Dockerfile 的 VCPKG_COMMIT（与 vcpkg.json builtin-baseline 同值），
-      # 从此处 grep 出来免得两处各写一份。CI 侧干净检出无 downloads 缓存、
-      # 无 bootstrap 二进制 → 容器内走 bootstrap + 源码包下载（GHA 网络原生可达）。
+      # 从此处 grep 出来免得两处各写一份。必须完整 clone（非浅 fetch）：
+      # baseline 解析要 read-tree 各 port 的历史树对象，单 commit 对象库
+      # 不够（37268213624 红因）。CI 侧干净检出无 downloads 缓存、无
+      # bootstrap 二进制 → 容器内走 bootstrap + 源码包下载（GHA 网络原生可达）。
       - name: 取 vcpkg 快照（named context）
         run: |
           VCPKG_COMMIT="$(grep -oP '(?<=^ARG VCPKG_COMMIT=)[0-9a-f]+' server/Dockerfile)"
-          git init vcpkg-src
-          git -C vcpkg-src remote add origin https://github.com/microsoft/vcpkg
-          git -C vcpkg-src fetch --depth 1 origin "$VCPKG_COMMIT"
-          git -C vcpkg-src checkout --quiet FETCH_HEAD
+          git clone --quiet https://github.com/microsoft/vcpkg vcpkg-src
+          git -C vcpkg-src checkout --quiet "$VCPKG_COMMIT"
 
       - name: 登录 ghcr.io
         uses: docker/login-action@v3
