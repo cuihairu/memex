@@ -69,6 +69,10 @@
     <string name="files_row_file">文件：%1$s（%2$s）</string>
     <string name="files_empty">收件箱为空：上传文件或记一条备忘录。</string>
     <string name="files_empty_me">个人空间为空（与收件箱相互隔离）。</string>
+    <string name="files_uplink_mode">外网模式（单向上传：传文件到收件箱，只能看自己的记录）</string>
+    <string name="files_port_hint_uplink">外网口</string>
+    <string name="files_state_on_uplink">已连接外网入口（单向上传）</string>
+    <string name="files_empty_uplink">还没有外网上传记录。</string>
     <string name="files_uploaded">已上传</string>
     <string name="files_downloaded_to">已下载到 %1$s</string>
     <string name="files_size_b">%1$d B</string>

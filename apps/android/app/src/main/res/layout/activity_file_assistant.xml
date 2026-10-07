@@ -59,6 +59,16 @@
             android:text="@string/files_connect" />
     </LinearLayout>
 
+    <!-- 外网模式（R23-4）：单向上传（唯一落点=文件助手收件箱），
+         功能刻意做少（登录→传文件→看自己记录）；端口=部署明示的外网口 -->
+    <CheckBox
+        android:id="@+id/cb_uplink_mode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:text="@string/files_uplink_mode" />
+
     <TextView
         android:id="@+id/tv_files_error"
         android:layout_width="match_parent"
@@ -98,8 +108,10 @@
             android:text="@string/files_refresh" />
     </LinearLayout>
 
-    <!-- 备忘录快记行：建/改共用一条（长按列表项改/删） -->
+    <!-- 备忘录快记行：建/改共用一条（长按列表项改/删）；外网模式隐藏
+         （外网面无备忘录端点） -->
     <LinearLayout
+        android:id="@+id/ll_memo_row"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"

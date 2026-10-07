@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.BaseAdapter
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.ListView
 import android.widget.ProgressBar
@@ -20,6 +21,7 @@ import com.memex.im.R
 import com.memex.im.core.FilesClient
 import com.memex.im.core.PrefsInitStore
 import com.memex.im.core.Session
+import com.memex.im.core.UplinkClient
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -39,6 +41,9 @@ class FileAssistantActivity : AppCompatActivity() {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
     private var client: FilesClient? = null
 
+    /** 外网模式客户端（R23-4）：与内网面互斥，勾选框切换 */
+    private var uplink: UplinkClient? = null
+
     /** 当前读面：inbox（收件箱）或 me（个人空间）；列表随 tab 切换重拉 */
     private var target: String = TARGET_INBOX
 
@@ -55,6 +60,8 @@ class FileAssistantActivity : AppCompatActivity() {
     private lateinit var btnUpload: Button
     private lateinit var btnTabInbox: Button
     private lateinit var btnTabMe: Button
+    private lateinit var cbUplink: CheckBox
+    private lateinit var llMemoRow: View
     private val adapter = ItemsAdapter()
 
     /** 长按进入编辑的备忘录 id；null＝快记行在新建 */
@@ -82,6 +89,8 @@ class FileAssistantActivity : AppCompatActivity() {
         btnUpload = findViewById(R.id.btn_files_upload)
         btnTabInbox = findViewById(R.id.btn_tab_inbox)
         btnTabMe = findViewById(R.id.btn_tab_me)
+        cbUplink = findViewById(R.id.cb_uplink_mode)
+        llMemoRow = findViewById(R.id.ll_memo_row)
 
         // 账号预填协作登录态（口令不回填——不落盘）
         Session.instance.account?.let { etAccount.setText(it) }
@@ -93,6 +102,9 @@ class FileAssistantActivity : AppCompatActivity() {
         btnTabInbox.setOnClickListener { switchTarget(TARGET_INBOX) }
         btnTabMe.setOnClickListener { switchTarget(TARGET_ME) }
         findViewById<Button>(R.id.btn_files_refresh).setOnClickListener { refresh() }
+        // 外网模式切换：换端口提示与预填（外网口无缺省——部署明示），收窄功能面
+        cbUplink.setOnCheckedChangeListener { _, _ -> renderUplinkMode() }
+        renderUplinkMode()
 
         val lv = findViewById<ListView>(R.id.lv_files)
         lv.adapter = adapter
@@ -109,9 +121,11 @@ class FileAssistantActivity : AppCompatActivity() {
     // —— 连接 ——
 
     private fun onConnectClicked() {
-        if (client?.isLoggedIn == true) {
+        if (client?.isLoggedIn == true || uplink?.isLoggedIn == true) {
             client?.logout()
             client = null
+            uplink?.logout()
+            uplink = null
             adapter.update(emptyList())
             setConnected(false)
             return
@@ -132,14 +146,22 @@ class FileAssistantActivity : AppCompatActivity() {
             finish()
             return
         }
+        val isUplink = cbUplink.isChecked
         showError("")
         setBusy(true)
         executor.execute {
-            val c = FilesClient()
             var err: String? = null
+            var internal: FilesClient? = null
+            var external: UplinkClient? = null
             try {
-                c.login(host, port, account, password)
+                if (isUplink) {
+                    external = UplinkClient().also { it.login(host, port, account, password) }
+                } else {
+                    internal = FilesClient().also { it.login(host, port, account, password) }
+                }
             } catch (e: FilesClient.ApiException) {
+                err = describe(e)
+            } catch (e: UplinkClient.ApiException) {
                 err = describe(e)
             } catch (e: java.io.IOException) {
                 err = getString(R.string.err_unreachable)
@@ -150,7 +172,8 @@ class FileAssistantActivity : AppCompatActivity() {
                     showError(err)
                     return@runOnUiThread
                 }
-                client = c
+                client = internal
+                uplink = external
                 setConnected(true)
                 refresh()
             }
@@ -224,14 +247,30 @@ class FileAssistantActivity : AppCompatActivity() {
     }
 
     private fun refresh() {
-        val c = client ?: return
+        val isUplink = uplink?.isLoggedIn == true
+        val c = client
+        val u = uplink
+        if (!isUplink && c == null) return
         setBusy(true)
         executor.execute {
             var err: String? = null
             var items: List<FilesClient.InboxItem> = emptyList()
             try {
-                items = if (target == TARGET_INBOX) c.listInbox() else c.listPersonal()
+                if (isUplink && u != null) {
+                    // 外网记录映射成 FileItem 展示（纯记录：pin/status 无意义置 0；
+                    // 无任何下载动作——外网会话永远没有读取内网数据的权限）
+                    items = u.mine().map {
+                        FilesClient.InboxItem.FileItem(
+                            id = it.id, fileName = it.fileName, fileSize = it.fileSize,
+                            fileHash = it.fileHash, pin = 0, status = 0, uploadTs = it.uploadTs,
+                        )
+                    }
+                } else if (c != null) {
+                    items = if (target == TARGET_INBOX) c.listInbox() else c.listPersonal()
+                }
             } catch (e: FilesClient.ApiException) {
+                err = describe(e)
+            } catch (e: UplinkClient.ApiException) {
                 err = describe(e)
             } catch (e: java.io.IOException) {
                 err = describe(e)
@@ -269,6 +308,17 @@ class FileAssistantActivity : AppCompatActivity() {
     }
 
     private fun showFileActions(file: FilesClient.InboxItem.FileItem) {
+        // 外网模式只有「删除」（自己的上传）：无下载端点，单向铁律
+        if (uplink?.isLoggedIn == true) {
+            AlertDialog.Builder(this)
+                .setTitle(file.fileName)
+                .setItems(arrayOf(getString(R.string.files_action_delete))) { _, _ ->
+                    deleteUplinkFile(file.id)
+                }
+                .setNegativeButton(R.string.files_cancel, null)
+                .show()
+            return
+        }
         val options =
             arrayOf(getString(R.string.files_action_download), getString(R.string.files_action_delete))
         AlertDialog.Builder(this)
@@ -283,16 +333,26 @@ class FileAssistantActivity : AppCompatActivity() {
     // —— 文件上传/下载/删除 ——
 
     private fun uploadPicked(uri: Uri) {
-        val c = client ?: return
+        val isUplink = uplink?.isLoggedIn == true
+        val c = client
+        val u = uplink
+        if (!isUplink && c == null) return
         val name = queryDisplayName(uri) ?: return
         setBusy(true)
         executor.execute {
             var err: String? = null
             try {
                 val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                if (bytes == null) err = getString(R.string.files_err_read)
-                else c.upload(target, name, bytes)
+                if (bytes == null) {
+                    err = getString(R.string.files_err_read)
+                } else if (isUplink && u != null) {
+                    u.upload(name, bytes) // 无 target：外网面无落点选择权
+                } else if (c != null) {
+                    c.upload(target, name, bytes)
+                }
             } catch (e: FilesClient.ApiException) {
+                err = describe(e)
+            } catch (e: UplinkClient.ApiException) {
                 err = describe(e)
             } catch (e: java.io.IOException) {
                 err = describe(e)
@@ -367,11 +427,34 @@ class FileAssistantActivity : AppCompatActivity() {
         }
     }
 
+    /** 外网模式删自己的上传（POST /uplink/delete?id=；服务端守卫他人/内网文件） */
+    private fun deleteUplinkFile(id: Long) {
+        val u = uplink ?: return
+        setBusy(true)
+        executor.execute {
+            var err: String? = null
+            try {
+                u.delete(id)
+            } catch (e: UplinkClient.ApiException) {
+                err = describe(e)
+            } catch (e: java.io.IOException) {
+                err = describe(e)
+            }
+            runOnUiThread {
+                setBusy(false)
+                if (err != null) showError(err) else refresh()
+            }
+        }
+    }
+
     // —— 展示 ——
 
     /** 失败明示：状态码＋服务端文案直接示人（401 会话过期单独引导重连） */
     private fun describe(e: java.io.IOException): String =
         when {
+            e is UplinkClient.ApiException && e.status == 401 -> getString(R.string.files_err_session)
+            e is UplinkClient.ApiException && e.status == 0 -> getString(R.string.err_unreachable)
+            e is UplinkClient.ApiException -> getString(R.string.files_err_prefix, e.status, e.error)
             e !is FilesClient.ApiException -> getString(R.string.err_unreachable)
             e.status == 401 -> getString(R.string.files_err_session)
             e.status == 0 -> getString(R.string.err_unreachable)
@@ -396,11 +479,41 @@ class FileAssistantActivity : AppCompatActivity() {
 
     private fun setConnected(connected: Boolean) {
         btnConnect.setText(if (connected) R.string.files_disconnect else R.string.files_connect)
-        tvState.setText(if (connected) R.string.files_state_on else R.string.files_state_off)
+        tvState.setText(
+            when {
+                connected && uplink?.isLoggedIn == true -> R.string.files_state_on_uplink
+                connected -> R.string.files_state_on
+                else -> R.string.files_state_off
+            }
+        )
         etAccount.isEnabled = !connected
         etPassword.isEnabled = !connected
         etPort.isEnabled = !connected
         if (!connected) tvEmpty.visibility = View.GONE
+    }
+
+    /** 外网模式收窄功能面：tab 与备忘录行隐藏（外网面只有上传/记录/删除）；
+     *  端口语义换外网口（无缺省——部署明示，清空防拿内网口当外网口） */
+    private fun renderUplinkMode() {
+        val uplinkMode = cbUplink.isChecked
+        btnTabInbox.visibility = if (uplinkMode) View.GONE else View.VISIBLE
+        btnTabMe.visibility = if (uplinkMode) View.GONE else View.VISIBLE
+        llMemoRow.visibility = if (uplinkMode) View.GONE else View.VISIBLE
+        etPort.hint = getString(
+            if (uplinkMode) R.string.files_port_hint_uplink else R.string.files_port_hint
+        )
+        if (!etPort.isEnabled) return // 已连接态不动端口值
+        if (uplinkMode) {
+            if (etPort.text.toString() == FilesClient.DEFAULT_FILES_PORT.toString()) {
+                etPort.setText("")
+            }
+            tvEmpty.setText(R.string.files_empty_uplink)
+        } else {
+            if (etPort.text.isNullOrBlank()) {
+                etPort.setText(FilesClient.DEFAULT_FILES_PORT.toString())
+            }
+            renderTabs()
+        }
     }
 
     private fun renderTabs() {
