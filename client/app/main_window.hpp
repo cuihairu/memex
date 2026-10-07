@@ -32,6 +32,7 @@ class FileAssistantDialog;
 class GroupMemoDialog;
 class GroupVaultDialog;
 class GroupCiDialog;
+class GroupPackDialog;
 
 class MainWindow : public QMainWindow {
 public:
@@ -230,6 +231,7 @@ private:
   QPointer<GroupMemoDialog> group_memo_; // R24-2 群备忘录窗口（懒建）
   QPointer<GroupVaultDialog> group_vault_; // R24-3 群密码箱窗口（懒建）
   QPointer<GroupCiDialog> group_ci_; // R25-2 群 CI/CD 窗口（懒建）
+  QPointer<GroupPackDialog> group_pack_; // R25-3 打包/导出窗口（懒建）
 
   QLabel* device_count_{nullptr};
   QLineEdit* search_box_{nullptr};

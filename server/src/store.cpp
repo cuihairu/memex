@@ -367,7 +367,19 @@ bool ServerStore::ensure_schema() {
       "  result_json TEXT NOT NULL DEFAULT '{}',"
       "  ts_ms INTEGER NOT NULL);"
       "CREATE INDEX IF NOT EXISTS idx_gcr_gid"
-      " ON group_ci_runs(group_id, pipeline, id);"; // 本段为 schema 字符串最后一段
+      " ON group_ci_runs(group_id, pipeline, id);"
+      // —— R25-3 打包工具：产物台账（同 gid+name+version upsert 覆盖）——
+      "CREATE TABLE IF NOT EXISTS group_pack_artifacts ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  group_id INTEGER NOT NULL,"
+      "  name TEXT NOT NULL,"
+      "  version TEXT NOT NULL,"
+      "  note TEXT NOT NULL DEFAULT '',"
+      "  created_by TEXT NOT NULL,"
+      "  created_ms INTEGER NOT NULL,"
+      "  UNIQUE (group_id, name, version));"
+      "CREATE INDEX IF NOT EXISTS idx_gpa_gid"
+      " ON group_pack_artifacts(group_id);"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -3709,6 +3721,80 @@ std::vector<ServerStore::CiRun> ServerStore::ci_status_list(
   }
   sqlite3_finalize(st);
   return out;
+}
+
+// —— R25-3 打包工具 ——
+
+bool ServerStore::pack_artifact_upsert(std::uint64_t group_id,
+                                       const std::string& name,
+                                       const std::string& version,
+                                       const std::string& note,
+                                       const std::string& created_by,
+                                       std::int64_t ts_ms) {
+  if (!group_info(group_id).has_value()) return false;
+  const char* sql =
+      "INSERT INTO group_pack_artifacts(group_id, name, version, note,"
+      " created_by, created_ms) VALUES(?,?,?,?,?,?)"
+      " ON CONFLICT(group_id, name, version) DO UPDATE SET"
+      " note=excluded.note, created_by=excluded.created_by,"
+      " created_ms=excluded.created_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, version.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, note.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 5, created_by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 6, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ServerStore::PackArtifact> ServerStore::pack_artifact_list(
+    std::uint64_t group_id) {
+  std::vector<PackArtifact> out;
+  const char* sql =
+      "SELECT id, group_id, name, version, note, created_by, created_ms"
+      " FROM group_pack_artifacts WHERE group_id = ?"
+      " ORDER BY created_ms DESC, name ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    PackArtifact a;
+    a.id = sqlite3_column_int64(st, 0);
+    a.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    const char* n = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* v = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    const char* no = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    const char* c = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    a.name = n ? n : "";
+    a.version = v ? v : "";
+    a.note = no ? no : "";
+    a.created_by = c ? c : "";
+    a.created_ms = sqlite3_column_int64(st, 6);
+    out.push_back(std::move(a));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::pack_artifact_delete(std::uint64_t group_id,
+                                       const std::string& name,
+                                       const std::string& version) {
+  const char* sql =
+      "DELETE FROM group_pack_artifacts WHERE group_id = ? AND name = ?"
+      " AND version = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, version.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
 }
 
 } // namespace memex::server

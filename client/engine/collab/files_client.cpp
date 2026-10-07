@@ -423,6 +423,53 @@ void FilesClient::ci_runs(quint64 gid, const QString& pipeline) {
             });
 }
 
+// —— R25-3 打包工具＋配置导出 ——
+
+void FilesClient::pack_build(quint64 gid, const QString& name,
+                             const QString& version, const QString& note) {
+  send_json(QStringLiteral("group-pack.build"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-pack/build"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("name"), name},
+             {QStringLiteral("version"), version},
+             {QStringLiteral("note"), note}},
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit pack_built();
+            });
+}
+
+void FilesClient::pack_list(quint64 gid) {
+  send_json(QStringLiteral("group-pack.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-pack/list?gid=%1").arg(gid), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit pack_listed(
+                  resp.value(QStringLiteral("artifacts")).toArray());
+            });
+}
+
+void FilesClient::pack_delete(quint64 gid, const QString& name,
+                              const QString& version) {
+  send_json(QStringLiteral("group-pack.delete"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-pack/delete"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("name"), name},
+             {QStringLiteral("version"), version}},
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit pack_deleted();
+            });
+}
+
+void FilesClient::group_export(quint64 gid) {
+  send_json(QStringLiteral("group.export"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-export?gid=%1").arg(gid), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit group_exported(
+                  resp.value(QStringLiteral("snapshot")).toObject());
+            });
+}
+
 void FilesClient::list_inbox() {
   send_json(QStringLiteral("inbox.list"), QStringLiteral("GET"),
             QStringLiteral("/files/list?target=inbox"), {},

@@ -744,6 +744,18 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (path_ == "/files/group-ci/runs" && method_ == "GET") {
       return route_group_ci_runs();
     }
+    if (path_ == "/files/group-pack/build" && method_ == "POST") {
+      return route_group_pack_build(body);
+    }
+    if (path_ == "/files/group-pack/list" && method_ == "GET") {
+      return route_group_pack_list();
+    }
+    if (path_ == "/files/group-pack/delete" && method_ == "POST") {
+      return route_group_pack_delete(body);
+    }
+    if (path_ == "/files/group-export" && method_ == "GET") {
+      return route_group_export();
+    }
     respond_json(404, {{"ok", false}, {"error", "路径不存在"}});
   }
 
@@ -2569,6 +2581,219 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                      {"ts_ms", r.ts_ms}});
     }
     respond_json(200, {{"ok", true}, {"gid", gid}, {"runs", arr}});
+  }
+
+  // —— R25-3 打包＋配置导出（首批动作类示例）——
+  // 打包：白名单闸动作（tool=pack 动作 build，成员可触发）；产物=台账
+  // 记录（stub：真产物字节面归后续批次）；删除=memo:config。导出：管理
+  // 面（memo:config——快照含成员与白名单），密文面永不进导出。
+  void route_group_pack_build(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("name") ||
+        !j["name"].is_string() || !j.contains("version") ||
+        !j["version"].is_string() ||
+        (j.contains("note") && !j["note"].is_string())) {
+      respond_json(
+          400, {{"ok", false}, {"error", "缺少字段：gid/name/version"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::string name = j["name"].get<std::string>();
+    const std::string version = j["version"].get<std::string>();
+    const std::string note =
+        j.contains("note") ? j["note"].get<std::string>() : std::string();
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权打包（非群成员）"}});
+      return;
+    }
+    // 白名单闸：tool=pack 动作 build（与 CI 触发同构）
+    const auto cfg = impl_.store.tool_config(gid, "pack");
+    bool opened = false;
+    if (cfg.has_value()) {
+      try {
+        for (const auto& a : json::parse(cfg->actions_json)) {
+          if (a.is_string() && a.get<std::string>() == "build") {
+            opened = true;
+            break;
+          }
+        }
+      } catch (const std::exception&) {
+      }
+    }
+    if (!opened) {
+      respond_json(403, {{"ok", false},
+                         {"error", "打包未开放（pack/build 不在工具白名单）"}});
+      return;
+    }
+    if (!impl_.store.pack_artifact_upsert(gid, name, version, note, account,
+                                          now_ms())) {
+      respond_json(404, {{"ok", false}, {"error", "群不存在"}});
+      return;
+    }
+    const json result = {{"stub", true}, {"name", name},
+                         {"version", version}};
+    impl_.store.tool_audit_add(gid, "pack", "build", account, j.dump(),
+                               result.dump(), now_ms());
+    std::cout << "[MEMEX] files group-pack build account=" << account
+              << " gid=" << gid << " name=" << name
+              << " version=" << version << std::endl;
+    // 打包完成卡片回群（同 CI 结果卡片面）
+    if (impl_.notice) {
+      impl_.notice("group:" + std::to_string(gid),
+                   "打包完成：" + name + " " + version,
+                   account + " 出产物「" + name + " " + version +
+                       "」（stub 执行器）",
+                   1);
+    }
+    respond_json(200, {{"ok", true},
+                       {"gid", gid},
+                       {"name", name},
+                       {"version", version},
+                       {"actor", account}});
+  }
+
+  void route_group_pack_list() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
+      return;
+    }
+    json arr = json::array();
+    for (const auto& a : impl_.store.pack_artifact_list(gid)) {
+      arr.push_back({{"id", a.id},
+                     {"name", a.name},
+                     {"version", a.version},
+                     {"note", a.note},
+                     {"created_by", a.created_by},
+                     {"created_ms", a.created_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"artifacts", arr}});
+  }
+
+  void route_group_pack_delete(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("name") ||
+        !j["name"].is_string() || !j.contains("version") ||
+        !j["version"].is_string()) {
+      respond_json(400,
+                   {{"ok", false}, {"error", "缺少字段：gid/name/version"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const Decision d = impl_.az.authorize(
+        {account, "memo:config", group_resource(gid), "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403,
+                   {{"ok", false}, {"error", "无权删除产物（仅群主/管理员）"}});
+      return;
+    }
+    if (!impl_.store.pack_artifact_delete(gid, j["name"].get<std::string>(),
+                                          j["version"].get<std::string>())) {
+      respond_json(404, {{"ok", false}, {"error", "产物不存在"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-pack delete account=" << account
+              << " gid=" << gid << " name=" << j["name"].get<std::string>()
+              << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}});
+  }
+
+  void route_group_export() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    // 管理面（快照含成员与白名单；memo:config 命中 owner/admin）
+    const Decision d = impl_.az.authorize(
+        {account, "memo:config", group_resource(gid), "owner=" + account});
+    if (!d.allowed) {
+      respond_json(
+          403, {{"ok", false}, {"error", "无权导出（仅群主/管理员）"}});
+      return;
+    }
+    const auto info = impl_.store.group_info(gid);
+    if (!info.has_value()) {
+      respond_json(404, {{"ok", false}, {"error", "群不存在"}});
+      return;
+    }
+    json members = json::array();
+    for (const auto& m : impl_.store.group_members(gid)) {
+      members.push_back({{"account", m},
+                         {"role", impl_.store.group_role(gid, m)}});
+    }
+    json tools = json::array();
+    for (const auto& t : impl_.store.tool_list(gid)) {
+      json actions = json::array();
+      try {
+        actions = json::parse(t.actions_json);
+      } catch (const std::exception&) {
+      }
+      tools.push_back({{"tool", t.tool},
+                       {"actions", actions},
+                       {"updated_by", t.updated_by},
+                       {"updated_ms", t.updated_ms}});
+    }
+    json pipelines = json::array();
+    for (const auto& p : impl_.store.ci_pipeline_list(gid)) {
+      pipelines.push_back({{"name", p.name},
+                           {"description", p.description},
+                           {"updated_by", p.updated_by}});
+    }
+    const auto vault = impl_.store.group_vault_info(gid);
+    // 密文面永不进导出：密码箱只带存在性与授权名单（不带货）
+    json vault_j = json::object();
+    vault_j["exists"] = vault.has_value();
+    if (vault.has_value()) {
+      json acl = json::array();
+      for (const auto& a : impl_.store.vault_acl_list(gid)) acl.push_back(a);
+      vault_j["acl"] = acl;
+    }
+    const json snapshot = {{"group",
+                            {{"gid", gid},
+                             {"name", info->name},
+                             {"owner", info->owner},
+                             {"open_edit",
+                              impl_.store.group_memo_open_edit(gid)}}},
+                           {"members", members},
+                           {"tools", tools},
+                           {"pipelines", pipelines},
+                           {"vault", vault_j}};
+    // 导出=敏感动作：进工具留痕（谁/何时导出了什么）
+    impl_.store.tool_audit_add(gid, "export", "export", account,
+                               json::object().dump(),
+                               json{{"stub", true}}.dump(), now_ms());
+    std::cout << "[MEMEX] files group-export account=" << account
+              << " gid=" << gid << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"snapshot", snapshot}});
   }
 
   void respond_json(int status, const json& body) {

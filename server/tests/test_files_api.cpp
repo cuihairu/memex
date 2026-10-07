@@ -1056,6 +1056,97 @@ int main() {
               .status == 404);
   }
 
+  // —— R25-3 打包工具＋配置导出（首批动作类示例）——
+  {
+    const std::string gids = std::to_string(gid);
+    // 打包卡片回群面：换新注桩捕获
+    std::vector<std::string> notices;
+    files.set_notice([&notices](const std::string& t, const std::string& ti,
+                                const std::string& c, int u) {
+      notices.push_back(t + "|" + ti);
+    });
+    // 打包：未登录 401；缺字段 400；非成员 403；白名单未开 403（成员也拒）
+    CHECK(http(port, "POST", "/files/group-pack/build", {},
+               "{\"gid\":" + gids + ",\"name\":\"app\",\"version\":\"1.0\"}")
+              .status == 401);
+    CHECK(http(port, "POST", "/files/group-pack/build", H("member1"),
+               "{\"gid\":" + gids + ",\"name\":\"app\"}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/group-pack/build", H("outsider"),
+               "{\"gid\":" + gids +
+                   ",\"name\":\"app\",\"version\":\"1.0\"}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-pack/build", H("member1"),
+               "{\"gid\":" + gids +
+                   ",\"name\":\"app\",\"version\":\"1.0\"}")
+              .status == 403);
+    // 开白名单（pack/build）→成员可打包（入群即授权）；同款重复=覆盖台账
+    CHECK(http(port, "POST", "/files/group-tools/config", H("owner1"),
+               "{\"gid\":" + gids +
+                   ",\"tool\":\"pack\",\"actions\":[\"build\"]}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-pack/build", H("member1"),
+               "{\"gid\":" + gids +
+                   ",\"name\":\"app\",\"version\":\"1.0\","
+                   "\"note\":\"首包\"}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-pack/build", H("member1"),
+               "{\"gid\":" + gids +
+                   ",\"name\":\"app\",\"version\":\"1.0\","
+                   "\"note\":\"重打\"}")
+              .status == 200);
+    // 卡片回群：两笔两卡片，标题带产物名与版本
+    CHECK(notices.size() == 2);
+    CHECK(notices[1].find("打包完成：app 1.0") != std::string::npos);
+    // 台账：非成员 403；成员见一条（同款覆盖）且 created_by=member1
+    CHECK(http(port, "GET", "/files/group-pack/list?gid=" + gids,
+               H("outsider"), "").status == 403);
+    const auto pl = http(port, "GET",
+                         "/files/group-pack/list?gid=" + gids, H("member1"),
+                         "");
+    CHECK(pl.status == 200);
+    CHECK(pl.body.find("\"name\":\"app\"") != std::string::npos);
+    CHECK(pl.body.find("\"note\":\"重打\"") != std::string::npos);
+    CHECK(pl.body.find("\"created_by\":\"member1\"") != std::string::npos);
+    // 删除恒归管理员：成员 403；幽灵产物 404；管理员删 200
+    CHECK(http(port, "POST", "/files/group-pack/delete", H("member1"),
+               "{\"gid\":" + gids +
+                   ",\"name\":\"app\",\"version\":\"1.0\"}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-pack/delete", H("owner1"),
+               "{\"gid\":" + gids +
+                   ",\"name\":\"ghost\",\"version\":\"9.9\"}")
+              .status == 404);
+    CHECK(http(port, "POST", "/files/group-pack/delete", H("admin1"),
+               "{\"gid\":" + gids +
+                   ",\"name\":\"app\",\"version\":\"1.0\"}")
+              .status == 200);
+    // 配置导出：管理面——成员 403；坏 gid 400；群主 200 快照带成员角色/
+    // 工具白名单/备忘录开关/密码箱存在性；密文面永不进导出
+    CHECK(http(port, "GET", "/files/group-export?gid=" + gids, H("member1"),
+               "").status == 403);
+    CHECK(http(port, "GET", "/files/group-export?gid=x", H("owner1"), "")
+              .status == 400);
+    const auto ex = http(port, "GET",
+                         "/files/group-export?gid=" + gids, H("owner1"), "");
+    CHECK(ex.status == 200);
+    CHECK(ex.body.find("\"owner\":\"owner1\"") != std::string::npos);
+    CHECK(ex.body.find("\"account\":\"member1\"") != std::string::npos);
+    CHECK(ex.body.find("\"role\":\"admin\"") != std::string::npos);
+    CHECK(ex.body.find("\"tool\":\"ci\"") != std::string::npos);
+    CHECK(ex.body.find("\"tool\":\"pack\"") != std::string::npos);
+    CHECK(ex.body.find("\"exists\":true") != std::string::npos);
+    // 密文不进导出：包裹块/条目密文键一律不在快照
+    CHECK(ex.body.find("wrapped_dek") == std::string::npos);
+    CHECK(ex.body.find("secret_ct") == std::string::npos);
+    CHECK(ex.body.find("kdf_salt") == std::string::npos);
+    // 导出=敏感动作：进工具留痕（tool=export）
+    const auto ea = http(port, "GET",
+                         "/files/group-tools/audit?gid=" + gids, H("owner1"),
+                         "");
+    CHECK(ea.body.find("\"tool\":\"export\"") != std::string::npos);
+  }
+
   // —— 存储未配置：面在、字节面 503、元数据面照常 ——
   {
     memex::server::FileServer bare(io, store, nullptr, 0);

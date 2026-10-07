@@ -685,6 +685,27 @@ public:
   // 红绿灯面：每条流水线最近一笔 run（无 run 的流水线不出现在此）
   std::vector<CiRun> ci_status_list(std::uint64_t group_id);
 
+  // —— R25-3 打包工具（首批动作类示例之二）——
+  // 产物台账（stub 阶段=打包结果记录；真产物字节面归后续批次）
+  struct PackArtifact {
+    std::int64_t id{0};
+    std::uint64_t group_id{0};
+    std::string name;
+    std::string version;
+    std::string note;
+    std::string created_by;
+    std::int64_t created_ms{0};
+  };
+  // 产物落账（同 gid+name+version 重复=覆盖 note/created_by）；群须存在
+  bool pack_artifact_upsert(std::uint64_t group_id, const std::string& name,
+                            const std::string& version,
+                            const std::string& note,
+                            const std::string& created_by,
+                            std::int64_t ts_ms);
+  std::vector<PackArtifact> pack_artifact_list(std::uint64_t group_id);
+  bool pack_artifact_delete(std::uint64_t group_id, const std::string& name,
+                            const std::string& version);
+
 private:
   bool ensure_schema();
 

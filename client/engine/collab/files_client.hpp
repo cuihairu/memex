@@ -100,6 +100,17 @@ class FilesClient : public QObject {
   // run 历史（成员；id DESC；pipeline 空=该群全部流水线）
   void ci_runs(quint64 gid, const QString& pipeline = QString());
 
+  // —— 打包工具＋配置导出（R25-3 /files/group-pack、/files/group-export）——
+  // 一键出产物（成员；须 pack/build 在工具白名单；stub=台账记录）
+  void pack_build(quint64 gid, const QString& name, const QString& version,
+                  const QString& note);
+  // 产物台账（成员；created_ms 倒序）
+  void pack_list(quint64 gid);
+  // 删产物（恒归群主/管理员）
+  void pack_delete(quint64 gid, const QString& name, const QString& version);
+  // 群配置快照导出（仅群主/管理员；密文面永不进导出）
+  void group_export(quint64 gid);
+
   // —— 收件箱（R23-3 文件助手混排面）——
   // GET /files/list?target=inbox：备忘录+文件时间倒序混排条目
   void list_inbox();
@@ -139,6 +150,10 @@ class FilesClient : public QObject {
   void ci_listed(const QJsonArray& pipelines); // 红绿灯面（last_status 键）
   void ci_triggered(qint64 run_id, const QString& status); // success|failed
   void ci_runs_listed(const QJsonArray& runs);
+  void pack_built();
+  void pack_listed(const QJsonArray& artifacts);
+  void pack_deleted();
+  void group_exported(const QJsonObject& snapshot);
   void inbox_listed(const QJsonArray& items); // type=memo|file 混排条目
   void upload_finished(qint64 file_id, bool second_transfer);
   void download_finished(const QString& save_path);
