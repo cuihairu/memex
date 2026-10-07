@@ -78,6 +78,8 @@ bool LocalStore::ensure_schema() {
   q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN msg_id TEXT NOT NULL DEFAULT ''"));
   // 旧库迁移：补 recalled 列
   q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN recalled INTEGER NOT NULL DEFAULT 0"));
+  // 平台-9：补 sync_state 列（蓝图§二十三 Sync State；空=历史行不参与恢复）
+  q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN sync_state TEXT NOT NULL DEFAULT ''"));
   // msg_id 去重索引（部分索引：直连消息 msg_id 为空不参与）
   if (!q.exec(QStringLiteral("CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_msg_id "
                              "ON messages(msg_id) WHERE msg_id != ''"))) {
@@ -140,8 +142,8 @@ bool LocalStore::append(const StoredMessage& msg, bool* inserted) {
   QSqlQuery q(QSqlDatabase::database(connection_name_));
   q.prepare(QStringLiteral(
       "INSERT OR IGNORE INTO messages"
-      " (peer, from_id, to_id, seq, ts_ms, text, source, msg_id, recalled)"
-      " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+      " (peer, from_id, to_id, seq, ts_ms, text, source, msg_id, recalled, sync_state)"
+      " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
   q.bindValue(0, QString::fromStdString(msg.peer));
   q.bindValue(1, QString::fromStdString(msg.from));
   q.bindValue(2, QString::fromStdString(msg.to));
@@ -151,6 +153,7 @@ bool LocalStore::append(const StoredMessage& msg, bool* inserted) {
   q.bindValue(6, QString::fromStdString(msg.source));
   q.bindValue(7, QString::fromStdString(msg.msg_id));
   q.bindValue(8, msg.recalled ? 1 : 0);
+  q.bindValue(9, QString::fromStdString(msg.sync_state));
   if (!q.exec()) {
     qWarning() << "[本地库] 写入失败：" << q.lastError().text();
     if (inserted) *inserted = false;
@@ -179,7 +182,8 @@ QList<StoredMessage> LocalStore::history(const QString& peer, int limit) const {
   QSqlQuery q(QSqlDatabase::database(connection_name_));
   // limit 取最近 N 条，整体按时间正序返回（聊天窗渲染方向）
   q.prepare(QStringLiteral(
-      "SELECT id, peer, from_id, to_id, seq, ts_ms, text, source, msg_id, recalled FROM ("
+      "SELECT id, peer, from_id, to_id, seq, ts_ms, text, source, msg_id,"
+      " recalled, sync_state FROM ("
       " SELECT * FROM messages WHERE peer = ?"
       " ORDER BY ts_ms DESC, id DESC LIMIT ?)"
       " ORDER BY ts_ms ASC, id ASC"));
@@ -201,6 +205,7 @@ QList<StoredMessage> LocalStore::history(const QString& peer, int limit) const {
     m.source = q.value(7).toString().toStdString();
     m.msg_id = q.value(8).toString().toStdString();
     m.recalled = q.value(9).toInt() != 0;
+    m.sync_state = q.value(10).toString().toStdString();
     out.push_back(std::move(m));
   }
   return out;
@@ -240,6 +245,54 @@ bool LocalStore::mark_recalled(const std::string& msg_id) {
     return false;
   }
   return q.numRowsAffected() > 0;
+}
+
+// —— 平台-9 同步状态机 ——
+
+bool LocalStore::set_sync_state(const std::string& from_id, std::uint64_t seq,
+                                const std::string& state) {
+  if (!open_ || from_id.empty() || state.empty()) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "UPDATE messages SET sync_state = ? WHERE from_id = ? AND seq = ?"));
+  q.addBindValue(QString::fromStdString(state));
+  q.addBindValue(QString::fromStdString(from_id));
+  q.addBindValue(static_cast<qint64>(seq));
+  if (!q.exec()) {
+    qWarning() << "[本地库] 同步状态推移失败：" << q.lastError().text();
+    return false;
+  }
+  return q.numRowsAffected() > 0;
+}
+
+QList<StoredMessage> LocalStore::pending_sync(
+    const std::string& from_id) const {
+  QList<StoredMessage> out;
+  if (!open_ || from_id.empty()) return out;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "SELECT peer, from_id, to_id, seq, ts_ms, text, source, msg_id, sync_state"
+      " FROM messages WHERE from_id = ? AND sync_state IN ('PENDING','SENDING')"
+      " ORDER BY seq ASC"));
+  q.addBindValue(QString::fromStdString(from_id));
+  if (!q.exec()) {
+    qWarning() << "[本地库] 待同步查询失败：" << q.lastError().text();
+    return out;
+  }
+  while (q.next()) {
+    StoredMessage m;
+    m.peer = q.value(0).toString().toStdString();
+    m.from = q.value(1).toString().toStdString();
+    m.to = q.value(2).toString().toStdString();
+    m.seq = static_cast<std::uint64_t>(q.value(3).toLongLong());
+    m.ts_ms = q.value(4).toLongLong();
+    m.text = q.value(5).toString().toStdString();
+    m.source = q.value(6).toString().toStdString();
+    m.msg_id = q.value(7).toString().toStdString();
+    m.sync_state = q.value(8).toString().toStdString();
+    out.push_back(std::move(m));
+  }
+  return out;
 }
 
 // —— R23-2 群文件 + 个人文件（内网全功能）客户端基础

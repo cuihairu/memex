@@ -186,6 +186,9 @@ quint64 CollabEngine::send_text(const QString& to, const QString& text) {
     sm.ts_ms = p.ts_ms;
     sm.text = p.text;
     sm.source = "collab";
+    // 平台-9 Sync State：入发送管线即记状态（在线直发=SENDING，
+    // 断线暂存=PENDING）；受理/放弃由回执与 teardown 推移
+    sm.sync_state = logged_in_ ? "SENDING" : "PENDING";
     store_->append(sm);
   }
   return seq;
@@ -410,12 +413,20 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
       if (reconnecting_) {
         reconnecting_ = false;
         emit reconnected();
-        // T2.5：重连成功即补传中断期暂存消息（服务端按 msg_id 去重归档）
-        flush_pending_sends();
       } else {
         emit logged_in(account_, display);
         fav_query(); // T4.5 常用联系人随登录自动拉取（换机保留即此体现）
       }
+      // 平台-9 重启恢复：seq 计数从本地库续位——新进程若从 1 重数，既撞
+      // 本地 UNIQUE(from_id,seq)，又因 msg_id=sha256(from:seq) 与旧消息
+      // 同 ID 被服务端去重误吞
+      if (store_) {
+        next_seq_ = static_cast<quint64>(
+            store_->next_local_seq(account_.toStdString()));
+      }
+      // T2.5 重连补传 + 平台-9 重启恢复：每次登录成功都回收补传队列与库中
+      // 遗留的 PENDING/SENDING 行（服务端按 msg_id 去重归档，重发幂等）
+      flush_pending_sends();
     } else {
       reconnecting_ = false;
       reconnect_timer_.stop();
@@ -580,6 +591,8 @@ void CollabEngine::handle_text(const Message& msg) {
     sm.text = msg.has_text() ? msg.text().text() : std::string{};
     sm.source = "collab";
     sm.msg_id = msg.msg_id();
+    // 平台-9：接收方向唯一入口是服务端投递——落库即已归档（ARCHIVED）
+    sm.sync_state = "ARCHIVED";
     store_->append(sm, &inserted);
   }
   if (!msg.msg_id().empty()) {
@@ -635,6 +648,7 @@ void CollabEngine::handle_notice(const Message& msg) {
     sm.text = text;
     sm.source = "collab";
     sm.msg_id = msg.msg_id();
+    sm.sync_state = "ARCHIVED"; // 服务端投递到达＝已归档（平台-9）
     store_->append(sm, &inserted);
   }
   // ACK 清服务端离线队列（与 TEXT 同语义；未回执下次登录重投，按 msg_id 去重）
@@ -674,6 +688,10 @@ void CollabEngine::handle_ack(const Message& msg) {
   if (msg.seq() != 0 && inflight_.contains(msg.seq())) {
     const quint64 seq = msg.seq();
     inflight_.remove(seq);
+    // 平台-9：服务端受理＝已归档待投递（SERVER_ACKED）
+    if (store_) {
+      store_->set_sync_state(account_.toStdString(), seq, "SERVER_ACKED");
+    }
     emit text_delivered(seq, true);
   }
 }
@@ -704,12 +722,33 @@ void CollabEngine::check_delivery_timeouts() {
   for (auto it = inflight_.begin(); it != inflight_.end();) {
     if (it.value().sent_at_ms > 0 &&
         now - it.value().sent_at_ms > CollabEngine::kDeliveryTimeoutMs) {
-      // 超时未回执：不判失败，转待补传（服务端可能已受理——补传按
-      // msg_id 去重，不会重复归档；真正送达以回执为准）
-      PendingSend p = it.value();
-      p.sent_at_ms = 0;
-      pending_reconnect_.push_back(p);
-      it = inflight_.erase(it);
+      // 平台-9 至少一次：回执超时先在连接内按原 seq 重发（服务端按
+      // msg_id 去重，重发幂等，不判失败）；连接已亡才转待补传。
+      if (logged_in_) {
+        PendingSend p = it.value();
+        Message m;
+        m.set_type(MsgType::TEXT);
+        m.set_seq(p.seq);
+        m.set_from(account_.toStdString());
+        m.set_to(p.to);
+        m.set_ts_ms(p.ts_ms);
+        m.mutable_text()->set_text(p.text);
+        send_frame(m);
+        p.sent_at_ms = now;
+        it.value() = p;
+        qInfo() << "[协作] 回执超时，连接内重发（seq" << p.seq << "）";
+        ++it;
+      } else {
+        // 服务端可能已受理——补传按 msg_id 去重，不会重复归档；
+        // 真正送达以回执为准
+        PendingSend p = it.value();
+        p.sent_at_ms = 0;
+        pending_reconnect_.push_back(p);
+        if (store_) {
+          store_->set_sync_state(account_.toStdString(), p.seq, "PENDING");
+        }
+        it = inflight_.erase(it);
+      }
     } else {
       ++it;
     }
@@ -719,6 +758,27 @@ void CollabEngine::check_delivery_timeouts() {
 
 // 重连成功后补传：暂存消息按原 seq 重发，服务端 sha256(from:seq) 幂等归档
 void CollabEngine::flush_pending_sends() {
+  // 平台-9 重启恢复：进程崩溃会丢内存暂存队列——库里仍 PENDING/SENDING
+  // 的消息灌回补传（按 seq 去重；已 SERVER_ACKED/FAILED 的不会回来）
+  if (store_) {
+    const QList<memex::client::StoredMessage> stuck =
+        store_->pending_sync(account_.toStdString());
+    for (const auto& m : stuck) {
+      const quint64 seq = m.seq;
+      const bool known =
+          inflight_.contains(seq) ||
+          std::any_of(pending_reconnect_.cbegin(), pending_reconnect_.cend(),
+                      [seq](const PendingSend& p) { return p.seq == seq; });
+      if (known) continue;
+      PendingSend p;
+      p.to = m.to;
+      p.text = m.text;
+      p.seq = seq;
+      p.ts_ms = m.ts_ms;
+      pending_reconnect_.push_back(p);
+      qInfo() << "[协作] 重启恢复：库中待同步消息重新入队（seq" << seq << "）";
+    }
+  }
   if (pending_reconnect_.isEmpty()) return;
   const qint64 now = QDateTime::currentMSecsSinceEpoch();
   for (const PendingSend& p : pending_reconnect_) {
@@ -733,6 +793,9 @@ void CollabEngine::flush_pending_sends() {
     PendingSend inflight = p;
     inflight.sent_at_ms = now;
     inflight_.insert(p.seq, inflight);
+    if (store_) {
+      store_->set_sync_state(account_.toStdString(), p.seq, "SENDING");
+    }
     qInfo() << "[协作] 补传中断期消息（seq" << p.seq << "）";
   }
   pending_reconnect_.clear();
@@ -750,11 +813,25 @@ void CollabEngine::teardown(bool unexpected) {
       PendingSend p = it.value();
       p.sent_at_ms = 0;
       pending_reconnect_.push_back(p);
+      if (store_) {
+        store_->set_sync_state(account_.toStdString(), p.seq, "PENDING");
+      }
     }
   } else {
     // 主动登出／被踢／重新登录：清队列并回报失败，不再补传
+    // （平台-9：暂存队列同样终态 FAILED——此前被静默丢弃）
     for (auto it = inflight_.constBegin(); it != inflight_.constEnd(); ++it) {
       emit text_delivered(it.key(), false);
+      if (store_) {
+        store_->set_sync_state(account_.toStdString(), it.value().seq,
+                               "FAILED");
+      }
+    }
+    for (const PendingSend& p : pending_reconnect_) {
+      emit text_delivered(p.seq, false);
+      if (store_) {
+        store_->set_sync_state(account_.toStdString(), p.seq, "FAILED");
+      }
     }
     pending_reconnect_.clear();
   }

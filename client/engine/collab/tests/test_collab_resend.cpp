@@ -9,6 +9,8 @@
 #include <QTemporaryDir>
 #include <QThread>
 
+#include <csignal>
+
 #include <functional>
 #include <vector>
 
@@ -240,7 +242,207 @@ int main(int argc, char** argv) {
     CHECK(out.contains(QStringLiteral("共 4 条")));
   }
 
-  a.logout();
+  // —— 平台-9 Sync State：六态状态机验收 ——
+  // 按文本取某对端历史行的同步状态（找不到＝<missing>）
+  auto sync_of = [](LocalStore& st, const QString& peer,
+                    const QString& text) -> QString {
+    for (const auto& m : st.history(peer, 200)) {
+      if (QString::fromStdString(m.text) == text) {
+        return QString::fromStdString(m.sync_state);
+      }
+    }
+    return QStringLiteral("<missing>");
+  };
+
+  // 发送侧：服务端受理（ACK 到达）＝SERVER_ACKED；接收侧：服务端投递
+  // 落库即 ARCHIVED（接收方向唯一入口）
+  CHECK(sync_of(store_a, QStringLiteral("bob"), QStringLiteral("在线基线消息")) ==
+        QStringLiteral("SERVER_ACKED"));
+  CHECK(sync_of(store_a, QStringLiteral("bob"), QStringLiteral("中断期消息甲")) ==
+        QStringLiteral("SERVER_ACKED"));
+  CHECK(sync_of(store_a, QStringLiteral("bob"), QStringLiteral("中断期消息乙")) ==
+        QStringLiteral("SERVER_ACKED"));
+  CHECK(sync_of(store_a, QStringLiteral("bob"), QStringLiteral("恢复后新消息")) ==
+        QStringLiteral("SERVER_ACKED"));
+  CHECK(sync_of(store_b, QStringLiteral("alice"), QStringLiteral("在线基线消息")) ==
+        QStringLiteral("ARCHIVED"));
+  CHECK(sync_of(store_b, QStringLiteral("alice"), QStringLiteral("中断期消息甲")) ==
+        QStringLiteral("ARCHIVED"));
+  CHECK(sync_of(store_b, QStringLiteral("alice"), QStringLiteral("中断期消息乙")) ==
+        QStringLiteral("ARCHIVED"));
+  CHECK(sync_of(store_b, QStringLiteral("alice"), QStringLiteral("恢复后新消息")) ==
+        QStringLiteral("ARCHIVED"));
+
+  // —— 平台-9 纯库层：set_sync_state / pending_sync（独立临时库）——
+  {
+    LocalStore sp;
+    CHECK(sp.open(tmp.filePath(QStringLiteral("p9.db"))));
+    memex::client::StoredMessage m;
+    m.peer = "carol";
+    m.from = "alice";
+    m.to = "carol";
+    m.ts_ms = 1;
+    m.source = "collab";
+    m.seq = 1;
+    m.text = "待发一";
+    m.sync_state = "PENDING";
+    CHECK(sp.append(m));
+    m.seq = 2;
+    m.text = "在途二";
+    m.sync_state = "SENDING";
+    CHECK(sp.append(m));
+    m.seq = 3;
+    m.text = "已受理三";
+    m.sync_state = "SERVER_ACKED";
+    CHECK(sp.append(m));
+    m.seq = 4;
+    m.text = "历史行";
+    m.sync_state = ""; // 空串＝状态机启用前的历史行，不参与恢复
+    CHECK(sp.append(m));
+
+    auto pends = sp.pending_sync("alice");
+    CHECK(pends.size() == 2);
+    CHECK(pends[0].seq == 1 && pends[1].seq == 2); // seq 升序
+
+    CHECK(sp.set_sync_state("alice", 1, "FAILED"));
+    pends = sp.pending_sync("alice");
+    CHECK(pends.size() == 1 && pends[0].seq == 2);
+    CHECK(sp.set_sync_state("alice", 2, "SERVER_ACKED"));
+    CHECK(sp.pending_sync("alice").isEmpty());
+    CHECK(!sp.set_sync_state("alice", 999, "FAILED")); // 不存在的行＝false
+    CHECK(!sp.set_sync_state("nobody", 1, "FAILED"));
+
+    CHECK(sync_of(sp, QStringLiteral("carol"), QStringLiteral("待发一")) ==
+          QStringLiteral("FAILED"));
+    CHECK(sync_of(sp, QStringLiteral("carol"), QStringLiteral("历史行")).isEmpty());
+    sp.close();
+  }
+
+  // —— 平台-9 登出放弃：在线在途（回执未达）→ 显式登出终态 FAILED ——
+  // 服务端进程冻结（SIGSTOP）：TCP 连接未断（logged_in_ 保持），但回执
+  // 永不到达——比杀进程更早的心跳判死之前完成登出，路径确定
+  {
+    ::kill(server2.processId(), SIGSTOP);
+
+    bool gave_up = false;
+    quint64 gave_up_seq = 0;
+    QObject::connect(&a, &CollabEngine::text_delivered, &a,
+                     [&](quint64 seq, bool ok) {
+                       if (!ok) {
+                         gave_up = true;
+                         gave_up_seq = seq;
+                       }
+                     });
+
+    const quint64 s5 =
+        a.send_text(QStringLiteral("bob"), QStringLiteral("登出放弃消息"));
+    CHECK(s5 != 0);
+    CHECK(wait_until(
+        [&] {
+          return sync_of(store_a, QStringLiteral("bob"),
+                         QStringLiteral("登出放弃消息")) == "SENDING";
+        },
+        3000));
+
+    a.logout(); // 在线显式登出：在途消息不再补传 → delivered(false) + FAILED
+    CHECK(wait_until([&] { return gave_up && gave_up_seq == s5; }, 3000));
+    CHECK(sync_of(store_a, QStringLiteral("bob"), QStringLiteral("登出放弃消息")) ==
+          QStringLiteral("FAILED"));
+    CHECK(store_a.pending_sync("alice").isEmpty()); // 终态行不参与恢复
+
+    ::kill(server2.processId(), SIGCONT);
+    server2.kill();
+    CHECK(server2.waitForFinished(5000));
+  }
+
+  // —— 平台-9 重启恢复：进程崩溃丢内存队列 → 库面 PENDING 行重新入队 ——
+  {
+    // 服务端复活：bob 自动重连；alice 已手动登出不再自动连
+    QProcess server3;
+    server3.setProcessChannelMode(QProcess::ForwardedChannels);
+    server3.start(server_bin, server_args);
+    CHECK(server3.waitForStarted(5000));
+    CHECK(wait_until([&] { return port_listening(port); }, 8000));
+    bool b_re2 = false;
+    QObject::connect(&b, &CollabEngine::reconnected, &b, [&] { b_re2 = true; });
+    CHECK(wait_until([&] { return b_re2; }, 20000));
+
+    // 模拟崩溃：新引擎登录后随服务端中断发送（暂存 PENDING），不登出
+    // 直接析构——析构不做 teardown，内存队列丢弃、库里行留在 PENDING
+    {
+      CollabEngine crashed;
+      crashed.attach_store(&store_a);
+      crashed.set_heartbeat(300, 2);
+      bool c_in = false;
+      QObject::connect(&crashed, &CollabEngine::logged_in, &crashed,
+                       [&](const QString&, const QString&) { c_in = true; });
+      crashed.login(QStringLiteral("127.0.0.1"), port,
+                    QStringLiteral("alice"), QStringLiteral("pass-a"));
+      CHECK(wait_until([&] { return c_in; }, 8000));
+
+      server3.kill();
+      CHECK(server3.waitForFinished(5000));
+      bool c_lost = false;
+      QObject::connect(&crashed, &CollabEngine::connection_lost, &crashed,
+                       [&] { c_lost = true; });
+      CHECK(wait_until([&] { return c_lost; }, 8000));
+
+      CHECK(crashed.send_text(QStringLiteral("bob"),
+                              QStringLiteral("重启恢复消息")) != 0);
+      CHECK(wait_until(
+          [&] {
+            return sync_of(store_a, QStringLiteral("bob"),
+                           QStringLiteral("重启恢复消息")) == "PENDING";
+          },
+          3000));
+    } // crashed 析构＝崩溃同型（内存队列没了，库面行还在）
+
+    // 服务端复活 + 全新引擎登录：flush_pending_sends 从库回收 PENDING 行
+    QProcess server4;
+    server4.setProcessChannelMode(QProcess::ForwardedChannels);
+    server4.start(server_bin, server_args);
+    CHECK(server4.waitForStarted(5000));
+    CHECK(wait_until([&] { return port_listening(port); }, 8000));
+
+    CollabEngine a3;
+    a3.attach_store(&store_a);
+    a3.set_heartbeat(300, 2);
+    bool a3_in = false;
+    QObject::connect(&a3, &CollabEngine::logged_in, &a3,
+                     [&](const QString&, const QString&) { a3_in = true; });
+    a3.login(QStringLiteral("127.0.0.1"), port, QStringLiteral("alice"),
+             QStringLiteral("pass-a"));
+    CHECK(wait_until([&] { return a3_in; }, 8000));
+
+    // 补传到位：内存队列已死，恢复只能靠库面行——bob 恰收到一条
+    CHECK(wait_until([&] { return b_got.size() == 5; }, 20000));
+    CHECK(b_got[4] == QStringLiteral("重启恢复消息"));
+    CHECK(wait_until(
+        [&] {
+          return sync_of(store_a, QStringLiteral("bob"),
+                         QStringLiteral("重启恢复消息")) == "SERVER_ACKED";
+        },
+        8000));
+    CHECK(sync_of(store_b, QStringLiteral("alice"),
+                  QStringLiteral("重启恢复消息")) == QStringLiteral("ARCHIVED"));
+    CHECK(store_a.pending_sync("alice").isEmpty());
+
+    // 归档恰一条（CLI messages 对账）
+    {
+      QString out;
+      CHECK(wait_until([&] {
+              out = run_capture(server_bin,
+                                {QStringLiteral("messages"), QStringLiteral("--db"),
+                                 db, QStringLiteral("--limit"),
+                                 QStringLiteral("50")});
+              return out.contains(QStringLiteral("共 5 条"));
+            }, 5000));
+      CHECK(out.count(QStringLiteral("重启恢复消息")) == 1);
+    }
+
+    a3.logout();
+  }
+
   b.logout();
   server2.terminate();
   server2.waitForFinished(3000);

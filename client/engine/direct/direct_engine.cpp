@@ -119,6 +119,7 @@ bool DirectEngine::start() {
             m.ts_ms = ts_ms;
             m.text = text.toStdString();
             m.source = "direct";
+            m.sync_state = "LOCAL"; // 直连域不进服务端同步（平台-9）
             store_->append(m);
             emit message_received(from_id, text, ts_ms);
           });
@@ -228,6 +229,7 @@ quint64 DirectEngine::send_text(const std::string& peer_device_id,
   m.ts_ms = ts_ms;
   m.text = text;
   m.source = "direct";
+  m.sync_state = "LOCAL"; // 直连域不进服务端同步（平台-9）
   store_->append(m);
 
   transport_->send_text(target.address, target.tcp_port, peer_device_id, seq, text);

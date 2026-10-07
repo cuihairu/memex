@@ -64,6 +64,16 @@ SecureChannel::Fed feed_available(SecureChannel* ch, QTcpSocket* sock) {
   return fed;
 }
 
+// 按文本取某对端历史行的同步状态（平台-9：直连域应恒 LOCAL）
+QString sync_state_of(LocalStore& st, const QString& peer, const QString& text) {
+  for (const auto& m : st.history(peer, 200)) {
+    if (QString::fromStdString(m.text) == text) {
+      return QString::fromStdString(m.sync_state);
+    }
+  }
+  return QStringLiteral("<missing>");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -246,6 +256,9 @@ int main(int argc, char** argv) {
   CHECK(wait_until([&] { return b_received > before_raw; }, 4000));
   CHECK(last_from == QStringLiteral("dev-A"));
   CHECK(last_text == QStringLiteral("raw-腿密文消息"));
+  // 平台-9：直连域不进服务端同步——接收侧落库恒 LOCAL
+  CHECK(sync_state_of(*b.store(), QStringLiteral("dev-A"),
+                      QStringLiteral("raw-腿密文消息")) == QStringLiteral("LOCAL"));
 
   bool ack_ok = false;
   CHECK(wait_until(
@@ -322,6 +335,9 @@ int main(int argc, char** argv) {
     CHECK(wait_until([&] { return b_received == before_bad + 1; }, 4000));
     CHECK(last_text == QStringLiteral("清针后恢复"));
     CHECK(b.store()->peer_identity_pub("dev-A") == a.identity_pub_hex());
+    // 平台-9：直连域不进服务端同步——发送侧落库恒 LOCAL（送达失败也留行）
+    CHECK(sync_state_of(*a.store(), QStringLiteral("dev-B"),
+                        QStringLiteral("清针后恢复")) == QStringLiteral("LOCAL"));
   }
 
   // ---------- ⑤ 重启同库同公钥 ----------

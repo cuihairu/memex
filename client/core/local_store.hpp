@@ -28,6 +28,12 @@ struct StoredMessage {
   std::string msg_id;
   // 撤回标记（仅界面展示用，原文保留在本地与服务端归档）。
   bool recalled{false};
+  // 平台-9 同步状态机（蓝图§二十三）：LOCAL（本地域，不进服务端同步，
+  // 直连态恒此值）/ PENDING（待发送）/ SENDING（在途）/ SERVER_ACKED
+  // （服务端受理，已归档待投递）/ ARCHIVED（服务端归档确认：接收方向
+  // 落库即此值——唯一入口是服务端投递）/ FAILED（终态失败，不再补传）。
+  // 空串＝历史行（状态机启用前的旧数据），不参与恢复补传。
+  std::string sync_state;
 };
 
 // —— R23-5 杀毒扫描白名单（本地侧）——
@@ -64,6 +70,12 @@ public:
 
   // 按 msg_id 置撤回标记（服务端撤回事件到达后调用）。
   bool mark_recalled(const std::string& msg_id);
+
+  // 平台-9 同步状态机：按发送方唯一键 (from_id, seq) 推移状态；
+  // pending_sync 取某账号尚在 PENDING/SENDING 的消息（重启恢复补传依据）。
+  bool set_sync_state(const std::string& from_id, std::uint64_t seq,
+                      const std::string& state);
+  QList<StoredMessage> pending_sync(const std::string& from_id) const;
 
   // 某对端的本地历史：取最近 limit 条，按时间正序返回。
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;
