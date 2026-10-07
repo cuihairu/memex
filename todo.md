@@ -210,7 +210,8 @@
 
 ## R25 群工具框架：CI/CD / 打包 / 配置导出（2026-10-04，设计=docs/design/群工具框架.md）
 
-- [ ] R25-1 群工具框架：工具白名单动作配置、**入群即授权/退群即失**、动作留痕（谁/何时/动作/参数/结果）、服务端代理调用骨架。
+- [x] R25-1 群工具框架：工具白名单动作配置、**入群即授权/退群即失**、动作留痕（谁/何时/动作/参数/结果）、服务端代理调用骨架。
+  - 2026-10-07 server 面收口（f87c031）：store 加 group_tools（group_id+tool 主键，actions_json/updated_by/updated_ms）＋group_tool_audit（谁/何时/哪个工具/什么动作/参数/结果）两表＋gid 索引，五方法 tool_set_actions（ON CONFLICT upsert，群须存在）/tool_config/tool_list/tool_audit_add/tool_audit_list（id DESC 限 200）；FileServer 四路由 /files/group-tools/{config,list,call,audit}，判权循既有 az 规则不自造：config/audit=memo:config（owner/admin，同 R24 密码箱管理面），list/call=群成员（file:read 群继承，入群即授权/退群即失）；call 白名单制三段闸（未配置 404→动作不在声明清单 403→params 须对象否则 400），通过后 stub 回显落审计（真外部系统调用归 R25-2/R25-3，凭据面归 R25-4——客户端只见按钮不见密钥）。测试：test_files_api 扩 R25-1 段（config 判权矩阵＋字段校验＋幽灵群不透存在性、管理员配置＋upsert 覆盖生效、list 成员可读、call 三段闸＋stub 回显带参数、audit 成员 403＋id DESC 倒序断言行带 actor/params/结果），ctest 37/37 全绿（首跑 files_client 全量并发下超时、单跑 1.54s 过＝负载闪失非回归，复跑全量绿）。
 - [ ] R25-2 CI/CD 工具：pipeline 状态视图（红绿灯+列表）、点击触发构建/打包（谁触发可回溯）、结果卡片回群。
 - [ ] R25-3 打包工具 + 配置导出工具（首批动作类示例）。
 - [ ] R25-4 凭据面：外部凭据只存服务端（R24 密码箱同款加密）、客户端零凭据、破坏性动作二次确认。
