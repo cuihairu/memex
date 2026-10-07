@@ -184,6 +184,14 @@ class FilesClient : public QObject {
   // 撤回（申请人专属且仅 pending）
   void withdraw_approval(qint64 id);
 
+  // —— 日报周报（二期 /files/reports）——
+  // 写日报（date=归属日 YYYY-MM-DD；当日重复提交=服务端 upsert 更新）
+  void save_report(const QString& date, const QString& content);
+  // 我的日报全部（date 倒序）
+  void list_reports();
+  // 团队聚合（直属上级=各直接下属的日报分组；判权服务端现裁）
+  void fetch_team_reports();
+
  signals:
   void logged_in();
   void login_failed(const QString& reason);
@@ -242,6 +250,9 @@ class FilesClient : public QObject {
   void approvals_listed(const QJsonArray& mine, const QJsonArray& pending);
   void approval_decided(qint64 id); // 同意/拒绝共用；终态以列表回查为准
   void approval_withdrawn(qint64 id);
+  void report_saved(qint64 id);
+  void reports_listed(const QJsonArray& reports);
+  void team_reports_listed(const QJsonArray& team); // author 分组＋reports
   // 统一失败通道：op=操作名（"memo.create"/"inbox.upload"/…）、
   // status=HTTP 状态码（0=网络层失败）、error=服务端 error 字段或网络串
   void request_failed(const QString& op, int status, const QString& error);

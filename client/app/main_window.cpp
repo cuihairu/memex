@@ -31,6 +31,7 @@
 #include "group_server_dialog.hpp"
 #include "task_dialog.hpp"
 #include "approval_dialog.hpp"
+#include "report_dialog.hpp"
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
@@ -277,6 +278,17 @@ void MainWindow::build_ui() {
     approval_dialog_->show();
     approval_dialog_->raise();
     approval_dialog_->activateWindow();
+  });
+  // 二期·日报周报：写日报/看下属（直属上级）；判权全在服务端
+  auto* act_reports = task_menu->addAction(QStringLiteral("日报周报…"));
+  connect(act_reports, &QAction::triggered, this, [this] {
+    if (!report_dialog_) {
+      report_dialog_ = new ReportDialog(this);
+      report_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    report_dialog_->show();
+    report_dialog_->raise();
+    report_dialog_->activateWindow();
   });
 
   // —— 设置：开机启动（T4.7；勾选态与登记文件同步）＋主题（R19 · T4.9）——

@@ -806,6 +806,43 @@ void FilesClient::withdraw_approval(qint64 id) {
             });
 }
 
+// —— 日报周报（二期）——
+
+void FilesClient::save_report(const QString& date, const QString& content) {
+  send_json(QStringLiteral("report.save"), QStringLiteral("POST"),
+            QStringLiteral("/files/reports"),
+            {{QStringLiteral("date"), date},
+             {QStringLiteral("content"), content}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit report_saved(static_cast<qint64>(
+                    resp.value(QStringLiteral("id")).toDouble()));
+              }
+            });
+}
+
+void FilesClient::list_reports() {
+  send_json(QStringLiteral("report.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/reports"), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit reports_listed(
+                    resp.value(QStringLiteral("reports")).toArray());
+              }
+            });
+}
+
+void FilesClient::fetch_team_reports() {
+  send_json(QStringLiteral("report.team"), QStringLiteral("GET"),
+            QStringLiteral("/files/reports/team"), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit team_reports_listed(
+                    resp.value(QStringLiteral("team")).toArray());
+              }
+            });
+}
+
 void FilesClient::download_file(qint64 file_id, const QString& file_name,
                                 const QString& save_dir) {
   if (token_.isEmpty()) {

@@ -220,6 +220,16 @@ bool ServerStore::ensure_schema() {
       "  decision_note TEXT NOT NULL DEFAULT '',"
       "  created_ms INTEGER NOT NULL,"
       "  decided_ms INTEGER NOT NULL DEFAULT 0);"
+      // 二期·日报周报：个人日报台账（当日重复=upsert 更新不留修订史；
+      // 周报=按周聚合视图不单设表；直属上级可看下属，判权在路由层 az）
+      "CREATE TABLE IF NOT EXISTS reports ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  author TEXT NOT NULL,"
+      "  report_date TEXT NOT NULL,"
+      "  content TEXT NOT NULL DEFAULT '',"
+      "  created_ms INTEGER NOT NULL,"
+      "  updated_ms INTEGER NOT NULL,"
+      "  UNIQUE(author, report_date));"
       // T2.6 组织架构：部门树（parent_id 成树）＋成员资料
       //（直属上级为独立单列——每人至多一名，结构性约束）
       "CREATE TABLE IF NOT EXISTS departments ("
@@ -3761,6 +3771,83 @@ bool ServerStore::approval_withdraw(std::int64_t id,
                   sqlite3_changes(db_) == 1; // 他人/非 pending=0 行=拒
   sqlite3_finalize(st);
   return ok;
+}
+
+// —— 二期·日报周报（设计稿 §二）——
+
+std::int64_t ServerStore::report_upsert(const std::string& author,
+                                        const std::string& report_date,
+                                        const std::string& content,
+                                        std::int64_t ts_ms) {
+  if (author.empty() || report_date.empty()) return 0;
+  if (!find_account(author)) return 0; // 幽灵账号不给写
+  const char* sql =
+      "INSERT INTO reports(author, report_date, content, created_ms,"
+      " updated_ms) VALUES(?,?,?,?,?)"
+      " ON CONFLICT(author, report_date) DO UPDATE SET"
+      " content = excluded.content, updated_ms = excluded.updated_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, author.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, report_date.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, content.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, ts_ms);
+  sqlite3_bind_int64(st, 5, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  if (!ok) return 0;
+  // upsert 两种路径统一按 (author, date) 回查 id（不依赖 last_insert_rowid
+  // 在 DO UPDATE 路径的语义）
+  const char* q = "SELECT id FROM reports WHERE author = ? AND report_date = ?;";
+  st = nullptr;
+  std::int64_t id = 0;
+  if (sqlite3_prepare_v2(db_, q, -1, &st, nullptr) == SQLITE_OK) {
+    sqlite3_bind_text(st, 1, author.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, report_date.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) id = sqlite3_column_int64(st, 0);
+  }
+  sqlite3_finalize(st);
+  return id;
+}
+
+std::vector<ServerStore::ReportRow> ServerStore::reports_of(
+    const std::string& author) {
+  std::vector<ReportRow> out;
+  const char* sql =
+      "SELECT id, author, report_date, content, created_ms, updated_ms"
+      " FROM reports WHERE author = ? ORDER BY report_date DESC, id DESC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, author.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    ReportRow t;
+    t.id = sqlite3_column_int64(st, 0);
+    t.author = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    t.report_date = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    t.content = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    t.created_ms = sqlite3_column_int64(st, 4);
+    t.updated_ms = sqlite3_column_int64(st, 5);
+    out.push_back(std::move(t));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<std::string> ServerStore::direct_reports(
+    const std::string& manager) {
+  std::vector<std::string> out;
+  const char* sql =
+      "SELECT DISTINCT account FROM org_reporting_lines"
+      " WHERE manager_account = ? ORDER BY account;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, manager.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    out.emplace_back(
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 0)));
+  }
+  sqlite3_finalize(st);
+  return out;
 }
 
 std::optional<GroupInfo> ServerStore::group_info(std::uint64_t group_id) {

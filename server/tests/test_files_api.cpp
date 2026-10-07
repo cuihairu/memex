@@ -2036,6 +2036,65 @@ int main() {
     CHECK(lm.body.find("withdrawn") != std::string::npos);
   }
 
+  // —— 二期·日报周报：个人日报台账（当日重复=upsert 更新）/直属上级
+  //     可看下属（org-admin 不兜底）/团队聚合反查/转岗即时断权 ——
+  {
+    // 未登录 401；缺 content 400；坏 date 400（归属日须 YYYY-MM-DD）
+    CHECK(http(port, "GET", "/files/reports", {}, "").status == 401);
+    CHECK(http(port, "POST", "/files/reports", H("member1"),
+               "{\"date\":\"2026-10-08\"}").status == 400);
+    CHECK(http(port, "POST", "/files/reports", H("member1"),
+               "{\"date\":\"10月8日\",\"content\":\"x\"}").status == 400);
+    // 写＋当日重复提交=更新（同 id、content 覆盖、created_ms 不动）
+    const auto r1 = http(port, "POST", "/files/reports", H("member1"),
+                         "{\"date\":\"2026-10-08\",\"content\":\"v1\"}");
+    CHECK(r1.status == 200);
+    const std::int64_t rid = jint(r1.body, "id");
+    CHECK(rid > 0);
+    const auto r2 = http(port, "POST", "/files/reports", H("member1"),
+                         "{\"date\":\"2026-10-08\",\"content\":\"v2\"}");
+    CHECK(r2.status == 200 && jint(r2.body, "id") == rid);
+    const auto mrows = store.reports_of("member1");
+    CHECK(mrows.size() == 1 && mrows[0].content == "v2" &&
+          mrows[0].created_ms > 0 && mrows[0].updated_ms >= mrows[0].created_ms);
+    // 自己看自己（列表回带）
+    const auto mine = http(port, "GET", "/files/reports", H("member1"), "");
+    CHECK(mine.status == 200);
+    CHECK(mine.body.find("\"date\":\"2026-10-08\"") != std::string::npos);
+    CHECK(mine.body.find("v2") != std::string::npos);
+    // 直属上级可看下属（审批段已设 member1→owner1 汇报线）
+    const auto sub = http(port, "GET",
+                          "/files/reports/read?author=member1",
+                          H("owner1"), "");
+    CHECK(sub.status == 200);
+    CHECK(sub.body.find("v2") != std::string::npos);
+    // org-admin 不兜底（设计口径日报只对直属上级开放；admin1 在审批段
+    // 已授 org-admin）
+    CHECK(http(port, "GET", "/files/reports/read?author=member1",
+               H("admin1"), "").status == 403);
+    // 无关系他人与幽灵账号同口径 403（不泄露存在性）；缺 author 400
+    CHECK(http(port, "GET", "/files/reports/read?author=owner1",
+               H("member1"), "").status == 403);
+    CHECK(http(port, "GET", "/files/reports/read?author=ghost",
+               H("owner1"), "").status == 403);
+    CHECK(http(port, "GET", "/files/reports/read", H("owner1"), "").status ==
+          400);
+    // 团队聚合反查：owner1 的直接下属=member1（reports 随行回带）；
+    // member1 无下属=空 team
+    const auto team = http(port, "GET", "/files/reports/team", H("owner1"),
+                           "");
+    CHECK(team.status == 200);
+    CHECK(team.body.find("\"author\":\"member1\"") != std::string::npos);
+    const auto team_empty = http(port, "GET", "/files/reports/team",
+                                 H("member1"), "");
+    CHECK(team_empty.status == 200);
+    CHECK(team_empty.body.find("\"author\":\"member1\"") == std::string::npos);
+    // 转岗即时断权：汇报线清掉后直属上级立即看不了（现查现裁）
+    CHECK(store.reporting_clear("member1"));
+    CHECK(http(port, "GET", "/files/reports/read?author=member1",
+               H("owner1"), "").status == 403);
+  }
+
   // —— R27-2 外部任务登记：provider/ext_key 成对、个人登记不转派、
   //     列表回带引用（详情 URL 由客户端 SPI 解析，服务端只存引用）——
   {

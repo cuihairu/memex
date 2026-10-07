@@ -50,6 +50,7 @@ qt_add_executable(memex_client
   app/file_assistant.hpp
   app/task_dialog.cpp
   app/approval_dialog.cpp
+  app/report_dialog.cpp
   engine/task/task_provider.cpp
   engine/task/task_http.cpp
   engine/task/github_provider.cpp
@@ -328,6 +329,7 @@ if(MEMEX_BUILD_TESTS)
     app/tests/test_task_dialog.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
+    app/report_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -364,6 +366,25 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # 二期·日报周报窗口冒烟：真服务端进程 × 离屏 QDialog——连接→member1
+  # 写日报→当日重复提交=更新（同日期一行）→直属上级 owner1 团队聚合可见
+  #→「仅本周」过滤→无关者 admin1 看下属=空（判权服务端裁，无下属即空
+  # 列表）。判权矩阵（org-admin 不兜底/转岗断权/幽灵 403）走 test_files_api
+  # 协议腿，不在此重复
+  add_executable(test_report_dialog
+    app/tests/test_report_dialog.cpp
+    app/report_dialog.cpp)
+  target_link_libraries(test_report_dialog PRIVATE
+    memex_engine_collab Qt6::Widgets)
+  target_include_directories(test_report_dialog PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_report_dialog PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME report_dialog COMMAND test_report_dialog)
+  set_tests_properties(report_dialog PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # T2.4 模式切换与降级验收：不重启切换、历史合并展示（来源字段）、
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch
@@ -372,6 +393,7 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
+    app/report_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -410,6 +432,7 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
+    app/report_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -446,6 +469,7 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
+    app/report_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -504,6 +528,7 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
+    app/report_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -541,6 +566,7 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
+    app/report_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -576,6 +602,7 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
+    app/report_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -611,6 +638,7 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
+    app/report_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp

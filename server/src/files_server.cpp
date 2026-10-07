@@ -38,6 +38,17 @@ std::int64_t now_ms() {
       .count();
 }
 
+// 日报归属日校验（YYYY-MM-DD 形态；不做历法深查——客户端日期控件给出，
+// 形态门只挡明显坏值）
+bool is_date_ymd(const std::string& s) {
+  if (s.size() != 10 || s[4] != '-' || s[7] != '-') return false;
+  for (std::size_t i = 0; i < s.size(); ++i) {
+    if (i == 4 || i == 7) continue;
+    if (s[i] < '0' || s[i] > '9') return false;
+  }
+  return true;
+}
+
 const char* reason_phrase(int status) {
   switch (status) {
   case 200: return "OK";
@@ -283,6 +294,19 @@ struct FileServer::Impl {
                     if (r == "org-admin") return true;
                   }
                   return false;
+                });
+    // 显式允许：日报周报查看（二期）——自己看自己，或作者的直属上级
+    //（平台-3 权威表现查 front() 命中；org-admin 不兜底=设计口径日报
+    // 只对直属上级开放）；未命中 default-deny（幽灵账号同 403 不泄露）
+    az.add_rule(RuleEffect::ExplicitAllow, "report-read",
+                [this](const AuthzQuery& q) {
+                  if (q.action != "report:read") return false;
+                  const std::string author =
+                      resource_owner_prefix(q.resource);
+                  if (author.empty()) return false;
+                  if (author == q.subject) return true; // 自己看自己
+                  const auto chain = store.manager_chain(author);
+                  return !chain.empty() && chain.front() == q.subject;
                 });
   }
 
@@ -773,6 +797,19 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/approvals/withdraw" && method_ == "POST") {
       return route_approval_withdraw(body);
+    }
+    // 日报周报（二期）：写自己的（当日 upsert）/看自己/直属上级看下属
+    if (path_ == "/files/reports" && method_ == "POST") {
+      return route_report_save(body);
+    }
+    if (path_ == "/files/reports" && method_ == "GET") {
+      return route_reports_mine();
+    }
+    if (path_ == "/files/reports/read" && method_ == "GET") {
+      return route_reports_read();
+    }
+    if (path_ == "/files/reports/team" && method_ == "GET") {
+      return route_reports_team();
     }
     // R24-2 群备忘录：群维度共享知识（管理员维护；开放编辑后成员可写，
     // 全部编辑逐笔留痕可回滚）。判权走 AuthorizationService 群规则。
@@ -1492,6 +1529,112 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       return;
     }
     respond_json(200, {{"ok", true}});
+  }
+
+  // —— 日报周报（二期，设计稿 §二）：个人日报台账，当日重复=upsert
+  //    更新不留修订史；周报=按周聚合视图不单设表；直属上级可看下属
+  //   （az report:read，org-admin 不兜底）——
+  static json report_row_json(const ServerStore::ReportRow& r) {
+    return {{"id", r.id},
+            {"author", r.author},
+            {"date", r.report_date},
+            {"content", r.content},
+            {"created_ms", r.created_ms},
+            {"updated_ms", r.updated_ms}};
+  }
+
+  void route_report_save(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("content") ||
+        !j["content"].is_string() || j["content"].get<std::string>().empty()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：content"}});
+      return;
+    }
+    const std::string date = j.contains("date") && j["date"].is_string()
+                                 ? j["date"].get<std::string>()
+                                 : "";
+    if (!is_date_ymd(date)) {
+      respond_json(400, {{"ok", false},
+                         {"error", "date 须为 YYYY-MM-DD（日报归属日）"}});
+      return;
+    }
+    const Decision d = impl_.az.authorize(
+        {account, "report:write", "user:" + account, "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403, {{"ok", false}, {"error", "无权写入"}});
+      return;
+    }
+    const std::int64_t id = impl_.store.report_upsert(
+        account, date, j["content"].get<std::string>(), now_ms());
+    if (id <= 0) {
+      respond_json(500, {{"ok", false}, {"error", "日报落库失败"}});
+      return;
+    }
+    std::cout << "[MEMEX] report save account=" << account
+              << " date=" << date << std::endl;
+    respond_json(200, {{"ok", true}, {"id", id}});
+  }
+
+  void route_reports_mine() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json arr = json::array();
+    for (const auto& r : impl_.store.reports_of(account)) {
+      arr.push_back(report_row_json(r));
+    }
+    respond_json(200, {{"ok", true}, {"reports", std::move(arr)}});
+  }
+
+  void route_reports_read() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    const std::string author = query_param(query_, "author");
+    if (author.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少参数：author"}});
+      return;
+    }
+    // 判权不过=403（幽灵账号同口径：链空且非本人——不泄露存在性）
+    const Decision d = impl_.az.authorize(
+        {account, "report:read", "user:" + author, "owner=" + author});
+    if (!d.allowed) {
+      respond_json(403, {{"ok", false},
+                         {"error", "无权查看该日报（直属上级可看下属）"}});
+      return;
+    }
+    json arr = json::array();
+    for (const auto& r : impl_.store.reports_of(author)) {
+      arr.push_back(report_row_json(r));
+    }
+    respond_json(200, {{"ok", true},
+                       {"author", author},
+                       {"reports", std::move(arr)}});
+  }
+
+  void route_reports_team() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    // 直接下属逐人聚合（org_reporting_lines 反查）；逐行再过 az 与单读
+    // 同源（平台-3 现查现裁=转岗即时生效）
+    json team = json::array();
+    for (const auto& sub : impl_.store.direct_reports(account)) {
+      const Decision d = impl_.az.authorize(
+          {account, "report:read", "user:" + sub, "owner=" + sub});
+      if (!d.allowed) continue;
+      json rows = json::array();
+      for (const auto& r : impl_.store.reports_of(sub)) {
+        rows.push_back(report_row_json(r));
+      }
+      team.push_back({{"author", sub}, {"reports", std::move(rows)}});
+    }
+    respond_json(200, {{"ok", true}, {"team", std::move(team)}});
   }
 
   void route_upload(const std::string& body) {

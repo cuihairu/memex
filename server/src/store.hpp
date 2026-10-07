@@ -706,6 +706,28 @@ public:
   // 撤回（申请人专属；UPDATE ... WHERE applicant=? AND status='pending'）
   bool approval_withdraw(std::int64_t id, const std::string& applicant);
 
+  // —— 二期·日报周报（设计稿 §二）——
+  // 个人日报台账：当日重复提交=更新（UNIQUE(author,report_date) upsert，
+  // 不留修订史——同 R23-3 个人备忘录口径）；周报=日报按周聚合视图，
+  // 不单设表。直属上级可看下属（az report:read 在路由层裁）
+  struct ReportRow {
+    std::int64_t id{0};
+    std::string author;
+    std::string report_date; // YYYY-MM-DD（日报归属日）
+    std::string content;     // 三段自由文本（做了什么/明日计划/blockers）
+    std::int64_t created_ms{0};
+    std::int64_t updated_ms{0};
+  };
+  // 写（存在即更新 content/updated_ms，created_ms 不动）→ id
+  std::int64_t report_upsert(const std::string& author,
+                             const std::string& report_date,
+                             const std::string& content,
+                             std::int64_t ts_ms);
+  // 某人全部（日期倒序）——自己看自己/直属上级看下属（判权在路由层）
+  std::vector<ReportRow> reports_of(const std::string& author);
+  // 直接下属（org_reporting_lines 反查：manager_account=? 去重）
+  std::vector<std::string> direct_reports(const std::string& manager);
+
   // —— T4.2 跨态会话 ——
   // 建立（start）：插入一行进行中记录（同会话重复 start 只记首条）。
   bool cross_log_start(const std::string& account,
