@@ -118,6 +118,9 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_webhook tests/test_webhook.cpp)
   target_link_libraries(test_webhook PRIVATE memex_server_core)
   add_test(NAME webhook COMMAND test_webhook)
+  add_executable(test_bot tests/test_bot.cpp)
+  target_link_libraries(test_bot PRIVATE memex_server_core)
+  add_test(NAME bot COMMAND test_bot)
   set_tests_properties(webhook PROPERTIES TIMEOUT 60)
 
   # R23-1 存储抽象层验收：文件元数据表、秒传哈希去重、群/人两级配额、

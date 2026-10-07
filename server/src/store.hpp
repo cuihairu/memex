@@ -178,6 +178,17 @@ struct WebhookRow {
   bool revoked{false};
 };
 
+// 机器人（bot）台账：name 不含 "bot:" 前缀（全名= "bot:"+name 伪账号，
+// 直插 group_members/offline_messages——两表无外键，零迁移）。token 明文
+// 仅 add 时输出一次，库存 sha256 摘要；disabled=1 即 403 拒收发。
+struct BotRow {
+  std::string name;
+  std::string token_hash;
+  std::string created_by;
+  std::int64_t created_ms{0};
+  bool disabled{false};
+};
+
 class ServerStore {
 public:
   ServerStore() = default;
@@ -566,6 +577,25 @@ public:
   std::vector<WebhookRow> webhook_list();
   // 吊销（按 id；返回是否确有该行被置位）
   bool webhook_revoke(std::int64_t id);
+
+  // —— 机器人（bot）台账 ——
+  // 建 bot（name 不含 "bot:" 前缀，不得为空或含 ':'）；重名返回 0。
+  std::int64_t bot_add(const std::string& name, const std::string& token_hash,
+                       const std::string& created_by, std::int64_t created_ms);
+  // 按 token 摘要取行（不存在/禁用行也返回，由调用方按 disabled 裁 403）。
+  std::optional<BotRow> bot_by_token(const std::string& token_hash);
+  // 全部行（CLI list）
+  std::vector<BotRow> bot_list();
+  // 按 name 取行（CLI join/leave 前校验）
+  std::optional<BotRow> bot_by_name(const std::string& name);
+  bool bot_remove(const std::string& name);
+  // 禁用/启用（disabled=是否禁用；返回是否确有该行）
+  bool bot_set_disabled(const std::string& name, bool disabled);
+  // bot 加群/退群：直插/直删 group_members（伪账号，无外键约束）。
+  // join：群或 bot 不存在返回 false；leave：本非成员返回 false。
+  bool bot_join_group(const std::string& name, std::uint64_t group_id,
+                      std::int64_t joined_ms);
+  bool bot_leave_group(const std::string& name, std::uint64_t group_id);
   // ORG_DATA 下发视图（按查看者过滤与脱敏，T4.6）：
   //  ① 被隐藏成员／隐藏部门（整树）对查看者不可见——管理员、白名单与
   //    部门内自己人豁免；② 查看者所在部门若限看本部门，则只见本部门子树；

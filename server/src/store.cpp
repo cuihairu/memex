@@ -330,6 +330,15 @@ bool ServerStore::ensure_schema() {
       "  name TEXT NOT NULL DEFAULT '',"
       "  created_ms INTEGER NOT NULL,"
       "  revoked INTEGER NOT NULL DEFAULT 0);"
+      // 机器人（bot）：name 不含 "bot:" 前缀（伪账号="bot:"+name，直插
+      // group_members/offline_messages——两表无外键，零迁移）；token 只存
+      // sha256 摘要（明文仅 add 时输出一次）；disabled=1 即拒收发。
+      "CREATE TABLE IF NOT EXISTS bots ("
+      "  name TEXT PRIMARY KEY,"
+      "  token_hash TEXT NOT NULL UNIQUE,"
+      "  created_by TEXT NOT NULL,"
+      "  created_ms INTEGER NOT NULL,"
+      "  disabled INTEGER NOT NULL DEFAULT 0);"
       // R23-1 文件存储元数据：文件表（秒传键 file_hash、归属、对象键、来源、状态）
       // R23-2 起秒传键含归属，R23-3 起再含类目 kind：
       // UNIQUE(file_hash, owner, belong_gid, belong_uid, kind)——同属主同
@@ -4460,6 +4469,163 @@ bool ServerStore::webhook_revoke(std::int64_t id) {
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
   sqlite3_bind_int64(st, 1, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+// —— 机器人（bot）台账 ——
+
+std::int64_t ServerStore::bot_add(const std::string& name,
+                                  const std::string& token_hash,
+                                  const std::string& created_by,
+                                  std::int64_t created_ms) {
+  if (name.empty() || name.find(':') != std::string::npos ||
+      token_hash.empty()) {
+    return 0;
+  }
+  const char* sql =
+      "INSERT INTO bots(name, token_hash, created_by, created_ms)"
+      " VALUES(?,?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, token_hash.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, created_by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, created_ms);
+  std::int64_t id = 0;
+  if (sqlite3_step(st) == SQLITE_DONE) id = sqlite3_last_insert_rowid(db_);
+  sqlite3_finalize(st);
+  return id;
+}
+
+std::optional<BotRow> ServerStore::bot_by_token(
+    const std::string& token_hash) {
+  if (token_hash.empty()) return std::nullopt;
+  const char* sql =
+      "SELECT name, token_hash, created_by, created_ms, disabled"
+      " FROM bots WHERE token_hash=?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_text(st, 1, token_hash.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<BotRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    BotRow r;
+    r.name = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    r.token_hash = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.created_by = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.created_ms = sqlite3_column_int64(st, 3);
+    r.disabled = sqlite3_column_int(st, 4) != 0;
+    out = std::move(r);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<BotRow> ServerStore::bot_list() {
+  std::vector<BotRow> out;
+  const char* sql =
+      "SELECT name, token_hash, created_by, created_ms, disabled"
+      " FROM bots ORDER BY created_ms, name;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    BotRow r;
+    r.name = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    r.token_hash = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.created_by = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.created_ms = sqlite3_column_int64(st, 3);
+    r.disabled = sqlite3_column_int(st, 4) != 0;
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::optional<BotRow> ServerStore::bot_by_name(const std::string& name) {
+  if (name.empty()) return std::nullopt;
+  const char* sql =
+      "SELECT name, token_hash, created_by, created_ms, disabled"
+      " FROM bots WHERE name=?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<BotRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    BotRow r;
+    r.name = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    r.token_hash = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.created_by = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.created_ms = sqlite3_column_int64(st, 3);
+    r.disabled = sqlite3_column_int(st, 4) != 0;
+    out = std::move(r);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::bot_remove(const std::string& name) {
+  // 连带清全部群成员行（伪账号退群由本方法一并兜底）。
+  const char* del_member =
+      "DELETE FROM group_members WHERE account=?;";
+  const char* del_bot = "DELETE FROM bots WHERE name=?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, del_member, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, ("bot:" + name).c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_step(st);
+  sqlite3_finalize(st);
+  if (sqlite3_prepare_v2(db_, del_bot, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::bot_set_disabled(const std::string& name, bool disabled) {
+  const char* sql = "UPDATE bots SET disabled=? WHERE name=?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int(st, 1, disabled ? 1 : 0);
+  sqlite3_bind_text(st, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::bot_join_group(const std::string& name,
+                                 std::uint64_t group_id,
+                                 std::int64_t joined_ms) {
+  if (!bot_by_name(name) || !group_info(group_id)) return false;
+  const char* sql =
+      "INSERT OR IGNORE INTO group_members(group_id, account, joined_ms)"
+      " VALUES(?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, ("bot:" + name).c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, joined_ms);
+  sqlite3_step(st);
+  sqlite3_finalize(st);
+  return true;
+}
+
+bool ServerStore::bot_leave_group(const std::string& name,
+                                  std::uint64_t group_id) {
+  if (!bot_by_name(name)) return false;
+  const char* sql =
+      "DELETE FROM group_members WHERE group_id=? AND account=?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, ("bot:" + name).c_str(), -1, SQLITE_TRANSIENT);
   const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
   sqlite3_finalize(st);
   return ok;

@@ -8,6 +8,8 @@
 #include <iostream>
 #include <sstream>
 
+#include <algorithm> // std::remove（发送者不收自己的消息）
+
 #include <nlohmann/json.hpp>
 
 #include <memex/protocol/messages.hpp>
@@ -123,7 +125,6 @@ private:
       const auto vb = val.find_first_not_of(" \t");
       val = vb == std::string::npos ? std::string{} : val.substr(vb);
       if (key == "content-length") {
-        seen_content_length_ = true;
         if (val.empty() ||
             val.find_first_not_of("0123456789") != std::string::npos) {
           content_length_ = static_cast<std::size_t>(-1); // 非法数值
@@ -134,13 +135,16 @@ private:
       } else if (key == "expect" &&
                  val.find("100-continue") != std::string::npos) {
         expect_continue_ = true;
+      } else if (key == "authorization") {
+        authorization_ = val; // /bot/* Bearer 鉴权用
       }
     }
-    if (!seen_content_length_ ||
-        content_length_ == static_cast<std::size_t>(-1)) {
-      respond(400, {{"ok", false}, {"error", "Content-Length 缺失或非法"}});
+    if (content_length_ == static_cast<std::size_t>(-1)) {
+      respond(400, {{"ok", false}, {"error", "Content-Length 非法"}});
       return false;
     }
+    // 头缺席＝无 body（RFC 7230：GET 无 Content-Length 是常态；POST 缺头
+    // 则 body 按空处理，后续 JSON 校验自会 400）
     if (content_length_ > kMaxBody) {
       body_too_large_ = true;
       return true; // 交由调用方回 413
@@ -149,8 +153,12 @@ private:
     return true;
   }
 
-  // 请求已读满：鉴权 → JSON 校验 → 投递 → 回写。
+  // 请求已读满：按路径分路（/bot/* 机器人 API｜/hook/<token> webhook）。
   void process(const std::string& body) {
+    if (uri_.rfind("/bot/", 0) == 0) {
+      process_bot(body);
+      return;
+    }
     // —— 方法与路径（POST /hook/<token>）——
     if (method_ != "POST") {
       respond(405, {{"ok", false}, {"error", "方法不支持：请用 POST"}});
@@ -253,6 +261,130 @@ private:
                   {"recipients", d.recipients}});
   }
 
+  // —— /bot/* 机器人 API（Bearer token 鉴权；与 webhook 共用同一端口与
+  // 投递面，见 docs/design/机器人平台.md）——
+  void process_bot(const std::string& body) {
+    const bool is_get = method_ == "GET";
+    const bool is_post = method_ == "POST";
+    if (uri_ == "/bot/updates" ? !is_get : !is_post) {
+      respond(405, {{"ok", false},
+                    {"error", uri_ == "/bot/updates"
+                                  ? "方法不支持：updates 用 GET"
+                                  : "方法不支持：请用 POST"}});
+      return;
+    }
+
+    // —— Bearer token 鉴权（sha256 摘要比对 bots 表）——
+    const std::string bearer = "Bearer ";
+    std::string token;
+    if (authorization_.rfind(bearer, 0) == 0) token = authorization_.substr(bearer.size());
+    const auto bot =
+        server_.store().bot_by_token(token.empty() ? std::string{} : sha256_hex(token));
+    if (!bot) {
+      respond(401, {{"ok", false}, {"error", "token 缺失、无效或 bot 已删除"}});
+      return;
+    }
+    if (bot->disabled) {
+      respond(403, {{"ok", false}, {"error", "bot 已禁用"}});
+      return;
+    }
+    const std::string self = "bot:" + bot->name;
+
+    if (uri_ == "/bot/send") {
+      json j;
+      if (!parse_json_object(body, j)) return;
+      if (!j.contains("target") || !j["target"].is_string() ||
+          j["target"].get<std::string>().empty()) {
+        respond(400, {{"ok", false}, {"error", "缺少或为空的字段：target"}});
+        return;
+      }
+      if (!j.contains("text") || !j["text"].is_string() ||
+          j["text"].get<std::string>().empty()) {
+        respond(400, {{"ok", false}, {"error", "缺少或为空的字段：text"}});
+        return;
+      }
+      const std::string target = j["target"].get<std::string>();
+      const std::string text = j["text"].get<std::string>();
+      // 群发送：群存在性 404 先于成员资格 403（与设计稿状态表同序）；
+      // 个人目标交给 deliver_notice 校验（404）
+      if (target.rfind("group:", 0) == 0) {
+        const auto gid = static_cast<std::uint64_t>(
+            std::strtoull(target.c_str() + 6, nullptr, 10));
+        if (!server_.store().group_info(gid)) {
+          respond(404, {{"ok", false}, {"error", "目标群不存在：" + target}});
+          return;
+        }
+        if (!server_.store().is_group_member(gid, self)) {
+          respond(403, {{"ok", false}, {"error", "bot 不在该群，无法发送"}});
+          return;
+        }
+      }
+      // sender=bot:<name>：归档 from＝bot 身份（留痕口径与普通消息同链路）
+      const NoticeDelivery d = deliver_notice(
+          server_, target, self, text, /*urgency=*/1, /*jump_url=*/"", self);
+      std::cout << "[MEMEX] bot " << self << " send " << d.http_status
+                << " target=" << target
+                << (d.ok ? " msg_id=" + d.msg_id : " error=" + d.error)
+                << std::endl;
+      if (!d.ok) {
+        respond(d.http_status, {{"ok", false}, {"error", d.error}});
+        return;
+      }
+      respond(200, {{"ok", true}, {"msg_id", d.msg_id},
+                    {"recipients", d.recipients}});
+      return;
+    }
+
+    if (uri_ == "/bot/updates") {
+      // 非阻塞 drain：即拉即回（真挂起长轮询会卡共享 io_context，留后续）。
+      json updates = json::array();
+      for (const auto& blob : server_.store().pending_offline(self)) {
+        memex::protocol::Message m;
+        if (!m.ParseFromString(blob)) continue; // 解不开的跳过（不应发生）
+        if (m.type() != memex::protocol::v1::TEXT) continue; // 只承诺文本
+        updates.push_back({{"msg_id", m.msg_id()},
+                           {"from", m.from()},
+                           {"to", m.to()},
+                           {"text", m.text().text()},
+                           {"ts_ms", m.ts_ms()}});
+      }
+      respond(200, {{"ok", true}, {"updates", updates}});
+      return;
+    }
+
+    if (uri_ == "/bot/ack") {
+      json j;
+      if (!parse_json_object(body, j)) return;
+      if (!j.contains("msg_id") || !j["msg_id"].is_string() ||
+          j["msg_id"].get<std::string>().empty()) {
+        respond(400, {{"ok", false}, {"error", "缺少或为空的字段：msg_id"}});
+        return;
+      }
+      const bool acked =
+          server_.store().ack_offline(j["msg_id"].get<std::string>(), self);
+      respond(200, {{"ok", true}, {"acked", acked}});
+      return;
+    }
+
+    respond(404, {{"ok", false},
+                  {"error", "路径不存在（/bot/send | /bot/updates | /bot/ack）"}});
+  }
+
+  // JSON body 解析公共门（非法/非对象一律 400）。
+  bool parse_json_object(const std::string& body, json& out) {
+    try {
+      out = json::parse(body);
+    } catch (const std::exception&) {
+      respond(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return false;
+    }
+    if (!out.is_object()) {
+      respond(400, {{"ok", false}, {"error", "请求体应为 JSON 对象"}});
+      return false;
+    }
+    return true;
+  }
+
   void respond(int status, const json& body) {
     const std::string payload = body.dump();
     std::ostringstream head;
@@ -291,9 +423,9 @@ private:
   bool head_parsed_{false};
   bool body_too_large_{false};
   bool expect_continue_{false};
-  bool seen_content_length_{false};
   std::string method_;
   std::string uri_;
+  std::string authorization_;
   std::size_t content_length_{0};
 };
 
@@ -302,7 +434,8 @@ private:
 NoticeDelivery deliver_notice(CollabServer& server, const std::string& target,
                               const std::string& title,
                               const std::string& content, int urgency,
-                              const std::string& jump_url) {
+                              const std::string& jump_url,
+                              const std::string& sender) {
   using Message = memex::protocol::Message;
   NoticeDelivery r;
 
@@ -320,6 +453,9 @@ NoticeDelivery deliver_notice(CollabServer& server, const std::string& target,
       return r;
     }
     recipients = store.group_members(gid); // 群通知发全体成员（含群主）
+    // 发送者不收自己的消息（镜像 TEXT 扇出语义；bot 发群不回环自队列）
+    recipients.erase(std::remove(recipients.begin(), recipients.end(), sender),
+                     recipients.end());
     if (recipients.empty()) {
       r.http_status = 404;
       r.error = "目标群无成员：" + target;
@@ -334,15 +470,16 @@ NoticeDelivery deliver_notice(CollabServer& server, const std::string& target,
     recipients.push_back(target);
   }
 
-  // —— 组 NOTICE 信封（服务端生成：无会话 seq，msg_id 以时间戳＋随机盐
-  // 派生，同毫秒并发投递也不撞）——
+  // —— 组 NOTICE 信封（服务端生成：无会话 seq，msg_id 以 sender＋时间戳＋
+  // 随机盐派生，同毫秒并发投递也不撞；sender 缺省=系统通知，bot 传
+  // "bot:<name>" 即得 bot 身份归档）——
   const std::int64_t ts = now_ms();
   const std::string msg_id = sha256_hex(
-      std::string(memex::protocol::kNoticeSender) + ":" + target + ":" +
-      std::to_string(ts) + ":" + random_salt_hex());
+      sender + ":" + target + ":" + std::to_string(ts) + ":" +
+      random_salt_hex());
   Message out;
   out.set_type(memex::protocol::v1::NOTICE);
-  out.set_from(memex::protocol::kNoticeSender);
+  out.set_from(sender);
   out.set_to(target);
   out.set_ts_ms(ts);
   out.set_msg_id(msg_id);
@@ -355,7 +492,7 @@ NoticeDelivery deliver_notice(CollabServer& server, const std::string& target,
 
   for (const auto& to : recipients) store.queue_offline(msg_id, to, blob);
   // T2.3 全量归档（正文用与客户端同源的 compose_notice_text，前后对账一致）
-  store.store_message(msg_id, memex::protocol::kNoticeSender, target,
+  store.store_message(msg_id, sender, target,
                       static_cast<int>(memex::protocol::v1::NOTICE),
                       memex::protocol::compose_notice_text(title, content,
                                                            jump_url),
@@ -365,11 +502,11 @@ NoticeDelivery deliver_notice(CollabServer& server, const std::string& target,
   }
   // T4.5 常用联系人最近刷新（镜像 TEXT 投递面：先 touch 再向在线收件人
   // 回推全量——「通知」会话即时进列表；整表替换，重复推送无害）
-  store.fav_touch(memex::protocol::kNoticeSender, target, ts);
+  store.fav_touch(sender, target, ts);
   if (is_group) {
     for (const auto& to : recipients) store.fav_touch(to, target, ts);
   } else {
-    store.fav_touch(target, memex::protocol::kNoticeSender, ts);
+    store.fav_touch(target, sender, ts);
   }
   for (const auto& to : recipients) {
     for (const auto& s : server.online_sessions(to)) {

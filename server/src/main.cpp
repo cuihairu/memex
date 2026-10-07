@@ -1856,6 +1856,140 @@ int cmd_assist(int argc, char** argv, const std::string& db_path) {
   return 2;
 }
 
+// 机器人（bot）台账：add 建 token（明文仅此一次，库内存 sha256 摘要）／
+// list 一览／remove 删除（连带退全部群）／disable|enable 开关／join|leave
+// 群成员维护。bot 全名="bot:<name>" 伪账号：加群后收群消息（TEXT 扇出自动
+// 入队）、可群发；单聊 to=bot:<name> 直达。收发走 webhook 端口 /bot/*。
+int cmd_bot(int argc, char** argv, const std::string& db_path) {
+  if (argc < 1) {
+    std::cerr << "用法：memex_server bot add <name> --by <账号> | list | "
+                 "remove <name> | disable|enable <name> | join|leave "
+                 "<name> <群号> [--db <库>]\n";
+    return 2;
+  }
+  const std::string_view sub = argv[0];
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+
+  if (sub == "add") {
+    if (argc < 2) {
+      std::cerr << "用法：bot add <name> --by <账号>（谁建的须留痕）\n";
+      return 2;
+    }
+    const std::string name = argv[1];
+    std::string by;
+    for (int i = 2; i + 1 < argc; i += 2)
+      if (std::string_view(argv[i]) == "--by") by = argv[i + 1];
+    if (by.empty()) {
+      std::cerr << "缺 --by <账号>\n";
+      return 2;
+    }
+    if (!store.find_account(by)) {
+      std::cerr << "操作者账号不存在：" << by << "\n";
+      return 1;
+    }
+    if (name.find(':') != std::string::npos) {
+      std::cerr << "bot 名不得含 ':'（前缀 bot: 为系统保留）\n";
+      return 2;
+    }
+    const std::string token = std::string("bot_") + memex::server::random_salt_hex();
+    const auto created_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now()
+                                    .time_since_epoch())
+                                .count();
+    const auto id = store.bot_add(name, memex::server::sha256_hex(token), by,
+                                  created_ms);
+    if (id == 0) {
+      std::cerr << "bot 创建失败（重名或参数非法）：" << name << "\n";
+      return 1;
+    }
+    std::cout << "已创建 bot：" << name << "（全名 bot:" << name << "）\n"
+              << "token：" << token << "\n"
+              << "（token 仅此一次显示，请立即保存；删除：memex_server bot remove "
+              << name << "）\n"
+              << "收发示例（与 webhook 同端口 " << kDefaultWebhookPort << "）：\n"
+              << "  curl -s -H 'Authorization: Bearer " << token << "' \\\n"
+              << "    -H 'Content-Type: application/json' \\\n"
+              << "    -d '{\"target\":\"<账号|group:N>\",\"text\":\"hello\"}' \\\n"
+              << "    http://<服务器>:" << kDefaultWebhookPort << "/bot/send\n"
+              << "  curl -s -H 'Authorization: Bearer " << token << "' \\\n"
+              << "    http://<服务器>:" << kDefaultWebhookPort << "/bot/updates\n";
+    return 0;
+  }
+
+  if (sub == "list") {
+    const auto rows = store.bot_list();
+    std::cout << "name\t全名\t创建人\ttoken 摘要前缀\t创建时刻\t状态\n";
+    for (const auto& b : rows) {
+      std::time_t secs = static_cast<std::time_t>(b.created_ms / 1000);
+      std::tm tm{};
+      local_time(secs, &tm);
+      char when[24];
+      std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
+      std::cout << b.name << "\tbot:" << b.name << '\t' << b.created_by
+                << '\t' << b.token_hash.substr(0, 12) << '\t' << when << '\t'
+                << (b.disabled ? "已禁用" : "启用") << '\n';
+    }
+    std::cout << "共 " << rows.size() << " 个\n";
+    return 0;
+  }
+
+  if (sub == "remove" || sub == "disable" || sub == "enable" || sub == "join" ||
+      sub == "leave") {
+    if (argc < 2) {
+      std::cerr << "用法：bot " << sub << " <name>"
+                << (sub == "join" || sub == "leave" ? " <群号>" : "") << "\n";
+      return 2;
+    }
+    const std::string name = argv[1];
+    if (sub == "remove") {
+      if (!store.bot_remove(name)) {
+        std::cerr << "无此 bot：" << name << "\n";
+        return 1;
+      }
+      std::cout << "已删除 bot：" << name << "（已连带退出全部群）\n";
+      return 0;
+    }
+    if (sub == "disable" || sub == "enable") {
+      if (!store.bot_set_disabled(name, sub == "disable")) {
+        std::cerr << "无此 bot：" << name << "\n";
+        return 1;
+      }
+      std::cout << "已" << (sub == "disable" ? "禁用" : "启用") << " bot："
+                << name << "\n";
+      return 0;
+    }
+    // join / leave <name> <群号>
+    if (argc < 3) {
+      std::cerr << "用法：bot " << sub << " <name> <群号>\n";
+      return 2;
+    }
+    const auto gid = std::strtoull(argv[2], nullptr, 10);
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+    const bool ok = sub == "join" ? store.bot_join_group(name, gid, now)
+                                  : store.bot_leave_group(name, gid);
+    if (!ok) {
+      std::cerr << (sub == "join" ? "加群失败（bot 或群不存在）"
+                                  : "退群失败（bot 不存在或本不在群）")
+                << "：" << name << " → 群 " << gid << "\n";
+      return 1;
+    }
+    std::cout << "bot " << name << (sub == "join" ? " 已加入群 " : " 已退出群 ")
+              << gid << "\n";
+    return 0;
+  }
+
+  std::cerr << "未知 bot 子命令：" << sub << "\n"
+            << "用法：bot add <name> --by <账号> | list | remove <name> | "
+               "disable|enable <name> | join|leave <name> <群号>\n";
+  return 2;
+}
+
 // webhook 接入台账（T4.10）：create 建 token（明文仅此一次，库内存 sha256
 // 摘要）／list 一览／revoke 吊销。目标＝账号（个人）或 group:<群号>（按群独立）。
 int cmd_webhook(int argc, char** argv, const std::string& db_path) {
@@ -2209,6 +2343,7 @@ int main(int argc, char** argv) {
     if (cmd == "group") return cmd_group(sub_argc, sub_argv, db_path);
     if (cmd == "policy") return cmd_policy(sub_argc, sub_argv, db_path);
     if (cmd == "assist") return cmd_assist(sub_argc, sub_argv, db_path);
+    if (cmd == "bot") return cmd_bot(sub_argc, sub_argv, db_path);
     if (cmd == "webhook") return cmd_webhook(sub_argc, sub_argv, db_path);
     if (cmd == "storage") return cmd_storage(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
