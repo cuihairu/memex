@@ -1080,16 +1080,38 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         j["title"].get<std::string>().empty() ||
         (j.contains("note") && !j["note"].is_string()) ||
         (j.contains("due_ms") && !j["due_ms"].is_number_integer()) ||
-        (j.contains("assignee") && !j["assignee"].is_string())) {
+        (j.contains("assignee") && !j["assignee"].is_string()) ||
+        (j.contains("provider") && !j["provider"].is_string()) ||
+        (j.contains("ext_key") && !j["ext_key"].is_string())) {
       respond_json(
           400,
           {{"ok", false},
-           {"error", "缺少字段：title（非空）；note/due_ms/assignee 可选"}});
+           {"error",
+            "缺少字段：title（非空）；note/due_ms/assignee/provider/"
+            "ext_key 可选"}});
+      return;
+    }
+    // R27-2 外部任务登记：provider/ext_key 成对，空=本地任务。外部条目
+    // 是个人登记（详情 URL 由客户端 provider SPI 解析，服务端只存引用），
+    // 不转派——分配语义（同群/同部门互派）只对本地任务定义。
+    std::string provider, ext_key;
+    if (j.contains("provider")) provider = j["provider"].get<std::string>();
+    if (j.contains("ext_key")) ext_key = j["ext_key"].get<std::string>();
+    if (provider.empty() != ext_key.empty()) {
+      respond_json(400,
+                   {{"ok", false},
+                    {"error",
+                     "外部任务须 provider 与 ext_key 成对提供"}});
       return;
     }
     std::string assignee = account;
     if (j.contains("assignee") && !j["assignee"].get<std::string>().empty()) {
       assignee = j["assignee"].get<std::string>();
+    }
+    if (!provider.empty() && assignee != account) {
+      respond_json(400, {{"ok", false},
+                         {"error", "外部任务不转派（个人登记）"}});
+      return;
     }
     if (assignee != account) {
       // 分配=特权动作：同群/同部门才可互派（task-assign 规则现查现裁）
@@ -1109,7 +1131,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         j.contains("note") ? j["note"].get<std::string>() : "";
     const std::int64_t id = impl_.store.task_create(
         assignee, account, j["title"].get<std::string>(), note, due_ms,
-        now_ms());
+        now_ms(), provider, ext_key);
     if (id <= 0) {
       respond_json(404, {{"ok", false}, {"error", "任务接收人不存在"}});
       return;
@@ -1134,7 +1156,9 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                       {"reminded_ms", t.reminded_ms},
                       {"done", t.done},
                       {"done_ms", t.done_ms},
-                      {"created_ms", t.created_ms}});
+                      {"created_ms", t.created_ms},
+                      {"provider", t.provider},
+                      {"ext_key", t.ext_key}});
     }
     json assigned = json::array();
     for (const auto& t : impl_.store.tasks_assigned_by(account)) {
@@ -1145,7 +1169,9 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                           {"due_ms", t.due_ms},
                           {"done", t.done},
                           {"done_ms", t.done_ms},
-                          {"created_ms", t.created_ms}});
+                          {"created_ms", t.created_ms},
+                          {"provider", t.provider},
+                          {"ext_key", t.ext_key}});
     }
     respond_json(200, {{"ok", true}, {"tasks", mine},
                        {"assigned_by_me", assigned}});

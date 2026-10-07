@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QDateTime>
 #include <QDateTimeEdit>
+#include <QDesktopServices>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -18,6 +19,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QTimer>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include "engine/collab/files_client.hpp"
@@ -39,6 +41,7 @@ TaskDialog::TaskDialog(QWidget* parent) : QDialog(parent) {
     set_status(QStringLiteral("已连接（") + client_->account() +
                QStringLiteral("）"));
     btn_add_->setEnabled(true);
+    btn_add_ext_->setEnabled(true);
     refresh();
     if (!findChild<QTimer*>("task_poll")) {
       auto* poll = new QTimer(this);
@@ -129,6 +132,26 @@ void TaskDialog::build_ui() {
   form2->addWidget(assignee_, 1);
   layout->addLayout(form2);
 
+  // 外部任务登记区（R27-2）：provider（内置 L1 预设）＋键（「project#键」
+  // 或完整链接）。登记前本地解析 detail URL——解析不出不发网不落库。
+  auto* form3 = new QHBoxLayout;
+  form3->addWidget(new QLabel(QStringLiteral("外部任务"), this));
+  ext_provider_ = new QComboBox(this);
+  for (const auto* p : providers_.providers()) {
+    ext_provider_->addItem(p->name(), p->id());
+  }
+  const int url_idx = ext_provider_->findData(QStringLiteral("url"));
+  if (url_idx >= 0) ext_provider_->setCurrentIndex(url_idx); // 粘贴链接即登记
+  ext_key_ = new QLineEdit(this);
+  ext_key_->setPlaceholderText(
+      QStringLiteral("仓库/站点#键 或完整链接（如 org/repo#12）"));
+  btn_add_ext_ = new QPushButton(QStringLiteral("登记外部任务"), this);
+  btn_add_ext_->setEnabled(false);
+  form3->addWidget(ext_provider_);
+  form3->addWidget(ext_key_, 1);
+  form3->addWidget(btn_add_ext_);
+  layout->addLayout(form3);
+
   // 操作区
   auto* ops = new QHBoxLayout;
   btn_add_ = new QPushButton(QStringLiteral("添加任务"), this);
@@ -156,6 +179,13 @@ void TaskDialog::build_ui() {
              due_->dateTime().toMSecsSinceEpoch(),
              who.startsWith(QStringLiteral("（")) ? QString() : who);
   });
+  connect(btn_add_ext_, &QPushButton::clicked, this, [this] {
+    if (add_external_task(ext_provider_->currentData().toString(),
+                          ext_key_->text(), title_->text())) {
+      title_->clear();
+      ext_key_->clear();
+    }
+  });
   connect(btn_toggle_, &QPushButton::clicked, this,
           [this] { toggle_selected_done(); });
   connect(btn_delete_, &QPushButton::clicked, this, [this] {
@@ -170,7 +200,16 @@ void TaskDialog::build_ui() {
   });
   connect(btn_refresh_, &QPushButton::clicked, this, [this] { refresh(); });
   connect(list_, &QListWidget::itemDoubleClicked, this,
-          [this](QListWidgetItem*) { toggle_selected_done(); });
+          [this](QListWidgetItem* it) {
+            // 外部行双击=跳外部详情（外部行的主语义）；本地行双击=勾完成
+            const QString url =
+                it ? it->data(Qt::UserRole + 5).toString() : QString();
+            if (!url.isEmpty()) {
+              QDesktopServices::openUrl(QUrl(url));
+              return;
+            }
+            toggle_selected_done();
+          });
 }
 
 void TaskDialog::connect_to(const QString& host, quint16 files_port,
@@ -214,6 +253,47 @@ bool TaskDialog::add_task(const QString& title, const QString& note,
   }
   client_->create_task(title, note, due_ms, assignee);
   return true;
+}
+
+void TaskDialog::split_ext_key(const QString& raw, QString& project,
+                               QString& key) {
+  const qint64 at = raw.lastIndexOf(QLatin1Char('#'));
+  if (at > 0) {
+    project = raw.left(at);
+    key = raw.mid(at + 1);
+  } else {
+    key = raw; // 无 # = 整串为键（直通链接等）
+  }
+}
+
+bool TaskDialog::add_external_task(const QString& provider_id,
+                                   const QString& key_input,
+                                   const QString& title) {
+  if (!is_connected()) {
+    set_status(QStringLiteral("未连接文件面"), true);
+    return false;
+  }
+  const QString raw = key_input.trimmed();
+  if (raw.isEmpty()) {
+    set_status(QStringLiteral("外部键不能为空"), true);
+    return false;
+  }
+  // detailUrl 必带：解析不出 URL 本地拒不发网不落库（宁缺毋滥造坏链）
+  QString project, key;
+  split_ext_key(raw, project, key);
+  if (providers_.detail_url(provider_id, key, project).isEmpty()) {
+    set_status(QStringLiteral("解析不出详情链接（provider 未登记或键不合法）"),
+               true);
+    return false;
+  }
+  client_->create_task(title.trimmed().isEmpty() ? raw : title.trimmed(),
+                       QString(), 0, QString(), provider_id, raw);
+  return true;
+}
+
+QString TaskDialog::selected_detail_url() const {
+  const auto* item = list_->currentItem();
+  return item ? item->data(Qt::UserRole + 5).toString() : QString();
 }
 
 bool TaskDialog::toggle_selected_done() {
@@ -269,40 +349,54 @@ void TaskDialog::populate(const QJsonArray& mine, const QJsonArray& assigned) {
   list_->clear();
   for (const auto& v : mine) {
     const auto t = v.toObject();
-    const QString creator =
-        t.value(QStringLiteral("creator")).toString();
-    const bool self = creator == account_;
-    const qint64 due = static_cast<qint64>(
-        t.value(QStringLiteral("due_ms")).toDouble());
-    QString when;
-    if (due > 0) {
-      when = QStringLiteral("  提醒 %1")
-                 .arg(QDateTime::fromMSecsSinceEpoch(due)
-                          .toString(QStringLiteral("MM-dd HH:mm")));
-    }
-    auto* item =
-        new QListWidgetItem(QStringLiteral("%1%2  %3%4")
-                                .arg(t.value(QStringLiteral("done")).toBool()
-                                         ? QStringLiteral("[x] ")
-                                         : QStringLiteral("[ ] "),
-                                     t.value(QStringLiteral("title"))
-                                         .toString(),
-                                     self ? QStringLiteral("自建")
-                                          : QStringLiteral("由 %1 分配")
-                                                .arg(creator),
-                                     when),
-                            list_);
-    item->setData(Qt::UserRole,
-                  t.value(QStringLiteral("id")).toDouble());
-    item->setData(Qt::UserRole + 1,
-                  t.value(QStringLiteral("done")).toBool());
-    item->setData(Qt::UserRole + 2, due);
+    const QString prov = t.value(QStringLiteral("provider")).toString();
+    const bool done = t.value(QStringLiteral("done")).toBool();
+    auto* item = new QListWidgetItem(QString(), list_);
+    item->setData(Qt::UserRole, t.value(QStringLiteral("id")).toDouble());
+    item->setData(Qt::UserRole + 1, done);
+    item->setData(Qt::UserRole + 2,
+                  static_cast<qint64>(
+                      t.value(QStringLiteral("due_ms")).toDouble()));
     item->setData(Qt::UserRole + 3,
                   static_cast<qint64>(
                       t.value(QStringLiteral("reminded_ms")).toDouble()));
     item->setData(Qt::UserRole + 4,
                   t.value(QStringLiteral("title")).toString());
-    if (t.value(QStringLiteral("done")).toBool()) {
+    if (!prov.isEmpty()) {
+      // 外部任务（R27-2）：🌐 标注 provider·键原文，现解析 detail URL
+      //（provider 未登记/键不合法=无跳转，行仍在、双击给状态提示）
+      const QString raw = t.value(QStringLiteral("ext_key")).toString();
+      QString project, key;
+      split_ext_key(raw, project, key);
+      item->setData(Qt::UserRole + 5,
+                    providers_.detail_url(prov, key, project));
+      const auto* p = providers_.provider(prov);
+      item->setText(QStringLiteral("%1🌐 %2  %3·%4")
+                        .arg(done ? QStringLiteral("[x] ")
+                                  : QStringLiteral("[ ] "),
+                             t.value(QStringLiteral("title")).toString(),
+                             p != nullptr ? p->name() : prov, raw));
+    } else {
+      const QString creator =
+          t.value(QStringLiteral("creator")).toString();
+      const bool self = creator == account_;
+      const qint64 due = item->data(Qt::UserRole + 2).toLongLong();
+      QString when;
+      if (due > 0) {
+        when = QStringLiteral("  提醒 %1")
+                   .arg(QDateTime::fromMSecsSinceEpoch(due)
+                            .toString(QStringLiteral("MM-dd HH:mm")));
+      }
+      item->setText(QStringLiteral("%1%2  %3%4")
+                        .arg(done ? QStringLiteral("[x] ")
+                                  : QStringLiteral("[ ] "),
+                             t.value(QStringLiteral("title")).toString(),
+                             self ? QStringLiteral("自建")
+                                  : QStringLiteral("由 %1 分配")
+                                        .arg(creator),
+                             when));
+    }
+    if (done) {
       item->setForeground(Qt::gray);
     }
   }

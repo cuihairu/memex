@@ -1956,6 +1956,41 @@ int main() {
                "{\"id\":" + std::to_string(tid) + "}").status == 404);
   }
 
+  // —— R27-2 外部任务登记：provider/ext_key 成对、个人登记不转派、
+  //     列表回带引用（详情 URL 由客户端 SPI 解析，服务端只存引用）——
+  {
+    // 成对缺失各拒
+    CHECK(http(port, "POST", "/files/tasks", H("owner1"),
+               "{\"title\":\"外部缺键\",\"provider\":\"url\"}").status == 400);
+    CHECK(http(port, "POST", "/files/tasks", H("owner1"),
+               "{\"title\":\"外部缺provider\",\"ext_key\":"
+               "\"https://a.example/1\"}").status == 400);
+    // 直通链接登记 200（外部条目落自己清单）
+    const auto ex = http(port, "POST", "/files/tasks", H("owner1"),
+                         "{\"title\":\"跟踪上游缺陷\",\"provider\":\"url\","
+                         "\"ext_key\":\"https://github.com/x/y/issues/9\"}");
+    CHECK(ex.status == 200);
+    // 外部任务不转派（分配语义只对本地任务定义）
+    CHECK(http(port, "POST", "/files/tasks", H("owner1"),
+               "{\"title\":\"外部转派拒\",\"provider\":\"url\",\"ext_key\":"
+               "\"https://a.example/2\",\"assignee\":\"member1\"}")
+              .status == 400);
+    // 列表回带 provider/ext_key 引用
+    const auto le = http(port, "GET", "/files/tasks", H("owner1"), "");
+    CHECK(le.status == 200);
+    CHECK(le.body.find("\"provider\":\"url\"") != std::string::npos);
+    CHECK(le.body.find("https://github.com/x/y/issues/9") !=
+          std::string::npos);
+    // 外部条目完成勾选照主人语义（memex 本地进度标记，不回写外部）
+    const std::int64_t exid = jint(ex.body, "id");
+    CHECK(http(port, "POST", "/files/tasks/done", H("owner1"),
+               "{\"id\":" + std::to_string(exid) + ",\"done\":true}")
+              .status == 200);
+    // 本地任务不受影响：无 provider 字段照常建
+    CHECK(http(port, "POST", "/files/tasks", H("owner1"),
+               "{\"title\":\"本地照常\"}").status == 200);
+  }
+
   // —— 平台-12 权限模型接线：群能力面统一门（未配置=现行允许、配置禁即
   //     拒；停用即 403 deny:capability-<名>，重启用即恢复）——
   {

@@ -202,7 +202,9 @@ bool ServerStore::ensure_schema() {
       "  reminded_ms INTEGER NOT NULL DEFAULT 0,"
       "  done INTEGER NOT NULL DEFAULT 0,"
       "  done_ms INTEGER NOT NULL DEFAULT 0,"
-      "  created_ms INTEGER NOT NULL);"
+      "  created_ms INTEGER NOT NULL,"
+      "  provider TEXT NOT NULL DEFAULT '',"
+      "  ext_key TEXT NOT NULL DEFAULT '');"
       "CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner);"
       // T2.6 组织架构：部门树（parent_id 成树）＋成员资料
       //（直属上级为独立单列——每人至多一名，结构性约束）
@@ -602,6 +604,14 @@ bool ServerStore::ensure_schema() {
   // 旧库迁移（R24-2）：群备忘录开放编辑开关（默认关=管理员维护）
   sqlite3_exec(db_, "ALTER TABLE groups ADD COLUMN"
                     " open_memo_edit INTEGER NOT NULL DEFAULT 0",
+              nullptr, nullptr, nullptr);
+  // 旧库迁移（R27-2）：任务表补外部任务引用列（provider/ext_key 成对，
+  // 空=本地任务；R27-1 建的库无此两列）
+  sqlite3_exec(db_, "ALTER TABLE tasks ADD COLUMN"
+                    " provider TEXT NOT NULL DEFAULT ''",
+              nullptr, nullptr, nullptr);
+  sqlite3_exec(db_, "ALTER TABLE tasks ADD COLUMN"
+                    " ext_key TEXT NOT NULL DEFAULT ''",
               nullptr, nullptr, nullptr);
   // 旧库迁移（T4.1）：offline_messages 单列 UNIQUE(msg_id) →
   // 复合 UNIQUE(msg_id, to_account)。旧表不重建则群扇出 INSERT OR IGNORE
@@ -3455,11 +3465,13 @@ ServerStore::TaskRow task_row_read(sqlite3_stmt* st) {
   t.done = sqlite3_column_int(st, 7) != 0;
   t.done_ms = sqlite3_column_int64(st, 8);
   t.created_ms = sqlite3_column_int64(st, 9);
+  t.provider = reinterpret_cast<const char*>(sqlite3_column_text(st, 10));
+  t.ext_key = reinterpret_cast<const char*>(sqlite3_column_text(st, 11));
   return t;
 }
 const char* kTaskCols =
     "id, owner, creator, title, note, due_ms, reminded_ms, done, done_ms,"
-    " created_ms";
+    " created_ms, provider, ext_key";
 } // namespace
 
 std::int64_t ServerStore::task_create(const std::string& owner,
@@ -3467,13 +3479,17 @@ std::int64_t ServerStore::task_create(const std::string& owner,
                                       const std::string& title,
                                       const std::string& note,
                                       std::int64_t due_ms,
-                                      std::int64_t created_ms) {
+                                      std::int64_t created_ms,
+                                      const std::string& provider,
+                                      const std::string& ext_key) {
   if (owner.empty() || creator.empty() || title.empty()) return 0;
+  // 外部任务引用成对（路由层把守口径，库层再兜一道）
+  if (provider.empty() != ext_key.empty()) return 0;
   // 双方都须为已建账号（幽灵账号不给建）
   if (!find_account(owner) || !find_account(creator)) return 0;
   const char* sql =
-      "INSERT INTO tasks(owner, creator, title, note, due_ms, created_ms)"
-      " VALUES(?,?,?,?,?,?);";
+      "INSERT INTO tasks(owner, creator, title, note, due_ms, created_ms,"
+      " provider, ext_key) VALUES(?,?,?,?,?,?,?,?);";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
   sqlite3_bind_text(st, 1, owner.c_str(), -1, SQLITE_TRANSIENT);
@@ -3482,6 +3498,8 @@ std::int64_t ServerStore::task_create(const std::string& owner,
   sqlite3_bind_text(st, 4, note.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_int64(st, 5, due_ms);
   sqlite3_bind_int64(st, 6, created_ms);
+  sqlite3_bind_text(st, 7, provider.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 8, ext_key.c_str(), -1, SQLITE_TRANSIENT);
   const bool ok = sqlite3_step(st) == SQLITE_DONE;
   sqlite3_finalize(st);
   return ok ? sqlite3_last_insert_rowid(db_) : 0;

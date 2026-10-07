@@ -10,6 +10,8 @@
 
 #include <QtGlobal>
 
+#include "engine/task/task_provider.hpp"
+
 class QComboBox;
 class QDateTimeEdit;
 class QLabel;
@@ -38,6 +40,12 @@ class TaskDialog : public QDialog {
   // due_ms<=0=不设提醒
   bool add_task(const QString& title, const QString& note, qint64 due_ms,
                 const QString& assignee);
+  // R27-2 外部任务登记（程序化入口）：键书写「project#键」或完整链接
+  //（无 # = 整串为键）。detailUrl 必带——provider 未知/解析不出 URL
+  // 本地拒不发网；标题空取键原文兜底。外部条目个人登记（不转派），
+  // 完成勾选=memex 本地进度标记（回写外部是 L3，随 R27-3 实做）。
+  bool add_external_task(const QString& provider_id, const QString& key_input,
+                         const QString& title);
   // 选中条目勾完成/回退（勾选框双击同效）
   bool toggle_selected_done();
   // 撤回选中条目（清单主人或分配人，服务端裁决）
@@ -54,14 +62,20 @@ class TaskDialog : public QDialog {
   QListWidget* list() const { return list_; }
   // 选中条目 id（未选中=-1）
   qint64 selected_id() const;
+  // 选中条目的外部详情 URL（本地任务/未选中/解析不出=空串）
+  QString selected_detail_url() const;
 
  private:
   void build_ui();
   void populate(const QJsonArray& mine, const QJsonArray& assigned);
   void set_status(const QString& text, bool error = false);
+  // 登记键原文 → （project, key）——「project#键」或整串为键
+  static void split_ext_key(const QString& raw, QString& project,
+                            QString& key);
 
   FilesClient* client_;
   QString account_;
+  TaskProviderRegistry providers_;
   QLineEdit* host_;
   QLineEdit* port_;
   QLineEdit* account_box_;
@@ -72,8 +86,11 @@ class TaskDialog : public QDialog {
   QLineEdit* note_;
   QDateTimeEdit* due_;
   QComboBox* assignee_;
+  QComboBox* ext_provider_;
+  QLineEdit* ext_key_;
   QPushButton* btn_connect_;
   QPushButton* btn_add_;
+  QPushButton* btn_add_ext_;
   QPushButton* btn_toggle_;
   QPushButton* btn_delete_;
   QPushButton* btn_refresh_;

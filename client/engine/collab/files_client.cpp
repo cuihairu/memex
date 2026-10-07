@@ -696,11 +696,15 @@ void FilesClient::delete_file(qint64 file_id) {
 // —— 个人任务清单（R27-1）——
 
 void FilesClient::create_task(const QString& title, const QString& note,
-                              qint64 due_ms, const QString& assignee) {
+                              qint64 due_ms, const QString& assignee,
+                              const QString& provider,
+                              const QString& ext_key) {
   QJsonObject body{{QStringLiteral("title"), title}};
   if (!note.isEmpty()) body.insert(QStringLiteral("note"), note);
   if (due_ms > 0) body.insert(QStringLiteral("due_ms"), static_cast<double>(due_ms));
   if (!assignee.isEmpty()) body.insert(QStringLiteral("assignee"), assignee);
+  if (!provider.isEmpty()) body.insert(QStringLiteral("provider"), provider);
+  if (!ext_key.isEmpty()) body.insert(QStringLiteral("ext_key"), ext_key);
   send_json(QStringLiteral("task.create"), QStringLiteral("POST"),
             QStringLiteral("/files/tasks"), body,
             [this](bool ok, int, const QJsonObject& resp, const QString&) {

@@ -49,6 +49,7 @@ qt_add_executable(memex_client
   app/file_assistant.cpp
   app/file_assistant.hpp
   app/task_dialog.cpp
+  engine/task/task_provider.cpp
   app/task_dialog.hpp
   app/group_memo_dialog.cpp
   app/group_memo_dialog.hpp
@@ -320,6 +321,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_task_dialog
     app/tests/test_task_dialog.cpp
     app/task_dialog.cpp
+    engine/task/task_provider.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp)
   target_link_libraries(test_task_dialog PRIVATE
@@ -340,6 +342,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    engine/task/task_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -372,6 +375,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    engine/task/task_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -402,6 +406,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    engine/task/task_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -454,6 +459,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    engine/task/task_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -485,6 +491,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    engine/task/task_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -514,6 +521,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    engine/task/task_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -543,6 +551,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    engine/task/task_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -564,4 +573,18 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(flash_alert PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 60)
+
+  # R27-2 外部任务 Provider SPI 验收：能力声明位（L1/L2/L3）、URL 模板
+  # 槽替换（{project}/{key}，缺槽拒）、直通链接 http(s) 门、注册表
+  # 预设解析与未知 id、L1-only 调 L2/L3 默认不支持
+  add_executable(test_task_provider
+    engine/task/tests/test_task_provider.cpp
+    engine/task/task_provider.cpp)
+  target_include_directories(test_task_provider PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(test_task_provider PRIVATE Qt6::Core)
+  add_test(NAME task_provider COMMAND test_task_provider)
+  set_tests_properties(task_provider PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 30)
 endif()

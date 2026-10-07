@@ -231,6 +231,77 @@ int main(int argc, char** argv) {
   QApplication::processEvents();
   CHECK(tray_notifies == notifies_after_first);
 
+  // —— R27-2 外部任务：直通链接登记（粘贴链接即登记）→ 🌐 行＋详情
+  //     解析；未知 provider 本地拒（不发网）；模板 provider 组合键；
+  //     引用持久化（刷新回带复解析）；勾完成=memex 本地标记 ——
+  const int before_ext = dlg.list()->count();
+  CHECK(dlg.add_external_task(QStringLiteral("url"),
+                              QStringLiteral("https://github.com/x/y/issues/9"),
+                              QString()));
+  CHECK(wait_until(
+      [&] { return dlg.list()->count() == before_ext + 1; }, 8000));
+  int ext_row = -1;
+  for (int i = 0; i < dlg.list()->count(); ++i) {
+    if (dlg.list()->item(i)->text().contains(QStringLiteral("🌐"))) {
+      ext_row = i;
+      break;
+    }
+  }
+  CHECK(ext_row >= 0);
+  dlg.list()->setCurrentRow(ext_row);
+  // 标题空取键原文兜底；详情 URL 直出
+  CHECK(dlg.list()->item(ext_row)->text().contains(
+      QStringLiteral("https://github.com/x/y/issues/9")));
+  CHECK(dlg.selected_detail_url() ==
+        QStringLiteral("https://github.com/x/y/issues/9"));
+  // 未知 provider：解析不出链接本地拒（不发网不落库）
+  const int n_now = dlg.list()->count();
+  CHECK(!dlg.add_external_task(QStringLiteral("ghost"),
+                               QStringLiteral("org/repo#1"), QString()));
+  CHECK(dlg.list()->count() == n_now);
+  // 模板 provider 组合键（project#键）
+  CHECK(dlg.add_external_task(QStringLiteral("github-issue"),
+                              QStringLiteral("cuihairu/memex#12"), QString()));
+  CHECK(wait_until([&] { return dlg.list()->count() == n_now + 1; }, 8000));
+  int gh_row = -1;
+  for (int i = 0; i < dlg.list()->count(); ++i) {
+    if (dlg.list()->item(i)->text().contains(
+            QStringLiteral("cuihairu/memex#12"))) {
+      gh_row = i;
+      break;
+    }
+  }
+  CHECK(gh_row >= 0);
+  dlg.list()->setCurrentRow(gh_row);
+  CHECK(dlg.selected_detail_url() ==
+        QStringLiteral("https://github.com/cuihairu/memex/issues/12"));
+  // 持久化：显式刷新后引用回带、URL 复解析一致（跨端对齐同径）
+  dlg.refresh();
+  CHECK(wait_until([&] {
+    for (int i = 0; i < dlg.list()->count(); ++i) {
+      if (dlg.list()->item(i)->text().contains(
+              QStringLiteral("cuihairu/memex#12"))) {
+        dlg.list()->setCurrentRow(i);
+        return dlg.selected_detail_url() ==
+               QStringLiteral("https://github.com/cuihairu/memex/issues/12");
+      }
+    }
+    return false;
+  }, 8000));
+  // 外部条目勾完成（memex 本地进度标记，回写外部是 L3 留 R27-3）
+  dlg.list()->setCurrentRow(gh_row);
+  CHECK(dlg.toggle_selected_done());
+  CHECK(wait_until([&] {
+    for (int i = 0; i < dlg.list()->count(); ++i) {
+      if (dlg.list()->item(i)->text().contains(
+              QStringLiteral("cuihairu/memex#12")) &&
+          dlg.list()->item(i)->text().startsWith(QStringLiteral("[x]"))) {
+        return true;
+      }
+    }
+    return false;
+  }, 8000));
+
   server.kill();
   server.waitForFinished(3000);
 

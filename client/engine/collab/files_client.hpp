@@ -157,9 +157,13 @@ class FilesClient : public QObject {
   void delete_file(qint64 file_id);
 
   // —— 个人任务清单（R27-1 /files/tasks）——
-  // 建（assignee 空=自建；非空=分配给他人，服务端按「同群/同部门」判权）
+  // 建（assignee 空=自建；非空=分配给他人，服务端按「同群/同部门」判权。
+  // R27-2 外部任务登记：provider/ext_key 成对非空=外部引用条目，
+  // 个人登记不转派，详情 URL 由客户端 provider SPI 解析）
   void create_task(const QString& title, const QString& note, qint64 due_ms,
-                   const QString& assignee = QString());
+                   const QString& assignee = QString(),
+                   const QString& provider = QString(),
+                   const QString& ext_key = QString());
   // 我的清单＋我派出的（一次双数组）
   void list_tasks();
   // 完成/回退（仅清单主人）

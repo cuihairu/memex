@@ -646,12 +646,18 @@ public:
     bool done{false};
     std::int64_t done_ms{0};
     std::int64_t created_ms{0};
+    std::string provider;   // R27-2 外部任务引用（provider id，空=本地任务）
+    std::string ext_key;    // 外部键原文（「project#键」或完整链接；与
+                            // provider 成对；详情 URL 由客户端 SPI 解析）
   };
-  // 建任务（owner 与 creator 都须为已建账号；标题非空）
+  // 建任务（owner 与 creator 都须为已建账号；标题非空；provider/ext_key
+  // 成对缺省=本地任务）
   std::int64_t task_create(const std::string& owner,
                            const std::string& creator,
                            const std::string& title, const std::string& note,
-                           std::int64_t due_ms, std::int64_t created_ms);
+                           std::int64_t due_ms, std::int64_t created_ms,
+                           const std::string& provider = "",
+                           const std::string& ext_key = "");
   // 我的清单（含别人派来的；id 倒序）
   std::vector<TaskRow> tasks_of(const std::string& owner);
   // 我派给别人的（creator=本人且 owner≠本人；id 倒序）
