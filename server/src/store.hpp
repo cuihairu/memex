@@ -742,6 +742,9 @@ public:
     double disk_used_mb{0};
     double disk_total_mb{0};
     double load1{0};
+    // R26-4 凭据掩码元数据（空/0=未配置；密文永不在此行）
+    std::string cred_updated_by;
+    std::int64_t cred_updated_ms{0};
   };
   // 登记（token_hash=SHA-256 hex；同 gid+name 幂等复用行并轮换令牌）；
   // 群须存在——0=群不存在/失败
@@ -788,6 +791,25 @@ public:
   bool server_session_close(std::uint64_t group_id, std::uint64_t id,
                             const std::string& actor, std::int64_t ts_ms);
   std::vector<ServerSessionRow> server_session_list(std::uint64_t group_id);
+
+  // —— R26-4 服务器凭据面：目标机接入凭据只存服务端（密文=cred::gcm_seal
+  // 的 hex 串；客户端零凭据——memex 只做「看+连」，真用凭据的操作归
+  // croupier）——
+  struct ServerCredentialMeta {
+    std::uint64_t server_id{0};
+    std::string updated_by;
+    std::int64_t updated_ms{0};
+  };
+  // 上/覆盖（同 server_id）；服务器须属该群=false
+  bool server_cred_set(std::uint64_t group_id, std::uint64_t server_id,
+                       const std::string& sealed_hex,
+                       const std::string& updated_by, std::int64_t ts_ms);
+  // 删（服务器须属该群）；无行=false
+  bool server_cred_delete(std::uint64_t group_id, std::uint64_t server_id);
+  // 密文取回（仅供服务端代理调用内存内解密——不暴露给任何 HTTP 面）
+  std::optional<std::string> server_cred_sealed(std::uint64_t server_id);
+  // 掩码清单（按群走 JOIN scope；无密文字段）
+  std::vector<ServerCredentialMeta> server_cred_list(std::uint64_t group_id);
 
 private:
   bool ensure_schema();

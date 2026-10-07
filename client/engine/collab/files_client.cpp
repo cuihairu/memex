@@ -597,6 +597,37 @@ void FilesClient::session_list(quint64 gid) {
             });
 }
 
+// —— R26-4 服务器凭据面（明文只在此层瞬时经手，不落任何日志/框） ——
+
+void FilesClient::server_cred_set(quint64 gid, qint64 server_id,
+                                  const QString& value) {
+  send_json(QStringLiteral("group-server-cred.set"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-servers/credential"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("server_id"), static_cast<double>(server_id)},
+             {QStringLiteral("value"), value}},
+            [this, gid, server_id](bool ok, int, const QJsonObject&,
+                                   const QString&) {
+              if (ok) {
+                emit server_cred_saved(static_cast<qint64>(gid), server_id);
+              }
+            });
+}
+
+void FilesClient::server_cred_delete(quint64 gid, qint64 server_id) {
+  send_json(QStringLiteral("group-server-cred.delete"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-servers/credential"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("server_id"), static_cast<double>(server_id)},
+             {QStringLiteral("op"), QStringLiteral("delete")}},
+            [this, gid, server_id](bool ok, int, const QJsonObject&,
+                                   const QString&) {
+              if (ok) {
+                emit server_cred_removed(static_cast<qint64>(gid), server_id);
+              }
+            });
+}
+
 void FilesClient::list_inbox() {
   send_json(QStringLiteral("inbox.list"), QStringLiteral("GET"),
             QStringLiteral("/files/list?target=inbox"), {},

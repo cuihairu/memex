@@ -423,7 +423,14 @@ bool ServerStore::ensure_schema() {
       "  redeemed_ms INTEGER NOT NULL DEFAULT 0,"
       "  closed_ms INTEGER NOT NULL DEFAULT 0);"
       "CREATE INDEX IF NOT EXISTS idx_gss_gid"
-      " ON group_server_sessions(group_id, id);"; // 本段为 schema 字符串最后一段
+      " ON group_server_sessions(group_id, id);"
+      // —— R26-4 服务器凭据：密文落库（cred::gcm_seal hex）；行内永不见
+      // 明文，掩码元数据经 server_list JOIN 出——
+      "CREATE TABLE IF NOT EXISTS group_server_credentials ("
+      "  server_id INTEGER PRIMARY KEY,"
+      "  sealed_hex TEXT NOT NULL,"
+      "  updated_by TEXT NOT NULL,"
+      "  updated_ms INTEGER NOT NULL);"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -4022,10 +4029,13 @@ std::vector<ServerStore::GroupServerRow> ServerStore::server_list(
     std::uint64_t group_id) {
   std::vector<GroupServerRow> out;
   const char* sql =
-      "SELECT id, group_id, name, host, enrolled_by, created_ms,"
-      " last_seen_ms, cpu_percent, mem_used_mb, mem_total_mb,"
-      " disk_used_mb, disk_total_mb, load1"
-      " FROM group_servers WHERE group_id = ? ORDER BY id ASC;";
+      "SELECT s.id, s.group_id, s.name, s.host, s.enrolled_by, s.created_ms,"
+      " s.last_seen_ms, s.cpu_percent, s.mem_used_mb, s.mem_total_mb,"
+      " s.disk_used_mb, s.disk_total_mb, s.load1,"
+      " COALESCE(c.updated_by, ''), COALESCE(c.updated_ms, 0)"
+      " FROM group_servers s"
+      " LEFT JOIN group_server_credentials c ON c.server_id = s.id"
+      " WHERE s.group_id = ? ORDER BY s.id ASC;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
   sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
@@ -4047,6 +4057,9 @@ std::vector<ServerStore::GroupServerRow> ServerStore::server_list(
     r.disk_used_mb = sqlite3_column_double(st, 10);
     r.disk_total_mb = sqlite3_column_double(st, 11);
     r.load1 = sqlite3_column_double(st, 12);
+    const char* cb = reinterpret_cast<const char*>(sqlite3_column_text(st, 13));
+    r.cred_updated_by = cb ? cb : "";
+    r.cred_updated_ms = sqlite3_column_int64(st, 14);
     out.push_back(std::move(r));
   }
   sqlite3_finalize(st);
@@ -4196,6 +4209,99 @@ std::vector<ServerStore::ServerSessionRow> ServerStore::server_session_list(
     r.redeemed_ms = sqlite3_column_int64(st, 8);
     r.closed_ms = sqlite3_column_int64(st, 9);
     out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// —— R26-4 服务器凭据面 ——
+
+bool ServerStore::server_cred_set(std::uint64_t group_id,
+                                  std::uint64_t server_id,
+                                  const std::string& sealed_hex,
+                                  const std::string& updated_by,
+                                  std::int64_t ts_ms) {
+  // 服务器须属该群（跨群 id 不给过）
+  sqlite3_stmt* own = nullptr;
+  const char* own_sql =
+      "SELECT 1 FROM group_servers WHERE id = ? AND group_id = ?;";
+  if (sqlite3_prepare_v2(db_, own_sql, -1, &own, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(own, 1, static_cast<sqlite3_int64>(server_id));
+  sqlite3_bind_int64(own, 2, static_cast<sqlite3_int64>(group_id));
+  const bool owned = sqlite3_step(own) == SQLITE_ROW;
+  sqlite3_finalize(own);
+  if (!owned) return false;
+  const char* sql =
+      "INSERT INTO group_server_credentials(server_id, sealed_hex,"
+      " updated_by, updated_ms) VALUES(?,?,?,?)"
+      " ON CONFLICT(server_id) DO UPDATE SET"
+      " sealed_hex=excluded.sealed_hex, updated_by=excluded.updated_by,"
+      " updated_ms=excluded.updated_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(server_id));
+  sqlite3_bind_text(st, 2, sealed_hex.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, updated_by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::server_cred_delete(std::uint64_t group_id,
+                                     std::uint64_t server_id) {
+  const char* sql =
+      "DELETE FROM group_server_credentials WHERE server_id = ? AND"
+      " EXISTS(SELECT 1 FROM group_servers s"
+      " WHERE s.id = server_id AND s.group_id = ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(server_id));
+  sqlite3_bind_int64(st, 2, static_cast<sqlite3_int64>(group_id));
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::optional<std::string> ServerStore::server_cred_sealed(
+    std::uint64_t server_id) {
+  const char* sql =
+      "SELECT sealed_hex FROM group_server_credentials WHERE server_id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(server_id));
+  std::optional<std::string> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    const char* h = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    out = h ? h : "";
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::ServerCredentialMeta> ServerStore::server_cred_list(
+    std::uint64_t group_id) {
+  std::vector<ServerCredentialMeta> out;
+  const char* sql =
+      "SELECT c.server_id, c.updated_by, c.updated_ms"
+      " FROM group_server_credentials c"
+      " JOIN group_servers s ON s.id = c.server_id"
+      " WHERE s.group_id = ? ORDER BY c.server_id ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    ServerCredentialMeta m;
+    m.server_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
+    const char* u = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    m.updated_by = u ? u : "";
+    m.updated_ms = sqlite3_column_int64(st, 2);
+    out.push_back(std::move(m));
   }
   sqlite3_finalize(st);
   return out;

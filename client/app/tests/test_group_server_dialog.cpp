@@ -3,8 +3,9 @@
 // （在线）＋未打点的第二台红（从未）→重登记换台后令牌刷新。成员腿：
 // 列表只读可见、越权登记 403 状态行明示。R26-3 会话腿：成员选中服务器
 // 发起（签发即兑现→命令框）→收尾落时长；群主第二笔进行中同屏可见。
-// 服务端判权矩阵/轮换语义/短票一次性/令牌摘要落库走 test_files_api 与
-// test_agent，不在此重复。
+// R26-4 凭据腿：群主存/删凭据（列表掩码态翻转）、成员越权 403。
+// 服务端判权矩阵/轮换语义/短票一次性/令牌摘要落库/凭据密文落库走
+// test_files_api 与 test_agent，不在此重复。
 #include <QApplication>
 #include <QColor>
 #include <QElapsedTimer>
@@ -91,7 +92,9 @@ int main(int argc, char** argv) {
                {QStringLiteral("serve"), QStringLiteral("--db"), db,
                 QStringLiteral("--port"), QString::number(collab_port),
                 QStringLiteral("--webhook-port"), QStringLiteral("0"),
-                QStringLiteral("--files-port"), QString::number(files_port)});
+                QStringLiteral("--files-port"), QString::number(files_port),
+                QStringLiteral("--tool-cred-secret"),
+                QStringLiteral("dialog-test-cred-secret")});
   CHECK(server.waitForStarted(5000));
   CHECK(wait_until([&] {
     QTcpServer probe;
@@ -212,6 +215,31 @@ int main(int argc, char** argv) {
            it->text().contains(QStringLiteral("时长"));
   }, 8000));
   CHECK(!member.close_session()); // 无进行中会话再收尾＝本地拒
+
+  // —— 服务器凭据腿（R26-4）：成员越权 403 状态行明示；群主存→列表
+  // 掩码「已配置（由 X 更新）」→删→「未配置」（明文只此一次出门，
+  // 列表永无凭据内容）——
+  member.server_list_widget()->setCurrentRow(0);
+  CHECK(member.set_server_credential(QStringLiteral("bob-secret")));
+  CHECK(wait_until([&] {
+    return member.status_text().contains(QStringLiteral("操作失败")) &&
+           member.status_text().contains(QStringLiteral("无权"));
+  }, 8000));
+  CHECK(member.server_list_widget()->item(0)->text().contains(
+      QStringLiteral("凭据 未配置"))); // 越权未改台账
+  owner.server_list_widget()->setCurrentRow(0);
+  CHECK(owner.set_server_credential(QStringLiteral("owner-secret")));
+  CHECK(wait_until([&] {
+    return owner.server_count() == 2 &&
+           owner.server_list_widget()->item(0)->text().contains(
+               QStringLiteral("凭据 已配置"));
+  }, 8000));
+  owner.server_list_widget()->setCurrentRow(0); // 列表随刷新重建，重选中
+  CHECK(owner.delete_server_credential());
+  CHECK(wait_until([&] {
+    return owner.server_list_widget()->item(0)->text().contains(
+        QStringLiteral("凭据 未配置"));
+  }, 8000));
 
   // —— 第二笔（群主发起不收尾）：留痕同屏，最新在前——
   owner.server_list_widget()->setCurrentRow(0);

@@ -138,6 +138,13 @@ class FilesClient : public QObject {
   // 接入留痕列表（成员；短票摘要永不出现）
   void session_list(quint64 gid);
 
+  // —— 服务器凭据面（R26-4 /files/group-servers/credential）——
+  // 上/覆盖目标机凭据（仅群主/管理员；服务端加密落库，客户端零凭据：
+  // 服务器列表只回掩码元数据，明文只此一次出门）
+  void server_cred_set(quint64 gid, qint64 server_id, const QString& value);
+  // 删凭据（仅群主/管理员）
+  void server_cred_delete(quint64 gid, qint64 server_id);
+
   // —— 收件箱（R23-3 文件助手混排面）——
   // GET /files/list?target=inbox：备忘录+文件时间倒序混排条目
   void list_inbox();
@@ -192,6 +199,8 @@ class FilesClient : public QObject {
                         const QString& server_name, const QString& host);
   void session_closed(qint64 session_id);
   void sessions_listed(const QJsonArray& sessions);
+  void server_cred_saved(qint64 gid, qint64 server_id);
+  void server_cred_removed(qint64 gid, qint64 server_id);
   void inbox_listed(const QJsonArray& items); // type=memo|file 混排条目
   void upload_finished(qint64 file_id, bool second_transfer);
   void download_finished(const QString& save_path);

@@ -1273,6 +1273,97 @@ int main() {
     CHECK(http(cport, "GET", "/files/group-tools/credentials?gid=" + gids,
                 Hc(owner_tok), "").body.find("\"credentials\":[]") !=
               std::string::npos);
+
+    // —— R26-4 服务器凭据面：目标机凭据只存服务端（同款加密）、掩码
+    //    元数据走服务器列表（cred/cred_updated_by）、跨群 id 不给过 ——
+    const auto key4 = memex::server::derive_tool_cred_key("http-test-secret");
+    {
+      // store 单元面：set 须服务器属该群（幽灵 id=false）→list 空
+      CHECK(!store.server_cred_set(gid, 999999999, "aa", "owner1", 1));
+      CHECK(!store.server_cred_set(gid2, 1, "aa", "owner1", 1));
+      CHECK(store.server_cred_list(gid).empty());
+    }
+    const auto en4 = http(cport, "POST", "/files/group-servers/enroll",
+                          Hc(owner_tok),
+                          "{\"gid\":" + gids +
+                              ",\"name\":\"cred-box\",\"host\":\"10.0.0.11\"}");
+    CHECK(en4.status == 200);
+    const std::int64_t csid = jint(en4.body, "id");
+    // store 面：真服务器（id=csid 属 gid）→密文取回≠明文→gcm_open 往返
+    CHECK(store.server_cred_set(gid, static_cast<std::uint64_t>(csid),
+                                memex::server::gcm_seal(key4, "unit-srv-cred"),
+                                "owner1", 1700000010000));
+    const auto got_srv = store.server_cred_sealed(csid);
+    CHECK(got_srv.has_value());
+    CHECK(got_srv.value() != "unit-srv-cred");
+    CHECK(memex::server::gcm_open(key4, got_srv.value()) == "unit-srv-cred");
+    CHECK(store.server_cred_set(gid, static_cast<std::uint64_t>(csid),
+                                memex::server::gcm_seal(key4, "unit-srv-2"),
+                                "owner1", 1700000011000));
+    // HTTP 面：未登录 401；缺 value 400；成员 403；跨群服务器 404
+    CHECK(http(cport, "POST", "/files/group-servers/credential", {},
+                "{\"gid\":" + gids + ",\"server_id\":" + std::to_string(csid) +
+                    ",\"value\":\"x\"}")
+              .status == 401);
+    CHECK(http(cport, "POST", "/files/group-servers/credential",
+                Hc(owner_tok),
+                "{\"gid\":" + gids + ",\"server_id\":" + std::to_string(csid) +
+                    "}")
+              .status == 400);
+    CHECK(http(cport, "POST", "/files/group-servers/credential",
+                Hc(member_tok),
+                "{\"gid\":" + gids + ",\"server_id\":" + std::to_string(csid) +
+                    ",\"value\":\"x\"}")
+              .status == 403);
+    CHECK(http(cport, "POST", "/files/group-servers/credential",
+                Hc(owner_tok),
+                "{\"gid\":" + std::to_string(gid2) +
+                    ",\"server_id\":" + std::to_string(csid) +
+                    ",\"value\":\"x\"}")
+              .status == 404);
+    // 群主设置 200：回包无 value/sealed 回显
+    const auto scs = http(cport, "POST", "/files/group-servers/credential",
+                          Hc(owner_tok),
+                          "{\"gid\":" + gids + ",\"server_id\":" +
+                              std::to_string(csid) + ",\"value\":\"srv-live-1\"}");
+    CHECK(scs.status == 200);
+    CHECK(scs.body.find("\"updated\":true") != std::string::npos);
+    CHECK(scs.body.find("srv-live-1") == std::string::npos);
+    // 服务器列表掩码元数据：cred=true＋谁更新；明文/密文永不出门
+    const auto sl = http(cport, "GET", "/files/group-servers/list?gid=" + gids,
+                         Hc(owner_tok), "");
+    CHECK(sl.status == 200);
+    CHECK(sl.body.find("\"cred\":true") != std::string::npos);
+    CHECK(sl.body.find("\"cred_updated_by\":\"owner1\"") != std::string::npos);
+    CHECK(sl.body.find("srv-live-1") == std::string::npos);
+    CHECK(sl.body.find("sealed") == std::string::npos);
+    // 成员看列表见掩码态（无密文），但无权改（上面 403 已验）
+    CHECK(http(cport, "GET", "/files/group-servers/list?gid=" + gids,
+               Hc(member_tok), "")
+              .body.find("\"cred\":true") != std::string::npos);
+    // 删除：成员 403；群主 200；再删 404；列表翻回「未配置」
+    CHECK(http(cport, "POST", "/files/group-servers/credential",
+               Hc(member_tok),
+               "{\"gid\":" + gids + ",\"server_id\":" + std::to_string(csid) +
+                   ",\"op\":\"delete\"}")
+              .status == 403);
+    CHECK(http(cport, "POST", "/files/group-servers/credential",
+               Hc(owner_tok),
+               "{\"gid\":" + gids + ",\"server_id\":" + std::to_string(csid) +
+                   ",\"op\":\"delete\"}")
+              .status == 200);
+    CHECK(http(cport, "POST", "/files/group-servers/credential",
+               Hc(owner_tok),
+               "{\"gid\":" + gids + ",\"server_id\":" + std::to_string(csid) +
+                   ",\"op\":\"delete\"}")
+              .status == 404);
+    CHECK(http(cport, "GET", "/files/group-servers/list?gid=" + gids,
+               Hc(owner_tok), "")
+              .body.find("\"cred\":false") != std::string::npos);
+    // 跨群 id 删不过；HTTP 删已净（再删=false、sealed 无）
+    CHECK(!store.server_cred_delete(gid2, static_cast<std::uint64_t>(csid)));
+    CHECK(!store.server_cred_delete(gid, static_cast<std::uint64_t>(csid)));
+    CHECK(!store.server_cred_sealed(csid).has_value());
   }
 
   // —— HTTP 面：未配主密钥的实例——两路由一律 503（不静默存明文） ——
@@ -1296,6 +1387,12 @@ int main() {
     CHECK(jstr(ns.body, "error").find("未启用") != std::string::npos);
     CHECK(http(nport, "GET", "/files/group-tools/credentials?gid=" + gids, nh,
                 "").status == 503);
+    // R26-4 服务器凭据同面：未配主密钥 503（不静默存明文）
+    const auto nsc = http(nport, "POST", "/files/group-servers/credential", nh,
+                          "{\"gid\":" + gids +
+                              ",\"server_id\":1,\"value\":\"x\"}");
+    CHECK(nsc.status == 503);
+    CHECK(jstr(nsc.body, "error").find("未启用") != std::string::npos);
   }
 
   // —— R26-1 服务器 agent 面：登记判权＋令牌只存摘要＋心跳鉴权＋列表

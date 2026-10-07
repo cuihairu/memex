@@ -42,6 +42,10 @@ class GroupServerDialog : public QDialog {
   bool request_session();
   // 收尾本人进行中的会话（落时长留痕）
   bool close_session();
+  // 存/删所选服务器凭据（仅群主/管理员；服务端加密落库——客户端零凭据，
+  // 明文只此一次出门）
+  bool set_server_credential(const QString& value);
+  bool delete_server_credential();
 
   // —— 走查/测试观察点 ——
   QString status_text() const;
@@ -69,11 +73,14 @@ class GroupServerDialog : public QDialog {
   QListWidget* servers_;
   QListWidget* sessions_;
   QLineEdit* cmd_;
+  QLineEdit* srv_cred_;
   QPushButton* btn_connect_;
   QPushButton* btn_refresh_;
   QPushButton* btn_enroll_;
   QPushButton* btn_session_;
   QPushButton* btn_close_;
+  QPushButton* btn_cred_set_;
+  QPushButton* btn_cred_del_;
   qint64 open_session_id_{0}; // 本人已兑现未收尾的会话（0=无）
 };
 

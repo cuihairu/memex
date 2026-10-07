@@ -799,6 +799,11 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (path_ == "/files/group-servers/sessions" && method_ == "GET") {
       return route_group_servers_sessions();
     }
+    // R26-4 服务器凭据：目标机凭据只存服务端（加密落库、回包只见掩码
+    // 元数据——客户端零凭据，真用凭据的操作归 croupier）
+    if (path_ == "/files/group-servers/credential" && method_ == "POST") {
+      return route_group_servers_credential(body);
+    }
     respond_json(404, {{"ok", false}, {"error", "路径不存在"}});
   }
 
@@ -3069,6 +3074,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     const std::int64_t now = now_ms();
     json arr = json::array();
     for (const auto& r : impl_.store.server_list(gid)) {
+      // cred 掩码元数据：只言「是否已配置/谁/何时」——密文与明文永不出门
       arr.push_back(
           {{"id", r.id},
            {"name", r.name},
@@ -3082,7 +3088,10 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
            {"mem_total_mb", r.mem_total_mb},
            {"disk_used_mb", r.disk_used_mb},
            {"disk_total_mb", r.disk_total_mb},
-           {"load1", r.load1}});
+           {"load1", r.load1},
+           {"cred", !r.cred_updated_by.empty()},
+           {"cred_updated_by", r.cred_updated_by},
+           {"cred_updated_ms", r.cred_updated_ms}});
     }
     respond_json(200, {{"ok", true}, {"gid", gid}, {"servers", arr}});
   }
@@ -3258,6 +3267,82 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
             s.closed_ms > 0 ? s.closed_ms - s.opened_ms : 0}});
     }
     respond_json(200, {{"ok", true}, {"gid", gid}, {"sessions", arr}});
+  }
+
+  // —— R26-4 服务器凭据（管理面）：上/覆盖/删。密文落库，回包只见
+  // updated 旗标——value 明文与 sealed_hex 密文都只此一次进服务端 ——
+  void route_group_servers_credential(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("server_id") ||
+        !j["server_id"].is_number_integer()) {
+      respond_json(400,
+                   {{"ok", false}, {"error", "缺少字段：gid/server_id"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::uint64_t sid =
+        static_cast<std::uint64_t>(j["server_id"].get<std::int64_t>());
+    const bool is_delete = j.contains("op") && j["op"].is_string() &&
+                           j["op"].get<std::string>() == "delete";
+    std::string value;
+    if (!is_delete) {
+      if (!j.contains("value") || !j["value"].is_string() ||
+          j["value"].get<std::string>().empty()) {
+        respond_json(
+            400, {{"ok", false},
+                  {"error", "缺少字段：value（非空字符串；删除传 op=\"delete\"）"}});
+        return;
+      }
+      value = j["value"].get<std::string>();
+    }
+    const Decision d = impl_.az.authorize(
+        {account, "memo:config", group_resource(gid), "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403,
+                   {{"ok", false}, {"error", "无权管理服务器凭据（仅群主/管理员）"}});
+      return;
+    }
+    if (impl_.tool_cred_key.empty()) {
+      respond_json(503, {{"ok", false},
+                         {"error", "凭据面未启用（服务端未配置 --tool-cred-secret）"}});
+      return;
+    }
+    if (is_delete) {
+      if (!impl_.store.server_cred_delete(gid, sid)) {
+        respond_json(404, {{"ok", false}, {"error", "凭据不存在或服务器不属该群"}});
+        return;
+      }
+      std::cout << "[MEMEX] files group-servers credential delete account="
+                << account << " gid=" << gid << " server=" << sid << std::endl;
+      respond_json(200,
+                   {{"ok", true}, {"gid", gid}, {"server_id", sid}, {"deleted", true}});
+      return;
+    }
+    const std::string sealed = gcm_seal(impl_.tool_cred_key, value);
+    if (sealed.empty()) {
+      respond_json(500, {{"ok", false}, {"error", "凭据加密失败"}});
+      return;
+    }
+    if (!impl_.store.server_cred_set(gid, sid, sealed, account, now_ms())) {
+      respond_json(404, {{"ok", false}, {"error", "服务器不存在或不属该群"}});
+      return;
+    }
+    // 留痕不含 value（明文/密文都不进日志）
+    std::cout << "[MEMEX] files group-servers credential set account="
+              << account << " gid=" << gid << " server=" << sid
+              << " sealed_bytes=" << sealed.size() / 2 << std::endl;
+    respond_json(200,
+                 {{"ok", true}, {"gid", gid}, {"server_id", sid}, {"updated", true}});
   }
 
   void respond_json(int status, const json& body) {

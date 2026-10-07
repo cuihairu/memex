@@ -92,9 +92,11 @@ GroupServerDialog::GroupServerDialog(QWidget* parent) : QDialog(parent) {
               it->setData(Qt::UserRole,
                           static_cast<qint64>(
                               o.value(QStringLiteral("id")).toDouble()));
+              const bool cred =
+                  o.value(QStringLiteral("cred")).toBool();
               it->setText(
                   QStringLiteral("%1 %2 · %3\nCPU %4 · 内存 %5 · 磁盘 %6 · "
-                                 "负载 %7\n最近心跳 %8 · 登记人 %9")
+                                 "负载 %7\n最近心跳 %8 · 登记人 %9 · 凭据 %10")
                       .arg(QStringLiteral("●"),
                            o.value(QStringLiteral("name")).toString(),
                            o.value(QStringLiteral("host")).toString(),
@@ -117,7 +119,13 @@ GroupServerDialog::GroupServerDialog(QWidget* parent) : QDialog(parent) {
                            seen == 0 ? QStringLiteral("从未")
                                      : fmt_time(seen),
                            o.value(QStringLiteral("enrolled_by"))
-                               .toString()));
+                               .toString())
+                      .arg(cred ? QStringLiteral("已配置（由 %1 更新）")
+                                      .arg(o.value(
+                                               QStringLiteral(
+                                                   "cred_updated_by"))
+                                               .toString())
+                                : QStringLiteral("未配置")));
               it->setForeground(online ? QColor(Qt::darkGreen)
                                        : QColor(Qt::red));
             }
@@ -211,6 +219,19 @@ GroupServerDialog::GroupServerDialog(QWidget* parent) : QDialog(parent) {
               it->setFlags(Qt::NoItemFlags);
             }
           });
+  // 凭据落点（明文永不出现在任何框/日志——只刷新掩码态）
+  connect(client_, &FilesClient::server_cred_saved, this,
+          [this](qint64, qint64) {
+            set_status(QStringLiteral("凭据已存（服务端加密；客户端零凭据）"),
+                       false);
+            srv_cred_->clear();
+            refresh();
+          });
+  connect(client_, &FilesClient::server_cred_removed, this,
+          [this](qint64, qint64) {
+            set_status(QStringLiteral("凭据已删"), false);
+            refresh();
+          });
   connect(client_, &FilesClient::request_failed, this,
           [this](const QString& op, int status, const QString& error) {
             set_status(QStringLiteral("操作失败[%1]（%2）：%3")
@@ -302,6 +323,19 @@ void GroupServerDialog::build_ui() {
   sessions_->setWordWrap(true);
   root->addWidget(sessions_, 1);
 
+  // —— 服务器凭据行（R26-4：仅群主/管理员；作用于选中行；密码态输入）——
+  auto* cred_row = new QHBoxLayout;
+  srv_cred_ = new QLineEdit(this);
+  srv_cred_->setEchoMode(QLineEdit::Password);
+  srv_cred_->setPlaceholderText(QStringLiteral(
+      "所选服务器凭据（口令/密钥——只送服务端加密，客户端不留存）"));
+  btn_cred_set_ = new QPushButton(QStringLiteral("存凭据"), this);
+  btn_cred_del_ = new QPushButton(QStringLiteral("删凭据"), this);
+  cred_row->addWidget(srv_cred_, 1);
+  cred_row->addWidget(btn_cred_set_);
+  cred_row->addWidget(btn_cred_del_);
+  root->addLayout(cred_row);
+
   // —— 状态行 ——
   status_ = new QLabel(QStringLiteral("未连接（与协作面同源账号；文件面端口独立）"),
                        this);
@@ -321,6 +355,10 @@ void GroupServerDialog::build_ui() {
           [this] { request_session(); });
   connect(btn_close_, &QPushButton::clicked, this,
           [this] { close_session(); });
+  connect(btn_cred_set_, &QPushButton::clicked, this,
+          [this] { set_server_credential(srv_cred_->text()); });
+  connect(btn_cred_del_, &QPushButton::clicked, this,
+          [this] { delete_server_credential(); });
   connect(btn_enroll_, &QPushButton::clicked, this, [this] {
     if (srv_name_->text().trimmed().isEmpty() ||
         srv_host_->text().trimmed().isEmpty()) {
@@ -385,6 +423,40 @@ bool GroupServerDialog::close_session() {
     return false;
   }
   client_->session_close(gid_, open_session_id_);
+  return true;
+}
+
+// 选中行的服务器 id（0=无有效选中）
+namespace {
+qint64 selected_server_id(const QListWidget* list) {
+  const auto* it = list->currentItem();
+  return it ? it->data(Qt::UserRole).toLongLong() : 0;
+}
+} // namespace
+
+bool GroupServerDialog::set_server_credential(const QString& value) {
+  if (gid_ == 0 || !client_->is_logged_in()) return false;
+  const qint64 sid = selected_server_id(servers_);
+  if (sid <= 0) {
+    set_status(QStringLiteral("先在列表中选中一台服务器"), true);
+    return false;
+  }
+  if (value.isEmpty()) {
+    set_status(QStringLiteral("凭据不能为空"), true);
+    return false;
+  }
+  client_->server_cred_set(gid_, sid, value);
+  return true;
+}
+
+bool GroupServerDialog::delete_server_credential() {
+  if (gid_ == 0 || !client_->is_logged_in()) return false;
+  const qint64 sid = selected_server_id(servers_);
+  if (sid <= 0) {
+    set_status(QStringLiteral("先在列表中选中一台服务器"), true);
+    return false;
+  }
+  client_->server_cred_delete(gid_, sid);
   return true;
 }
 
