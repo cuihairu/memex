@@ -1,8 +1,10 @@
 // R26-2 群服务器面板冒烟：真服务端进程 × 离屏 QDialog。
 // 管理员腿：登记（令牌只显示一次）→真 memex_agent --once 心跳→列表绿灯
 // （在线）＋未打点的第二台红（从未）→重登记换台后令牌刷新。成员腿：
-// 列表只读可见、越权登记 403 状态行明示。服务端判权矩阵/轮换语义/令牌
-// 摘要落库走 test_files_api 与 test_agent，不在此重复。
+// 列表只读可见、越权登记 403 状态行明示。R26-3 会话腿：成员选中服务器
+// 发起（签发即兑现→命令框）→收尾落时长；群主第二笔进行中同屏可见。
+// 服务端判权矩阵/轮换语义/短票一次性/令牌摘要落库走 test_files_api 与
+// test_agent，不在此重复。
 #include <QApplication>
 #include <QColor>
 #include <QElapsedTimer>
@@ -187,6 +189,45 @@ int main(int argc, char** argv) {
            member.status_text().contains(QStringLiteral("无权登记"));
   }, 8000));
   CHECK(member.server_count() == 2); // 幽灵登记未进台账
+
+  // —— SSH 会话腿：未选中本地拒；选中 web-1 发起（签发即兑现）→命令框——
+  // →留痕「进行中」；收尾翻「已收尾」落时长——
+  CHECK(!member.request_session()); // 未选中：本地拒绝，不出网
+  CHECK(member.status_text().contains(QStringLiteral("选中")));
+  member.server_list_widget()->setCurrentRow(0); // web-1（10.0.0.9，绿灯）
+  CHECK(member.request_session());
+  CHECK(wait_until([&] {
+    return member.session_command_text() ==
+               QStringLiteral("ssh 10.0.0.9") &&
+           member.session_count() >= 1 &&
+           member.session_list_widget()->item(0)->text().contains(
+               QStringLiteral("bob")) &&
+           member.session_list_widget()->item(0)->text().contains(
+               QStringLiteral("进行中"));
+  }, 8000));
+  CHECK(member.close_session());
+  CHECK(wait_until([&] {
+    const auto* it = member.session_list_widget()->item(0);
+    return it != nullptr && it->text().contains(QStringLiteral("已收尾")) &&
+           it->text().contains(QStringLiteral("时长"));
+  }, 8000));
+  CHECK(!member.close_session()); // 无进行中会话再收尾＝本地拒
+
+  // —— 第二笔（群主发起不收尾）：留痕同屏，最新在前——
+  owner.server_list_widget()->setCurrentRow(0);
+  CHECK(owner.request_session());
+  CHECK(wait_until([&] {
+    member.refresh(); // 留痕列表不推送，随刷新拉取
+    return member.session_count() == 2 &&
+           member.session_list_widget()->item(0)->text().contains(
+               QStringLiteral("alice")) &&
+           member.session_list_widget()->item(0)->text().contains(
+               QStringLiteral("进行中")) &&
+           member.session_list_widget()->item(1)->text().contains(
+               QStringLiteral("bob")) &&
+           member.session_list_widget()->item(1)->text().contains(
+               QStringLiteral("已收尾"));
+  }, 8000));
 
   server.terminate();
   server.waitForFinished(3000);

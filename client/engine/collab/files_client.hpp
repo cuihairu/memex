@@ -127,6 +127,17 @@ class FilesClient : public QObject {
   // 服务器列表（群成员入群即授权；红绿灯=服务端 online 键＋最近一拍指标）
   void server_list(quint64 gid);
 
+  // —— 远程会话（R26-3 /files/group-servers/session[s]，SSH 起步）——
+  // 发起会话：一次性短票出门（60s TTL；票明文只此一次，服务端只存摘要）
+  void session_request(quint64 gid, qint64 server_id,
+                       const QString& protocol = QStringLiteral("ssh"));
+  // 即时兑现（票即凭据；本地拉起 ssh 前才兑现——重放 409）
+  void session_redeem(const QString& ticket);
+  // 收尾（本人＋进行中才可；落时长留痕）
+  void session_close(quint64 gid, qint64 session_id);
+  // 接入留痕列表（成员；短票摘要永不出现）
+  void session_list(quint64 gid);
+
   // —— 收件箱（R23-3 文件助手混排面）——
   // GET /files/list?target=inbox：备忘录+文件时间倒序混排条目
   void list_inbox();
@@ -175,6 +186,12 @@ class FilesClient : public QObject {
   void tool_credentials_listed(const QJsonArray& credentials);
   void server_enrolled(qint64 gid, qint64 server_id, const QString& token);
   void servers_listed(const QJsonArray& servers);
+  void session_requested(qint64 gid, qint64 session_id, const QString& ticket,
+                         qint64 expires_ms);
+  void session_redeemed(qint64 session_id, qint64 gid,
+                        const QString& server_name, const QString& host);
+  void session_closed(qint64 session_id);
+  void sessions_listed(const QJsonArray& sessions);
   void inbox_listed(const QJsonArray& items); // type=memo|file 混排条目
   void upload_finished(qint64 file_id, bool second_transfer);
   void download_finished(const QString& save_path);

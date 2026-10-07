@@ -537,6 +537,66 @@ void FilesClient::server_list(quint64 gid) {
             });
 }
 
+// —— R26-3 远程会话（短票只在此层瞬时经手，不落任何日志） ——
+
+void FilesClient::session_request(quint64 gid, qint64 server_id,
+                                  const QString& protocol) {
+  send_json(QStringLiteral("group-session.request"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-servers/session/request"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("server_id"), static_cast<double>(server_id)},
+             {QStringLiteral("protocol"), protocol}},
+            [this, gid](bool ok, int, const QJsonObject& resp,
+                        const QString&) {
+              if (!ok) return;
+              emit session_requested(
+                  static_cast<qint64>(gid),
+                  static_cast<qint64>(
+                      resp.value(QStringLiteral("session_id")).toDouble()),
+                  resp.value(QStringLiteral("ticket")).toString(),
+                  static_cast<qint64>(
+                      resp.value(QStringLiteral("expires_ms")).toDouble()));
+            });
+}
+
+void FilesClient::session_redeem(const QString& ticket) {
+  send_json(QStringLiteral("group-session.redeem"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-servers/session/redeem"),
+            {{QStringLiteral("ticket"), ticket}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit session_redeemed(
+                  static_cast<qint64>(
+                      resp.value(QStringLiteral("session_id")).toDouble()),
+                  static_cast<qint64>(
+                      resp.value(QStringLiteral("gid")).toDouble()),
+                  resp.value(QStringLiteral("server_name")).toString(),
+                  resp.value(QStringLiteral("host")).toString());
+            });
+}
+
+void FilesClient::session_close(quint64 gid, qint64 session_id) {
+  send_json(QStringLiteral("group-session.close"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-servers/session/close"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("session_id"), static_cast<double>(session_id)}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit session_closed(static_cast<qint64>(
+                  resp.value(QStringLiteral("session_id")).toDouble()));
+            });
+}
+
+void FilesClient::session_list(quint64 gid) {
+  send_json(QStringLiteral("group-session.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-servers/sessions?gid=%1").arg(gid),
+            {}, [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit sessions_listed(
+                  resp.value(QStringLiteral("sessions")).toArray());
+            });
+}
+
 void FilesClient::list_inbox() {
   send_json(QStringLiteral("inbox.list"), QStringLiteral("GET"),
             QStringLiteral("/files/list?target=inbox"), {},

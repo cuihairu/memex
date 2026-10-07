@@ -8,6 +8,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QProcess>
 #include <QSettings>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -28,6 +29,29 @@ QString fmt_pair(double used, double total) {
   if (total <= 0) return QStringLiteral("尚未上报");
   return QStringLiteral("%1/%2 MB")
       .arg(QString::number(used, 'f', 0), QString::number(total, 'f', 0));
+}
+
+// 会话时长（收尾留痕）：秒取整
+QString fmt_duration(qint64 duration_ms) {
+  return QStringLiteral("%1 秒").arg(QString::number(duration_ms / 1000));
+}
+
+// 尽力而为唤起本地终端跑 ssh（桌面会话才试；offscreen/无显示环境不动）。
+// 唤不起也无妨——命令框恒有命令可手动复制。
+bool desktop_session_present() {
+  return !qEnvironmentVariableIsEmpty("DISPLAY") ||
+         !qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY");
+}
+
+bool spawn_ssh_terminal(const QString& host) {
+  const QString cmd = QStringLiteral("ssh %1").arg(host);
+  for (const QString& term :
+       {QStringLiteral("x-terminal-emulator"), QStringLiteral("xterm")}) {
+    if (QProcess::startDetached(term, {QStringLiteral("-e"), cmd})) {
+      return true;
+    }
+  }
+  return false;
 }
 
 } // namespace
@@ -65,6 +89,9 @@ GroupServerDialog::GroupServerDialog(QWidget* parent) : QDialog(parent) {
               const qint64 seen = static_cast<qint64>(
                   o.value(QStringLiteral("last_seen_ms")).toDouble());
               auto* it = new QListWidgetItem(servers_);
+              it->setData(Qt::UserRole,
+                          static_cast<qint64>(
+                              o.value(QStringLiteral("id")).toDouble()));
               it->setText(
                   QStringLiteral("%1 %2 · %3\nCPU %4 · 内存 %5 · 磁盘 %6 · "
                                  "负载 %7\n最近心跳 %8 · 登记人 %9")
@@ -112,6 +139,77 @@ GroupServerDialog::GroupServerDialog(QWidget* parent) : QDialog(parent) {
                            .arg(QString::number(id)),
                        false);
             client_->server_list(gid_);
+          });
+  // —— SSH 会话（R26-3）：短票签发→即时兑现→本地唤起/命令框→收尾留痕 ——
+  connect(client_, &FilesClient::session_requested, this,
+          [this](qint64, qint64, const QString& ticket, qint64) {
+            // 票明文只在此瞬时经手：立即兑现（60s TTL 一次性；不落任何框）
+            client_->session_redeem(ticket);
+            set_status(QStringLiteral("短票已签发，正在兑现…"), false);
+          });
+  connect(client_, &FilesClient::session_redeemed, this,
+          [this](qint64 session_id, qint64, const QString& server_name,
+                 const QString& host) {
+            open_session_id_ = session_id;
+            // 命令恒落框（唤不起终端也能手动复制）；桌面会话才尝试唤起
+            cmd_->setText(QStringLiteral("ssh %1").arg(host));
+            const bool spawned =
+                desktop_session_present() && spawn_ssh_terminal(host);
+            set_status(QStringLiteral("会话 #%1 已兑现：%2（%3）——%4")
+                           .arg(QString::number(session_id), server_name,
+                                host,
+                                spawned ? QStringLiteral("本地终端已唤起")
+                                        : QStringLiteral(
+                                              "命令已给出（手动执行）")),
+                       false);
+            client_->session_list(gid_);
+          });
+  connect(client_, &FilesClient::session_closed, this,
+          [this](qint64 session_id) {
+            open_session_id_ = 0;
+            set_status(QStringLiteral("会话 #%1 已收尾").arg(
+                           QString::number(session_id)),
+                       false);
+            client_->session_list(gid_);
+          });
+  // 留痕列表（只更新列表不动状态行——防瞬态覆盖）
+  connect(client_, &FilesClient::sessions_listed, this,
+          [this](const QJsonArray& arr) {
+            sessions_->clear();
+            for (const auto& v : arr) {
+              const QJsonObject o = v.toObject();
+              const bool redeemed =
+                  o.value(QStringLiteral("redeemed")).toBool();
+              const bool open = o.value(QStringLiteral("open")).toBool();
+              const QString state =
+                  !open ? QStringLiteral("已收尾 · 时长 %1")
+                              .arg(fmt_duration(static_cast<qint64>(
+                                  o.value(QStringLiteral("duration_ms"))
+                                      .toDouble())))
+                        : (redeemed ? QStringLiteral("进行中")
+                                    : QStringLiteral("未用短票"));
+              const qint64 opened = static_cast<qint64>(
+                  o.value(QStringLiteral("opened_ms")).toDouble());
+              auto* it = new QListWidgetItem(sessions_);
+              it->setText(
+                  QStringLiteral("#%1 %2 · %3 · %4 · %5 · %6 · %7")
+                      .arg(QString::number(
+                               static_cast<qint64>(
+                                   o.value(QStringLiteral("id")).toDouble()),
+                               10),
+                           o.value(QStringLiteral("server_name")).toString(),
+                           o.value(QStringLiteral("host")).toString(),
+                           o.value(QStringLiteral("protocol")).toString(),
+                           o.value(QStringLiteral("actor")).toString(),
+                           opened == 0 ? QStringLiteral("—") : fmt_time(opened),
+                           state));
+            }
+            if (arr.isEmpty()) {
+              auto* it = new QListWidgetItem(sessions_);
+              it->setText(QStringLiteral(
+                  "（本群暂无接入留痕——选中服务器点「发起 SSH 会话」）"));
+              it->setFlags(Qt::NoItemFlags);
+            }
           });
   connect(client_, &FilesClient::request_failed, this,
           [this](const QString& op, int status, const QString& error) {
@@ -184,6 +282,26 @@ void GroupServerDialog::build_ui() {
       QStringLiteral("注册令牌（登记后生成一次；重登记作废旧令牌）"));
   root->addWidget(token_);
 
+  // —— SSH 会话区（R26-3：选中服务器→发起；短票不出框、命令框可复制）——
+  auto* session_row = new QHBoxLayout;
+  btn_session_ = new QPushButton(QStringLiteral("发起 SSH 会话"), this);
+  btn_close_ = new QPushButton(QStringLiteral("关闭会话"), this);
+  session_row->addWidget(btn_session_);
+  session_row->addWidget(btn_close_);
+  session_row->addStretch(1);
+  root->addLayout(session_row);
+
+  cmd_ = new QLineEdit(this);
+  cmd_->setReadOnly(true);
+  cmd_->setPlaceholderText(QStringLiteral(
+      "本地命令（会话兑现后给出；唤不起终端时手动执行）"));
+  root->addWidget(cmd_);
+
+  sessions_ = new QListWidget(this);
+  sessions_->setAlternatingRowColors(true);
+  sessions_->setWordWrap(true);
+  root->addWidget(sessions_, 1);
+
   // —— 状态行 ——
   status_ = new QLabel(QStringLiteral("未连接（与协作面同源账号；文件面端口独立）"),
                        this);
@@ -199,6 +317,10 @@ void GroupServerDialog::build_ui() {
     if (btn_connect_->isEnabled()) btn_connect_->click();
   });
   connect(btn_refresh_, &QPushButton::clicked, this, [this] { refresh(); });
+  connect(btn_session_, &QPushButton::clicked, this,
+          [this] { request_session(); });
+  connect(btn_close_, &QPushButton::clicked, this,
+          [this] { close_session(); });
   connect(btn_enroll_, &QPushButton::clicked, this, [this] {
     if (srv_name_->text().trimmed().isEmpty() ||
         srv_host_->text().trimmed().isEmpty()) {
@@ -232,12 +354,38 @@ void GroupServerDialog::set_group(quint64 gid, const QString& group_name) {
   setWindowTitle(QStringLiteral("群服务器 — %1").arg(group_name));
   servers_->clear();
   token_->clear();
+  sessions_->clear();
+  cmd_->clear();
+  open_session_id_ = 0;
   if (gid_ > 0 && client_->is_logged_in()) refresh();
 }
 
 void GroupServerDialog::refresh() {
   if (gid_ == 0 || !client_->is_logged_in()) return;
   client_->server_list(gid_);
+  client_->session_list(gid_);
+}
+
+bool GroupServerDialog::request_session() {
+  if (gid_ == 0 || !client_->is_logged_in()) return false;
+  const auto* it = servers_->currentItem();
+  const qint64 sid = it ? it->data(Qt::UserRole).toLongLong() : 0;
+  if (sid <= 0) {
+    set_status(QStringLiteral("先在列表中选中一台服务器"), true);
+    return false;
+  }
+  client_->session_request(gid_, sid);
+  return true;
+}
+
+bool GroupServerDialog::close_session() {
+  if (gid_ == 0 || !client_->is_logged_in()) return false;
+  if (open_session_id_ == 0) {
+    set_status(QStringLiteral("没有进行中的会话"), true);
+    return false;
+  }
+  client_->session_close(gid_, open_session_id_);
+  return true;
 }
 
 bool GroupServerDialog::enroll_server(const QString& name,
@@ -256,6 +404,12 @@ QString GroupServerDialog::status_text() const { return status_->text(); }
 int GroupServerDialog::server_count() const { return servers_->count(); }
 
 QString GroupServerDialog::enroll_token_text() const { return token_->text(); }
+
+int GroupServerDialog::session_count() const { return sessions_->count(); }
+
+QString GroupServerDialog::session_command_text() const {
+  return cmd_->text();
+}
 
 void GroupServerDialog::set_status(const QString& text, bool error) {
   status_->setText(text);
