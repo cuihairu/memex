@@ -701,6 +701,149 @@ int main() {
               .status == 404);
   }
 
+  // —— R24-3 群密码箱：全程密文（服务端不验 b64 内容）、授权名单、
+  //     查看/复制留痕、重置/删除——解锁派生是客户端面，此处只验存取与判权 ——
+  {
+    const std::string salt = "czYwMDAwMDA=";
+    const std::string wrap = "bm9uY2UxMjM0NTY3ODkwYWJjZGVmZ2hpamtsbW5vcA==";
+    const std::string salt2 = "bmV3c2FsdA==";
+    const std::string ct = "bm9uY2UtY2lwaGVydGV4dA==";
+    const std::string nonce = "bm9uY2UxMjM0NTY3ODkw";
+    const std::string gids = std::to_string(gid);
+    // 未登录 401；非成员 403（存在性都不透）
+    CHECK(http(port, "GET", "/files/group-vault/info?gid=" + gids, {}, "")
+              .status == 401);
+    CHECK(http(port, "GET", "/files/group-vault/info?gid=" + gids,
+               H("outsider"), "").status == 403);
+    // 未建箱 exists=false；坏 gid 400
+    CHECK(http(port, "GET", "/files/group-vault/info?gid=x", H("member1"), "")
+              .status == 400);
+    const auto iv0 = http(port, "GET", "/files/group-vault/info?gid=" + gids,
+                          H("member1"), "");
+    CHECK(iv0.status == 200);
+    CHECK(iv0.body.find("\"exists\":false") != std::string::npos);
+    const std::string init_body = "{\"gid\":" + gids + ",\"kdf_salt\":\"" +
+                                  salt + "\",\"kdf_iters\":600000,"
+                                         "\"wrapped_dek\":\"" +
+                                  wrap + "\"}";
+    // 建箱：成员 403（仅群主/管理员）；迭代数 <10000 400；管理员可建；重复 409
+    CHECK(http(port, "POST", "/files/group-vault/init", H("member1"),
+               init_body).status == 403);
+    CHECK(http(port, "POST", "/files/group-vault/init", H("admin1"),
+               "{\"gid\":" + gids + ",\"kdf_salt\":\"" + salt +
+                   "\",\"kdf_iters\":100,\"wrapped_dek\":\"" + wrap + "\"}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/group-vault/init", H("admin1"),
+               init_body).status == 200);
+    CHECK(http(port, "POST", "/files/group-vault/init", H("admin1"),
+               init_body).status == 409);
+    // info 建后带回盐/包裹块（授权成员解锁必需）
+    const auto iv1 = http(port, "GET", "/files/group-vault/info?gid=" + gids,
+                          H("member1"), "");
+    CHECK(iv1.status == 200);
+    CHECK(iv1.body.find("\"exists\":true") != std::string::npos);
+    CHECK(iv1.body.find(salt) != std::string::npos);
+    CHECK(iv1.body.find(wrap) != std::string::npos);
+    // list：成员可读（名单空=全成员），掩码面——列表不带 secret 密文
+    const auto lv = http(port, "GET", "/files/group-vault/list?gid=" + gids,
+                         H("member1"), "");
+    CHECK(lv.status == 200);
+    CHECK(lv.body.find("\"secret_ct\"") == std::string::npos);
+    // 条目维护：成员建 403（管理员维护，不开放成员写）；群主建 200
+    const std::string entry =
+        "{\"gid\":" + gids + ",\"name\":\"生产库\",\"account_name\":\"root\","
+                             "\"secret_ct\":\"" +
+        ct + "\",\"secret_nonce\":\"" + nonce + "\"}";
+    CHECK(http(port, "POST", "/files/group-vault/save", H("member1"), entry)
+              .status == 403);
+    const auto sv = http(port, "POST", "/files/group-vault/save",
+                         H("owner1"), entry);
+    CHECK(sv.status == 200);
+    const auto vid = jint(sv.body, "id");
+    CHECK(vid > 0);
+    // 改条目（带 id）：群主 200
+    const std::string entry_upd =
+        "{\"gid\":" + gids + ",\"id\":" + std::to_string(vid) +
+        ",\"name\":\"生产库-主\",\"account_name\":\"root\","
+        "\"secret_ct\":\"" +
+        ct + "\",\"secret_nonce\":\"" + nonce + "\"}";
+    CHECK(http(port, "POST", "/files/group-vault/save", H("owner1"),
+               entry_upd).status == 200);
+    // access：群主 reveal 200 带密文；成员 copy 200（默认全成员可解锁）；
+    // 坏 action 400；幽灵条目 404
+    const std::string acc_base = "{\"gid\":" + gids + ",\"id\":" +
+                                 std::to_string(vid) + ",\"action\":\"";
+    const auto ac1 = http(port, "POST", "/files/group-vault/access",
+                          H("owner1"), acc_base + "reveal\"}");
+    CHECK(ac1.status == 200);
+    CHECK(ac1.body.find("\"secret_ct\":\"" + ct + "\"") != std::string::npos);
+    CHECK(http(port, "POST", "/files/group-vault/access", H("member1"),
+               acc_base + "copy\"}").status == 200);
+    CHECK(http(port, "POST", "/files/group-vault/access", H("member1"),
+               acc_base + "steal\"}").status == 400);
+    CHECK(http(port, "POST", "/files/group-vault/access", H("member1"),
+               "{\"gid\":" + gids + ",\"id\":999999,"
+                                    "\"action\":\"reveal\"}")
+              .status == 404);
+    // 留痕：成员查审计拒（仅群主/管理员）；群主查见 reveal+copy 两行
+    CHECK(http(port, "GET", "/files/group-vault/audit?gid=" + gids,
+               H("member1"), "").status == 403);
+    const auto au = http(port, "GET", "/files/group-vault/audit?gid=" + gids,
+                         H("owner1"), "");
+    CHECK(au.status == 200);
+    CHECK(au.body.find("\"action\":\"copy\"") != std::string::npos);
+    CHECK(au.body.find("\"action\":\"reveal\"") != std::string::npos);
+    CHECK(au.body.find("\"actor\":\"member1\"") != std::string::npos);
+    // 授权名单：管理员设拒（仅群主可收窄授权）；群主设 [admin1] 后
+    // member1 不在名单拒、admin1 恒可（owner/admin 不受名单限）
+    CHECK(http(port, "POST", "/files/group-vault/acl", H("admin1"),
+               "{\"gid\":" + gids + ",\"accounts\":[\"member1\"]}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-vault/acl", H("owner1"),
+               "{\"gid\":" + gids + ",\"accounts\":[\"admin1\"]}")
+              .status == 200);
+    CHECK(http(port, "GET", "/files/group-vault/list?gid=" + gids,
+               H("member1"), "").status == 403);
+    CHECK(http(port, "GET", "/files/group-vault/info?gid=" + gids,
+               H("member1"), "").status == 403);
+    CHECK(http(port, "GET", "/files/group-vault/list?gid=" + gids,
+               H("admin1"), "").status == 200);
+    // 空名单恢复全成员（共享本意默认）
+    CHECK(http(port, "POST", "/files/group-vault/acl", H("owner1"),
+               "{\"gid\":" + gids + ",\"accounts\":[]}").status == 200);
+    CHECK(http(port, "GET", "/files/group-vault/list?gid=" + gids,
+               H("member1"), "").status == 200);
+    // 重置/重包裹：成员 403；群主换盐换包裹块 200 且 info 见新盐；
+    // 无箱的 gid2 404
+    CHECK(http(port, "POST", "/files/group-vault/rekey", H("member1"),
+               init_body).status == 403);
+    const std::string rekey_body = "{\"gid\":" + gids + ",\"kdf_salt\":\"" +
+                                   salt2 + "\",\"kdf_iters\":720000,"
+                                           "\"wrapped_dek\":\"" +
+                                   wrap + "\"}";
+    CHECK(http(port, "POST", "/files/group-vault/rekey", H("owner1"),
+               rekey_body).status == 200);
+    const auto iv2 = http(port, "GET", "/files/group-vault/info?gid=" + gids,
+                          H("member1"), "");
+    CHECK(iv2.body.find(salt2) != std::string::npos);
+    CHECK(iv2.body.find("\"kdf_iters\":720000") != std::string::npos);
+    CHECK(http(port, "POST", "/files/group-vault/rekey",
+               H("owner1"),
+               "{\"gid\":" + std::to_string(gid2) + ",\"kdf_salt\":\"" +
+                   salt2 + "\",\"kdf_iters\":600000,\"wrapped_dek\":\"" +
+                   wrap + "\"}")
+              .status == 404);
+    // 删条目恒归管理员：成员拒；群主删 200；再 access 404
+    CHECK(http(port, "POST", "/files/group-vault/delete", H("member1"),
+               "{\"gid\":" + gids + ",\"id\":" + std::to_string(vid) + "}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-vault/delete", H("owner1"),
+               "{\"gid\":" + gids + ",\"id\":" + std::to_string(vid) + "}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-vault/access", H("owner1"),
+               acc_base + "reveal\"}").status == 404);
+  }
+
   // —— 存储未配置：面在、字节面 503、元数据面照常 ——
   {
     memex::server::FileServer bare(io, store, nullptr, 0);
