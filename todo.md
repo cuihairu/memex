@@ -199,7 +199,8 @@
 
 ## R24 群组知识共享：公告 / 备忘录 / 密码箱（2026-10-04，设计=docs/design/群组知识共享.md）
 
-- [ ] R24-1 群公告：发布/置顶全员可见/编辑历史留痕/联动三级推送（公告=重要强提醒）。
+- [x] R24-1 群公告：发布/置顶全员可见/编辑历史留痕/联动三级推送（公告=重要强提醒）。
+  - 2026-10-07 server 面收口（b9aa8ab）＋桌面客户端腿（d0aa28d）：编辑历史 group_announcement_log 只附加表（谁/何时/改成了什么，清除也落一笔）＋announcement_history 倒序查询；group_announce 判权按设计放宽为群主/管理员（owner||admin，群主身份在 groups.owner 不在 role 列）；发布成功对全员 deliver_notice（urgency=IMPORTANT 重要强提醒、title=群公告：群名、jump=group:N；清除不推——管理动作非新信息，全员强提醒是骚扰，裁量留档）；协议 op=announce_history 群成员可查（非成员拒）回执 GroupResult.history 倒序带全；proto 加 AnnouncementRev（旧客户端 proto3 未知字段语义跳过，Android/鸿蒙无群解码零影响）；桌面群菜单「公告编辑历史…」入口（QEventLoop+3s 超时兜底、倒序列 时间/设为：内容、空 content=（清除公告））＋设置公告文案「群主专属」→「群主/管理员可设」。测试：test_group 库级（权限/历史三笔含清除/幽灵群）＋协议级（NOTICE 全员同 msg_id urgency=2、归档含公告 NOTICE、announce_history 成员带回非成员拒），collab_chat 真服务端引擎腿（bob 收 NOTICE urgency=2→普通成员拒→历史三笔倒序）；ctest 35/35 全绿。设计裁量留档：①公告=单条现值模型（沿用 groups.announcement 与顶栏置顶渲染，不引条目表——「置顶区固定入口」由既有群顶栏承担）；②历史查询协议端点随桌面客户端腿落（服务端先行），Android/鸿蒙群面未做后续随平台批；③公告历史=群成员可查（与「全员可见」口径一致，留痕非机密）。教训入注：测试腿内 connect 捕局部变量必悬垂——下一条 NOTICE 撞悬垂槽 segfault，connect 一律 main 顶层。
 - [ ] R24-2 群备忘录：条目化共享知识（标题+正文+代码块）、搜索、修订历史可回滚、权限（管理员维护或开放示编辑留痕）；**禁止放密码**。
 - [ ] R24-3 群密码箱：wingman 同款加密（PBKDF2 600k→KEK→AES-256-GCM 包 DEK）、显式解锁、每次查看留痕、掩码展示、授权名单（默认全成员，群主可改）、成员变更重包裹。
 - [ ] R24-4 UI 边界：备忘录疑似密码提示、密码箱默认掩码、复制密码=显式动作+留痕、导出默认关闭。
