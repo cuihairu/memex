@@ -14,6 +14,7 @@
 
 #include <asio.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -96,6 +97,10 @@ class FileServer {
 
  private:
   asio::ip::tcp::acceptor acceptor_;
+  // 存活旗标：完成回调按值持有同一份 shared_ptr——析构置 false 后，
+  // 被取消的挂起 accept 在回调里短路，不再触达已析构的 this
+  std::shared_ptr<std::atomic<bool>> alive_{
+      std::make_shared<std::atomic<bool>>(true)};
   void do_accept();
 };
 

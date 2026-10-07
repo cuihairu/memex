@@ -27,6 +27,8 @@ constexpr std::size_t kMaxHead = 8 * 1024;      // 请求头上限（防呆）
 constexpr std::size_t kMaxJsonBody = 64 * 1024; // session/manage JSON 上限
 constexpr std::size_t kMaxUpload = 512u * 1024 * 1024; // 单文件上限 512MiB
 constexpr std::int64_t kSessionTtlMs = 12 * 3600 * 1000; // 令牌 12h
+// R26-1 agent 在线判定窗：默认 30s 心跳的 3 倍宽限（错过两拍仍算在线）
+constexpr std::int64_t kAgentOnlineMs = 90 * 1000;
 
 std::int64_t now_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -766,6 +768,17 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/group-tools/credentials" && method_ == "GET") {
       return route_group_tools_credentials();
+    }
+    // R26-1 服务器 agent 面：登记（管理面）/心跳（agent 注册令牌，非
+    // 人会话）/列表（群成员——入群即授权）
+    if (path_ == "/files/group-servers/enroll" && method_ == "POST") {
+      return route_group_servers_enroll(body);
+    }
+    if (path_ == "/files/group-servers/heartbeat" && method_ == "POST") {
+      return route_group_servers_heartbeat(body);
+    }
+    if (path_ == "/files/group-servers/list" && method_ == "GET") {
+      return route_group_servers_list();
     }
     respond_json(404, {{"ok", false}, {"error", "路径不存在"}});
   }
@@ -2921,6 +2934,140 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     respond_json(200, {{"ok", true}, {"gid", gid}, {"credentials", arr}});
   }
 
+  // —— R26-1 服务器 agent 面 ——
+
+  // 登记：管理面（memo:config）。生成注册令牌（明文只此一次出现在回包，
+  // 库里只存 SHA-256 摘要）；同 gid+name 重登记=轮换令牌、id 稳定。
+  void route_group_servers_enroll(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("name") ||
+        !j["name"].is_string() || !j.contains("host") ||
+        !j["host"].is_string()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：gid/name/host"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::string name = j["name"].get<std::string>();
+    const std::string host = j["host"].get<std::string>();
+    if (gid == 0 || name.empty() || host.empty()) {
+      respond_json(400,
+                   {{"ok", false},
+                    {"error", "gid 须为正整数、name/host 非空"}});
+      return;
+    }
+    const Decision d = impl_.az.authorize(
+        {account, "memo:config", group_resource(gid), "owner=" + account});
+    if (!d.allowed) {
+      respond_json(
+          403, {{"ok", false}, {"error", "无权登记服务器（仅群主/管理员）"}});
+      return;
+    }
+    const std::string token = random_salt_hex(); // 16B 熵 → 32 hex
+    const std::uint64_t id =
+        impl_.store.server_enroll(gid, name, host, sha256_hex(token), account,
+                                  now_ms());
+    if (id == 0) {
+      respond_json(404, {{"ok", false}, {"error", "群不存在"}});
+      return;
+    }
+    // 令牌不进日志（只进回包一次）
+    std::cout << "[MEMEX] files group-servers enroll account=" << account
+              << " gid=" << gid << " id=" << id << " name=" << name
+              << " host=" << host << std::endl;
+    respond_json(200, {{"ok", true},
+                       {"gid", gid},
+                       {"id", id},
+                       {"name", name},
+                       {"token", token}});
+  }
+
+  // 心跳：agent 令牌鉴权（非人会话——不走 Authorization 头）。指标整拍
+  // 覆盖写；令牌错/轮换掉的旧令牌一律 401。
+  void route_group_servers_heartbeat(const std::string& body) {
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("token") || !j["token"].is_string() ||
+        j["token"].get<std::string>().empty()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：token"}});
+      return;
+    }
+    for (const char* k :
+         {"cpu_percent", "mem_used_mb", "mem_total_mb", "disk_used_mb",
+          "disk_total_mb", "load1"}) {
+      if (!j.contains(k) || !j[k].is_number()) {
+        respond_json(400,
+                     {{"ok", false},
+                      {"error", std::string("缺少数值字段：") + k}});
+        return;
+      }
+    }
+    const auto srv = impl_.store.server_by_token_hash(
+        sha256_hex(j["token"].get<std::string>()));
+    if (!srv.has_value()) {
+      respond_json(401, {{"ok", false}, {"error", "注册令牌无效"}});
+      return;
+    }
+    impl_.store.server_heartbeat(
+        srv->id, j["cpu_percent"].get<double>(),
+        j["mem_used_mb"].get<double>(), j["mem_total_mb"].get<double>(),
+        j["disk_used_mb"].get<double>(), j["disk_total_mb"].get<double>(),
+        j["load1"].get<double>(), now_ms());
+    respond_json(200, {{"ok", true},
+                       {"id", srv->id},
+                       {"gid", srv->group_id},
+                       {"interval_s", kAgentOnlineMs / 3000}});
+  }
+
+  // 列表：群成员（入群即授权）。带最近一拍指标＋在线红绿灯（last_seen
+  // 新鲜度）；令牌摘要永不出现。
+  void route_group_servers_list() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
+      return;
+    }
+    const std::int64_t now = now_ms();
+    json arr = json::array();
+    for (const auto& r : impl_.store.server_list(gid)) {
+      arr.push_back(
+          {{"id", r.id},
+           {"name", r.name},
+           {"host", r.host},
+           {"enrolled_by", r.enrolled_by},
+           {"created_ms", r.created_ms},
+           {"last_seen_ms", r.last_seen_ms},
+           {"online", now - r.last_seen_ms < kAgentOnlineMs},
+           {"cpu_percent", r.cpu_percent},
+           {"mem_used_mb", r.mem_used_mb},
+           {"mem_total_mb", r.mem_total_mb},
+           {"disk_used_mb", r.disk_used_mb},
+           {"disk_total_mb", r.disk_total_mb},
+           {"load1", r.load1}});
+    }
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"servers", arr}});
+  }
+
   void respond_json(int status, const json& body) {
     const std::string payload = body.dump();
     std::ostringstream head;
@@ -2978,7 +3125,11 @@ FileServer::FileServer(asio::io_context& io, ServerStore& store,
                                    std::move(uplink_policy))),
       acceptor_(io, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port)) {}
 
-FileServer::~FileServer() = default;
+FileServer::~FileServer() {
+  // 先落旗标再随成员析构关闭 acceptor：挂起的 accept 完成回调见到
+  // false 即短路（回调持有旗标的 shared_ptr，生命周期独立于实例）
+  alive_->store(false);
+}
 
 std::uint16_t FileServer::port() const {
   return acceptor_.local_endpoint().port();
@@ -3009,11 +3160,20 @@ void FileServer::start_accept() {
 }
 
 void FileServer::do_accept() {
+  // 旗标按值随回调持有：实例析构（旗标置 false）后，acceptor 随成员析构
+  // 关闭并把挂起的 accept 以 operation_aborted 完成——回调在旗标上短路，
+  // 不再触达已析构的 this；错误态一律停链（closed acceptor 续链＝空转）
+  const auto alive = alive_;
   acceptor_.async_accept(
-      [this](std::error_code ec, asio::ip::tcp::socket socket) {
-        if (!ec) {
-          std::make_shared<FileConn>(std::move(socket), *impl_)->start();
+      [this, alive](std::error_code ec, asio::ip::tcp::socket socket) {
+        if (ec || !alive->load()) {
+          if (ec && alive->load()) {
+            std::cerr << "[MEMEX] Files accept 停链：" << ec.message()
+                      << std::endl;
+          }
+          return;
         }
+        std::make_shared<FileConn>(std::move(socket), *impl_)->start();
         do_accept();
       });
 }

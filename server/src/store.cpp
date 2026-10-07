@@ -388,7 +388,28 @@ bool ServerStore::ensure_schema() {
       "  sealed_hex TEXT NOT NULL,"
       "  updated_by TEXT NOT NULL,"
       "  updated_ms INTEGER NOT NULL,"
-      "  PRIMARY KEY (group_id, tool));"; // 本段为 schema 字符串最后一段
+      "  PRIMARY KEY (group_id, tool));"
+      // —— R26-1 服务器 agent 面：登记行（agent 令牌只存 SHA-256 摘要，
+      // 明文只在登记回包出现一次）＋最近一拍指标（红绿灯=last_seen 新鲜
+      // 度，路由层判）；同 gid+name 复用一行（UNIQUE）——
+      "CREATE TABLE IF NOT EXISTS group_servers ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  group_id INTEGER NOT NULL,"
+      "  name TEXT NOT NULL,"
+      "  host TEXT NOT NULL,"
+      "  token_hash TEXT NOT NULL UNIQUE,"
+      "  enrolled_by TEXT NOT NULL,"
+      "  created_ms INTEGER NOT NULL,"
+      "  last_seen_ms INTEGER NOT NULL DEFAULT 0,"
+      "  cpu_percent REAL NOT NULL DEFAULT -1,"
+      "  mem_used_mb REAL NOT NULL DEFAULT 0,"
+      "  mem_total_mb REAL NOT NULL DEFAULT 0,"
+      "  disk_used_mb REAL NOT NULL DEFAULT 0,"
+      "  disk_total_mb REAL NOT NULL DEFAULT 0,"
+      "  load1 REAL NOT NULL DEFAULT 0,"
+      "  UNIQUE (group_id, name));"
+      "CREATE INDEX IF NOT EXISTS idx_gs_gid"
+      " ON group_servers(group_id);"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -3884,6 +3905,135 @@ std::vector<ServerStore::ToolCredentialMeta> ServerStore::tool_cred_list(
     m.updated_by = u ? u : "";
     m.updated_ms = sqlite3_column_int64(st, 3);
     out.push_back(std::move(m));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// —— R26-1 服务器 agent 面 ——
+
+std::uint64_t ServerStore::server_enroll(std::uint64_t group_id,
+                                         const std::string& name,
+                                         const std::string& host,
+                                         const std::string& token_hash,
+                                         const std::string& enrolled_by,
+                                         std::int64_t ts_ms) {
+  if (!group_info(group_id).has_value()) return 0;
+  // 同 gid+name 复用一行（UNIQUE 闸）：重登记=轮换令牌，id 稳定
+  const char* sql =
+      "INSERT INTO group_servers(group_id, name, host, token_hash,"
+      " enrolled_by, created_ms) VALUES(?,?,?,?,?,?)"
+      " ON CONFLICT(group_id, name) DO UPDATE SET host=excluded.host,"
+      " token_hash=excluded.token_hash,"
+      " enrolled_by=excluded.enrolled_by, created_ms=excluded.created_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, host.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, token_hash.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 5, enrolled_by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 6, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  const std::uint64_t id =
+      ok ? static_cast<std::uint64_t>(sqlite3_last_insert_rowid(db_)) : 0;
+  sqlite3_finalize(st);
+  return id;
+}
+
+std::optional<ServerStore::GroupServerRow>
+ServerStore::server_by_token_hash(const std::string& token_hash) {
+  const char* sql =
+      "SELECT id, group_id, name, host, enrolled_by, created_ms,"
+      " last_seen_ms, cpu_percent, mem_used_mb, mem_total_mb,"
+      " disk_used_mb, disk_total_mb, load1"
+      " FROM group_servers WHERE token_hash = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_text(st, 1, token_hash.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<GroupServerRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    GroupServerRow r;
+    r.id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
+    r.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    const char* n = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* h = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    const char* e = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    r.name = n ? n : "";
+    r.host = h ? h : "";
+    r.enrolled_by = e ? e : "";
+    r.created_ms = sqlite3_column_int64(st, 5);
+    r.last_seen_ms = sqlite3_column_int64(st, 6);
+    r.cpu_percent = sqlite3_column_double(st, 7);
+    r.mem_used_mb = sqlite3_column_double(st, 8);
+    r.mem_total_mb = sqlite3_column_double(st, 9);
+    r.disk_used_mb = sqlite3_column_double(st, 10);
+    r.disk_total_mb = sqlite3_column_double(st, 11);
+    r.load1 = sqlite3_column_double(st, 12);
+    out = std::move(r);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::server_heartbeat(std::uint64_t id, double cpu_percent,
+                                   double mem_used_mb, double mem_total_mb,
+                                   double disk_used_mb, double disk_total_mb,
+                                   double load1, std::int64_t ts_ms) {
+  const char* sql =
+      "UPDATE group_servers SET last_seen_ms=?, cpu_percent=?,"
+      " mem_used_mb=?, mem_total_mb=?, disk_used_mb=?, disk_total_mb=?,"
+      " load1=? WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, ts_ms);
+  sqlite3_bind_double(st, 2, cpu_percent);
+  sqlite3_bind_double(st, 3, mem_used_mb);
+  sqlite3_bind_double(st, 4, mem_total_mb);
+  sqlite3_bind_double(st, 5, disk_used_mb);
+  sqlite3_bind_double(st, 6, disk_total_mb);
+  sqlite3_bind_double(st, 7, load1);
+  sqlite3_bind_int64(st, 8, static_cast<sqlite3_int64>(id));
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ServerStore::GroupServerRow> ServerStore::server_list(
+    std::uint64_t group_id) {
+  std::vector<GroupServerRow> out;
+  const char* sql =
+      "SELECT id, group_id, name, host, enrolled_by, created_ms,"
+      " last_seen_ms, cpu_percent, mem_used_mb, mem_total_mb,"
+      " disk_used_mb, disk_total_mb, load1"
+      " FROM group_servers WHERE group_id = ? ORDER BY id ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    GroupServerRow r;
+    r.id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
+    r.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    const char* n = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* h = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    const char* e = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    r.name = n ? n : "";
+    r.host = h ? h : "";
+    r.enrolled_by = e ? e : "";
+    r.created_ms = sqlite3_column_int64(st, 5);
+    r.last_seen_ms = sqlite3_column_int64(st, 6);
+    r.cpu_percent = sqlite3_column_double(st, 7);
+    r.mem_used_mb = sqlite3_column_double(st, 8);
+    r.mem_total_mb = sqlite3_column_double(st, 9);
+    r.disk_used_mb = sqlite3_column_double(st, 10);
+    r.disk_total_mb = sqlite3_column_double(st, 11);
+    r.load1 = sqlite3_column_double(st, 12);
+    out.push_back(std::move(r));
   }
   sqlite3_finalize(st);
   return out;

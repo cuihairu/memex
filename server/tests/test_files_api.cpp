@@ -1276,10 +1276,14 @@ int main() {
   }
 
   // —— HTTP 面：未配主密钥的实例——两路由一律 503（不静默存明文） ——
+  // 两个临时面实例都活到 io 停摆之后：do_accept 以裸 this 链式再挂
+  // accept，作用域内析构会让 io 线程在悬空 this 上跑完成回调（偶发段错误）
+  std::unique_ptr<memex::server::FileServer> no_cred;
+  std::unique_ptr<memex::server::FileServer> bare;
   {
-    memex::server::FileServer no_cred(io, store, nullptr, 0);
-    const std::uint16_t nport = no_cred.port();
-    no_cred.start_accept();
+    no_cred = std::make_unique<memex::server::FileServer>(io, store, nullptr, 0);
+    const std::uint16_t nport = no_cred->port();
+    no_cred->start_accept();
     const auto nt = http(nport, "POST", "/files/session", {},
                          "{\"account\":\"owner1\",\"password\":\"pw-owner1\"}");
     CHECK(nt.status == 200);
@@ -1294,11 +1298,79 @@ int main() {
                 "").status == 503);
   }
 
+  // —— R26-1 服务器 agent 面：登记判权＋令牌只存摘要＋心跳鉴权＋列表
+  //    红绿灯（在线=last_seen 新鲜）——
+  {
+    const std::string gids = std::to_string(gid);
+    const std::string enroll_body =
+        "{\"gid\":" + gids + ",\"name\":\"web-1\",\"host\":\"10.0.0.1\"}";
+    // 登记：未登录 401；缺 host 400；非管理员 403（外人/成员都摸不到）
+    CHECK(http(port, "POST", "/files/group-servers/enroll", {}, enroll_body)
+              .status == 401);
+    CHECK(http(port, "POST", "/files/group-servers/enroll", H("owner1"),
+               "{\"gid\":" + gids + ",\"name\":\"web-1\"}")
+              .status == 400);
+    for (const char* a : {"member1", "outsider"}) {
+      CHECK(http(port, "POST", "/files/group-servers/enroll", H(a),
+                 enroll_body).status == 403);
+    }
+    // 群主登记 200：回包带一次性令牌
+    const auto en = http(port, "POST", "/files/group-servers/enroll",
+                         H("owner1"), enroll_body);
+    CHECK(en.status == 200);
+    const std::string token = jstr(en.body, "token");
+    CHECK(!token.empty());
+    CHECK(jint(en.body, "id") > 0);
+    // 令牌只存 SHA-256 摘要：摘要能开、明文开不了（库内永不见明文）
+    CHECK(store
+              .server_by_token_hash(memex::server::sha256_hex(token))
+              .has_value());
+    CHECK(!store.server_by_token_hash(token).has_value());
+    // 心跳：错令牌 401；缺数值字段 400；正拍 200（心跳走令牌非人会话）
+    const std::string hb_head =
+        ",\"cpu_percent\":12.5,\"mem_used_mb\":1024,\"mem_total_mb\":2048,"
+        "\"disk_used_mb\":20,\"disk_total_mb\":100,\"load1\":0.42";
+    CHECK(http(port, "POST", "/files/group-servers/heartbeat", {},
+               "{\"token\":\"bogus\"" + hb_head + "}").status == 401);
+    CHECK(http(port, "POST", "/files/group-servers/heartbeat", {},
+               "{\"token\":\"" + token +
+                   ",\"cpu_percent\":1.0}").status == 400);
+    CHECK(http(port, "POST", "/files/group-servers/heartbeat", {},
+               "{\"token\":\"" + token + "\"" + hb_head + "}").status == 200);
+    // 列表：非成员 403；成员 200 在线绿灯＋指标落账；令牌永不出现
+    CHECK(http(port, "GET", "/files/group-servers/list?gid=" + gids,
+               H("outsider"), "").status == 403);
+    const auto sl = http(port, "GET",
+                         "/files/group-servers/list?gid=" + gids,
+                         H("member1"), "");
+    CHECK(sl.status == 200);
+    CHECK(sl.body.find("\"name\":\"web-1\"") != std::string::npos);
+    CHECK(sl.body.find("\"online\":true") != std::string::npos);
+    CHECK(sl.body.find("\"cpu_percent\":12.5") != std::string::npos);
+    CHECK(sl.body.find("\"load1\":0.42") != std::string::npos);
+    CHECK(sl.body.find("token") == std::string::npos);
+    // 重登记=同行轮换令牌：id 稳定、老令牌 401、新令牌 200
+    const auto en2 = http(port, "POST", "/files/group-servers/enroll",
+                          H("owner1"), enroll_body);
+    CHECK(en2.status == 200);
+    CHECK(jint(en2.body, "id") == jint(en.body, "id"));
+    CHECK(jstr(en2.body, "token") != token);
+    CHECK(http(port, "POST", "/files/group-servers/heartbeat", {},
+               "{\"token\":\"" + token + "\"" + hb_head + "}").status == 401);
+    CHECK(http(port, "POST", "/files/group-servers/heartbeat", {},
+               "{\"token\":\"" + jstr(en2.body, "token") + "\"" + hb_head +
+                   "}").status == 200);
+    // 幽灵群：memo:config 判权先于写入（不存在的群不给过）
+    CHECK(http(port, "POST", "/files/group-servers/enroll", H("owner1"),
+               "{\"gid\":999999999,\"name\":\"x\",\"host\":\"h\"}")
+              .status == 403);
+  }
+
   // —— 存储未配置：面在、字节面 503、元数据面照常 ——
   {
-    memex::server::FileServer bare(io, store, nullptr, 0);
-    const std::uint16_t bport = bare.port();
-    bare.start_accept();
+    bare = std::make_unique<memex::server::FileServer>(io, store, nullptr, 0);
+    const std::uint16_t bport = bare->port();
+    bare->start_accept();
     const auto bt =
         http(bport, "POST", "/files/session", {},
              "{\"account\":\"member1\",\"password\":\"pw-member1\"}");

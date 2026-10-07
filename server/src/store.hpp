@@ -725,6 +725,39 @@ public:
   // 掩码清单（无密文字段）
   std::vector<ToolCredentialMeta> tool_cred_list(std::uint64_t group_id);
 
+  // —— R26-1 服务器 agent 面：公用服务器登记（agent 凭注册令牌心跳，
+  // 令牌只存 SHA-256 摘要——明文只在登记回包出现一次；指标=最近一拍，
+  // 红绿灯=last_seen 新鲜度由路由层判）——
+  struct GroupServerRow {
+    std::uint64_t id{0};
+    std::uint64_t group_id{0};
+    std::string name;
+    std::string host;
+    std::string enrolled_by;
+    std::int64_t created_ms{0};
+    std::int64_t last_seen_ms{0};
+    double cpu_percent{-1.0}; // -1=尚未上报过
+    double mem_used_mb{0};
+    double mem_total_mb{0};
+    double disk_used_mb{0};
+    double disk_total_mb{0};
+    double load1{0};
+  };
+  // 登记（token_hash=SHA-256 hex；同 gid+name 幂等复用行并轮换令牌）；
+  // 群须存在——0=群不存在/失败
+  std::uint64_t server_enroll(std::uint64_t group_id, const std::string& name,
+                              const std::string& host,
+                              const std::string& token_hash,
+                              const std::string& enrolled_by,
+                              std::int64_t ts_ms);
+  std::optional<GroupServerRow> server_by_token_hash(
+      const std::string& token_hash);
+  bool server_heartbeat(std::uint64_t id, double cpu_percent,
+                        double mem_used_mb, double mem_total_mb,
+                        double disk_used_mb, double disk_total_mb,
+                        double load1, std::int64_t ts_ms);
+  std::vector<GroupServerRow> server_list(std::uint64_t group_id);
+
 private:
   bool ensure_schema();
 
