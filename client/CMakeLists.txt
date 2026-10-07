@@ -53,6 +53,7 @@ qt_add_executable(memex_client
   engine/task/task_http.cpp
   engine/task/github_provider.cpp
   engine/task/dingtalk_provider.cpp
+  engine/task/feishu_provider.cpp
   app/task_dialog.hpp
   app/group_memo_dialog.cpp
   app/group_memo_dialog.hpp
@@ -328,6 +329,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
     engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp)
   target_link_libraries(test_task_dialog PRIVATE
@@ -352,6 +354,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
     engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -388,6 +391,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
     engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -422,6 +426,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
     engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -478,6 +483,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
     engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -513,6 +519,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
     engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -546,6 +553,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
     engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -579,6 +587,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
     engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -642,6 +651,21 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_dingtalk_provider PRIVATE Qt6::Core Qt6::Network)
   add_test(NAME dingtalk_provider COMMAND test_dingtalk_provider)
   set_tests_properties(dingtalk_provider PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 30)
+
+  # R27-3 飞书任务 provider 验收（假传输回放不打外网）：tenant 令牌流
+  #（缓存/信封 code 拒/到期重取）、L3 建任务与完成回写、Bearer 头与端点
+  add_executable(test_feishu_provider
+    engine/task/tests/test_feishu_provider.cpp
+    engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/feishu_provider.cpp)
+  target_include_directories(test_feishu_provider PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(test_feishu_provider PRIVATE Qt6::Core Qt6::Network)
+  add_test(NAME feishu_provider COMMAND test_feishu_provider)
+  set_tests_properties(feishu_provider PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 30)
 endif()
