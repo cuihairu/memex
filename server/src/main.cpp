@@ -2,9 +2,11 @@
 // 管理后台（T3.1）接管运维面之前，账号开通与记录查询走本 CLI。
 #include <asio.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -1280,6 +1282,144 @@ int cmd_org(int argc, char** argv, const std::string& db_path) {
   return 2;
 }
 
+// retention 子命令族（平台-5 留存策略与清除）：
+//   retention set <days|indefinite> [--dept 路径] --by 账号
+//                                  留存期白名单：30/180/365/1095 或 indefinite
+//   retention show [账号]           已配置行（全局在前）；带账号=生效留存期
+//   retention purge --before 时刻 --reason 文本 --by 账号 --approved-by 账号
+//                   [--policy-days N]
+//                                  Retention Purge（双人审批高风险；物理清
+//                                  除＋逐条 purged 事件＋批次台账＋审计）
+//   retention purges [N]            清除台账（倒序）
+int cmd_retention(int argc, char** argv, const std::string& db_path) {
+  if (argc < 1) {
+    std::cerr << "用法：memex_server retention set|show|purge|purges … "
+                 "[--db <库>]\n";
+    return 2;
+  }
+  const std::string_view sub = argv[0];
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+  const std::int64_t now = std::chrono::duration_cast<
+      std::chrono::milliseconds>(std::chrono::system_clock::now()
+                                     .time_since_epoch())
+      .count();
+
+  if (sub == "set") {
+    if (argc < 2) {
+      std::cerr << "用法：org retention set <days|indefinite> [--dept 路径] "
+                 "--by 账号\n";
+      return 2;
+    }
+    int days = 0;
+    const std::string_view d = argv[1];
+    if (d == "indefinite" || d == "0") {
+      days = 0;
+    } else {
+      days = std::atoi(argv[1]);
+    }
+    std::string dept, by;
+    for (int i = 2; i + 1 < argc; i += 2) {
+      const std::string_view flag = argv[i];
+      if (flag == "--dept") dept = argv[i + 1];
+      else if (flag == "--by") by = argv[i + 1];
+    }
+    if (by.empty()) {
+      std::cerr << "缺 --by 账号（谁配置的须留痕）\n";
+      return 2;
+    }
+    if (!store.retention_set(days, dept, by, now)) {
+      std::cerr << "写入失败（天数须为 30/180/365/1095/indefinite，"
+                   "部门须已存在）\n";
+      return 1;
+    }
+    std::cout << "已配置留存期：" << (dept.empty() ? "（全局）" : dept)
+              << " → " << (days == 0 ? "Indefinite" : std::to_string(days) + " 天")
+              << "（by " << by << "）\n";
+    return 0;
+  }
+
+  if (sub == "show") {
+    const std::string who = argc >= 2 ? argv[1] : "";
+    if (who.empty()) {
+      std::cout << "scope\t留存期\t配置人\t配置时刻\n";
+      for (const auto& p : store.retention_list()) {
+        std::cout << (p.department_path.empty() ? "（全局）"
+                                                : p.department_path)
+                  << '\t'
+                  << (p.retention_days == 0
+                          ? "Indefinite"
+                          : std::to_string(p.retention_days) + " 天")
+                  << '\t' << p.updated_by << '\t' << p.updated_ms << '\n';
+      }
+      return 0;
+    }
+    const auto p = store.retention_resolve(who);
+    std::cout << who << " 生效留存期："
+              << (p.retention_days == 0 ? "Indefinite（永久）"
+                                        : std::to_string(p.retention_days) + " 天")
+              << "（scope " << (p.department_path.empty() ? "全局/默认"
+                                                          : p.department_path)
+              << "）\n";
+    return 0;
+  }
+
+  if (sub == "purge") {
+    std::int64_t before = 0;
+    std::string reason, by, approved;
+    int policy_days = 0;
+    for (int i = 1; i + 1 < argc; i += 2) {
+      const std::string_view flag = argv[i];
+      if (flag == "--before") {
+        // 时刻或毫秒时间戳都收
+        if (std::all_of(argv[i + 1], argv[i + 1] + std::strlen(argv[i + 1]),
+                        ::isdigit)) {
+          before = std::strtoll(argv[i + 1], nullptr, 10);
+        } else {
+          before = parse_time_arg(argv[i + 1], false); // 日期粒度=当日零点
+        }
+      } else if (flag == "--reason") reason = argv[i + 1];
+      else if (flag == "--by") by = argv[i + 1];
+      else if (flag == "--approved-by") approved = argv[i + 1];
+      else if (flag == "--policy-days") policy_days = std::atoi(argv[i + 1]);
+    }
+    if (before <= 0 || reason.empty() || by.empty() || approved.empty()) {
+      std::cerr << "用法：retention purge --before <时刻|毫秒> --reason 文本 "
+                 "--by 账号 --approved-by 账号 [--policy-days N]\n";
+      return 2;
+    }
+    const std::int64_t id = store.retention_purge(before, reason, by, approved,
+                                                  policy_days, now);
+    if (id == 0) {
+      std::cerr << "清除被拒（双人须两账号存在且不同、理由必填、时间线有效）\n";
+      return 1;
+    }
+    std::cout << "已执行 Retention Purge（台账 id " << id << "）："
+              << "清除 " << before << " 之前的归档（by " << by
+              << "，批准 " << approved << "）\n";
+    return 0;
+  }
+
+  if (sub == "purges") {
+    const int n = argc >= 2 ? std::atoi(argv[1]) : 50;
+    std::cout << "id\t执行人\t批准人\t条数\t期限(天)\t理由\t时刻\n";
+    for (const auto& p : store.retention_purges(n)) {
+      std::cout << p.id << '\t' << p.purged_by << '\t' << p.approved_by << '\t'
+                << p.msg_count << '\t'
+                << (p.policy_days == 0 ? "Indefinite"
+                                       : std::to_string(p.policy_days))
+                << '\t' << p.reason << '\t' << p.purged_ms << '\n';
+    }
+    return 0;
+  }
+
+  std::cerr << "未知 retention 子命令：" << sub << "\n";
+  return 2;
+}
+
 // policy 子命令族（T3.4 策略开关，按部门配置、全局兜底）：
 //   policy set [--dept 路径] [--allow-anonymous on|off]
 //              [--allow-cross-state on|off] [--new-device-approval on|off]
@@ -1680,6 +1820,7 @@ int main(int argc, char** argv) {
     if (cmd == "logins") return cmd_logins(sub_argc, sub_argv, db_path);
     if (cmd == "device") return cmd_device(sub_argc, sub_argv, db_path);
     if (cmd == "messages") return cmd_messages(sub_argc, sub_argv, db_path);
+    if (cmd == "retention") return cmd_retention(sub_argc, sub_argv, db_path);
     if (cmd == "audit") return cmd_audit(sub_argc, sub_argv, db_path);
     if (cmd == "cross") return cmd_cross(sub_argc, sub_argv, db_path);
     if (cmd == "favs") return cmd_favs(sub_argc, sub_argv, db_path);

@@ -137,6 +137,22 @@ bool ServerStore::ensure_schema() {
       "  ts_ms INTEGER NOT NULL);"
       "CREATE INDEX IF NOT EXISTS idx_message_events_msg"
       "  ON message_events(msg_id, id);"
+      // 平台-5 留存策略与清除台账（删除必须双人＋留痕，无痕删除被禁止）
+      "CREATE TABLE IF NOT EXISTS retention_policies ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  department_path TEXT NOT NULL DEFAULT '' UNIQUE,"
+      "  retention_days INTEGER NOT NULL,"
+      "  updated_by TEXT NOT NULL DEFAULT '',"
+      "  updated_ms INTEGER NOT NULL);"
+      "CREATE TABLE IF NOT EXISTS retention_purges ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  purged_by TEXT NOT NULL,"
+      "  approved_by TEXT NOT NULL,"
+      "  reason TEXT NOT NULL DEFAULT '',"
+      "  policy_days INTEGER NOT NULL DEFAULT 0,"
+      "  msg_count INTEGER NOT NULL DEFAULT 0,"
+      "  before_ms INTEGER NOT NULL,"
+      "  purged_ms INTEGER NOT NULL);"
       // T2.6 组织架构：部门树（parent_id 成树）＋成员资料
       //（直属上级为独立单列——每人至多一名，结构性约束）
       "CREATE TABLE IF NOT EXISTS departments ("
@@ -1344,6 +1360,16 @@ bool ServerStore::append_message_event(const std::string& msg_id,
       ok = sqlite3_step(u) == SQLITE_DONE && sqlite3_changes(db_) > 0;
     }
     sqlite3_finalize(u);
+  } else if (event == "purged") {
+    // 平台-5 留存清除：投影物理移除；事件表留痕（重建跳过——清除可重现）
+    sqlite3_stmt* d = nullptr;
+    ok = sqlite3_prepare_v2(db_, "DELETE FROM messages WHERE msg_id = ?;",
+                            -1, &d, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(d, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+      ok = sqlite3_step(d) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    }
+    sqlite3_finalize(d);
   }
   // delivered/read：只记事件，不动投影
   if (ok) {
@@ -1403,9 +1429,10 @@ std::vector<ServerStore::MessageEvent> ServerStore::message_events(
 
 std::vector<ArchivedMessage> ServerStore::rebuild_messages_from_events() {
   // 重放事件重建当前态：created 建（按首现序）、recalled 置标记、
-  // edited 替正文；其余事件不变形状
+  // edited 替正文、purged 移除（留存清除可重现）；其余事件不变形状
   std::vector<ArchivedMessage> out;
   std::map<std::string, std::size_t> index; // msg_id → out 下标
+  std::set<std::string> purged;
   for (const auto& e : message_events("")) {
     if (e.event == "created") {
       nlohmann::json p = nlohmann::json::parse(e.payload, nullptr, false);
@@ -1425,8 +1452,209 @@ std::vector<ArchivedMessage> ServerStore::rebuild_messages_from_events() {
     } else if (e.event == "edited") {
       const auto it = index.find(e.msg_id);
       if (it != index.end() && !e.payload.empty()) out[it->second].text = e.payload;
+    } else if (e.event == "purged") {
+      purged.insert(e.msg_id);
     }
   }
+  if (!purged.empty()) {
+    std::vector<ArchivedMessage> kept;
+    kept.reserve(out.size());
+    for (auto& m : out) {
+      if (!purged.count(m.msg_id)) kept.push_back(std::move(m));
+    }
+    out = std::move(kept);
+  }
+  return out;
+}
+
+// —— 平台-5 留存策略与 Retention Purge ——
+
+bool ServerStore::retention_set(int days, const std::string& department_path,
+                                const std::string& updated_by,
+                                std::int64_t ts_ms) {
+  // 白名单枚举（蓝图§十四）：30 天/6 个月/1 年/3 年/Indefinite
+  if (days != 0 && days != 30 && days != 180 && days != 365 && days != 1095)
+    return false;
+  if (!department_path.empty()) {
+    // 部门行须挂已存在部门（与 set_policy 同口径，不顺手建部门）
+    bool found = false;
+    for (const auto& [id, path] : department_list()) {
+      (void)id;
+      if (path == department_path) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
+  }
+  const char* sql =
+      "INSERT INTO retention_policies(department_path, retention_days,"
+      " updated_by, updated_ms) VALUES(?,?,?,?)"
+      " ON CONFLICT(department_path) DO UPDATE SET"
+      " retention_days = excluded.retention_days,"
+      " updated_by = excluded.updated_by,"
+      " updated_ms = excluded.updated_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, department_path.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 2, days);
+  sqlite3_bind_text(st, 3, updated_by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ServerStore::RetentionPolicy> ServerStore::retention_list() {
+  std::vector<RetentionPolicy> out;
+  const char* sql =
+      "SELECT id, department_path, retention_days, updated_by, updated_ms"
+      " FROM retention_policies ORDER BY department_path = '' DESC,"
+      " department_path ASC;"; // 全局行在前
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    RetentionPolicy p;
+    p.id = sqlite3_column_int64(st, 0);
+    p.department_path = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    p.retention_days = sqlite3_column_int(st, 2);
+    p.updated_by = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    p.updated_ms = sqlite3_column_int64(st, 4);
+    out.push_back(std::move(p));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+ServerStore::RetentionPolicy ServerStore::retention_resolve(
+    const std::string& account) {
+  // 生效留存期：本人部门链逐级上溯（与 resolve_policy 同走法）→ 全局行 →
+  // 内置默认 Indefinite（0）
+  std::map<std::string, RetentionPolicy> by_path;
+  for (const auto& p : retention_list()) by_path[p.department_path] = p;
+  std::string path;
+  if (const auto prof = member_profile(account)) {
+    path = prof->department_path;
+  }
+  while (!path.empty()) {
+    const auto it = by_path.find(path);
+    if (it != by_path.end()) return it->second;
+    const auto pos = path.rfind('/');
+    if (pos == std::string::npos) break;
+    path.resize(pos);
+  }
+  const auto g = by_path.find("");
+  if (g != by_path.end()) return g->second;
+  RetentionPolicy fallback; // 内置默认：Indefinite（现状口径）
+  return fallback;
+}
+
+std::int64_t ServerStore::retention_purge(std::int64_t before_ms,
+                                          const std::string& reason,
+                                          const std::string& purged_by,
+                                          const std::string& approved_by,
+                                          int policy_days,
+                                          std::int64_t ts_ms) {
+  // 高风险三道闸：双人（两账号存在且不同）＋理由必填＋时间线有效
+  if (before_ms <= 0) return 0;
+  if (reason.empty()) return 0;
+  if (purged_by.empty() || approved_by.empty()) return 0;
+  if (purged_by == approved_by) return 0; // 双人审批：一人不得自批自清
+  if (!find_account(purged_by) || !find_account(approved_by)) return 0;
+  const auto victims = [&] {
+    std::vector<std::string> ids;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_,
+                           "SELECT msg_id FROM messages WHERE ts_ms < ?"
+                           " ORDER BY id;",
+                           -1, &st, nullptr) != SQLITE_OK)
+      return ids;
+    sqlite3_bind_int64(st, 1, before_ms);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+      ids.emplace_back(reinterpret_cast<const char*>(sqlite3_column_text(st, 0)));
+    }
+    sqlite3_finalize(st);
+    return ids;
+  }();
+  char* tx = nullptr;
+  if (sqlite3_exec(db_, "SAVEPOINT purge;", nullptr, nullptr, &tx) !=
+      SQLITE_OK) {
+    sqlite3_free(tx);
+    return 0;
+  }
+  bool ok = true;
+  for (const auto& id : victims) {
+    // 逐条落 purged 事件（事件与清除同事务——无痕删除被禁止）
+    ok = append_message_event(id, "purged", purged_by, reason, ts_ms);
+    if (!ok) break;
+  }
+  std::int64_t ledger_id = 0;
+  if (ok) {
+    sqlite3_stmt* i = nullptr;
+    ok = sqlite3_prepare_v2(
+             db_,
+             "INSERT INTO retention_purges(purged_by, approved_by, reason,"
+             " policy_days, msg_count, before_ms, purged_ms)"
+             " VALUES(?,?,?,?,?,?,?);",
+             -1, &i, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(i, 1, purged_by.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(i, 2, approved_by.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(i, 3, reason.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int(i, 4, policy_days);
+      sqlite3_bind_int(i, 5, static_cast<int>(victims.size()));
+      sqlite3_bind_int64(i, 6, before_ms);
+      sqlite3_bind_int64(i, 7, ts_ms);
+      ok = sqlite3_step(i) == SQLITE_DONE;
+      if (ok) ledger_id = sqlite3_last_insert_rowid(db_);
+    }
+    sqlite3_finalize(i);
+  }
+  if (ok) { // 审计留痕复用查阅台账（purge 属敏感动作，谁何时清了几条）
+    AuditReadRow a;
+    a.op_account = purged_by;
+    a.action = "purge";
+    a.filters = "before_ms=" + std::to_string(before_ms) +
+                " 批准=" + approved_by +
+                " 理由=" + reason;
+    a.result_count = static_cast<int>(victims.size());
+    a.ts_ms = ts_ms;
+    add_audit_read(a);
+  }
+  if (ok && ledger_id > 0) {
+    ok = sqlite3_exec(db_, "RELEASE purge;", nullptr, nullptr, &tx) ==
+         SQLITE_OK;
+  } else {
+    ok = false;
+    sqlite3_exec(db_, "ROLLBACK TO purge;", nullptr, nullptr, &tx);
+    sqlite3_exec(db_, "RELEASE purge;", nullptr, nullptr, &tx);
+  }
+  sqlite3_free(tx);
+  return ok ? ledger_id : 0;
+}
+
+std::vector<ServerStore::RetentionPurge> ServerStore::retention_purges(
+    int limit) {
+  std::vector<RetentionPurge> out;
+  const char* sql =
+      "SELECT id, purged_by, approved_by, reason, policy_days, msg_count,"
+      " before_ms, purged_ms FROM retention_purges ORDER BY id DESC LIMIT ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int(st, 1, limit > 0 ? limit : 50);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    RetentionPurge p;
+    p.id = sqlite3_column_int64(st, 0);
+    p.purged_by = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    p.approved_by = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    p.reason = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    p.policy_days = sqlite3_column_int(st, 4);
+    p.msg_count = sqlite3_column_int(st, 5);
+    p.before_ms = sqlite3_column_int64(st, 6);
+    p.purged_ms = sqlite3_column_int64(st, 7);
+    out.push_back(std::move(p));
+  }
+  sqlite3_finalize(st);
   return out;
 }
 

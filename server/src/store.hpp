@@ -339,6 +339,43 @@ public:
   // 重放事件重建当前态（created 建 行、recalled 置标记、edited 替正文）
   std::vector<ArchivedMessage> rebuild_messages_from_events();
 
+  // —— 平台-5 留存策略（Retention Policy）：废除「永久留存」一刀切——
+  //     生命周期由管理员配置（30/180/365/1095 天或 0=Indefinite）；
+  //     删除=Retention Purge（who/when/what/why/policy/approval 台账，
+  //     双人审批高风险），逐条落 purged 事件（历史无痕删除被禁止）——
+  struct RetentionPolicy {
+    std::int64_t id{0};
+    std::string department_path; // 空=全局行；部门未配置时继承全局
+    int retention_days{0};       // 0=Indefinite
+    std::string updated_by;
+    std::int64_t updated_ms{0};
+  };
+  // 写入一行（UPSERT，按部门路径）；days 须为 0 或 30/180/365/1095
+  bool retention_set(int days, const std::string& department_path,
+                     const std::string& updated_by, std::int64_t ts_ms);
+  std::vector<RetentionPolicy> retention_list();
+  // 生效留存期：本人部门链逐级上溯 → 全局行 → 内置默认 Indefinite
+  RetentionPolicy retention_resolve(const std::string& account);
+  // Retention Purge：双人审批（approved_by≠purged_by、两账号须存在）、
+  // 理由必填；物理清除 before_ms 之前的归档行，逐条落 purged 事件
+  //（重建可重现清除事实），批次台账＋审计留痕。返回台账 id；0=拒。
+  struct RetentionPurge {
+    std::int64_t id{0};
+    std::string purged_by;
+    std::string approved_by;
+    std::string reason;
+    int policy_days{0};
+    int msg_count{0};
+    std::int64_t before_ms{0};
+    std::int64_t purged_ms{0};
+  };
+  std::int64_t retention_purge(std::int64_t before_ms,
+                               const std::string& reason,
+                               const std::string& purged_by,
+                               const std::string& approved_by,
+                               int policy_days, std::int64_t ts_ms);
+  std::vector<RetentionPurge> retention_purges(int limit = 50);
+
   // —— T2.6 组织架构 ——
 
   // 部门：按全路径逐级创建（已存在即复用）；返回末级部门 id，失败 -1。

@@ -409,6 +409,98 @@ int main() {
     CHECK(!store.append_message_event("mid-幽灵", "edited", "alice", "x", 1));
   }
 
+  // —— 平台-5 留存策略与 Retention Purge：白名单天数、部门链继承、
+  //     双人审批（一人不得自批自清）、清除落 purged 事件＋台账＋审计、
+  //     重建跳过已清除（清除可重现而非无痕） ——
+  {
+    // 策略面：白名单外拒（45 天不在 30/180/365/1095/indefinite）
+    CHECK(!store.retention_set(45, "", "admin1", 1));
+    CHECK(store.retention_set(0, "", "admin1", 1)); // 全局 Indefinite
+    CHECK(store.retention_set(30, "", "admin1", 2)); // 全局覆盖为 30 天
+    const auto g = store.retention_resolve("nobody-挂档");
+    CHECK(g.retention_days == 30); // 无部门者吃全局行
+    CHECK(store.retention_list().size() == 1);
+    // 部门行覆盖全局；须挂已存在部门
+    CHECK(!store.retention_set(180, "不存在的部门", "admin1", 3));
+    store.ensure_department_path("公司/研发部");
+    store.ensure_department_path("公司/研发部/客户端组");
+    {
+      // bob 挂到 公司/研发部（中段）；客户端组未单独配置 → 链上溯命中父行
+      CHECK(store.set_member_profile(
+          "bob", store.ensure_department_path("公司/研发部"), "", ""));
+      CHECK(store.retention_set(180, "公司/研发部", "admin1", 4));
+      const auto r = store.retention_resolve("bob");
+      CHECK(r.retention_days == 180 && r.department_path == "公司/研发部");
+      // 挂到叶子（叶子未配置）→ 仍走父行 180
+      CHECK(store.set_member_profile(
+          "bob", store.ensure_department_path("公司/研发部/客户端组"), "", ""));
+      const auto r2 = store.retention_resolve("bob");
+      CHECK(r2.retention_days == 180 && r2.department_path == "公司/研发部");
+    }
+
+    // 清除面：三道闸逐一验拒
+    const std::int64_t t_purge = now_ms();
+    CHECK(store.store_message("mid-old1", "alice", "bob", 10, "远古一",
+                              t_purge - 10 * 86400000LL));
+    CHECK(store.store_message("mid-old2", "bob", "alice", 10, "远古二",
+                              t_purge - 9 * 86400000LL));
+    CHECK(store.store_message("mid-old3", "alice", "bob", 10, "远古三",
+                              t_purge - 8 * 86400000LL));
+    CHECK(store.retention_purge(0, "理由", "alice", "bob", 30, 1) == 0); // 时间线
+    CHECK(store.retention_purge(t_purge, "", "alice", "bob", 30, 1) == 0); // 空理由
+    CHECK(store.retention_purge(t_purge, "理由", "alice", "alice", 30, 1) ==
+          0); // 自批自清
+    CHECK(store.retention_purge(t_purge, "理由", "alice", "幽灵", 30, 1) ==
+          0); // 批准人不存在
+    const std::size_t before_rows = store.messages("").size();
+    const std::int64_t before_events =
+        store.message_events("").size();
+    const auto ledger_id =
+        store.retention_purge(t_purge - 7 * 86400000LL, "留存期到批量清除",
+                              "alice", "bob", 30, t_purge); // 线取 7 天前：只圈三条远古
+    CHECK(ledger_id > 0);
+    CHECK(store.messages("").size() == before_rows - 3); // 三条远古被清
+    bool proto_kept = false; // 协议腿消息（ts≈now）不在清除线内，仍在
+    for (const auto& m : store.messages(""))
+      if (m.msg_id == msg_id) proto_kept = true;
+    CHECK(proto_kept);
+    // 逐条 purged 事件（created→…→purged 全程留痕）
+    for (const char* mid : {"mid-old1", "mid-old2", "mid-old3"}) {
+      const auto seq = store.message_events(mid);
+      CHECK(!seq.empty());
+      if (!seq.empty()) {
+        CHECK(seq.front().event == "created"); // 原文 payload 永在
+        CHECK(seq.back().event == "purged" && seq.back().by_account == "alice");
+        CHECK(seq.back().payload == "留存期到批量清除"); // 理由随事件
+      }
+    }
+    CHECK(store.message_events("").size() == before_events + 3);
+    // 台账：who/approval/why/policy/count 全在
+    const auto ledgers = store.retention_purges(10);
+    CHECK(ledgers.size() == 1);
+    if (!ledgers.empty()) {
+      CHECK(ledgers[0].id == ledger_id);
+      CHECK(ledgers[0].purged_by == "alice" && ledgers[0].approved_by == "bob");
+      CHECK(ledgers[0].reason == "留存期到批量清除");
+      CHECK(ledgers[0].policy_days == 30 && ledgers[0].msg_count == 3);
+      CHECK(ledgers[0].before_ms == t_purge - 7 * 86400000LL);
+    }
+    // 审计留痕：purge 属敏感动作进查阅台账
+    bool audited = false;
+    for (const auto& a : store.audit_reads(20))
+      if (a.action == "purge" && a.op_account == "alice" &&
+          a.result_count == 3)
+        audited = true;
+    CHECK(audited);
+    // 重建跳过已清除（清除可重现而非无痕——重放不出已清消息本体）
+    bool ghost_reborn = false;
+    for (const auto& m : store.rebuild_messages_from_events())
+      if (m.msg_id == "mid-old1" || m.msg_id == "mid-old2" ||
+          m.msg_id == "mid-old3")
+        ghost_reborn = true;
+    CHECK(!ghost_reborn);
+  }
+
   if (g_failures == 0) {
     std::cout << "archive tests: all passed\n";
     return 0;
