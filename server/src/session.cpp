@@ -353,9 +353,13 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     break;
   }
   case v1::ACK:
-    // 接收方回执：消息已收取，清离线队列
+    // 接收方回执：消息已收取，清离线队列；平台-4 落 delivered 事件
+    //（ack 清队成功才记——重 ACK 不重记）
     if (logged_in_ && msg.has_ack() && !msg.ack().msg_id().empty()) {
-      server_.store().ack_offline(msg.ack().msg_id(), account_);
+      if (server_.store().ack_offline(msg.ack().msg_id(), account_)) {
+        server_.store().append_message_event(msg.ack().msg_id(), "delivered",
+                                             account_, "", now_ms());
+      }
     }
     break;
   case v1::READ: {
@@ -376,6 +380,7 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     const std::int64_t rms = now_ms(); // 留痕与通知共用同一时刻
     if (!server_.store().record_read(target, account_, rms)) break;
     if (!is_new) break;
+    server_.store().append_message_event(target, "read", account_, "", rms);
     memex::protocol::Message out;
     out.set_type(v1::READ_NOTICE);
     out.set_from("server");
@@ -468,8 +473,7 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       log("越权撤回被拒：目标发送方为 " + original_from);
       break;
     }
-    server_.store().recall_message(target);
-    server_.store().record_recall_event(target, account_, now_ms());
+    server_.store().recall_message(target, account_, now_ms());
     log("撤回留痕：" + target);
     // 转发给消息会话双方的在线会话（不含本会话），客户端按 msg_id 标记本地副本
     for (const auto& s : server_.online_sessions(msg.to())) {

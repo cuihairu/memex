@@ -2,6 +2,8 @@
 
 #include "cred.hpp"
 
+#include <nlohmann/json.hpp>
+
 #include <sqlite3.h>
 
 #include <chrono>
@@ -124,6 +126,17 @@ bool ServerStore::ensure_schema() {
       "  msg_id TEXT NOT NULL,"
       "  by_account TEXT NOT NULL,"
       "  ts_ms INTEGER NOT NULL);"
+      // 平台-4 归档事件溯源：append-only（无 UPDATE/DELETE 路径）；
+      // 消息状态变迁全留痕，当前态可由本表重放重建
+      "CREATE TABLE IF NOT EXISTS message_events ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  msg_id TEXT NOT NULL,"
+      "  event TEXT NOT NULL,"
+      "  by_account TEXT NOT NULL DEFAULT '',"
+      "  payload TEXT NOT NULL DEFAULT '',"
+      "  ts_ms INTEGER NOT NULL);"
+      "CREATE INDEX IF NOT EXISTS idx_message_events_msg"
+      "  ON message_events(msg_id, id);"
       // T2.6 组织架构：部门树（parent_id 成树）＋成员资料
       //（直属上级为独立单列——每人至多一名，结构性约束）
       "CREATE TABLE IF NOT EXISTS departments ("
@@ -1250,20 +1263,171 @@ std::size_t ServerStore::offline_count(const std::string& account) {
 bool ServerStore::store_message(const std::string& msg_id, const std::string& from_account,
                                 const std::string& to_account, int type,
                                 const std::string& text, std::int64_t ts_ms) {
-  const char* sql =
-      "INSERT OR IGNORE INTO messages(msg_id, from_account, to_account, type, text, ts_ms)"
-      " VALUES(?, ?, ?, ?, ?, ?);";
+  // 平台-4：归档走 created 事件（payload 带全量字段，事件与投影同事务落）
+  nlohmann::json p;
+  p["from"] = from_account;
+  p["to"] = to_account;
+  p["type"] = type;
+  p["text"] = text;
+  p["ts_ms"] = ts_ms;
+  return append_message_event(msg_id, "created", from_account, p.dump(),
+                              ts_ms > 0 ? ts_ms : now_ms());
+}
+
+// —— 平台-4 归档事件溯源 ——
+
+bool ServerStore::append_message_event(const std::string& msg_id,
+                                       const std::string& event,
+                                       const std::string& by_account,
+                                       const std::string& payload,
+                                       std::int64_t ts_ms) {
+  if (msg_id.empty() || event.empty()) return false;
+  char* tx = nullptr;
+  if (sqlite3_exec(db_, "SAVEPOINT msg_evt;", nullptr, nullptr, &tx) !=
+      SQLITE_OK) {
+    sqlite3_free(tx);
+    return false;
+  }
+  bool ok = true;
+  if (event == "created") {
+    // created 物化归档行：payload 带全量字段；重投去重（已有行不重放）
+    nlohmann::json p = nlohmann::json::parse(payload, nullptr, false);
+    if (p.is_discarded() || !p.contains("from") || !p.contains("to")) {
+      sqlite3_exec(db_, "ROLLBACK TO msg_evt;", nullptr, nullptr, &tx);
+      sqlite3_exec(db_, "RELEASE msg_evt;", nullptr, nullptr, &tx);
+      sqlite3_free(tx);
+      return false;
+    }
+    sqlite3_stmt* i = nullptr;
+    ok = sqlite3_prepare_v2(
+             db_,
+             "INSERT OR IGNORE INTO messages(msg_id, from_account, to_account,"
+             " type, text, ts_ms) VALUES(?,?,?,?,?,?);",
+             -1, &i, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(i, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(i, 2,
+                        p.value("from", std::string{}).c_str(), -1,
+                        SQLITE_TRANSIENT);
+      sqlite3_bind_text(i, 3,
+                        p.value("to", std::string{}).c_str(), -1,
+                        SQLITE_TRANSIENT);
+      sqlite3_bind_int(i, 4, p.value("type", 0));
+      sqlite3_bind_text(i, 5,
+                        p.value("text", std::string{}).c_str(), -1,
+                        SQLITE_TRANSIENT);
+      sqlite3_bind_int64(i, 6, p.value("ts_ms", std::int64_t{0}));
+      ok = sqlite3_step(i) == SQLITE_DONE;
+      if (ok) ok = sqlite3_changes(db_) > 0; // 已存在=重投，不记重复事件
+    }
+    sqlite3_finalize(i);
+  } else if (event == "recalled") {
+    // 投影跟随事件：recall=1（正文不动——留痕纪律）
+    sqlite3_stmt* u = nullptr;
+    ok = sqlite3_prepare_v2(db_,
+                            "UPDATE messages SET recall = 1 WHERE msg_id = ?;",
+                            -1, &u, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(u, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+      ok = sqlite3_step(u) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    }
+    sqlite3_finalize(u);
+  } else if (event == "edited") {
+    // 投影跟随事件：正文替换（原 created payload 里原文永在——可审计）
+    sqlite3_stmt* u = nullptr;
+    ok = sqlite3_prepare_v2(db_,
+                            "UPDATE messages SET text = ? WHERE msg_id = ?;",
+                            -1, &u, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(u, 1, payload.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(u, 2, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+      ok = sqlite3_step(u) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+    }
+    sqlite3_finalize(u);
+  }
+  // delivered/read：只记事件，不动投影
+  if (ok) {
+    sqlite3_stmt* e = nullptr;
+    ok = sqlite3_prepare_v2(
+             db_,
+             "INSERT INTO message_events(msg_id, event, by_account, payload,"
+             " ts_ms) VALUES(?,?,?,?,?);",
+             -1, &e, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(e, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(e, 2, event.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(e, 3, by_account.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(e, 4, payload.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64(e, 5, ts_ms);
+      ok = sqlite3_step(e) == SQLITE_DONE;
+    }
+    sqlite3_finalize(e);
+  }
+  if (ok) {
+    ok = sqlite3_exec(db_, "RELEASE msg_evt;", nullptr, nullptr, &tx) ==
+         SQLITE_OK;
+  } else {
+    sqlite3_exec(db_, "ROLLBACK TO msg_evt;", nullptr, nullptr, &tx);
+    sqlite3_exec(db_, "RELEASE msg_evt;", nullptr, nullptr, &tx);
+  }
+  sqlite3_free(tx);
+  return ok;
+}
+
+std::vector<ServerStore::MessageEvent> ServerStore::message_events(
+    const std::string& msg_id) {
+  std::vector<MessageEvent> out;
+  std::string sql =
+      "SELECT id, msg_id, event, by_account, payload, ts_ms"
+      " FROM message_events";
+  if (!msg_id.empty()) sql += " WHERE msg_id = ?";
+  sql += " ORDER BY id;"; // 发生序（append-only 单调）
   sqlite3_stmt* st = nullptr;
-  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
-  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_text(st, 2, from_account.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_text(st, 3, to_account.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_int(st, 4, type);
-  sqlite3_bind_text(st, 5, text.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_int64(st, 6, ts_ms);
-  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK)
+    return out;
+  if (!msg_id.empty())
+    sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    MessageEvent e;
+    e.id = sqlite3_column_int64(st, 0);
+    e.msg_id = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    e.event = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    e.by_account = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    e.payload = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    e.ts_ms = sqlite3_column_int64(st, 5);
+    out.push_back(std::move(e));
+  }
   sqlite3_finalize(st);
-  return ok; // 唯一键冲突（消息已存在）→ DONE 之外 → false
+  return out;
+}
+
+std::vector<ArchivedMessage> ServerStore::rebuild_messages_from_events() {
+  // 重放事件重建当前态：created 建（按首现序）、recalled 置标记、
+  // edited 替正文；其余事件不变形状
+  std::vector<ArchivedMessage> out;
+  std::map<std::string, std::size_t> index; // msg_id → out 下标
+  for (const auto& e : message_events("")) {
+    if (e.event == "created") {
+      nlohmann::json p = nlohmann::json::parse(e.payload, nullptr, false);
+      if (p.is_discarded()) continue;
+      ArchivedMessage m;
+      m.msg_id = e.msg_id;
+      m.from_account = p.value("from", std::string{});
+      m.to_account = p.value("to", std::string{});
+      m.type = p.value("type", 0);
+      m.text = p.value("text", std::string{});
+      m.ts_ms = p.value("ts_ms", std::int64_t{0});
+      index[e.msg_id] = out.size();
+      out.push_back(std::move(m));
+    } else if (e.event == "recalled") {
+      const auto it = index.find(e.msg_id);
+      if (it != index.end()) out[it->second].recalled = true;
+    } else if (e.event == "edited") {
+      const auto it = index.find(e.msg_id);
+      if (it != index.end() && !e.payload.empty()) out[it->second].text = e.payload;
+    }
+  }
+  return out;
 }
 
 // 消息检索：账号为空=全部；非空=该账号收发两侧＋其所在群的群消息都命中
@@ -1380,15 +1544,16 @@ std::vector<AuditReadRow> ServerStore::audit_reads(int limit) {
   return out;
 }
 
-// 消息撤回：只置标记不清正文
-bool ServerStore::recall_message(const std::string& msg_id) {
-  const char* sql = "UPDATE messages SET recall = 1 WHERE msg_id = ?;";
-  sqlite3_stmt* st = nullptr;
-  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
-  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
-  const bool ok = sqlite3_step(st) == SQLITE_DONE;
-  sqlite3_finalize(st);
-  return ok;
+// 消息撤回：平台-4 起走 recalled 事件（事件与投影同事务落），
+// 并保 recall_events 对账行（既有对账口径不变）
+bool ServerStore::recall_message(const std::string& msg_id,
+                                 const std::string& by_account,
+                                 std::int64_t ts_ms) {
+  if (message_from(msg_id).empty()) return false; // 消息不存在
+  if (!append_message_event(msg_id, "recalled", by_account, "", ts_ms))
+    return false;
+  record_recall_event(msg_id, by_account, ts_ms); // 对账表尽力（主证在事件表）
+  return true;
 }
 
 // 查询消息是否被撤回

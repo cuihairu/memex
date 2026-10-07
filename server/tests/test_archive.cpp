@@ -295,7 +295,7 @@ int main() {
     CHECK(seed.create_account("bob", "pb-1", "Bob"));
     CHECK(seed.store_message("mid-x1", "alice", "bob", 10, "合同评审通过", now_ms() - 60000));
     CHECK(seed.store_message("mid-x2", "alice", "bob", 10, "明天放假", now_ms() - 30000));
-    CHECK(seed.recall_message("mid-x1")); // 撤回的那条含关键词：导出面仍须完整
+    CHECK(seed.recall_message("mid-x1", "alice", now_ms())); // 撤回的那条含关键词：导出面仍须完整
     seed.close();
   }
   { // 关键词检索＋导出留证
@@ -320,6 +320,93 @@ int main() {
     CHECK(out.find("关键词=合同") != std::string::npos);
     CHECK(out.find("检索") != std::string::npos);
     CHECK(out.find("账号=alice") != std::string::npos);
+  }
+
+  // —— 平台-4 归档事件溯源：created/delivered/recalled 全留痕；
+  //     事件重放重建当前态（重投演示）；edited 投影跟随、原文永在 ——
+  {
+    // 协议腿已在前面走过：TEXT 归档（created）→ bob ACK（delivered）→
+    // alice 撤回（recalled＋对账行）。此处对事件序列本身断言。
+    const auto seq = store.message_events(msg_id);
+    CHECK(seq.size() == 3);
+    if (seq.size() == 3) {
+      CHECK(seq[0].event == "created" && seq[0].by_account == "alice");
+      CHECK(seq[1].event == "delivered" && seq[1].by_account == "bob");
+      CHECK(seq[2].event == "recalled" && seq[2].by_account == "alice");
+      // created payload 带全量字段（原文、收发、时间）——重放材料
+      CHECK(seq[0].payload.find("可留痕的这一条") != std::string::npos);
+      CHECK(seq[0].payload.find("\"to\":\"bob\"") != std::string::npos);
+    }
+    CHECK(store.message_events("mid-不存在").empty());
+
+    // 重投演练：空库只吃事件流 → 重建态与原库物化态逐字段一致
+    ServerStore replay;
+    CHECK(replay.open(":memory:"));
+    const auto all = store.message_events("");
+    CHECK(!all.empty());
+    for (const auto& e : all) {
+      CHECK(replay.append_message_event(e.msg_id, e.event, e.by_account,
+                                        e.payload, e.ts_ms));
+    }
+    const auto reborn = replay.rebuild_messages_from_events();
+    const auto live = store.messages("");
+    CHECK(reborn.size() == live.size());
+    for (const auto& m : live) {
+      bool found = false;
+      for (const auto& r : reborn) {
+        if (r.msg_id != m.msg_id) continue;
+        found = true;
+        CHECK(r.from_account == m.from_account);
+        CHECK(r.to_account == m.to_account);
+        CHECK(r.type == m.type);
+        CHECK(r.text == m.text);
+        CHECK(r.ts_ms == m.ts_ms);
+        CHECK(r.recalled == m.recalled);
+        break;
+      }
+      CHECK(found); // 原库每条都能在重建态找到同字段副本
+    }
+    // created 幂等：重投同一条 created → 拒（已有行不重放、不记重复事件）
+    const auto first = store.message_events("mid-2");
+    CHECK(first.size() == 1 && first.front().event == "created");
+    CHECK(!replay.append_message_event("mid-2", "created", first.front().by_account,
+                                       first.front().payload, 1));
+
+    // edited：投影跟随事件、原 created payload 里原文永在；重放一致
+    CHECK(store.store_message("mid-evt", "alice", "bob", 10, "初稿",
+                              now_ms()));
+    CHECK(store.append_message_event("mid-evt", "edited", "alice", "改定稿",
+                                     now_ms()));
+    {
+      const auto rows = store.messages("");
+      bool seen = false;
+      for (const auto& m : rows) {
+        if (m.msg_id != "mid-evt") continue;
+        seen = true;
+        CHECK(m.text == "改定稿"); // 投影已替换
+      }
+      CHECK(seen);
+      const auto seq2 = store.message_events("mid-evt");
+      CHECK(seq2.size() == 2);
+      if (seq2.size() == 2) {
+        CHECK(seq2[0].event == "created");
+        CHECK(seq2[0].payload.find("初稿") != std::string::npos); // 原文在案
+        CHECK(seq2[1].event == "edited" && seq2[1].payload == "改定稿");
+      }
+    }
+    {
+      const auto rebuilt = store.rebuild_messages_from_events();
+      bool seen = false;
+      for (const auto& m : rebuilt) {
+        if (m.msg_id != "mid-evt") continue;
+        seen = true;
+        CHECK(m.text == "改定稿"); // 重放与物化同态
+      }
+      CHECK(seen);
+    }
+    // 幽灵消息：recalled/edited 对不存在消息拒（投影 0 行=拒）
+    CHECK(!store.append_message_event("mid-幽灵", "recalled", "alice", "", 1));
+    CHECK(!store.append_message_event("mid-幽灵", "edited", "alice", "x", 1));
   }
 
   if (g_failures == 0) {

@@ -301,8 +301,10 @@ public:
   // 查阅留痕：检索／导出动作逐次落日志（只附加，不删改）。
   bool add_audit_read(const AuditReadRow& rec);
   std::vector<AuditReadRow> audit_reads(int limit = 100);
-  // 撤回仅置标记，正文不清（留痕纪律）。
-  bool recall_message(const std::string& msg_id);
+  // 撤回仅置标记，正文不清（留痕纪律）；平台-4 起同笔落 recalled 事件
+  //（消息不存在或越权由调用方判定，此处只认存在性）。
+  bool recall_message(const std::string& msg_id, const std::string& by_account,
+                      std::int64_t ts_ms);
   bool is_recalled(const std::string& msg_id);
   // 某消息发送方（撤回权限判定）；不存在返回空串。
   std::string message_from(const std::string& msg_id);
@@ -311,6 +313,31 @@ public:
                            const std::string& by_account,
                            std::int64_t ts_ms);
   std::size_t recall_event_count(const std::string& msg_id);
+
+  // —— 平台-4 归档事件溯源（Event Sourcing）：Message 原始行 immutable
+  //     （正文/撤回永不改写历史），状态变迁走 message_events append-only
+  //     （created/delivered/read/recalled/edited）；messages.recall/text
+  //     列＝事件物化投影（由追加函数同事务同步）；当前态可由事件重放
+  //     重建（rebuild_messages_from_events）。——
+  struct MessageEvent {
+    std::int64_t id{0};
+    std::string msg_id;
+    std::string event;      // created／delivered／read／recalled／edited
+    std::string by_account; // 触发者（created=发送方；delivered/read=接收方）
+    std::string payload;    // created=全量字段 JSON；edited=新正文；其余空
+    std::int64_t ts_ms{0};
+  };
+  // 追加事件（append-only，无更新/删除路径）。created 物化归档行
+  //（等价 store_message）；recalled 物化 recall=1；edited 物化 text。
+  // 幂等：created 对已有归档行不重放（重投去重）。
+  bool append_message_event(const std::string& msg_id,
+                            const std::string& event,
+                            const std::string& by_account,
+                            const std::string& payload, std::int64_t ts_ms);
+  // 某消息的事件序列（按发生序）；msg_id 空=全部事件（重投演练用）
+  std::vector<MessageEvent> message_events(const std::string& msg_id);
+  // 重放事件重建当前态（created 建 行、recalled 置标记、edited 替正文）
+  std::vector<ArchivedMessage> rebuild_messages_from_events();
 
   // —— T2.6 组织架构 ——
 
