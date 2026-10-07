@@ -261,7 +261,16 @@ bool ServerStore::ensure_schema() {
       "  file_hash TEXT NOT NULL DEFAULT '',"
       "  object_key TEXT NOT NULL DEFAULT '',"
       "  upload_ts INTEGER NOT NULL DEFAULT 0);"
-      "CREATE INDEX IF NOT EXISTS idx_uplink_logs_uploader ON uplink_logs(uploader);"; // 本段为 schema 字符串最后一段
+      "CREATE INDEX IF NOT EXISTS idx_uplink_logs_uploader ON uplink_logs(uploader);"
+      // 群公告编辑历史（R24-1）：只附加——每次成功设置（含清除）落一条
+      // 谁/何时/改成了什么；现行公告全文仍在 groups.announcement。
+      "CREATE TABLE IF NOT EXISTS group_announcement_log ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  group_id INTEGER NOT NULL,"
+      "  editor TEXT NOT NULL,"
+      "  content TEXT NOT NULL,"
+      "  ts_ms INTEGER NOT NULL);"
+      "CREATE INDEX IF NOT EXISTS idx_gal_gid ON group_announcement_log(group_id);"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -1794,18 +1803,69 @@ bool ServerStore::group_leave(std::uint64_t group_id,
 }
 
 bool ServerStore::group_announce(std::uint64_t group_id,
-                                 const std::string& owner,
+                                 const std::string& account,
                                  const std::string& announcement) {
   const auto info = group_info(group_id);
-  if (!info.has_value() || info->owner != owner) return false;
+  if (!info.has_value()) return false;
+  // R24-1 权限放宽：群主或管理员可设（设计「可写=群主/管理员」；
+  // 群主身份在 groups.owner——role 列不含群主行）。
+  if (info->owner != account && group_role(group_id, account) != "admin") {
+    return false;
+  }
+  sqlite3_exec(db_, "BEGIN;", nullptr, nullptr, nullptr);
   const char* sql = "UPDATE groups SET announcement = ? WHERE group_id = ?;";
   sqlite3_stmt* st = nullptr;
-  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+    return false;
+  }
   sqlite3_bind_text(st, 1, announcement.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_int64(st, 2, static_cast<sqlite3_int64>(group_id));
   const bool ok = sqlite3_step(st) == SQLITE_DONE;
   sqlite3_finalize(st);
-  return ok;
+  if (!ok) {
+    sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
+    return false;
+  }
+  // 编辑历史留痕（只附加）：清除也落一笔（content 空串=清除）
+  const char* log_sql =
+      "INSERT INTO group_announcement_log(group_id, editor, content, ts_ms)"
+      " VALUES(?, ?, ?, ?);";
+  st = nullptr;
+  if (sqlite3_prepare_v2(db_, log_sql, -1, &st, nullptr) == SQLITE_OK) {
+    sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+    sqlite3_bind_text(st, 2, account.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, announcement.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 4, now_ms());
+    sqlite3_step(st);
+    sqlite3_finalize(st);
+  }
+  sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr);
+  return true;
+}
+
+std::vector<ServerStore::AnnouncementRevision>
+ServerStore::announcement_history(std::uint64_t group_id, int limit) {
+  std::vector<AnnouncementRevision> out;
+  const char* sql =
+      "SELECT id, editor, content, ts_ms FROM group_announcement_log"
+      " WHERE group_id = ? ORDER BY id DESC LIMIT ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_int(st, 2, limit);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    AnnouncementRevision r;
+    r.id = sqlite3_column_int64(st, 0);
+    const char* e = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    const char* c = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.editor = e ? e : "";
+    r.content = c ? c : "";
+    r.ts_ms = sqlite3_column_int64(st, 3);
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
 }
 
 // —— T4.2 跨态会话日志 ——

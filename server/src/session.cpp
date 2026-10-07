@@ -4,6 +4,7 @@
 #include <iostream>
 
 #include "cred.hpp"
+#include "webhook.hpp" // R24-1 公告联动三级推送（deliver_notice）
 
 namespace memex::server {
 
@@ -236,6 +237,7 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     if (!logged_in_ || !msg.has_group_cmd()) break;
     const auto& cmd = msg.group_cmd();
     bool ok = false;
+    bool want_history = false; // R24-1：announce_history 回执带编辑历史
     std::string reason;
     std::uint64_t gid = cmd.group_id();
     if (cmd.op() == "create") {
@@ -265,7 +267,29 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     } else if (cmd.op() == "announce") {
       ok = server_.store().group_announce(cmd.group_id(), account_,
                                           cmd.announcement());
-      if (!ok) reason = "公告设置失败（仅群主可设）";
+      if (!ok) reason = "公告设置失败（仅群主/管理员可设）";
+      if (ok && !cmd.announcement().empty()) {
+        // R24-1 联动三级推送：公告=重要强提醒，全员（含设置者）收 NOTICE
+        //（清除公告不推——管理动作非新信息，全员强提醒是骚扰）。
+        const auto info = server_.store().group_info(cmd.group_id());
+        if (info.has_value()) {
+          const std::string target =
+              "group:" + std::to_string(cmd.group_id());
+          deliver_notice(server_, target,
+                         "群公告：" + info->name, cmd.announcement(),
+                         static_cast<int>(v1::Notice::IMPORTANT), target);
+        }
+      }
+    } else if (cmd.op() == "announce_history") {
+      // R24-1 编辑历史查询：群成员可查（留痕是全员可见信息的一部分）；
+      // 回执 history 倒序带全，客户端经专用信号展示。
+      if (!server_.store().is_group_member(cmd.group_id(), account_)) {
+        ok = false;
+        reason = "公告历史查询失败（仅群成员可查）";
+      } else {
+        ok = true;
+        want_history = true;
+      }
     } else {
       break;
     }
@@ -279,6 +303,15 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     r->set_reason(reason);
     r->set_op(cmd.op());
     r->set_group_id(gid);
+    if (want_history) {
+      for (const auto& h :
+           server_.store().announcement_history(cmd.group_id())) {
+        auto* hr = r->add_history();
+        hr->set_editor(h.editor);
+        hr->set_content(h.content);
+        hr->set_ts_ms(h.ts_ms);
+      }
+    }
     send(memex::protocol::encode(result));
     break;
   }

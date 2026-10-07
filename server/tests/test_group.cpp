@@ -173,12 +173,24 @@ int main() {
     CHECK(!s.group_invite(gid, "ghost"));
     CHECK(!s.group_invite(99999, "dave"));
 
-    // 公告：仅群主可设；空串＝清除
-    CHECK(s.group_announce(gid, "bob", "bob 版公告") == false);
+    // 公告（R24-1）：群主/管理员可设；空串＝清除；每次成功设置落编辑历史
+    CHECK(s.group_announce(gid, "bob", "bob 版公告") == false); // 普通成员拒
     CHECK(s.group_announce(gid, "alice", "每周五例会"));
     CHECK(s.group_info(gid)->announcement == "每周五例会");
     CHECK(s.group_announce(gid, "alice", ""));
     CHECK(s.group_info(gid)->announcement.empty());
+    // R24-1：管理员可设；历史留痕（只附加、新者在前、清除也是一笔）
+    CHECK(s.group_set_role(gid, "bob", "admin"));
+    CHECK(s.group_announce(gid, "bob", "bob 代发的新版公告"));
+    CHECK(s.group_info(gid)->announcement == "bob 代发的新版公告");
+    CHECK(!s.group_announce(99999, "alice", "幽灵群公告")); // 群不存在
+    CHECK(s.announcement_history(99999).empty());
+    const auto hist = s.announcement_history(gid);
+    CHECK(hist.size() == 3);
+    CHECK(hist[0].editor == "bob" && hist[0].content == "bob 代发的新版公告");
+    CHECK(hist[1].editor == "alice" && hist[1].content.empty());
+    CHECK(hist[2].editor == "alice" && hist[2].content == "每周五例会");
+    CHECK(hist[0].ts_ms > 0);
 
     // groups_of：成员视角
     CHECK(s.groups_of("dave").size() == 1);
@@ -263,9 +275,75 @@ int main() {
     const auto bob_view = s.search_messages(q);
     CHECK(bob_view.size() == 1 && bob_view[0].to_account == "group:" + std::to_string(gid));
 
-    // 公告：仅群主；GROUP_QUERY 下发群列表
-    CHECK(a.group_cmd("announce", gid, {}, "", "每周五例会").group_result().ok());
+    // 公告（R24-1）：群主设→全员 NOTICE 联动（公告=重要强提醒）；普通成员拒
+    {
+      memex::protocol::Message am;
+      am.set_type(v1::GROUP_CMD);
+      am.set_from("alice");
+      am.set_to("server");
+      am.set_ts_ms(now_ms());
+      auto* ac = am.mutable_group_cmd();
+      ac->set_op("announce");
+      ac->set_group_id(gid);
+      ac->set_announcement("每周五例会");
+      a.send(am);
+      // alice 自己在收件人里：扇出帧先于回执写 socket——先收 NOTICE 再收回执
+      const auto na = a.read();
+      CHECK(na.type() == v1::NOTICE);
+      CHECK(na.from() == memex::protocol::kNoticeSender);
+      CHECK(na.to() == "group:" + std::to_string(gid));
+      CHECK(na.notice().urgency() == v1::Notice::IMPORTANT);
+      CHECK(na.notice().title() == "群公告：项目群");
+      CHECK(na.notice().content() == "每周五例会");
+      CHECK(na.notice().jump_url() == "group:" + std::to_string(gid));
+      const auto ares = a.read();
+      CHECK(ares.type() == v1::GROUP_RESULT && ares.group_result().ok());
+      // bob 同收一条（同 msg_id 扇出）；ACK 清自己队列行
+      const auto nb = b.read();
+      CHECK(nb.type() == v1::NOTICE);
+      CHECK(nb.notice().urgency() == v1::Notice::IMPORTANT);
+      CHECK(nb.msg_id() == na.msg_id());
+      memex::protocol::Message ackn;
+      ackn.set_type(v1::ACK);
+      ackn.set_from("bob");
+      ackn.set_to("server");
+      ackn.set_ts_ms(now_ms());
+      ackn.mutable_ack()->set_msg_id(nb.msg_id());
+      b.send(ackn);
+      b.sync();
+      CHECK(s.offline_count("bob") == 0);
+    }
     CHECK(!b.group_cmd("announce", gid, {}, "", "bob 版").group_result().ok());
+
+    // R24-1 编辑历史查询：群成员带回倒序全量；非成员拒
+    {
+      memex::protocol::Message hq;
+      hq.set_type(v1::GROUP_CMD);
+      hq.set_from("bob");
+      hq.set_to("server");
+      hq.set_ts_ms(now_ms());
+      auto* hc = hq.mutable_group_cmd();
+      hc->set_op("announce_history");
+      hc->set_group_id(gid);
+      b.send(hq);
+      const auto hres = b.read();
+      CHECK(hres.type() == v1::GROUP_RESULT);
+      CHECK(hres.group_result().ok());
+      CHECK(hres.group_result().op() == "announce_history");
+      CHECK(hres.group_result().history_size() == 1);
+      if (hres.group_result().history_size() == 1) {
+        CHECK(hres.group_result().history(0).editor() == "alice");
+        CHECK(hres.group_result().history(0).content() == "每周五例会");
+      }
+    }
+    {
+      TestClient d2(io, server.port());
+      d2.account_ = "dave";
+      d2.login("dave", "pc-d2");
+      const auto deny = d2.group_cmd("announce_history", gid);
+      CHECK(!deny.group_result().ok());
+      CHECK(deny.group_result().history_size() == 0);
+    }
     memex::protocol::Message gq;
     gq.set_type(v1::GROUP_QUERY);
     gq.set_from("bob");
@@ -347,10 +425,11 @@ int main() {
     c.send(ack3);
     c.sync();
     CHECK(s.offline_count("carol") == 0);
-    // 归档仍只有两条群消息（补投不重复归档）
+    // 归档仍只有两条群消息＋一条公告 NOTICE（R24-1 联动推送也全量归档；
+    // 补投不重复归档。检索按当前成员关系联入群消息，公告早于 carol 入群也命中）
     memex::server::MessageSearch q2;
     q2.account = "carol";
-    CHECK(s.search_messages(q2).size() == 2);
+    CHECK(s.search_messages(q2).size() == 3);
 
     // 群主退群＝解散：群列表清空，前成员发群消息被拒不归档（PING 探测）
     CHECK(a.group_cmd("leave", gid).group_result().ok());

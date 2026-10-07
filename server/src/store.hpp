@@ -344,9 +344,19 @@ public:
   bool group_invite(std::uint64_t group_id, const std::string& account);
   // 退群（群主退群=解散：删成员表记录；群号与归档保留）
   bool group_leave(std::uint64_t group_id, const std::string& account);
-  // 群公告（仅群主可设；空串=清除）
-  bool group_announce(std::uint64_t group_id, const std::string& owner,
+  // 群公告（R24-1：群主/管理员可设；空串=清除）。每次成功设置都落一条
+  // 编辑历史（谁/何时/改成了什么——清除也落，content 空串即「清除」一笔）。
+  bool group_announce(std::uint64_t group_id, const std::string& account,
                       const std::string& announcement);
+  // 群公告编辑历史（R24-1：倒序，新者在前；只附加不删改）
+  struct AnnouncementRevision {
+    std::int64_t id{0};
+    std::string editor;
+    std::string content; // 该次设置后的全文（空串=该次为清除）
+    std::int64_t ts_ms{0};
+  };
+  std::vector<AnnouncementRevision> announcement_history(
+      std::uint64_t group_id, int limit = 100);
   // 群成员账号列表（群不存在返回空）
   std::vector<std::string> group_members(std::uint64_t group_id);
 
