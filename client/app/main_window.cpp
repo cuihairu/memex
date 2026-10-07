@@ -500,6 +500,7 @@ void MainWindow::wire_collab() {
             act_collab_logout_->setEnabled(true);
             collab_was_logged_in_ = true;
             kick_text_.clear(); // T4.3：新会话清除旧互踢提示
+            collab_degraded_ = false; // 平台-7：登录恢复即退出降级态
             // 在线表以服务端推送为准（登录广播先于 LOGIN_RESULT 到达，
             // 推送已含自己——此处不清，否则会擦掉刚收到的推送）。
             seed_collab_peers();
@@ -525,19 +526,26 @@ void MainWindow::wire_collab() {
   connect(&collab_engine_, &CollabEngine::login_failed, this,
           [this](const QString& reason) {
             act_collab_logout_->setEnabled(false);
-            update_banner();
             if (reason == QStringLiteral("无法连接服务器")) {
-              // 降级：服务端不可达 → 停留直连态，明示归档缺口
+              // 平台-7 降级：登录尝试因服务端不可达而失败＝本应归档而
+              // 不得（用户意图是协作态）——与曾否登录无关；显式登出回
+              // 直连不算降级（logout_collab 清标志）。标志先置再刷横幅
+              collab_degraded_ = true;
+              update_banner();
               append_system_line(QStringLiteral(
                   "服务端不可达：已回落直连态，消息不进归档"
                   "（点对点传输，仍可正常收发）"));
               show_status(
                   QStringLiteral("服务端不可达，已回落直连态：消息不进归档"));
             } else {
+              update_banner();
               show_status(QStringLiteral("协作登录失败：%1").arg(reason));
             }
           });
   connect(&collab_engine_, &CollabEngine::connection_lost, this, [this] {
+    // 平台-7：登录中断线＝DEGRADED（本应归档而服务端不可达）；被顶下线
+    // （kicked 先行清了登录态）与服务端无涉，不算降级
+    if (collab_was_logged_in_) collab_degraded_ = true;
     collab_was_logged_in_ = false;
     online_accounts_.clear(); // 断线即未知在线态（重连推送后刷新）
     update_banner();
@@ -725,6 +733,7 @@ void MainWindow::logout_collab() {
   direct_engine_.set_collab_account(""); // 登出即广播「未登录」（对端即时闭环）
   act_collab_logout_->setEnabled(false);
   collab_was_logged_in_ = false;
+  collab_degraded_ = false; // 平台-7：显式登出＝主动回直连，非降级
   online_accounts_.clear(); // T4.3：登出即未知在线态
   delivery_text_.clear();   // T4.3：发送状态随会话失效
   update_banner();
@@ -1690,6 +1699,10 @@ QString MainWindow::status_text() const { return statusBar()->currentMessage(); 
 
 QString MainWindow::chat_html() const { return chat_view_->toHtml(); }
 
+QString MainWindow::input_hint() const { return input_box_->placeholderText(); }
+
+QString MainWindow::chat_meta() const { return chat_meta_->text(); }
+
 // —— T4.3 消息状态与多端（验收面）——
 QString MainWindow::delivery_text() const { return delivery_text_; }
 QString MainWindow::kick_text() const { return kick_text_; }
@@ -1869,6 +1882,8 @@ void MainWindow::set_autostart(bool on) {
 
 // 归档提示条（常驻不可关）：协作态显示归档口径；直连／降级态必须明示
 // 「消息不进归档」——切换与降级共用这一条提示（A7、A11 界面口径）。
+// 平台-7 降级显式化：DEGRADED 压过跨态（服务端不可达对本会话恒真，
+// 是更具体的口径——跨态细节由会话标记承载）；输入框提示随态同步。
 void MainWindow::update_banner() {
   // 协作单聊与服务端群聊都走服务端转发归档（T4.1 后者同口径）
   const bool collab_session =
@@ -1889,31 +1904,41 @@ void MainWindow::update_banner() {
         QStringLiteral("background:%1; color:%2; font-size:12px; "
                        "padding:6px 10px;")
             .arg(t.brand_wash.name(), t.brand_wash_text.name()));
-    // T4.2 跨态会话（恰一边登录）：固定「未归档」标识，常驻不可关闭（A7）
-    bool cross = false;
-    if (current_kind_ == QStringLiteral("direct")) {
-      cross = is_cross_state(current_peer_);
-    } else if (current_kind_ == QStringLiteral("dgroup")) {
-      for (const QString& dev : dgroup_members_.value(current_peer_)) {
-        if (is_cross_state(dev)) {
-          cross = true;
-          break;
+    // 平台-7：DEGRADED（本应归档但服务端不可达）恒先判——全面标识
+    if (collab_degraded_) {
+      banner_->setText(QStringLiteral(
+          "　⚠ 已降级直连态（未归档通信）：服务端不可达，消息不进归档"
+          "（点对点传输，仅保存在双方本机；恢复后协作消息自动补传归档）"));
+    } else {
+      // T4.2 跨态会话（恰一边登录）：固定「未归档」标识，常驻不可关闭（A7）
+      bool cross = false;
+      if (current_kind_ == QStringLiteral("direct")) {
+        cross = is_cross_state(current_peer_);
+      } else if (current_kind_ == QStringLiteral("dgroup")) {
+        for (const QString& dev : dgroup_members_.value(current_peer_)) {
+          if (is_cross_state(dev)) {
+            cross = true;
+            break;
+          }
         }
       }
+      if (cross) {
+        banner_->setText(QStringLiteral(
+            "　⚠ 跨态会话 · 未归档：恰一边登录协作态，消息点对点传输不进归档"
+            "（与未登录终端的会话标记常驻不可关闭）"));
+      } else {
+        banner_->setText(QStringLiteral(
+            "　⚠ 直连态会话：消息点对点传输，不经过服务器——消息不进归档"
+            "（服务端无任何记录，仅保存在双方本机）"));
+      }
     }
-    if (cross) {
-      banner_->setText(QStringLiteral(
-          "　⚠ 跨态会话 · 未归档：恰一边登录协作态，消息点对点传输不进归档"
-          "（与未登录终端的会话标记常驻不可关闭）"));
-    } else if (collab_was_logged_in_ && !collab_engine_.is_logged_in()) {
-      banner_->setText(QStringLiteral(
-          "　⚠ 已降级直连态：服务端不可达，消息不进归档"
-          "（点对点传输，仅保存在双方本机）"));
-    } else {
-      banner_->setText(QStringLiteral(
-          "　⚠ 直连态会话：消息点对点传输，不经过服务器——消息不进归档"
-          "（服务端无任何记录，仅保存在双方本机）"));
-    }
+  }
+  // 平台-7：输入框提示随态——降级态明示「不进归档」，其余常规
+  if (collab_degraded_) {
+    input_box_->setPlaceholderText(QStringLiteral(
+        "未归档通信（已降级直连）：此会话消息不进服务端归档"));
+  } else {
+    input_box_->setPlaceholderText(QStringLiteral("输入消息，回车发送"));
   }
 }
 
@@ -2121,8 +2146,13 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
     const Peer p = direct_engine_.peer(id.toStdString());
     const QString name = p.name.empty() ? id.left(8) : QString::fromStdString(p.name);
     chat_title_->setText(name);
-    // T4.2：跨态会话 meta 固定「跨态 · 未归档」前缀（与横幅同口径，A7）
-    if (is_cross_state(id)) {
+    // 平台-7：降级态 meta 固定「已降级 · 未归档」前缀（服务端不可达对本
+    // 会话恒真，压过跨态——更具体的口径）；T4.2 跨态次之（A7）
+    if (collab_degraded_) {
+      chat_meta_->setText(
+          QStringLiteral("已降级 · 未归档 · %1 · TCP %2")
+              .arg(p.address.toString(), QString::number(p.tcp_port)));
+    } else if (is_cross_state(id)) {
       chat_meta_->setText(
           QStringLiteral("跨态 · 未归档 · %1 · TCP %2")
               .arg(p.address.toString(), QString::number(p.tcp_port)));

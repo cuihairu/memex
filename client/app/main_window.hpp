@@ -81,6 +81,9 @@ public:
   QString banner_text() const;   // 归档提示条文案（直连／协作两态）
   QString status_text() const;   // 状态栏当前文案（降级提示在此）
   QString chat_html() const;     // 聊天区富文本（合并展示断言）
+  // —— 平台-7 降级显式化（验收面）——
+  QString input_hint() const;    // 输入框提示（降级态明示「不进归档」）
+  QString chat_meta() const;     // 会话元信息行（降级态「已降级 · 未归档」前缀）
   int alert_count() const;       // 新消息闪烁累计次数（合并窗内只记 1）
   // —— T4.3 消息状态与多端（验收面）——
   QString delivery_text() const; // 最近一条发出消息的状态（发送中／已送达／失败／已读）
@@ -181,6 +184,10 @@ private:
   QString current_kind_{QStringLiteral("direct")}; // 会话形态：direct／collab／group／dgroup
   QSet<QString> collab_peers_; // 协作会话列表（登录后与本地库历史并集）
   bool collab_was_logged_in_{false}; // 上一轮登录态（降级提示去抖）
+  // 平台-7 DEGRADED：本应归档但服务端不可达（断线／掉线后登录失败）。
+  // 独立于 collab_was_logged_in_（后者被 connection_lost 即刻清零，
+  // 随后的登录失败就无从判「曾归档」）；仅登录恢复／显式登出清零。
+  bool collab_degraded_{false};
   QString last_org_json_;     // 最近一次组织架构数据（T3.1）
   bool org_dialog_pending_{false}; // 已请求组织架构、等待弹窗
   bool anonymous_allowed_{true};   // T3.4 生效策略：允许免登录使用（默认宽松）

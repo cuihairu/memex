@@ -378,6 +378,13 @@ int main(int argc, char** argv) {
   }, 3000));
   CHECK(!window.collab_logged_in());
   CHECK(window.banner_text().contains(QStringLiteral("消息不进归档")));
+  // 平台-7 降级显式化：状态栏（已有断言）之外——横幅明示「已降级」、
+  // 输入框提示随态（未归档通信）、直连会话标记「已降级 · 未归档」前缀
+  CHECK(window.banner_text().contains(QStringLiteral("已降级")));
+  CHECK(window.input_hint().contains(QStringLiteral("未归档")));
+  CHECK(window.input_hint().contains(QStringLiteral("已降级")));
+  window.open_direct_peer(QStringLiteral("dev-B2"));
+  CHECK(window.chat_meta().contains(QStringLiteral("已降级 · 未归档")));
 
   // —— 服务端已死：直连态仍可收发（A11 直连半边）——
   db_received = 0;
