@@ -159,6 +159,81 @@ void FilesClient::fetch_memo(qint64 id) {
             });
 }
 
+void FilesClient::list_group_memos(quint64 gid, const QString& q) {
+  QString path = QStringLiteral("/files/group-memo/list?gid=%1").arg(gid);
+  if (!q.isEmpty()) {
+    // 主动百分号编码（中文走 %XX；服务端 query_param 已解 %XX）
+    path += QStringLiteral("&q=") +
+            QString::fromLatin1(QUrl::toPercentEncoding(q));
+  }
+  send_json(QStringLiteral("group-memo.list"), QStringLiteral("GET"), path, {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit group_memo_listed(
+                  resp.value(QStringLiteral("memos")).toArray(),
+                  resp.value(QStringLiteral("open_edit")).toBool());
+            });
+}
+
+void FilesClient::save_group_memo(quint64 gid, const QString& title,
+                                  const QString& content, qint64 id) {
+  QJsonObject body{{QStringLiteral("gid"), static_cast<double>(gid)},
+                   {QStringLiteral("title"), title},
+                   {QStringLiteral("content"), content}};
+  if (id > 0) body.insert(QStringLiteral("id"), static_cast<double>(id));
+  send_json(QStringLiteral("group-memo.save"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-memo/save"), body,
+            [this, id](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit group_memo_saved(
+                  id > 0 ? id
+                         : static_cast<qint64>(resp.value(QStringLiteral("id"))
+                                                   .toDouble()));
+            });
+}
+
+void FilesClient::delete_group_memo(quint64 gid, qint64 id) {
+  send_json(QStringLiteral("group-memo.delete"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-memo/delete"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("id"), static_cast<double>(id)}},
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit group_memo_deleted(id);
+            });
+}
+
+void FilesClient::group_memo_history(qint64 id) {
+  send_json(QStringLiteral("group-memo.history"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-memo/history?id=") +
+                QString::number(id),
+            {}, [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit group_memo_history_fetched(
+                  resp.value(QStringLiteral("revisions")).toArray());
+            });
+}
+
+void FilesClient::rollback_group_memo(qint64 id, qint64 revision_id) {
+  send_json(QStringLiteral("group-memo.rollback"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-memo/rollback"),
+            {{QStringLiteral("id"), static_cast<double>(id)},
+             {QStringLiteral("revision_id"), static_cast<double>(revision_id)}},
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit group_memo_rolled_back(id);
+            });
+}
+
+void FilesClient::set_group_memo_open_edit(quint64 gid, bool open) {
+  send_json(QStringLiteral("group-memo.open-edit"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-memo/open-edit"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("open"), open}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) emit group_memo_open_edit_set(
+                            resp.value(QStringLiteral("open_edit")).toBool());
+            });
+}
+
 void FilesClient::list_inbox() {
   send_json(QStringLiteral("inbox.list"), QStringLiteral("GET"),
             QStringLiteral("/files/list?target=inbox"), {},

@@ -41,7 +41,9 @@ qt_add_executable(memex_client
   app/theme_settings_page.cpp
   app/theme_settings_page.hpp
   app/file_assistant.cpp
-  app/file_assistant.hpp)
+  app/file_assistant.hpp
+  app/group_memo_dialog.cpp
+  app/group_memo_dialog.hpp)
 target_include_directories(memex_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_compile_definitions(memex_client PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 target_link_libraries(memex_client PRIVATE
@@ -183,12 +185,30 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # R24-2 群备忘录窗口冒烟：真服务端进程 × 离屏 QDialog——连接→列表
+  # →新建→编辑→搜索→历史窗填充；权限面（成员 403/删恒归管理员）与
+  # 回滚全链走 test_files_client 引擎级腿，不在此重复
+  add_executable(test_group_memo_dialog
+    app/tests/test_group_memo_dialog.cpp
+    app/group_memo_dialog.cpp)
+  target_link_libraries(test_group_memo_dialog PRIVATE
+    memex_engine_collab Qt6::Widgets)
+  target_include_directories(test_group_memo_dialog PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_group_memo_dialog PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME group_memo_dialog COMMAND test_group_memo_dialog)
+  set_tests_properties(group_memo_dialog PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # T2.4 模式切换与降级验收：不重启切换、历史合并展示（来源字段）、
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/group_memo_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -213,6 +233,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_tray.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/group_memo_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -235,6 +256,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_screenshot.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/group_memo_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -276,6 +298,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_icon.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/group_memo_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -299,6 +322,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_theme.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/group_memo_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -320,6 +344,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_chat_actions.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/group_memo_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -341,6 +366,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_flash_alert.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/group_memo_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp

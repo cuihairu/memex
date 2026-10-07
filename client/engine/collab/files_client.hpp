@@ -38,6 +38,21 @@ class FilesClient : public QObject {
   void list_memos();
   void fetch_memo(qint64 id);
 
+  // —— 群备忘录（R24-2 /files/group-memo）——
+  // 列表（updated_ms 倒序）；q 非空＝标题/正文子串搜索（URL 百分号编码）
+  void list_group_memos(quint64 gid, const QString& q = QString());
+  // id=0 新建；>0 修改既有条目（服务端落修订笔）
+  void save_group_memo(quint64 gid, const QString& title,
+                       const QString& content, qint64 id = 0);
+  // 删除（恒归群主/管理员；连带修订史）
+  void delete_group_memo(quint64 gid, qint64 id);
+  // 修订史（倒序：最新笔在前）
+  void group_memo_history(qint64 id);
+  // 回滚＝一次编辑（取目标笔全文落新笔）
+  void rollback_group_memo(qint64 id, qint64 revision_id);
+  // 开放全员编辑开关（仅群主/管理员）
+  void set_group_memo_open_edit(quint64 gid, bool open);
+
   // —— 收件箱（R23-3 文件助手混排面）——
   // GET /files/list?target=inbox：备忘录+文件时间倒序混排条目
   void list_inbox();
@@ -57,6 +72,12 @@ class FilesClient : public QObject {
   void memo_deleted(qint64 id);
   void memo_listed(const QJsonArray& memos);
   void memo_fetched(qint64 id, const QString& content);
+  void group_memo_listed(const QJsonArray& memos, bool open_edit);
+  void group_memo_saved(qint64 id);
+  void group_memo_deleted(qint64 id);
+  void group_memo_history_fetched(const QJsonArray& revisions);
+  void group_memo_rolled_back(qint64 id);
+  void group_memo_open_edit_set(bool open);
   void inbox_listed(const QJsonArray& items); // type=memo|file 混排条目
   void upload_finished(qint64 file_id, bool second_transfer);
   void download_finished(const QString& save_path);

@@ -3,6 +3,9 @@
 // （503 降级口径）——备忘录/列表/判权全在元数据面，全链路可验；字节面
 // （上传/下载过真对象存储）由服务端 test_files_api/test_s3_e2e 覆盖，
 // 此处验「未配置=503 明示错误」的边界与客户端错误通道。
+// R24-2 群备忘录腿：CollabEngine 建群（TCP 面）→ FilesClient 文件面
+// 全链——成员建 403/群主建改/修订史倒序/开关权限（成员拒·群主开）/
+// 开放后成员可写可回滚·删除仍拒/中文搜索/收权回落/删连带史 404。
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QFile>
@@ -15,9 +18,13 @@
 
 #include <functional>
 
+#include <core/local_store.hpp>
+#include <engine/collab/collab_engine.hpp>
 #include <engine/collab/files_client.hpp>
 
 using memex::client::FilesClient;
+using memex::client::CollabEngine;
+using memex::client::LocalStore;
 
 #ifndef MEMEX_SERVER_BIN
 #error "MEMEX_SERVER_BIN 未定义（应传入 $<TARGET_FILE:memex_server>）"
@@ -250,6 +257,136 @@ int main(int argc, char** argv) {
   memos = QJsonArray{};
   cli.list_memos();
   CHECK(wait_until([&] { return memos.size() == 1; }, 8000));
+
+  // —— R24-2 群备忘录腿：CollabEngine 建群（TCP 面）→ 文件面全链 ——
+  LocalStore store_ce;
+  CHECK(store_ce.open(tmp.filePath(QStringLiteral("ce.db"))));
+  CollabEngine ce;
+  ce.attach_store(&store_ce);
+  bool ce_in = false;
+  quint64 gm_gid = 0;
+  QObject::connect(&ce, &CollabEngine::logged_in, &ce,
+                   [&](const QString&, const QString&) { ce_in = true; });
+  QObject::connect(&ce, &CollabEngine::group_result, &ce,
+                   [&](bool ok, const QString&, const QString& op, quint64 id) {
+                     if (ok && op == QStringLiteral("create"))
+                       gm_gid = id;
+                   });
+  ce.login(QStringLiteral("127.0.0.1"), collab_port, QStringLiteral("alice"),
+           QStringLiteral("pass-1"));
+  CHECK(wait_until([&] { return ce_in; }, 8000));
+  ce.create_group(QStringLiteral("备忘录测试群"), {QStringLiteral("bob")});
+  CHECK(wait_until([&] { return gm_gid > 0; }, 8000));
+
+  // 信号收集（一律 main 顶层，无腿内捕获悬垂面）
+  int gm_saved_count = 0;
+  qint64 gm_saved_id = 0;
+  QObject::connect(&cli, &FilesClient::group_memo_saved, &cli,
+                   [&](qint64 id) {
+                     gm_saved_id = id;
+                     ++gm_saved_count;
+                   });
+  QJsonArray gm_list;
+  bool gm_open_edit = true;
+  QObject::connect(&cli, &FilesClient::group_memo_listed, &cli,
+                   [&](const QJsonArray& arr, bool open) {
+                     gm_list = arr;
+                     gm_open_edit = open;
+                   });
+  QJsonArray gm_revs;
+  QObject::connect(&cli, &FilesClient::group_memo_history_fetched, &cli,
+                   [&](const QJsonArray& arr) { gm_revs = arr; });
+  bool gm_oe_set = false;
+  bool gm_oe_state = false;
+  QObject::connect(&cli, &FilesClient::group_memo_open_edit_set, &cli,
+                   [&](bool open) {
+                     gm_oe_set = true;
+                     gm_oe_state = open;
+                   });
+  bool gm_del = false;
+  QObject::connect(&cli, &FilesClient::group_memo_deleted, &cli,
+                   [&](qint64) { gm_del = true; });
+  bool bob_rolled = false;
+  int bob_saved_count = 0;
+  QObject::connect(&bob, &FilesClient::group_memo_saved, &bob,
+                   [&](qint64) { ++bob_saved_count; });
+  QObject::connect(&bob, &FilesClient::group_memo_rolled_back, &bob,
+                   [&](qint64) { bob_rolled = true; });
+
+  // 成员 bob 建 → 403（默认管理员维护）
+  fail_status = 0;
+  bob.save_group_memo(gm_gid, QStringLiteral("成员条目"),
+                      QStringLiteral("x"));
+  CHECK(wait_until([&] { return fail_status == 403; }, 8000));
+  // 群主 alice 建＋改（改落修订笔）
+  cli.save_group_memo(gm_gid, QStringLiteral("值班表"),
+                      QStringLiteral("host=10.0.0.1 port=5432"));
+  CHECK(wait_until([&] { return gm_saved_id > 0; }, 8000));
+  const qint64 gm_id = gm_saved_id;
+  cli.save_group_memo(gm_gid, QStringLiteral("值班表"),
+                      QStringLiteral("host=10.0.0.2"), gm_id);
+  CHECK(wait_until([&] { return gm_saved_count == 2; }, 8000));
+  // 列表：一条＋开关未开
+  cli.list_group_memos(gm_gid);
+  CHECK(wait_until([&] { return gm_list.size() == 1 && !gm_open_edit; },
+                   8000));
+  // 修订史两笔倒序（最新在前）
+  cli.group_memo_history(gm_id);
+  CHECK(wait_until([&] { return gm_revs.size() == 2; }, 8000));
+  CHECK(gm_revs.at(0)
+              .toObject()
+              .value(QStringLiteral("content"))
+              .toString() == QStringLiteral("host=10.0.0.2"));
+  // 成员读历史（file:read 群继承）
+  QJsonArray bob_revs;
+  QObject::connect(&bob, &FilesClient::group_memo_history_fetched, &bob,
+                   [&](const QJsonArray& arr) { bob_revs = arr; });
+  bob.group_memo_history(gm_id);
+  CHECK(wait_until([&] { return bob_revs.size() == 2; }, 8000));
+  // 开关：成员设 403、群主开
+  fail_status = 0;
+  bob.set_group_memo_open_edit(gm_gid, true);
+  CHECK(wait_until([&] { return fail_status == 403; }, 8000));
+  cli.set_group_memo_open_edit(gm_gid, true);
+  CHECK(wait_until([&] { return gm_oe_set && gm_oe_state; }, 8000));
+  // 开放后：bob 建＋改（改群主的条目）
+  bob.save_group_memo(gm_gid, QStringLiteral("成员补的条目"),
+                      QStringLiteral("值班备注"));
+  CHECK(wait_until([&] { return bob_saved_count == 1; }, 8000));
+  bob.save_group_memo(gm_gid, QStringLiteral("值班表"),
+                      QStringLiteral("host=10.0.0.3"), gm_id);
+  CHECK(wait_until([&] { return bob_saved_count == 2; }, 8000));
+  // 但删除恒归管理员
+  fail_status = 0;
+  bob.delete_group_memo(gm_gid, gm_id);
+  CHECK(wait_until([&] { return fail_status == 403; }, 8000));
+  // 开放编辑下成员可回滚（=一次编辑）：回滚到首笔（倒序数组 at(1)）
+  const qint64 first_rev_id = static_cast<qint64>(
+      gm_revs.at(1).toObject().value(QStringLiteral("id")).toDouble());
+  CHECK(first_rev_id > 0);
+  bob.rollback_group_memo(gm_id, first_rev_id);
+  CHECK(wait_until([&] { return bob_rolled; }, 8000));
+  // 中文搜索（%XX 编码走查）：「值班表」只中《值班表》（另一条 content
+  // =值班备注含「值班」子串，OR content 面也会命中——用全词避开）
+  gm_list = QJsonArray{};
+  cli.list_group_memos(gm_gid, QStringLiteral("值班表"));
+  CHECK(wait_until([&] { return gm_list.size() == 1; }, 8000));
+  CHECK(gm_list.at(0)
+            .toObject()
+            .value(QStringLiteral("title"))
+            .toString() == QStringLiteral("值班表"));
+  // 收权后成员写回落 403；群主删（连带修订史）
+  gm_oe_set = false;
+  cli.set_group_memo_open_edit(gm_gid, false);
+  CHECK(wait_until([&] { return gm_oe_set && !gm_oe_state; }, 8000));
+  fail_status = 0;
+  bob.save_group_memo(gm_gid, QStringLiteral("再建"), QStringLiteral("x"));
+  CHECK(wait_until([&] { return fail_status == 403; }, 8000));
+  cli.delete_group_memo(gm_gid, gm_id);
+  CHECK(wait_until([&] { return gm_del; }, 8000));
+  fail_status = 0;
+  cli.group_memo_history(gm_id);
+  CHECK(wait_until([&] { return fail_status == 404; }, 8000));
 
   server.terminate();
   server.waitForFinished(3000);

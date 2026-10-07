@@ -22,6 +22,7 @@
 #include <QMenu>
 
 #include "file_assistant.hpp"
+#include "group_memo_dialog.hpp"
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
@@ -1321,6 +1322,7 @@ void MainWindow::show_group_menu(const QPoint& pos) {
     auto* act_invite = menu.addAction(QStringLiteral("拉人进群…"));
     auto* act_ann = menu.addAction(QStringLiteral("设置群公告…"));
     auto* act_hist = menu.addAction(QStringLiteral("公告编辑历史…"));
+    auto* act_memo = menu.addAction(QStringLiteral("群备忘录…"));
     menu.addSeparator();
     auto* act_leave = menu.addAction(QStringLiteral("退出群聊"));
     connect(act_invite, &QAction::triggered, this,
@@ -1329,6 +1331,18 @@ void MainWindow::show_group_menu(const QPoint& pos) {
             [this, gid] { group_announce_dialog(gid); });
     connect(act_hist, &QAction::triggered, this,
             [this, gid] { group_announce_history_dialog(gid); });
+    connect(act_memo, &QAction::triggered, this, [this, gid] {
+      // R24-2 群备忘录：独立文件面会话窗口（懒建复用，换群重拉）
+      const auto it = groups_.find(gid);
+      if (!group_memo_) {
+        group_memo_ = new GroupMemoDialog(this);
+      }
+      group_memo_->set_group(gid, it != groups_.end() ? it->name
+                                                     : QStringLiteral("群 %1").arg(gid));
+      group_memo_->show();
+      group_memo_->raise();
+      group_memo_->activateWindow();
+    });
     connect(act_leave, &QAction::triggered, this, [this, gid] {
       if (QMessageBox::question(
               this, QStringLiteral("退出群聊"),

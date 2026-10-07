@@ -29,6 +29,7 @@ class QSystemTrayIcon;
 namespace memex::client {
 
 class FileAssistantDialog;
+class GroupMemoDialog;
 
 class MainWindow : public QMainWindow {
 public:
@@ -224,6 +225,7 @@ private:
   DirectEngine direct_engine_;
   CollabEngine collab_engine_;
   QPointer<FileAssistantDialog> file_assistant_; // R23-3 文件助手窗口（懒建）
+  QPointer<GroupMemoDialog> group_memo_; // R24-2 群备忘录窗口（懒建）
 
   QLabel* device_count_{nullptr};
   QLineEdit* search_box_{nullptr};
