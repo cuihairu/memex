@@ -212,7 +212,8 @@
 
 - [x] R25-1 群工具框架：工具白名单动作配置、**入群即授权/退群即失**、动作留痕（谁/何时/动作/参数/结果）、服务端代理调用骨架。
   - 2026-10-07 server 面收口（f87c031）：store 加 group_tools（group_id+tool 主键，actions_json/updated_by/updated_ms）＋group_tool_audit（谁/何时/哪个工具/什么动作/参数/结果）两表＋gid 索引，五方法 tool_set_actions（ON CONFLICT upsert，群须存在）/tool_config/tool_list/tool_audit_add/tool_audit_list（id DESC 限 200）；FileServer 四路由 /files/group-tools/{config,list,call,audit}，判权循既有 az 规则不自造：config/audit=memo:config（owner/admin，同 R24 密码箱管理面），list/call=群成员（file:read 群继承，入群即授权/退群即失）；call 白名单制三段闸（未配置 404→动作不在声明清单 403→params 须对象否则 400），通过后 stub 回显落审计（真外部系统调用归 R25-2/R25-3，凭据面归 R25-4——客户端只见按钮不见密钥）。测试：test_files_api 扩 R25-1 段（config 判权矩阵＋字段校验＋幽灵群不透存在性、管理员配置＋upsert 覆盖生效、list 成员可读、call 三段闸＋stub 回显带参数、audit 成员 403＋id DESC 倒序断言行带 actor/params/结果），ctest 37/37 全绿（首跑 files_client 全量并发下超时、单跑 1.54s 过＝负载闪失非回归，复跑全量绿）。
-- [ ] R25-2 CI/CD 工具：pipeline 状态视图（红绿灯+列表）、点击触发构建/打包（谁触发可回溯）、结果卡片回群。
+- [x] R25-2 CI/CD 工具：pipeline 状态视图（红绿灯+列表）、点击触发构建/打包（谁触发可回溯）、结果卡片回群。
+  - 2026-10-07 收口（5630f0b）：store 加 group_ci_pipelines（gid+name 主键）＋group_ci_runs（谁触发/何时/哪条流水线/params/结果）两表＋五方法（ci_status_list=每流水线最近一笔即红绿灯面）；FileServer 四路由 /files/group-ci/{pipeline,list,trigger,runs}——增删=memo:config、读/触发=群成员（入群即授权）、触发须 R25-1 白名单放行（tool=ci 动作 trigger，未开 403 状态行明示）→幽灵流水线 404→stub 执行器即时终态（params fail=true 演练失败腿，真 CI 接入归 R25-4 凭据面后）→run 落账＋动作留痕进 R25-1 工具审计（谁触发可回溯=设计点名）；「结果卡片回群」走 FileServer 注入 GroupNoticeFn 回调（main 接线 deliver_notice——NOTICE 信封＝离线入队＋归档＋在线扇出同一投递面，FileServer 不持 CollabServer 不加耦合；测试注桩捕获断言成功/失败卡片标题即红绿灯语义）。客户端 FilesClient 加 set_tool_actions（R25-1 白名单面）＋ci 四方法四信号＋GroupCiDialog 新窗（●绿成功/●红失败/●灰未跑、触发行参数 JSON 可选、run 历史谁触发可查、管理行增删/开放成员触发）＋主窗群菜单「CI/CD 流水线…」。测试：test_files_api 扩 R25-2 段＋新 test_group_ci_dialog 离屏冒烟（灰→绿→红翻转/历史倒序/成员腿入群即授权），ctest 38/38 全绿。
 - [ ] R25-3 打包工具 + 配置导出工具（首批动作类示例）。
 - [ ] R25-4 凭据面：外部凭据只存服务端（R24 密码箱同款加密）、客户端零凭据、破坏性动作二次确认。
 
