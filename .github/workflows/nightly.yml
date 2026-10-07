@@ -108,14 +108,29 @@ jobs:
             libsm-dev libice-dev libegl1-mesa-dev \
             ${{ matrix.sys_pkgs }}
 
+      # Ninja：hosted runner 镜像普遍预装（mac brew／win choco），缺了才补装
+      # ——不再走 seanmiddleditch/gha-setup-ninja（上游最新 v6 仍 target
+      # Node.js 20，Node 20 弃用警告无法根除；平台包管理器零第三方依赖）
       - name: 安装 Ninja（Windows/macOS）
         if: runner.os != 'Linux'
-        uses: seanmiddleditch/gha-setup-ninja@v6
+        shell: bash
+        run: |
+          if command -v ninja >/dev/null 2>&1; then
+            echo "ninja 已预装：$(ninja --version)"
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            brew install ninja
+          else
+            choco install ninja -y --no-progress
+          fi
+          ninja --version
 
-      # Windows 锁 MSVC：Ninja 需要显式选中 VS 工具链（不走默认生成器探测）
+      # Windows 锁 MSVC：Ninja 需要显式选中 VS 工具链（不走默认生成器探测）。
+      # ilammy/msvc-dev-cmd 上游停在 v1.13.0（2024-03）target Node.js 20——
+      # 钉最新 tag；Node 20 弃用警告在其上游出 Node 24 版前为已知残留
+      #（GitHub 兼容层强制跑 Node 24，功能不受影响）
       - name: 配置 MSVC 环境（Windows）
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@v1.13.0
 
       # Windows/macOS 用官方 Qt 二进制（vcpkg 侧只装 Qt 以外依赖，避免源码重建
       # Qt 的 1.5h+；windeployqt / macdeployqt 与官方运行库天然同源）。
