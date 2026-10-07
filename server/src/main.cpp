@@ -535,12 +535,16 @@ std::string cli_operator() {
 }
 
 // messages [账号] [--keyword K] [--since 时刻] [--until 时刻] [--limit N]
-//          [--export 文件]：管理员检索归档（T3.2：条件检索＋导出留证＋查阅日志）。
+//          [--export 文件] [--as 账号]：管理员检索归档（T3.2：条件检索＋
+//          导出留证＋查阅日志）。平台-6：--as 账号化审计——账号须持
+//          auditor 有效角色（SystemAdmin 不自动可读消息），操作者记该
+//          账号；不带 --as＝本地运维信任路径（操作者记系统用户名）。
 // 撤回消息原文照常可见并标「已撤回」——留痕纪律：撤回仅置标记不清正文。
 int cmd_messages(int argc, char** argv, const std::string& db_path) {
   std::string account;
   std::string keyword;
   std::string export_path;
+  std::string as_account; // 平台-6：操作者账号化（审计台账记人、持证校验）
   std::int64_t since_ms = 0, until_ms = 0;
   int limit = 200;
   for (int i = 0; i < argc; ++i) {
@@ -555,6 +559,8 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {
       keyword = argv[++i];
     } else if (arg == "--export" && i + 1 < argc) {
       export_path = argv[++i];
+    } else if (arg == "--as" && i + 1 < argc) {
+      as_account = argv[++i];
     } else if (arg == "--since" && i + 1 < argc) {
       since_ms = parse_time_arg(argv[++i], false);
       if (since_ms < 0) {
@@ -575,6 +581,43 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {
   if (!store.open(db_path)) {
     std::cerr << "本地库打开失败：" << db_path << "\n";
     return 1;
+  }
+  const auto now_gate = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+  // 过滤条件摘要（进查阅日志；只记条件，不记消息内容）
+  std::string filters;
+  auto append_filter = [&filters](const std::string& kv) {
+    if (!filters.empty()) filters += " ";
+    filters += kv;
+  };
+  if (!account.empty()) append_filter("账号=" + account);
+  if (!keyword.empty()) append_filter("关键词=" + keyword);
+  if (since_ms > 0) append_filter("起=" + std::to_string(since_ms));
+  if (until_ms > 0) append_filter("止=" + std::to_string(until_ms));
+
+  // 平台-6 审计独立角色（蓝图§十六）：SecurityAuditor≠SystemAdmin——
+  // 显式账号化（--as）走持证校验，admin 有效角色不自动可读消息；
+  // 被拒尝试同样留痕（审计自身被拒可对账）。不带 --as＝本地运维信任
+  // 路径（现状口径，操作者记系统用户名）。
+  std::string operator_account = cli_operator();
+  if (!as_account.empty()) {
+    const auto roles = store.effective_roles(as_account, now_gate);
+    const bool is_auditor =
+        std::find(roles.begin(), roles.end(), "auditor") != roles.end();
+    if (!is_auditor) {
+      memex::server::AuditReadRow denied;
+      denied.op_account = as_account;
+      denied.action = "audit.denied";
+      denied.filters = filters;
+      denied.ts_ms = now_gate;
+      store.add_audit_read(denied);
+      std::cerr << "被拒：" << as_account
+                << " 不持 auditor 有效角色（SystemAdmin 不自动可读消息，"
+                   "须经授权授予 auditor）；被拒尝试已留痕\n";
+      return 1;
+    }
+    operator_account = as_account;
   }
   memex::server::MessageSearch q;
   q.account = account;
@@ -603,17 +646,7 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {
     std::cout << archive_origin << '\n';
   }
 
-  // 过滤条件摘要（进查阅日志；只记条件，不记消息内容）
-  std::string filters;
-  auto append_filter = [&filters](const std::string& kv) {
-    if (!filters.empty()) filters += " ";
-    filters += kv;
-  };
-  if (!account.empty()) append_filter("账号=" + account);
-  if (!keyword.empty()) append_filter("关键词=" + keyword);
-  if (since_ms > 0) append_filter("起=" + std::to_string(since_ms));
-  if (until_ms > 0) append_filter("止=" + std::to_string(until_ms));
-
+  // 过滤条件摘要（进查阅日志；只记条件，不记消息内容）——已在判权闸前算好
   auto format_row = [](const memex::server::ArchivedMessage& m) {
     std::time_t secs = static_cast<std::time_t>(m.ts_ms / 1000);
     std::tm tm{};
@@ -630,7 +663,9 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {
   };
 
   const std::string header = "msg_id\t发送方\t接收方\t类型\t状态\t时间\t正文";
-  const std::string action = export_path.empty() ? "检索" : "导出";
+  // 平台-6：审计动作规范名（蓝图§十六 message.search/message.export）
+  const std::string action =
+      export_path.empty() ? "audit.message.search" : "audit.message.export";
   const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
                        std::chrono::system_clock::now().time_since_epoch())
                        .count();
@@ -643,7 +678,7 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {
       return 1;
     }
     out << "# Memex 归档导出\n# 导出时间(ms)：" << now
-        << "\n# 操作者：" << cli_operator() << "\n# 过滤条件："
+        << "\n# 操作者：" << operator_account << "\n# 过滤条件："
         << (filters.empty() ? "（全部）" : filters) << "\n";
     if (!archive_origin.empty()) out << "# " << archive_origin << "\n";
     for (const auto& m : rows) out << format_row(m) << '\n';
@@ -659,7 +694,7 @@ int cmd_messages(int argc, char** argv, const std::string& db_path) {
 
   // 查阅行为记日志（每次检索／导出都落一条；audit 子命令可查）
   memex::server::AuditReadRow audit;
-  audit.op_account = cli_operator();
+  audit.op_account = operator_account;
   audit.action = action;
   audit.filters = filters;
   audit.result_count = static_cast<int>(rows.size());

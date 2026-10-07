@@ -316,9 +316,9 @@ int main() {
   }
   { // 查阅日志：检索与导出逐次落痕、条件与命中数可对账
     const std::string out = run_cli("audit 10 --db " + db2);
-    CHECK(out.find("导出") != std::string::npos);
+    CHECK(out.find("audit.message.export") != std::string::npos);
     CHECK(out.find("关键词=合同") != std::string::npos);
-    CHECK(out.find("检索") != std::string::npos);
+    CHECK(out.find("audit.message.search") != std::string::npos);
     CHECK(out.find("账号=alice") != std::string::npos);
   }
 
@@ -499,6 +499,55 @@ int main() {
           m.msg_id == "mid-old3")
         ghost_reborn = true;
     CHECK(!ghost_reborn);
+  }
+
+  // —— 平台-6 审计独立角色：SecurityAuditor≠SystemAdmin——显式账号化
+  //     （--as）须持 auditor 有效角色（admin 不自动可读消息）；台账记
+  //     操作者账号；被拒尝试留痕（audit.denied） ——
+  {
+    // 无证账号（bob 基础 member）→ 拒＋留痕
+    const std::string deny1 =
+        run_cli("messages --keyword 合同 --as bob --db " + db2);
+    CHECK(deny1.find("不持 auditor 有效角色") != std::string::npos);
+    // 授 admin 依旧拒：SystemAdmin 不自动可读消息（蓝图§十六红线）
+    {
+      ServerStore seed6;
+      CHECK(seed6.open(db2));
+      CHECK(seed6.role_grant("bob", "admin", "", 0, 0, "alice", 1) > 0);
+      seed6.close();
+    }
+    const std::string deny2 =
+        run_cli("messages --keyword 合同 --as bob --db " + db2);
+    CHECK(deny2.find("不持 auditor 有效角色") != std::string::npos);
+    // 授 auditor → 过；台账操作者记该账号（非系统用户名）
+    {
+      ServerStore seed6;
+      CHECK(seed6.open(db2));
+      CHECK(seed6.role_grant("bob", "auditor", "", 0, 0, "alice", 2) > 0);
+      seed6.close();
+    }
+    const std::string out_path6 = "/tmp/memex-archive-export6.txt";
+    std::remove(out_path6.c_str());
+    const std::string ok1 = run_cli("messages --keyword 合同 --as bob --export " +
+                                    out_path6 + " --db " + db2);
+    CHECK(ok1.find("已导出至") != std::string::npos);
+    const std::string file6 = read_file(out_path6);
+    CHECK(file6.find("# 操作者：bob") != std::string::npos); // 账号化留痕
+    // 审计自身可对账：bob 先拒两次（audit.denied）后成功一次
+    const auto audit_out = run_cli("audit 20 --db " + db2);
+    CHECK(audit_out.find("audit.denied") != std::string::npos);
+    int denied_rows = 0, bob_rows = 0;
+    std::istringstream ss6(audit_out);
+    std::string line6;
+    while (std::getline(ss6, line6)) {
+      if (line6.find("audit.denied") != std::string::npos) ++denied_rows;
+      if (line6.find("audit.message.export") != std::string::npos &&
+          line6.find("\tbob\t") != std::string::npos)
+        ++bob_rows;
+    }
+    CHECK(denied_rows == 2);
+    CHECK(bob_rows >= 1);
+    std::remove(out_path6.c_str());
   }
 
   if (g_failures == 0) {
