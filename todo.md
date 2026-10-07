@@ -223,7 +223,8 @@
 
 - [x] R26-1 memex agent：轻量常驻（Linux 起步），注册/心跳/负载上报（CPU/内存/磁盘/负载）。
   - 2026-10-07 收口（b8bf382 服务端＋e26063d agent）：store 加 group_servers 表（同 gid+name UNIQUE 复用行；token_hash=SHA-256 摘要 UNIQUE——明文只在登记回包出现一次、不进日志）＋四方法 server_enroll（重登记=轮换令牌、id 稳定）/server_by_token_hash/server_heartbeat（最近一拍整拍覆盖）/server_list；FileServer 三路由 /files/group-servers/{enroll,heartbeat,list}——登记=memo:config（owner/admin）、心跳=agent 令牌鉴权非人会话（错令牌 401、缺数值字段 400）、列表=群成员入群即授权（online=last_seen 90s 新鲜度＝默认 30s 心跳错过两拍仍在线；令牌摘要永不出现）。memex_agent（Linux 起步，UNIX 守卫）：--server/--token/--interval/--path/--once 常驻，只读采样不开监听口不落盘——/proc/stat 两拍差分 CPU%（首拍 250ms 差分窗、之后逐拍前移）、/proc/meminfo、statvfs 磁盘、getloadavg；失败按间隔重试，--once exit 0/1、缺参 exit 2。附带 FileServer 悬空 accept 修复：do_accept 裸 this 链式续挂，作用域实例析构后 io 线程在悬空 this 上跑完成回调（加 R26-1 测试段改时序后偶发段错误 gdb 实锤）——析构先落 alive 旗标（回调按值持同一 shared_ptr）＋错误态停链不再空转，test_files_api 临时面实例改存活到 io 停摆后。测试：test_files_api 扩 R26-1 段（登记判权/令牌只存摘要/心跳 401 400/列表绿灯/轮换 id 稳定老令牌失效/幽灵群）＋新 test_agent（真 agent 进程 × in-process FileServer 真 TCP：--once exit 0→绿灯＋内存/磁盘真值非占位；错令牌/连不上 exit 1），ctest 40/40 全绿（files_api 连跑 5 遍稳）。
-- [ ] R26-2 群服务器面板：服务器列表红绿灯+状态详情（R25 状态视图实例化）。
+- [x] R26-2 群服务器面板：服务器列表红绿灯+状态详情（R25 状态视图实例化）。
+  - 2026-10-07 收口（83b19e8）：FilesClient server_enroll/server_list 两方法两信号（令牌只在登记回包出现一次）；GroupServerDialog 新窗——●绿=agent 在线（90s 新鲜度窗）/●红=失联或从未打点（未打点明示「从未」），条目详情=最近一拍 CPU/内存/磁盘/负载＋谁登记＋最近心跳时刻，登记行（群主/管理员；重登记作废旧令牌走 QMessageBox 二次确认、程序化入口不弹框供测试），注册令牌只读框一次性显示（喂给 memex_agent --token），换群清列表重拉；main_window 群菜单「服务器…」懒建入口。测试：新 test_group_server_dialog（真服务端进程×离屏 QDialog×真 memex_agent --once——空列表占位→登记令牌显示→一拍心跳绿灯＋「从未」消失→第二台未打点一绿一红同屏＋令牌随重登记刷新；成员列表只读可见、越权登记 403 状态行、幽灵登记未进台账），ctest 41/41 全绿（冒烟连跑 5 遍稳）。
 - [ ] R26-3 远程会话：SSH 起步（RDP/VNC 随后），一次性短票+接入留痕（谁/何时/连哪台/时长）。
 - [ ] R26-4 凭据面：服务器凭据只存服务端（R24 加密面）、客户端零凭据；memex 只做「看+连」，操作类归 croupier。
 
