@@ -570,6 +570,137 @@ int main() {
   CHECK(http(port, "POST", "/files/memo", H("member1"), "{\"content\":\"x\"}",
              false).status == 400);
 
+  // —— R24-2 群备忘录：管理员维护默认、开放编辑开关、修订史回滚、搜索 ——
+  {
+    // 未登录 401；非成员 403（group-member 继承不命中）
+    CHECK(http(port, "GET", "/files/group-memo/list?gid=" + std::to_string(gid),
+               {}, "").status == 401);
+    CHECK(http(port, "GET", "/files/group-memo/list?gid=" + std::to_string(gid),
+               H("outsider"), "").status == 403);
+    // 坏 gid 400
+    CHECK(http(port, "GET", "/files/group-memo/list?gid=x", H("member1"), "")
+              .status == 400);
+    // 默认管理员维护：成员建 403；管理员建 200；缺 title 400
+    CHECK(http(port, "POST", "/files/group-memo/save",
+               H("member1"),
+               "{\"gid\":" + std::to_string(gid) +
+                   ",\"title\":\"t\",\"content\":\"c\"}").status == 403);
+    CHECK(http(port, "POST", "/files/group-memo/save",
+               H("admin1"),
+               "{\"gid\":" + std::to_string(gid) + ",\"content\":\"c\"}")
+              .status == 400);
+    const auto mk = http(
+        port, "POST", "/files/group-memo/save", H("admin1"),
+        "{\"gid\":" + std::to_string(gid) +
+            ",\"title\":\"测试环境\",\"content\":\"host=10.0.0.1 port=5432\"}");
+    CHECK(mk.status == 200);
+    const auto mid = jint(mk.body, "id");
+    CHECK(mid > 0);
+    // 列表：成员可读；open_edit=false 回真；标题命中
+    const auto lst = http(
+        port, "GET",
+        "/files/group-memo/list?gid=" + std::to_string(gid), H("member1"), "");
+    CHECK(lst.status == 200);
+    CHECK(jstr(lst.body, "title") == "测试环境");
+    CHECK(lst.body.find("\"open_edit\":false") != std::string::npos);
+    // 编辑留痕：管理员改一次（修订史=首笔+编辑笔共 2）
+    CHECK(http(port, "POST", "/files/group-memo/save", H("admin1"),
+               "{\"gid\":" + std::to_string(gid) + ",\"id\":" +
+                   std::to_string(mid) +
+                   ",\"title\":\"测试环境\",\"content\":\"host=10.0.0.2\"}")
+              .status == 200);
+    const auto hist = http(
+        port, "GET", "/files/group-memo/history?id=" + std::to_string(mid),
+        H("member1"), "");
+    CHECK(hist.status == 200);
+    CHECK(jint(hist.body, "id") == mid);
+    // 倒序：首笔在 updated 值语义上先落——revisions[0] 应是最新编辑笔
+    CHECK(hist.body.find("host=10.0.0.2") != std::string::npos);
+    CHECK(hist.body.find("host=10.0.0.1") != std::string::npos);
+    // 开放编辑开关：成员设 403（memo:config 仅群主/管理员）；管理员开 200
+    CHECK(http(port, "POST", "/files/group-memo/open-edit", H("member1"),
+               "{\"gid\":" + std::to_string(gid) + ",\"open\":true}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-memo/open-edit", H("admin1"),
+               "{\"gid\":" + std::to_string(gid) + ",\"open\":true}")
+              .status == 200);
+    // 开放后：成员可建/可改（留痕照记）；删仍归管理员（开放的是写不是删）
+    const auto mk2 = http(
+        port, "POST", "/files/group-memo/save", H("member1"),
+        "{\"gid\":" + std::to_string(gid) +
+            ",\"title\":\"值班表\",\"content\":\"周一 alice\"}");
+    CHECK(mk2.status == 200);
+    const auto mid2 = jint(mk2.body, "id");
+    CHECK(mid2 > 0);
+    CHECK(http(port, "POST", "/files/group-memo/save", H("member1"),
+               "{\"gid\":" + std::to_string(gid) + ",\"id\":" +
+                   std::to_string(mid) +
+                   ",\"title\":\"测试环境\",\"content\":\"host=10.0.0.3\"}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-memo/delete", H("member1"),
+               "{\"gid\":" + std::to_string(gid) + ",\"id\":" +
+                   std::to_string(mid2) + "}").status == 403);
+    // 回滚：成员回滚到首笔（content 回 host=10.0.0.1）——回滚即一次编辑落新笔
+    const auto hist2 = http(
+        port, "GET", "/files/group-memo/history?id=" + std::to_string(mid),
+        H("admin1"), "");
+    // 首笔 id：修订笔 JSON 键序 content 在前——首笔（数组最后一笔）content
+    // 之后最近的 "id":N 即该笔 id
+    const std::string first_rev_marker =
+        "\"content\":\"host=10.0.0.1 port=5432\"";
+    const auto fp = hist2.body.find(first_rev_marker);
+    CHECK(fp != std::string::npos);
+    std::int64_t first_rev = 0;
+    if (fp != std::string::npos) {
+      const std::size_t idp = hist2.body.find("\"id\":", fp);
+      if (idp != std::string::npos) {
+        first_rev = std::atoll(hist2.body.c_str() + idp + 5);
+      }
+    }
+    CHECK(first_rev > 0);
+    CHECK(http(port, "POST", "/files/group-memo/rollback", H("member1"),
+               "{\"id\":" + std::to_string(mid) + ",\"revision_id\":" +
+                   std::to_string(first_rev) + "}").status == 200);
+    const auto after = http(
+        port, "GET", "/files/group-memo/history?id=" + std::to_string(mid),
+        H("member1"), "");
+    // 回滚后新增一笔（editor=member1，content=首版全文）； revisions[0]
+    // （倒序最新笔）即回滚笔——其 content 是修订笔数组里最先出现的 host=10.0.0.1
+    CHECK(after.status == 200);
+    const auto roll_pos = after.body.find(first_rev_marker);
+    CHECK(roll_pos != std::string::npos);
+    CHECK(after.body.find("\"editor\":\"member1\"", roll_pos) ==
+          roll_pos + first_rev_marker.size() + 1);
+    // 幽灵修订笔 404
+    CHECK(http(port, "POST", "/files/group-memo/rollback", H("admin1"),
+               "{\"id\":" + std::to_string(mid) + ",\"revision_id\":999999}")
+              .status == 404);
+    // 搜索：q=值班 命中条目2；q=不存在词 空
+    const auto search = http(
+        port, "GET",
+        "/files/group-memo/list?gid=" + std::to_string(gid) + "&q=%E5%80%BC%E7%8F%AD",
+        H("member1"), "");
+    CHECK(search.status == 200);
+    CHECK(search.body.find("值班表") != std::string::npos);
+    CHECK(search.body.find("测试环境") == std::string::npos);
+    // 关闭开放编辑：成员写回落 403
+    CHECK(http(port, "POST", "/files/group-memo/open-edit", H("owner1"),
+               "{\"gid\":" + std::to_string(gid) + ",\"open\":false}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-memo/save", H("member1"),
+               "{\"gid\":" + std::to_string(gid) + ",\"id\":" +
+                   std::to_string(mid) +
+                   ",\"title\":\"测试环境\",\"content\":\"host=10.0.0.9\"}")
+              .status == 403);
+    // 管理员删除：条目+修订史连带（history 404）
+    CHECK(http(port, "POST", "/files/group-memo/delete", H("admin1"),
+               "{\"gid\":" + std::to_string(gid) + ",\"id\":" +
+                   std::to_string(mid) + "}").status == 200);
+    CHECK(http(port, "GET", "/files/group-memo/history?id=" +
+                                 std::to_string(mid), H("admin1"), "")
+              .status == 404);
+  }
+
   // —— 存储未配置：面在、字节面 503、元数据面照常 ——
   {
     memex::server::FileServer bare(io, store, nullptr, 0);
