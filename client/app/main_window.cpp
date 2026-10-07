@@ -7,6 +7,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -1319,12 +1320,15 @@ void MainWindow::show_group_menu(const QPoint& pos) {
     const quint64 gid = id.mid(QStringLiteral("group:").size()).toULongLong();
     auto* act_invite = menu.addAction(QStringLiteral("拉人进群…"));
     auto* act_ann = menu.addAction(QStringLiteral("设置群公告…"));
+    auto* act_hist = menu.addAction(QStringLiteral("公告编辑历史…"));
     menu.addSeparator();
     auto* act_leave = menu.addAction(QStringLiteral("退出群聊"));
     connect(act_invite, &QAction::triggered, this,
             [this, gid] { group_invite_dialog(gid); });
     connect(act_ann, &QAction::triggered, this,
             [this, gid] { group_announce_dialog(gid); });
+    connect(act_hist, &QAction::triggered, this,
+            [this, gid] { group_announce_history_dialog(gid); });
     connect(act_leave, &QAction::triggered, this, [this, gid] {
       if (QMessageBox::question(
               this, QStringLiteral("退出群聊"),
@@ -1395,17 +1399,70 @@ void MainWindow::group_invite_dialog(quint64 group_id) {
   show_status(QStringLiteral("拉人请求已发送（%1 人）").arg(picked.size()));
 }
 
-// 群公告（仅群主可设；服务端校验并回执结果）
+// 群公告（群主/管理员可设，R24-1 权限放宽；服务端校验并回执结果）
 void MainWindow::group_announce_dialog(quint64 group_id) {
   const auto it = groups_.find(group_id);
   if (it == groups_.end()) return;
   bool ok = false;
   const QString text = QInputDialog::getMultiLineText(
       this, QStringLiteral("设置群公告（群 %1）").arg(group_id),
-      QStringLiteral("群主专属；留空＝清除公告"), it->announcement, &ok);
+      QStringLiteral("群主/管理员可设；留空＝清除公告"), it->announcement, &ok);
   if (!ok) return;
   collab_engine_.announce_group(group_id, text.trimmed());
-  show_status(QStringLiteral("群公告设置请求已发送"));
+  show_status(QStringLiteral("群公告设置请求已发送（全员将收到重要级通知）"));
+}
+
+// 公告编辑历史（R24-1）：请求后等专用回执（超时兜底），倒序列出
+// 谁/何时/改成了什么（content 空串＝该次为清除）。
+void MainWindow::group_announce_history_dialog(quint64 group_id) {
+  if (!groups_.contains(group_id)) return;
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("公告编辑历史（群 %1）").arg(group_id));
+  dlg.resize(520, 400);
+  auto* layout = new QVBoxLayout(&dlg);
+  auto* list = new QListWidget(&dlg);
+  list->setWordWrap(true);
+  layout->addWidget(list);
+  auto* close_btn =
+      new QPushButton(QStringLiteral("关闭"), &dlg);
+  layout->addWidget(close_btn);
+  QObject::connect(close_btn, &QPushButton::clicked, &dlg, &QDialog::accept);
+
+  QEventLoop loop;
+  auto conn = connect(
+      &collab_engine_, &CollabEngine::announcement_history_received, &dlg,
+      [&loop, &list, group_id](quint64 gid, const QString& history_json) {
+        if (gid != group_id) return; // 其他群的回执继续等
+        const auto arr = nlohmann::json::parse(
+            history_json.toStdString(), nullptr, false);
+        if (arr.is_discarded() || !arr.is_array()) {
+          auto* item = new QListWidgetItem(QStringLiteral("历史解析失败"), list);
+          item->setForeground(Qt::gray);
+        } else if (arr.empty()) {
+          new QListWidgetItem(QStringLiteral("暂无编辑记录"), list);
+        } else {
+          for (const auto& h : arr) {
+            const QDateTime ts =
+                QDateTime::fromMSecsSinceEpoch(h.value("ts_ms", 0));
+            const QString content =
+                QString::fromStdString(h.value("content", std::string{}));
+            new QListWidgetItem(
+                QStringLiteral("%1　%2　设为：%3")
+                    .arg(ts.toString(QStringLiteral("yyyy-MM-dd HH:mm")),
+                         QString::fromStdString(h.value("editor", std::string{})),
+                         content.isEmpty() ? QStringLiteral("（清除公告）")
+                                           : content),
+                list);
+          }
+        }
+        loop.quit();
+      });
+  collab_engine_.announce_history(group_id);
+  // 超时兜底：服务端 3 秒无回执提示后关（连接异常等极端情形不吊死模态）
+  QTimer::singleShot(3000, &loop, &QEventLoop::quit);
+  loop.exec();
+  QObject::disconnect(conn);
+  dlg.exec();
 }
 
 // 免服务端临时群（直连态）：从已发现设备多选，发送＝逐设备点对点扇出。

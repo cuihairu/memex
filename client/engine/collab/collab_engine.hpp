@@ -60,6 +60,8 @@ public slots:
   void invite_group(quint64 group_id, const QStringList& members);
   void leave_group(quint64 group_id);
   void announce_group(quint64 group_id, const QString& announcement);
+  // 公告编辑历史查询（R24-1）：回执经 announcement_history_received
+  void announce_history(quint64 group_id);
   void query_groups();
   // —— 跨态会话日志（T4.2）：op=start（建立）／end（结束）——
   // 只上报时间、双方与时长，不含任何消息内容；须登录态。
@@ -94,9 +96,14 @@ signals:
   void org_received(const QString& org_json);
   // 常用联系人全量（T4.5）：JSON [{"peer","starred","last_ms"}]（已排序）
   void fav_received(const QString& fav_json);
-  // 群命令回执（T4.1）：op（create/invite/leave/announce）、ok、reason、群号
+  // 群命令回执（T4.1）：op（create/invite/leave/announce/announce_history）、
+  // ok、reason、群号
   void group_result(bool ok, const QString& reason, const QString& op,
                     quint64 group_id);
+  // 公告编辑历史（R24-1）：JSON [{"editor","content","ts_ms"}]（倒序，
+  // content 空串=该次为清除）；群号随查
+  void announcement_history_received(quint64 group_id,
+                                     const QString& history_json);
   // 群列表（T4.1）：JSON [{"group_id":N,"name","owner","announcement","members":[…]}]
   void groups_received(const QString& groups_json);
   // 收到群消息：群键（"group:N"）、发送者账号、正文、时间、msg_id

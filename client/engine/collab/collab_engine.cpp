@@ -296,6 +296,19 @@ void CollabEngine::announce_group(quint64 group_id, const QString& announcement)
   send_frame(m);
 }
 
+void CollabEngine::announce_history(quint64 group_id) {
+  if (!logged_in_) return;
+  Message m;
+  m.set_type(MsgType::GROUP_CMD);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* c = m.mutable_group_cmd();
+  c->set_op("announce_history");
+  c->set_group_id(group_id);
+  send_frame(m);
+}
+
 void CollabEngine::query_groups() {
   if (!logged_in_) return;
   Message m;
@@ -486,9 +499,23 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
     break;
   }
   case MsgType::GROUP_RESULT: {
-    // 群命令回执（T4.1）：失败理由上抛；成功操作顺带刷新群列表
+    // 群命令回执（T4.1）：失败理由上抛；成功操作顺带刷新群列表。
+    // R24-1：announce_history 回执改走专用信号（不刷群列表）。
     if (!msg.has_group_result()) return;
     const auto& r = msg.group_result();
+    if (r.op() == "announce_history") {
+      nlohmann::json j = nlohmann::json::array();
+      for (const auto& h : r.history()) {
+        nlohmann::json hj;
+        hj["editor"] = h.editor();
+        hj["content"] = h.content();
+        hj["ts_ms"] = h.ts_ms();
+        j.push_back(std::move(hj));
+      }
+      emit announcement_history_received(
+          r.group_id(), QString::fromStdString(j.dump()));
+      break;
+    }
     emit group_result(r.ok(), QString::fromStdString(r.reason()),
                       QString::fromStdString(r.op()), r.group_id());
     if (r.ok()) query_groups();

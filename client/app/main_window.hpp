@@ -165,6 +165,8 @@ private:
   // 拉人进群／设置群公告弹窗（成员数据源：组织架构成员）
   void group_invite_dialog(quint64 group_id);
   void group_announce_dialog(quint64 group_id);
+  // 公告编辑历史查看（R24-1）：请求→等专用回执（超时兜底）→列表展示
+  void group_announce_history_dialog(quint64 group_id);
   // 免服务端临时群（直连态多选设备扇出，不进归档）
   void dgroup_dialog();
   QString dgroup_title(const QString& dgroup_id) const; // 「临时群 N」标题

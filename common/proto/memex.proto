@@ -128,14 +128,21 @@ message OrgData {
 }
 
 // —— 群聊（T4.1）——
-// 群管理命令（op 取值："create" 建群｜"invite" 拉人｜"leave" 退群｜"announce" 群公告）。
+// 群管理命令（op 取值："create" 建群｜"invite" 拉人｜"leave" 退群｜"announce" 群公告
+// ｜"announce_history" 公告编辑历史查询——回执 history 倒序带全，R24-1）。
 // 群消息走既有 TEXT：to = "group:<群号>"，服务端按成员扇出并全量归档。
 message GroupCmd {
-  string op = 1;              // create／invite／leave／announce
+  string op = 1;              // create／invite／leave／announce／announce_history
   string name = 2;            // 群名（create）
   repeated string members = 3; // 成员账号（create／invite；create 时建群者自动入群）
-  uint64 group_id = 4;        // 群号（invite／leave／announce）
+  uint64 group_id = 4;        // 群号（invite／leave／announce／announce_history）
   string announcement = 5;    // 公告内容（announce）
+}
+
+message AnnouncementRev {
+  string editor = 1;   // 设置人账号
+  string content = 2;  // 该次设置后的全文（空串=该次为清除）
+  int64 ts_ms = 3;     // 设置时刻（服务端时钟）
 }
 
 message GroupResult {
@@ -143,6 +150,9 @@ message GroupResult {
   string reason = 2;   // 失败原因（群不存在／非成员／账号不存在…）
   string op = 3;       // 回执对应的命令
   uint64 group_id = 4; // 成功建群时回填群号
+  // R24-1：op=announce_history 时的编辑历史（倒序；其余 op 不填——
+  // 未知该字段的旧客户端按 proto3 未知字段跳过，不受影响）
+  repeated AnnouncementRev history = 5;
 }
 
 message GroupInfo {

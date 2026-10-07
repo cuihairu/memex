@@ -11,6 +11,8 @@
 #include <functional>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
 
@@ -127,6 +129,36 @@ int main(int argc, char** argv) {
   QObject::connect(&b, &CollabEngine::text_delivered, &b,
                    [&](quint64 seq, bool ok) { b_receipts.push_back({seq, ok}); });
 
+  // —— R24-1 群公告腿的信号收集：connect 一律顶层（生命周期=测试全程，
+  // 防腿块结束局部捕获悬垂后下一条 NOTICE 撞悬垂槽崩溃）——
+  quint64 ann_gid = 0;
+  QString b_fail_reason;
+  std::vector<int> b_urgencies;
+  QString b_notice_title;
+  quint64 hist_gid = 0;
+  QString hist_json;
+  QObject::connect(&a, &CollabEngine::group_result, &a,
+                   [&](bool ok, const QString&, const QString& op,
+                       quint64 id) {
+                     if (ok && op == "create") ann_gid = id;
+                   });
+  QObject::connect(&b, &CollabEngine::group_result, &b,
+                   [&](bool ok, const QString& reason, const QString& op,
+                       quint64) {
+                     if (!ok && op == "announce") b_fail_reason = reason;
+                   });
+  QObject::connect(&b, &CollabEngine::notice_received, &b,
+                   [&](const QString&, const QString& title, const QString&,
+                       int urgency, const QString&, qint64, const QString&) {
+                     b_urgencies.push_back(urgency);
+                     b_notice_title = title;
+                   });
+  QObject::connect(&a, &CollabEngine::announcement_history_received, &a,
+                   [&](quint64 g, const QString& j) {
+                     hist_gid = g;
+                     hist_json = j;
+                   });
+
   a.login(QStringLiteral("127.0.0.1"), port, QStringLiteral("alice"), QStringLiteral("pass-a"));
   b.login(QStringLiteral("127.0.0.1"), port, QStringLiteral("bob"), QStringLiteral("pass-b"));
   CHECK(wait_until([&] { return a_in && b_in; }, 8000));
@@ -187,6 +219,38 @@ int main(int argc, char** argv) {
       CHECK(m.msg_id.empty() == (m.from == "bob")); // 协作态收到的都有 msg_id
     }
     CHECK(copies == 1);
+  }
+
+  // —— R24-1 群公告：建群→设公告（全员 NOTICE＝重要级强提醒）→普通成员拒→
+  // 历史留痕查询回带（倒序，清除也是一笔）——信号收集 connect 已在顶层
+  {
+    a.create_group(QStringLiteral("公告测试群"), {QStringLiteral("bob")});
+    CHECK(wait_until([&] { return ann_gid > 0; }, 8000));
+    const quint64 gid = ann_gid;
+
+    // bob 视角的分级推送信号：公告=重要（urgency=2），标题带群名
+    a.announce_group(gid, QStringLiteral("每周五例会"));
+    CHECK(wait_until([&] { return !b_urgencies.empty(); }, 8000));
+    CHECK(b_urgencies[0] == 2); // IMPORTANT＝桌面强提醒级
+    CHECK(b_notice_title == QStringLiteral("群公告：公告测试群"));
+
+    // 普通成员设公告被拒（R24-1 权限=群主/管理员）——拒收回执发给 b
+    b.announce_group(gid, QStringLiteral("bob 版"));
+    CHECK(wait_until([&] { return !b_fail_reason.isEmpty(); }, 8000));
+    CHECK(b_fail_reason.contains(QStringLiteral("群主/管理员")));
+
+    // 清除（不推 NOTICE）→重设→历史三笔倒序（新者在前，清除也是一笔）
+    a.announce_group(gid, QString());
+    a.announce_group(gid, QStringLiteral("新版公告"));
+    a.announce_history(gid);
+    CHECK(wait_until([&] { return hist_gid == gid && !hist_json.isEmpty(); }, 8000));
+    const auto arr = nlohmann::json::parse(hist_json.toStdString(), nullptr, false);
+    CHECK(arr.is_array() && arr.size() == 3);
+    if (arr.is_array() && arr.size() == 3) {
+      CHECK(arr[0]["editor"] == "alice" && arr[0]["content"] == "新版公告");
+      CHECK(arr[1]["editor"] == "alice" && arr[1]["content"] == "");
+      CHECK(arr[2]["editor"] == "alice" && arr[2]["content"] == "每周五例会");
+    }
   }
 
   // 断线重连：杀服务端 → 双端判死（connection_lost）→ 同库同端口重启 →
