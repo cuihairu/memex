@@ -844,6 +844,111 @@ int main() {
                acc_base + "reveal\"}").status == 404);
   }
 
+  // —— R25-1 群工具框架：白名单配置（memo:config=群主/管理员）、
+  //     成员可读清单、动作代理调用（stub 回显＋谁/何时/动作/参数留痕）、
+  //     审计管理面——入群即授权/退群即失（file:read 群继承） ——
+  {
+    const std::string gids = std::to_string(gid);
+    // config：未登录 401；普通成员 403；缺字段/坏 actions 400；
+    // 幽灵群不透存在性（owner1 也 403）
+    CHECK(http(port, "POST", "/files/group-tools/config", {},
+               "{\"gid\":" + gids + ",\"tool\":\"ci\",\"actions\":[]}")
+              .status == 401);
+    CHECK(http(port, "POST", "/files/group-tools/config", H("member1"),
+               "{\"gid\":" + gids + ",\"tool\":\"ci\",\"actions\":[]}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-tools/config", H("owner1"),
+               "{\"gid\":" + gids + ",\"tool\":\"ci\"}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/group-tools/config", H("owner1"),
+               "{\"gid\":0,\"tool\":\"ci\",\"actions\":[]}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/group-tools/config", H("owner1"),
+               "{\"gid\":" + gids + ",\"tool\":\"\",\"actions\":[]}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/group-tools/config", H("owner1"),
+               "{\"gid\":" + gids +
+                   ",\"tool\":\"ci\",\"actions\":[\"deploy\",42]}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/group-tools/config", H("owner1"),
+               "{\"gid\":999999,\"tool\":\"ci\",\"actions\":[]}")
+              .status == 403);
+    // 管理员可配置；upsert 覆盖（再设即替换旧清单）
+    CHECK(http(port, "POST", "/files/group-tools/config", H("admin1"),
+               "{\"gid\":" + gids +
+                   ",\"tool\":\"ci\",\"actions\":[\"deploy\",\"rollback\"]}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-tools/config", H("owner1"),
+               "{\"gid\":" + gids +
+                   ",\"tool\":\"ci\",\"actions\":[\"deploy\",\"rollback\","
+                   "\"status\"]}")
+              .status == 200);
+    // list：未登录 401；非成员 403；坏 gid 400；成员见最新清单（覆盖生效）
+    CHECK(http(port, "GET", "/files/group-tools/list?gid=" + gids, {}, "")
+              .status == 401);
+    CHECK(http(port, "GET", "/files/group-tools/list?gid=" + gids,
+               H("outsider"), "").status == 403);
+    CHECK(http(port, "GET", "/files/group-tools/list?gid=x", H("member1"), "")
+              .status == 400);
+    const auto lt = http(port, "GET",
+                         "/files/group-tools/list?gid=" + gids, H("member1"),
+                         "");
+    CHECK(lt.status == 200);
+    CHECK(lt.body.find("\"tool\":\"ci\"") != std::string::npos);
+    CHECK(lt.body.find("\"deploy\"") != std::string::npos);
+    CHECK(lt.body.find("\"rollback\"") != std::string::npos);
+    CHECK(lt.body.find("\"status\"") != std::string::npos);
+    // call：字段校验（params 须对象）400；非成员 403；幽灵群 403；
+    // 未配置工具 404（gid2 有成员无配置）
+    CHECK(http(port, "POST", "/files/group-tools/call", H("member1"),
+               "{\"gid\":" + gids + ",\"tool\":\"ci\",\"action\":\"deploy\","
+                                    "\"params\":[1]}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/group-tools/call", H("outsider"),
+               "{\"gid\":" + gids + ",\"tool\":\"ci\",\"action\":\"deploy\","
+                                    "\"params\":{}}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-tools/call", H("owner1"),
+               "{\"gid\":999999,\"tool\":\"ci\",\"action\":\"deploy\","
+               "\"params\":{}}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-tools/call", H("member1"),
+               "{\"gid\":" + std::to_string(gid2) +
+                   ",\"tool\":\"nope\",\"action\":\"deploy\",\"params\":{}}")
+              .status == 404);
+    // 白名单外 403；白名单内 200 且 stub 回显带参数
+    CHECK(http(port, "POST", "/files/group-tools/call", H("member1"),
+               "{\"gid\":" + gids + ",\"tool\":\"ci\",\"action\":\"hack\","
+                                    "\"params\":{}}")
+              .status == 403);
+    const auto c1 = http(port, "POST", "/files/group-tools/call", H("member1"),
+                         "{\"gid\":" + gids +
+                             ",\"tool\":\"ci\",\"action\":\"deploy\","
+                             "\"params\":{\"env\":\"prod\",\"rev\":\"a1b2\"}}");
+    CHECK(c1.status == 200);
+    CHECK(c1.body.find("\"stub\":true") != std::string::npos);
+    CHECK(c1.body.find("\"env\":\"prod\"") != std::string::npos);
+    // 再调一笔（供审计倒序断言：后调的在前）
+    CHECK(http(port, "POST", "/files/group-tools/call", H("owner1"),
+               "{\"gid\":" + gids +
+                   ",\"tool\":\"ci\",\"action\":\"status\",\"params\":{}}")
+              .status == 200);
+    // audit：成员 403（管理面）；群主见两行且倒序（status 在 deploy 前）、
+    // 行带 actor/params/结果
+    CHECK(http(port, "GET", "/files/group-tools/audit?gid=" + gids,
+               H("member1"), "").status == 403);
+    const auto ta = http(port, "GET",
+                         "/files/group-tools/audit?gid=" + gids, H("owner1"),
+                         "");
+    CHECK(ta.status == 200);
+    CHECK(ta.body.find("\"actor\":\"member1\"") != std::string::npos);
+    CHECK(ta.body.find("\"rev\":\"a1b2\"") != std::string::npos);
+    const auto pos_status = ta.body.find("\"action\":\"status\"");
+    const auto pos_deploy = ta.body.find("\"action\":\"deploy\"");
+    CHECK(pos_status != std::string::npos && pos_deploy != std::string::npos);
+    CHECK(pos_status < pos_deploy); // id DESC：最新在前
+  }
+
   // —— 存储未配置：面在、字节面 503、元数据面照常 ——
   {
     memex::server::FileServer bare(io, store, nullptr, 0);

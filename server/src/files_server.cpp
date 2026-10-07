@@ -717,6 +717,18 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (path_ == "/files/group-vault/audit" && method_ == "GET") {
       return route_group_vault_audit();
     }
+    if (path_ == "/files/group-tools/config" && method_ == "POST") {
+      return route_group_tools_config(body);
+    }
+    if (path_ == "/files/group-tools/list" && method_ == "GET") {
+      return route_group_tools_list();
+    }
+    if (path_ == "/files/group-tools/call" && method_ == "POST") {
+      return route_group_tools_call(body);
+    }
+    if (path_ == "/files/group-tools/audit" && method_ == "GET") {
+      return route_group_tools_audit();
+    }
     respond_json(404, {{"ok", false}, {"error", "路径不存在"}});
   }
 
@@ -2112,6 +2124,214 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                      {"entry_id", a.entry_id},
                      {"actor", a.actor},
                      {"action", a.action},
+                     {"ts_ms", a.ts_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"rows", arr}});
+  }
+
+  // —— R25-1 群工具框架 ——
+  // call 判定（入群即授权/退群即失，route 叠加不自造规则）：群成员
+  // （file:read 群继承）即备格；白名单另查（工具只暴露声明的动作）。
+  bool tool_call_allowed(const std::string& account, std::uint64_t gid) {
+    return impl_.az
+        .authorize({account, "file:read", group_resource(gid),
+                    "owner=" + account})
+        .allowed;
+  }
+
+  // 工具白名单配置（仅群主/管理员＝memo:config；actions 须为字符串数组）
+  void route_group_tools_config(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("tool") ||
+        !j["tool"].is_string() || !j.contains("actions") ||
+        !j["actions"].is_array()) {
+      respond_json(400, {{"ok", false},
+                         {"error", "缺少字段：gid/tool/actions（字符串数组）"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::string tool = j["tool"].get<std::string>();
+    if (gid == 0 || tool.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数、tool 非空"}});
+      return;
+    }
+    std::vector<std::string> actions;
+    for (const auto& a : j["actions"]) {
+      if (!a.is_string()) {
+        respond_json(400, {{"ok", false}, {"error", "actions 须为字符串数组"}});
+        return;
+      }
+      actions.push_back(a.get<std::string>());
+    }
+    const Decision d = impl_.az.authorize(
+        {account, "memo:config", group_resource(gid), "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403,
+                   {{"ok", false}, {"error", "无权配置工具（仅群主/管理员）"}});
+      return;
+    }
+    json arr = json::array();
+    for (const auto& a : actions) arr.push_back(a);
+    if (!impl_.store.tool_set_actions(gid, tool, arr.dump(), account,
+                                      now_ms())) {
+      respond_json(404, {{"ok", false}, {"error", "群不存在"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-tools config account=" << account
+              << " gid=" << gid << " tool=" << tool
+              << " actions=" << actions.size() << std::endl;
+    respond_json(200, {{"ok", true},
+                       {"gid", gid},
+                       {"tool", tool},
+                       {"size", static_cast<int>(actions.size())}});
+  }
+
+  void route_group_tools_list() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
+      return;
+    }
+    json arr = json::array();
+    for (const auto& c : impl_.store.tool_list(gid)) {
+      json actions = json::array();
+      try {
+        actions = json::parse(c.actions_json);
+      } catch (const std::exception&) {
+        actions = json::array(); // 库内串损坏不炸路由
+      }
+      arr.push_back({{"tool", c.tool},
+                     {"actions", actions},
+                     {"updated_by", c.updated_by},
+                     {"updated_ms", c.updated_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"tools", arr}});
+  }
+
+  // 动作代理调用（R25-1=骨架：白名单校验＋留痕＋stub 回显；真外部系统
+  // 调用随 R25-2/R25-3 落地——客户端只见按钮不见密钥）
+  void route_group_tools_call(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("tool") ||
+        !j["tool"].is_string() || !j.contains("action") ||
+        !j["action"].is_string() || !j.contains("params") ||
+        !j["params"].is_object()) {
+      respond_json(
+          400, {{"ok", false},
+                {"error", "缺少字段：gid/tool/action/params（对象）"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::string tool = j["tool"].get<std::string>();
+    const std::string action = j["action"].get<std::string>();
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403,
+                   {{"ok", false}, {"error", "无权调用（非群成员）"}});
+      return;
+    }
+    const auto cfg = impl_.store.tool_config(gid, tool);
+    if (!cfg.has_value()) {
+      respond_json(404, {{"ok", false}, {"error", "工具未配置"}});
+      return;
+    }
+    // 白名单制：动作不在声明清单＝拒（无自由参数逃逸；参数校验随具体工具）
+    json actions = json::array();
+    try {
+      actions = json::parse(cfg->actions_json);
+    } catch (const std::exception&) {
+      actions = json::array();
+    }
+    bool listed = false;
+    for (const auto& a : actions) {
+      if (a.is_string() && a.get<std::string>() == action) {
+        listed = true;
+        break;
+      }
+    }
+    if (!listed) {
+      respond_json(403, {{"ok", false},
+                         {"error", "动作未开放（不在该群工具白名单）"}});
+      return;
+    }
+    // 留痕在回包前？在回包后？——先执行后留痕：结果一并入审计行
+    const json result = {{"ok", true},
+                         {"stub", true},
+                         {"tool", tool},
+                         {"action", action},
+                         {"echo", j["params"]}};
+    const std::string result_str = result.dump();
+    impl_.store.tool_audit_add(gid, tool, action, account, j["params"].dump(),
+                               result_str, now_ms());
+    std::cout << "[MEMEX] files group-tools call account=" << account
+              << " gid=" << gid << " tool=" << tool
+              << " action=" << action << std::endl;
+    respond_json(200, {{"ok", true},
+                       {"gid", gid},
+                       {"tool", tool},
+                       {"action", action},
+                       {"result", result}});
+  }
+
+  void route_group_tools_audit() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    // 审计查询=管理面（memo:config 规则命中 owner/admin）
+    const Decision d = impl_.az.authorize(
+        {account, "memo:config", group_resource(gid), "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403,
+                   {{"ok", false}, {"error", "无权查看审计（仅群主/管理员）"}});
+      return;
+    }
+    json arr = json::array();
+    for (const auto& a : impl_.store.tool_audit_list(gid)) {
+      json params = json::object();
+      json result = json::object();
+      try {
+        params = json::parse(a.params_json);
+      } catch (const std::exception&) {
+      }
+      try {
+        result = json::parse(a.result_json);
+      } catch (const std::exception&) {
+      }
+      arr.push_back({{"id", a.id},
+                     {"tool", a.tool},
+                     {"action", a.action},
+                     {"actor", a.actor},
+                     {"params", params},
+                     {"result", result},
                      {"ts_ms", a.ts_ms}});
     }
     respond_json(200, {{"ok", true}, {"gid", gid}, {"rows", arr}});

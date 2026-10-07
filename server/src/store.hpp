@@ -611,6 +611,42 @@ public:
   std::vector<GroupVaultAudit> vault_audit_list(std::uint64_t group_id,
                                                 int limit = 200);
 
+  // —— R25-1 群工具框架（白名单动作＋入群即授权＋动作留痕＋代理骨架）——
+  // 群=授权域：管理员给群配工具白名单动作；成员 call 判定在路由层叠加
+  //（群成员 file:read 继承——入群即有、退群即失），无独立授权体系。
+  struct GroupToolConfig {
+    std::uint64_t group_id{0};
+    std::string tool;
+    std::string actions_json; // JSON 数组字符串（服务端不解释动作语义）
+    std::string updated_by;
+    std::int64_t updated_ms{0};
+  };
+  // 动作留痕：谁/何时/哪个工具/什么动作/参数/结果（铁律：点击可回溯到人）
+  struct GroupToolAudit {
+    std::int64_t id{0};
+    std::uint64_t group_id{0};
+    std::string tool;
+    std::string action;
+    std::string actor;
+    std::string params_json;
+    std::string result_json; // 代理调用回包（R25-1=骨架 stub 回显）
+    std::int64_t ts_ms{0};
+  };
+  // 工具白名单动作配置（upsert；群须存在=false）
+  bool tool_set_actions(std::uint64_t group_id, const std::string& tool,
+                        const std::string& actions_json,
+                        const std::string& updated_by, std::int64_t ts_ms);
+  // 单工具配置（无行=未配置 nullopt）
+  std::optional<GroupToolConfig> tool_config(std::uint64_t group_id,
+                                             const std::string& tool);
+  std::vector<GroupToolConfig> tool_list(std::uint64_t group_id);
+  void tool_audit_add(std::uint64_t group_id, const std::string& tool,
+                      const std::string& action, const std::string& actor,
+                      const std::string& params_json,
+                      const std::string& result_json, std::int64_t ts_ms);
+  std::vector<GroupToolAudit> tool_audit_list(std::uint64_t group_id,
+                                              int limit = 200);
+
 private:
   bool ensure_schema();
 

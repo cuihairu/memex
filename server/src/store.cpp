@@ -326,7 +326,28 @@ bool ServerStore::ensure_schema() {
       "  action TEXT NOT NULL,"
       "  ts_ms INTEGER NOT NULL);"
       "CREATE INDEX IF NOT EXISTS idx_gva_gid"
-      " ON group_vault_audit(group_id);"; // 本段为 schema 字符串最后一段
+      " ON group_vault_audit(group_id);"
+      // —— R25-1 群工具：白名单动作配置（gid+tool 主键 upsert；服务端不
+      // 解释动作语义，路由层按白名单放行——无自由动作）——
+      "CREATE TABLE IF NOT EXISTS group_tools ("
+      "  group_id INTEGER NOT NULL,"
+      "  tool TEXT NOT NULL,"
+      "  actions_json TEXT NOT NULL,"
+      "  updated_by TEXT NOT NULL,"
+      "  updated_ms INTEGER NOT NULL,"
+      "  PRIMARY KEY (group_id, tool));"
+      // 动作留痕：谁/何时/哪个工具/什么动作/参数/结果（与审计面同源）
+      "CREATE TABLE IF NOT EXISTS group_tool_audit ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  group_id INTEGER NOT NULL,"
+      "  tool TEXT NOT NULL,"
+      "  action TEXT NOT NULL,"
+      "  actor TEXT NOT NULL,"
+      "  params_json TEXT NOT NULL,"
+      "  result_json TEXT NOT NULL,"
+      "  ts_ms INTEGER NOT NULL);"
+      "CREATE INDEX IF NOT EXISTS idx_gta_gid"
+      " ON group_tool_audit(group_id);"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -3369,6 +3390,144 @@ std::vector<ServerStore::GroupVaultAudit> ServerStore::vault_audit_list(
     a.actor = ac ? ac : "";
     a.action = act ? act : "";
     a.ts_ms = sqlite3_column_int64(st, 5);
+    out.push_back(std::move(a));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// —— R25-1 群工具框架 ——
+
+bool ServerStore::tool_set_actions(std::uint64_t group_id,
+                                   const std::string& tool,
+                                   const std::string& actions_json,
+                                   const std::string& updated_by,
+                                   std::int64_t ts_ms) {
+  if (group_id == 0 || tool.empty() || actions_json.empty() ||
+      updated_by.empty()) {
+    return false;
+  }
+  if (!group_info(group_id).has_value()) return false;
+  const char* sql =
+      "INSERT INTO group_tools(group_id, tool, actions_json, updated_by,"
+      " updated_ms) VALUES(?, ?, ?, ?, ?)"
+      " ON CONFLICT(group_id, tool) DO UPDATE SET actions_json=excluded."
+      "actions_json, updated_by=excluded.updated_by, updated_ms=excluded."
+      "updated_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, tool.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, actions_json.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, updated_by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::optional<ServerStore::GroupToolConfig> ServerStore::tool_config(
+    std::uint64_t group_id, const std::string& tool) {
+  const char* sql =
+      "SELECT group_id, tool, actions_json, updated_by, updated_ms"
+      " FROM group_tools WHERE group_id = ? AND tool = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, tool.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<GroupToolConfig> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    GroupToolConfig c;
+    c.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
+    const char* t = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* u = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    c.tool = t ? t : "";
+    c.actions_json = a ? a : "";
+    c.updated_by = u ? u : "";
+    c.updated_ms = sqlite3_column_int64(st, 4);
+    out = std::move(c);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::GroupToolConfig> ServerStore::tool_list(
+    std::uint64_t group_id) {
+  std::vector<GroupToolConfig> out;
+  const char* sql =
+      "SELECT group_id, tool, actions_json, updated_by, updated_ms"
+      " FROM group_tools WHERE group_id = ? ORDER BY tool ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    GroupToolConfig c;
+    c.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
+    const char* t = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* u = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    c.tool = t ? t : "";
+    c.actions_json = a ? a : "";
+    c.updated_by = u ? u : "";
+    c.updated_ms = sqlite3_column_int64(st, 4);
+    out.push_back(std::move(c));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+void ServerStore::tool_audit_add(std::uint64_t group_id,
+                                 const std::string& tool,
+                                 const std::string& action,
+                                 const std::string& actor,
+                                 const std::string& params_json,
+                                 const std::string& result_json,
+                                 std::int64_t ts_ms) {
+  const char* sql =
+      "INSERT INTO group_tool_audit(group_id, tool, action, actor, params_json,"
+      " result_json, ts_ms) VALUES (?, ?, ?, ?, ?, ?, ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, tool.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, action.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, actor.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 5, params_json.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 6, result_json.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 7, ts_ms);
+  sqlite3_step(st);
+  sqlite3_finalize(st);
+}
+
+std::vector<ServerStore::GroupToolAudit> ServerStore::tool_audit_list(
+    std::uint64_t group_id, int limit) {
+  std::vector<GroupToolAudit> out;
+  const char* sql =
+      "SELECT id, group_id, tool, action, actor, params_json, result_json,"
+      " ts_ms FROM group_tool_audit WHERE group_id = ?"
+      " ORDER BY id DESC LIMIT ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_int(st, 2, limit);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    GroupToolAudit a;
+    a.id = sqlite3_column_int64(st, 0);
+    a.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    const char* t = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* ac = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    const char* actor = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    const char* pj = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    const char* rj = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    a.tool = t ? t : "";
+    a.action = ac ? ac : "";
+    a.actor = actor ? actor : "";
+    a.params_json = pj ? pj : "";
+    a.result_json = rj ? rj : "";
+    a.ts_ms = sqlite3_column_int64(st, 7);
     out.push_back(std::move(a));
   }
   sqlite3_finalize(st);
