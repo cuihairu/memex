@@ -42,12 +42,18 @@ class GroupCiDialog : public QDialog {
   // 越权由服务端 403 状态行明示）
   bool open_trigger_whitelist();
 
+  // —— R25-4 凭据面（工具固定 ci；值只此一次发往服务端，界面永只显示
+  // 掩码状态。程序化入口不弹确认框——确认框只挂按钮路径，测试走这里）——
+  bool set_credential(const QString& value);
+  bool delete_credential();
+
   // —— 走查/测试观察点 ——
   QString status_text() const;
   int pipeline_count() const;
   QListWidget* pipeline_list() const { return pipelines_; }
   int runs_count() const;
   QListWidget* runs_list() const { return runs_; }
+  QString credential_state_text() const;
 
  private:
   void build_ui();
@@ -62,6 +68,8 @@ class GroupCiDialog : public QDialog {
   QLineEdit* params_;
   QLineEdit* pl_name_;
   QLineEdit* pl_desc_;
+  QLineEdit* cred_value_;
+  QLabel* cred_state_;
   QLabel* status_;
   QListWidget* pipelines_;
   QListWidget* runs_;
@@ -71,6 +79,8 @@ class GroupCiDialog : public QDialog {
   QPushButton* btn_add_;
   QPushButton* btn_delete_;
   QPushButton* btn_open_;
+  QPushButton* btn_cred_set_;
+  QPushButton* btn_cred_del_;
 };
 
 } // namespace memex::client

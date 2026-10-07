@@ -706,6 +706,25 @@ public:
   bool pack_artifact_delete(std::uint64_t group_id, const std::string& name,
                             const std::string& version);
 
+  // —— R25-4 凭据面：工具外部凭据只存服务端（密文=cred::gcm_seal 的
+  // hex 串，行内永不见明文；取回只给掩码元数据——客户端零凭据）——
+  struct ToolCredentialMeta {
+    std::uint64_t group_id{0};
+    std::string tool;
+    std::string updated_by;
+    std::int64_t updated_ms{0};
+  };
+  // 上/覆盖（同 gid+tool）；群须存在=false
+  bool tool_cred_set(std::uint64_t group_id, const std::string& tool,
+                     const std::string& sealed_hex,
+                     const std::string& updated_by, std::int64_t ts_ms);
+  bool tool_cred_delete(std::uint64_t group_id, const std::string& tool);
+  // 密文取回（仅供服务端代理调用内存内解密——不暴露给任何 HTTP 面）
+  std::optional<std::string> tool_cred_sealed(std::uint64_t group_id,
+                                              const std::string& tool);
+  // 掩码清单（无密文字段）
+  std::vector<ToolCredentialMeta> tool_cred_list(std::uint64_t group_id);
+
 private:
   bool ensure_schema();
 

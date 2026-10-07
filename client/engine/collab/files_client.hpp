@@ -111,6 +111,15 @@ class FilesClient : public QObject {
   // 群配置快照导出（仅群主/管理员；密文面永不进导出）
   void group_export(quint64 gid);
 
+  // —— 工具凭据面（R25-4 /files/group-tools/credential[s]）——
+  // 上/覆盖凭据（仅群主/管理员；服务端加密落库，客户端零凭据：
+  // 回包只有掩码元数据，明文只此一次出门）
+  void tool_cred_set(quint64 gid, const QString& tool, const QString& value);
+  // 删凭据（仅群主/管理员）
+  void tool_cred_delete(quint64 gid, const QString& tool);
+  // 掩码元数据列表（tool/updated_by/updated_ms；永不含凭据值）
+  void tool_cred_list(quint64 gid);
+
   // —— 收件箱（R23-3 文件助手混排面）——
   // GET /files/list?target=inbox：备忘录+文件时间倒序混排条目
   void list_inbox();
@@ -154,6 +163,9 @@ class FilesClient : public QObject {
   void pack_listed(const QJsonArray& artifacts);
   void pack_deleted();
   void group_exported(const QJsonObject& snapshot);
+  void tool_cred_saved(qint64 gid, const QString& tool);
+  void tool_cred_removed(qint64 gid, const QString& tool);
+  void tool_credentials_listed(const QJsonArray& credentials);
   void inbox_listed(const QJsonArray& items); // type=memo|file 混排条目
   void upload_finished(qint64 file_id, bool second_transfer);
   void download_finished(const QString& save_path);

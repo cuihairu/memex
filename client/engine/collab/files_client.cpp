@@ -470,6 +470,43 @@ void FilesClient::group_export(quint64 gid) {
             });
 }
 
+// —— R25-4 工具凭据面（value 只此一次出门；服务端回包不回显）——
+
+void FilesClient::tool_cred_set(quint64 gid, const QString& tool,
+                                const QString& value) {
+  send_json(QStringLiteral("group-credential.set"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-tools/credential"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("tool"), tool},
+             {QStringLiteral("value"), value}},
+            [this, gid, tool](bool ok, int, const QJsonObject&,
+                              const QString&) {
+              if (ok) emit tool_cred_saved(static_cast<qint64>(gid), tool);
+            });
+}
+
+void FilesClient::tool_cred_delete(quint64 gid, const QString& tool) {
+  send_json(QStringLiteral("group-credential.delete"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-tools/credential"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("tool"), tool},
+             {QStringLiteral("op"), QStringLiteral("delete")}},
+            [this, gid, tool](bool ok, int, const QJsonObject&,
+                              const QString&) {
+              if (ok) emit tool_cred_removed(static_cast<qint64>(gid), tool);
+            });
+}
+
+void FilesClient::tool_cred_list(quint64 gid) {
+  send_json(QStringLiteral("group-credential.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-tools/credentials?gid=%1").arg(gid),
+            {}, [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit tool_credentials_listed(
+                  resp.value(QStringLiteral("credentials")).toArray());
+            });
+}
+
 void FilesClient::list_inbox() {
   send_json(QStringLiteral("inbox.list"), QStringLiteral("GET"),
             QStringLiteral("/files/list?target=inbox"), {},

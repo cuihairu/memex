@@ -171,6 +171,9 @@ struct FileServer::Impl {
   std::shared_ptr<FileSessions> sessions;
   // R25-2 工具结果卡片回群回调（缺省未设＝只落账不回群）
   GroupNoticeFn notice;
+  // R25-4 凭据面 GCM 密钥（主密钥 SHA-256 派生 32B raw；空＝主密钥未
+  // 配置＝凭据面未启用，路由 503）
+  std::string tool_cred_key;
 
   explicit Impl(ServerStore& s, std::shared_ptr<S3Storage> st,
                 bool uplink = false,
@@ -755,6 +758,14 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/group-export" && method_ == "GET") {
       return route_group_export();
+    }
+    // R25-4 凭据面：写/删凭据（管理面 memo:config；回包绝不回显 value）
+    // 与掩码元数据列表（客户端零凭据——明文只在服务端代理内存内）
+    if (path_ == "/files/group-tools/credential" && method_ == "POST") {
+      return route_group_tools_credential(body);
+    }
+    if (path_ == "/files/group-tools/credentials" && method_ == "GET") {
+      return route_group_tools_credentials();
     }
     respond_json(404, {{"ok", false}, {"error", "路径不存在"}});
   }
@@ -2796,6 +2807,120 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     respond_json(200, {{"ok", true}, {"gid", gid}, {"snapshot", snapshot}});
   }
 
+  // —— R25-4 凭据面：工具外部凭据只存服务端密文（gcm_seal hex 落库，
+  // 行内永不见明文）。管理面（memo:config＝owner/admin）；主密钥未配＝
+  // 503 明示「未启用」而非静默存明文；回包只带掩码元数据。
+  void route_group_tools_credential(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("tool") ||
+        !j["tool"].is_string()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：gid/tool"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::string tool = j["tool"].get<std::string>();
+    if (gid == 0 || tool.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数、tool 非空"}});
+      return;
+    }
+    const bool is_delete = j.contains("op") && j["op"].is_string() &&
+                           j["op"].get<std::string>() == "delete";
+    std::string value;
+    if (!is_delete) {
+      if (!j.contains("value") || !j["value"].is_string() ||
+          j["value"].get<std::string>().empty()) {
+        respond_json(
+            400, {{"ok", false},
+                  {"error", "缺少字段：value（非空字符串；删除传 op=\"delete\"）"}});
+        return;
+      }
+      value = j["value"].get<std::string>();
+    }
+    const Decision d = impl_.az.authorize(
+        {account, "memo:config", group_resource(gid), "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403,
+                   {{"ok", false}, {"error", "无权管理凭据（仅群主/管理员）"}});
+      return;
+    }
+    if (impl_.tool_cred_key.empty()) {
+      respond_json(503, {{"ok", false},
+                         {"error", "凭据面未启用（服务端未配置 --tool-cred-secret）"}});
+      return;
+    }
+    if (is_delete) {
+      if (!impl_.store.tool_cred_delete(gid, tool)) {
+        respond_json(404, {{"ok", false}, {"error", "凭据不存在"}});
+        return;
+      }
+      std::cout << "[MEMEX] files group-tools credential delete account="
+                << account << " gid=" << gid << " tool=" << tool << std::endl;
+      respond_json(200, {{"ok", true},
+                         {"gid", gid},
+                         {"tool", tool},
+                         {"deleted", true}});
+      return;
+    }
+    const std::string sealed =
+        gcm_seal(impl_.tool_cred_key, value);
+    if (sealed.empty()) {
+      respond_json(500, {{"ok", false}, {"error", "凭据加密失败"}});
+      return;
+    }
+    if (!impl_.store.tool_cred_set(gid, tool, sealed, account, now_ms())) {
+      respond_json(404, {{"ok", false}, {"error", "群不存在"}});
+      return;
+    }
+    // 留痕不含 value（明文/密文都不进日志）
+    std::cout << "[MEMEX] files group-tools credential set account=" << account
+              << " gid=" << gid << " tool=" << tool
+              << " sealed_bytes=" << sealed.size() / 2 << std::endl;
+    respond_json(200, {{"ok", true},
+                       {"gid", gid},
+                       {"tool", tool},
+                       {"updated", true}});
+  }
+
+  // 掩码元数据列表（工具/谁/何时更新——永不含 sealed_hex，更不含明文）
+  void route_group_tools_credentials() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    const Decision d = impl_.az.authorize(
+        {account, "memo:config", group_resource(gid), "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403,
+                   {{"ok", false}, {"error", "无权查看凭据（仅群主/管理员）"}});
+      return;
+    }
+    if (impl_.tool_cred_key.empty()) {
+      respond_json(503, {{"ok", false},
+                         {"error", "凭据面未启用（服务端未配置 --tool-cred-secret）"}});
+      return;
+    }
+    json arr = json::array();
+    for (const auto& m : impl_.store.tool_cred_list(gid)) {
+      arr.push_back({{"tool", m.tool},
+                     {"updated_by", m.updated_by},
+                     {"updated_ms", m.updated_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"credentials", arr}});
+  }
+
   void respond_json(int status, const json& body) {
     const std::string payload = body.dump();
     std::ostringstream head;
@@ -2860,6 +2985,11 @@ std::uint16_t FileServer::port() const {
 }
 
 void FileServer::set_notice(GroupNoticeFn fn) { impl_->notice = std::move(fn); }
+
+void FileServer::set_tool_cred_secret(const std::string& secret) {
+  // 派生空（secret 空）＝凭据面未启用；只存派生密钥，明文主密钥不驻留
+  impl_->tool_cred_key = derive_tool_cred_key(secret);
+}
 
 void FileServer::start_accept() {
   if (impl_->uplink_mode) {

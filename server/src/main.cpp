@@ -62,6 +62,9 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
   memex::server::UplinkPolicy uplink_policy;
   memex::server::S3Config s3;
   s3.region = "auto";
+  // R25-4 凭据面主密钥（缺省空＝凭据面未启用；建议随部署 env 走
+  // ——旗标进 ps，值仅服务端内存内派生）
+  std::string tool_cred_secret;
   for (int i = 0; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--port" && i + 1 < argc) {
@@ -110,6 +113,9 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
     } else if (arg == "--uplink-login-secret" && i + 1 < argc) {
       // R23-5 外网登录二次验证（部署级第二口令；TOTP 另批）
       uplink_policy.login_secret = argv[++i];
+    } else if (arg == "--tool-cred-secret" && i + 1 < argc) {
+      // R25-4 凭据面主密钥（服务端派生 GCM 密钥；不给=凭据面未启用）
+      tool_cred_secret = argv[++i];
     } else if (arg == "--s3-endpoint" && i + 1 < argc) {
       s3.endpoint = argv[++i];
     } else if (arg == "--s3-bucket" && i + 1 < argc) {
@@ -223,6 +229,8 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
           (void)memex::server::deliver_notice(server, target, title, content,
                                               urgency, "");
         });
+        // R25-4 凭据面：主密钥派生 GCM 密钥（空=未启用，凭据路由 503）
+        files->set_tool_cred_secret(tool_cred_secret);
       } catch (const std::exception& e) {
         std::cerr << "[MEMEX] 文件面端口绑定失败，文件面未启用"
                      "（消息主通道不受影响）：" << e.what() << std::endl;

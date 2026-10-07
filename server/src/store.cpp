@@ -379,7 +379,16 @@ bool ServerStore::ensure_schema() {
       "  created_ms INTEGER NOT NULL,"
       "  UNIQUE (group_id, name, version));"
       "CREATE INDEX IF NOT EXISTS idx_gpa_gid"
-      " ON group_pack_artifacts(group_id);"; // 本段为 schema 字符串最后一段
+      " ON group_pack_artifacts(group_id);"
+      // —— R25-4 凭据面：工具外部凭据（密文 hex=cred::gcm_seal；客户端
+      // 永不取回，代理调用时内存内解密；同 gid+tool 覆盖）——
+      "CREATE TABLE IF NOT EXISTS group_tool_credentials ("
+      "  group_id INTEGER NOT NULL,"
+      "  tool TEXT NOT NULL,"
+      "  sealed_hex TEXT NOT NULL,"
+      "  updated_by TEXT NOT NULL,"
+      "  updated_ms INTEGER NOT NULL,"
+      "  PRIMARY KEY (group_id, tool));"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -3795,6 +3804,89 @@ bool ServerStore::pack_artifact_delete(std::uint64_t group_id,
                   sqlite3_changes(db_) > 0;
   sqlite3_finalize(st);
   return ok;
+}
+
+// —— R25-4 凭据面 ——
+
+bool ServerStore::tool_cred_set(std::uint64_t group_id,
+                                const std::string& tool,
+                                const std::string& sealed_hex,
+                                const std::string& updated_by,
+                                std::int64_t ts_ms) {
+  if (!group_info(group_id).has_value()) return false;
+  const char* sql =
+      "INSERT INTO group_tool_credentials(group_id, tool, sealed_hex,"
+      " updated_by, updated_ms) VALUES(?,?,?,?,?)"
+      " ON CONFLICT(group_id, tool) DO UPDATE SET"
+      " sealed_hex=excluded.sealed_hex, updated_by=excluded.updated_by,"
+      " updated_ms=excluded.updated_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, tool.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, sealed_hex.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, updated_by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::tool_cred_delete(std::uint64_t group_id,
+                                   const std::string& tool) {
+  const char* sql =
+      "DELETE FROM group_tool_credentials WHERE group_id = ? AND tool = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, tool.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::optional<std::string> ServerStore::tool_cred_sealed(
+    std::uint64_t group_id, const std::string& tool) {
+  const char* sql =
+      "SELECT sealed_hex FROM group_tool_credentials WHERE group_id = ?"
+      " AND tool = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, tool.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<std::string> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    const char* h = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    out = h ? h : "";
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::ToolCredentialMeta> ServerStore::tool_cred_list(
+    std::uint64_t group_id) {
+  std::vector<ToolCredentialMeta> out;
+  const char* sql =
+      "SELECT group_id, tool, updated_by, updated_ms"
+      " FROM group_tool_credentials WHERE group_id = ? ORDER BY tool ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    ToolCredentialMeta m;
+    m.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
+    const char* t = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    const char* u = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    m.tool = t ? t : "";
+    m.updated_by = u ? u : "";
+    m.updated_ms = sqlite3_column_int64(st, 3);
+    out.push_back(std::move(m));
+  }
+  sqlite3_finalize(st);
+  return out;
 }
 
 } // namespace memex::server

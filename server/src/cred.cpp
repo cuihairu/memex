@@ -76,4 +76,118 @@ std::string sha256_hex(const std::string& data) {
   return to_hex(md, md_len);
 }
 
+// —— R25-4 工具凭据面（与群密码箱同构的 GCM 封装，但密钥在服务端：代理
+// 调用无人在线解密，主密钥随部署配置；客户端只见掩码永不取回明文）——
+
+std::string derive_tool_cred_key(const std::string& secret) {
+  if (secret.empty()) return {}; // 未配主密钥＝凭据面未启用
+  unsigned char md[EVP_MAX_MD_SIZE];
+  unsigned int md_len = 0;
+  if (EVP_Digest(secret.data(), secret.size(), md, &md_len, EVP_sha256(),
+                 nullptr) != 1) {
+    return {};
+  }
+  return std::string(reinterpret_cast<const char*>(md), 32);
+}
+
+namespace {
+constexpr int kGcmNonceBytes = 12;
+constexpr int kGcmTagBytes = 16;
+} // namespace
+
+std::string gcm_seal(const std::string& key32, const std::string& plaintext) {
+  if (key32.size() != 32 || plaintext.empty()) return {};
+  unsigned char nonce[kGcmNonceBytes];
+  if (RAND_bytes(nonce, sizeof(nonce)) != 1) return {};
+  EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+  if (!ctx) return {};
+  std::string out;
+  do {
+    unsigned char tag[kGcmTagBytes];
+    int len = 0, total = 0;
+    std::string packed;
+    packed.resize(plaintext.size() + kGcmTagBytes);
+    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) !=
+        1) break;
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, kGcmNonceBytes,
+                            nullptr) != 1) break;
+    if (EVP_EncryptInit_ex(ctx, nullptr, nullptr,
+                           reinterpret_cast<const unsigned char*>(key32.data()),
+                           nonce) != 1) break;
+    if (EVP_EncryptUpdate(
+            ctx, reinterpret_cast<unsigned char*>(packed.data()), &len,
+            reinterpret_cast<const unsigned char*>(plaintext.data()),
+            static_cast<int>(plaintext.size())) != 1)
+      break;
+    total = len;
+    if (EVP_EncryptFinal_ex(
+            ctx, reinterpret_cast<unsigned char*>(packed.data()) + total,
+            &len) != 1)
+      break;
+    total += len;
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, kGcmTagBytes, tag) !=
+        1)
+      break;
+    packed.resize(static_cast<std::size_t>(total));
+    std::string raw(reinterpret_cast<const char*>(nonce), sizeof(nonce));
+    raw += packed;
+    raw.append(reinterpret_cast<const char*>(tag), sizeof(tag));
+    out = to_hex(reinterpret_cast<const unsigned char*>(raw.data()),
+                 raw.size());
+  } while (false);
+  EVP_CIPHER_CTX_free(ctx);
+  return out;
+}
+
+std::string gcm_open(const std::string& key32, const std::string& packed_hex) {
+  if (key32.size() != 32) return {};
+  const std::string raw = from_hex(packed_hex);
+  if (raw.size() <=
+      static_cast<std::size_t>(kGcmNonceBytes + kGcmTagBytes)) {
+    return {}; // 至少 nonce+tag；空明文不合法（写入面校验非空）
+  }
+  const unsigned char* nonce =
+      reinterpret_cast<const unsigned char*>(raw.data());
+  const unsigned char* tag =
+      reinterpret_cast<const unsigned char*>(raw.data() + raw.size()) -
+      kGcmTagBytes;
+  const unsigned char* ct =
+      reinterpret_cast<const unsigned char*>(raw.data() + kGcmNonceBytes);
+  const int ct_len = static_cast<int>(raw.size()) - kGcmNonceBytes -
+                     kGcmTagBytes;
+  EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+  if (!ctx) return {};
+  std::string out;
+  bool ok = false;
+  do {
+    int len = 0, total = 0;
+    out.resize(raw.size()); // 明文 ≤ 密文长度（同界安全）
+    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) !=
+        1) break;
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, kGcmNonceBytes,
+                            nullptr) != 1) break;
+    if (EVP_DecryptInit_ex(ctx, nullptr, nullptr,
+                           reinterpret_cast<const unsigned char*>(key32.data()),
+                           nonce) != 1) break;
+    if (EVP_DecryptUpdate(ctx, reinterpret_cast<unsigned char*>(out.data()),
+                          &len, ct, ct_len) != 1)
+      break;
+    total = len;
+    if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, kGcmTagBytes,
+                            const_cast<unsigned char*>(tag)) != 1)
+      break;
+    // 验签败（篡改/错钥）＝Final <0 → 不置 ok → 空串
+    if (EVP_DecryptFinal_ex(
+            ctx, reinterpret_cast<unsigned char*>(out.data()) + total,
+            &len) != 1)
+      break;
+    total += len;
+    out.resize(static_cast<std::size_t>(total));
+    ok = true;
+  } while (false);
+  EVP_CIPHER_CTX_free(ctx);
+  if (!ok) out.clear();
+  return out;
+}
+
 } // namespace memex::server

@@ -86,6 +86,10 @@ class FileServer {
   // 工具结果卡片回群回调（R25-2；缺省未设＝只落账不回群，测试面用）
   void set_notice(GroupNoticeFn fn);
 
+  // R25-4 工具凭据面主密钥（服务端 SHA-256 派生 32B GCM 密钥）：未设或
+  // 空串＝凭据面未启用（两路由一律 503）；凭据永不回客户端。
+  void set_tool_cred_secret(const std::string& secret);
+
   // 连接处理内部类（匿名空间）需触达：公开类型、私有成员不可触达
   struct Impl;
   std::unique_ptr<Impl> impl_;

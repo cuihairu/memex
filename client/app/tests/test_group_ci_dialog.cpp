@@ -85,7 +85,10 @@ int main(int argc, char** argv) {
                {QStringLiteral("serve"), QStringLiteral("--db"), db,
                 QStringLiteral("--port"), QString::number(collab_port),
                 QStringLiteral("--webhook-port"), QStringLiteral("0"),
-                QStringLiteral("--files-port"), QString::number(files_port)});
+                QStringLiteral("--files-port"), QString::number(files_port),
+                // R25-4 凭据面：配主密钥（缺省空=凭据路由 503）
+                QStringLiteral("--tool-cred-secret"),
+                QStringLiteral("test-secret")});
   CHECK(server.waitForStarted(5000));
   CHECK(wait_until([&] {
     QTcpServer probe;
@@ -188,6 +191,21 @@ int main(int argc, char** argv) {
                QStringLiteral("成功"));
   }, 8000));
 
+  // —— R25-4 凭据腿（alice=群主）：设置→掩码状态「已配置」→删除→「未配置」。
+  //     只等持久面（cred_state_ 标签），不等状态行（会被刷新回包覆盖）——
+  CHECK(owner.credential_state_text().contains(QStringLiteral("未配置")));
+  CHECK(owner.set_credential(QStringLiteral("sk-owner-secret")));
+  CHECK(wait_until([&] {
+    return owner.credential_state_text().contains(QStringLiteral("已配置")) &&
+           owner.credential_state_text().contains(QStringLiteral("alice"));
+  }, 8000));
+  // 掩码面：状态文本永不含凭据值
+  CHECK(!owner.credential_state_text().contains(QStringLiteral("sk-owner-secret")));
+  CHECK(owner.delete_credential());
+  CHECK(wait_until([&] {
+    return owner.credential_state_text().contains(QStringLiteral("未配置"));
+  }, 8000));
+
   // —— 成员腿：白名单开放后成员可读可触发（入群即授权）——
   GroupCiDialog member;
   member.connect_to(QStringLiteral("127.0.0.1"), files_port,
@@ -207,6 +225,24 @@ int main(int argc, char** argv) {
            member.runs_list()->item(0)->text().contains(
                QStringLiteral("成功"));
   }, 8000));
+
+  // —— R25-4 凭据面（管理员腿）：设置→掩码标签「已配置（由 alice …）」
+  //    →删除→「未配置」。只等持久面（cred_state_ 标签），不等状态行 ——
+  CHECK(owner.credential_state_text().contains(QStringLiteral("未配置")));
+  CHECK(owner.set_credential(QStringLiteral("s3cr3t-value")));
+  CHECK(wait_until([&] {
+    const QString t = owner.credential_state_text();
+    return t.contains(QStringLiteral("已配置")) &&
+           t.contains(QStringLiteral("alice"));
+  }, 8000));
+  // 客户端零凭据：掩码标签永不含凭据值（回包本就不带 value）
+  CHECK(!owner.credential_state_text().contains(QStringLiteral("s3cr3t")));
+  CHECK(owner.delete_credential());
+  CHECK(wait_until([&] {
+    return owner.credential_state_text().contains(QStringLiteral("未配置"));
+  }, 8000));
+  // 成员无凭据面：bob 恒「未配置」（列表 403 被静默过滤，红绿灯面不被打断）
+  CHECK(member.credential_state_text().contains(QStringLiteral("未配置")));
 
   server.terminate();
   server.waitForFinished(3000);

@@ -140,8 +140,42 @@ GroupCiDialog::GroupCiDialog(QWidget* parent) : QDialog(parent) {
   connect(client_, &FilesClient::tool_actions_set, this, [this] {
     set_status(QStringLiteral("已开放成员触发（ci/trigger 进白名单）"), false);
   });
+  // R25-4 凭据面：保存/删除后重拉掩码状态（只动 cred_state_ 标签＝持久
+  // 面；回包里没有 value，界面永远显示不出凭据值）
+  connect(client_, &FilesClient::tool_cred_saved, this,
+          [this](qint64, const QString&) {
+            set_status(QStringLiteral("凭据已更新（服务端加密保存，客户端不留存）"),
+                       false);
+            client_->tool_cred_list(gid_);
+          });
+  connect(client_, &FilesClient::tool_cred_removed, this,
+          [this](qint64, const QString&) {
+            set_status(QStringLiteral("凭据已删除"), false);
+            client_->tool_cred_list(gid_);
+          });
+  connect(client_, &FilesClient::tool_credentials_listed, this,
+          [this](const QJsonArray& creds) {
+            for (const auto& v : creds) {
+              const QJsonObject o = v.toObject();
+              if (o.value(QStringLiteral("tool")).toString() !=
+                  QStringLiteral("ci")) {
+                continue;
+              }
+              cred_state_->setText(
+                  QStringLiteral("ci 凭据：已配置（由 %1 于 %2 更新）")
+                      .arg(o.value(QStringLiteral("updated_by")).toString(),
+                           fmt_time(static_cast<qint64>(
+                               o.value(QStringLiteral("updated_ms"))
+                                   .toDouble()))));
+              return;
+            }
+            cred_state_->setText(QStringLiteral("ci 凭据：未配置"));
+          });
   connect(client_, &FilesClient::request_failed, this,
           [this](const QString& op, int status, const QString& error) {
+            // 凭据状态静默拉取：非管理员 403 是常态（成员看不到凭据），
+            // 不刷错误状态打断成员的红绿灯走查
+            if (op == QStringLiteral("group-credential.list")) return;
             set_status(QStringLiteral("操作失败[%1]（%2）：%3")
                            .arg(op, status > 0 ? QString::number(status)
                                                : QStringLiteral("网络"),
@@ -228,6 +262,25 @@ void GroupCiDialog::build_ui() {
   mgr_row->addWidget(btn_refresh_);
   root->addLayout(mgr_row);
 
+  // —— 凭据行（R25-4：值只此一次发往服务端；界面永只显示掩码状态）——
+  auto* cred_row = new QHBoxLayout;
+  cred_value_ = new QLineEdit(this);
+  cred_value_->setEchoMode(QLineEdit::Password);
+  cred_value_->setPlaceholderText(
+      QStringLiteral("ci 工具凭据值（仅设置时发送一次；界面不回显）"));
+  cred_state_ = new QLabel(QStringLiteral("ci 凭据：未配置"), this);
+  btn_cred_set_ = new QPushButton(QStringLiteral("设置凭据"), this);
+  btn_cred_del_ = new QPushButton(QStringLiteral("删除凭据"), this);
+  btn_cred_set_->setToolTip(QStringLiteral(
+      "把凭据加密保存到服务端（仅群主/管理员；代理调用时服务端内存内"
+      "解密，客户端永不取回）"));
+  btn_cred_del_->setToolTip(QStringLiteral("删除本群 ci 工具凭据"));
+  cred_row->addWidget(cred_value_, 1);
+  cred_row->addWidget(cred_state_);
+  cred_row->addWidget(btn_cred_set_);
+  cred_row->addWidget(btn_cred_del_);
+  root->addLayout(cred_row);
+
   // —— 状态行 ——
   status_ = new QLabel(QStringLiteral("未连接（与协作面同源账号；文件面端口独立）"),
                        this);
@@ -269,6 +322,31 @@ void GroupCiDialog::build_ui() {
     }
     submit_pipeline(name, QString(), true);
   });
+  // 破坏性动作二次确认只挂按钮路径（程序化 set_credential/delete_credential
+  // 不弹框，测试直接走）
+  connect(btn_cred_set_, &QPushButton::clicked, this, [this] {
+    if (cred_value_->text().isEmpty()) {
+      set_status(QStringLiteral("先填凭据值再设置"), true);
+      return;
+    }
+    if (QMessageBox::question(this, QStringLiteral("设置凭据"),
+                              QStringLiteral("更新本群 ci 工具凭据？"
+                                             "（服务端加密保存，覆盖旧值）")) !=
+        QMessageBox::Yes) {
+      return;
+    }
+    set_credential(cred_value_->text());
+    cred_value_->clear();
+  });
+  connect(btn_cred_del_, &QPushButton::clicked, this, [this] {
+    if (QMessageBox::question(this, QStringLiteral("删除凭据"),
+                              QStringLiteral("删除本群 ci 工具凭据？"
+                                             "（代理调用将无法携带认证）")) !=
+        QMessageBox::Yes) {
+      return;
+    }
+    delete_credential();
+  });
 }
 
 void GroupCiDialog::connect_to(const QString& host, quint16 files_port,
@@ -292,6 +370,8 @@ void GroupCiDialog::refresh() {
   client_->ci_list(gid_);
   const auto* it = pipelines_->currentItem();
   client_->ci_runs(gid_, it ? it->data(kRoleName).toString() : QString());
+  // 掩码状态静默拉取（成员 403 被 request_failed 过滤，不打断红绿灯面）
+  client_->tool_cred_list(gid_);
 }
 
 bool GroupCiDialog::trigger_selected() {
@@ -331,11 +411,31 @@ bool GroupCiDialog::open_trigger_whitelist() {
   return true;
 }
 
+bool GroupCiDialog::set_credential(const QString& value) {
+  if (gid_ == 0 || !client_->is_logged_in()) return false;
+  if (value.isEmpty()) {
+    set_status(QStringLiteral("凭据值不能为空"), true);
+    return false;
+  }
+  client_->tool_cred_set(gid_, QStringLiteral("ci"), value);
+  return true;
+}
+
+bool GroupCiDialog::delete_credential() {
+  if (gid_ == 0 || !client_->is_logged_in()) return false;
+  client_->tool_cred_delete(gid_, QStringLiteral("ci"));
+  return true;
+}
+
 QString GroupCiDialog::status_text() const { return status_->text(); }
 
 int GroupCiDialog::pipeline_count() const { return pipelines_->count(); }
 
 int GroupCiDialog::runs_count() const { return runs_->count(); }
+
+QString GroupCiDialog::credential_state_text() const {
+  return cred_state_->text();
+}
 
 void GroupCiDialog::set_status(const QString& text, bool error) {
   status_->setText(text);
