@@ -29,4 +29,19 @@ Decision AuthorizationService::authorize(const AuthzQuery& q) const {
   return {false, kDefaultDeny};
 }
 
+std::vector<AuthorizationService::FilterHit>
+AuthorizationService::filter_allowed(
+    std::size_t count,
+    const std::function<AuthzQuery(std::size_t)>& query_for) const {
+  std::vector<FilterHit> out;
+  out.reserve(count);
+  for (std::size_t i = 0; i < count; ++i) {
+    const Decision d = authorize(query_for(i));
+    if (d.allowed) {
+      out.push_back(FilterHit{i, d.reason});
+    }
+  }
+  return out;
+}
+
 } // namespace memex::server

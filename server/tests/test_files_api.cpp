@@ -1557,6 +1557,74 @@ int main() {
     CHECK(ls2.body.find("\"open\":true") != std::string::npos);
   }
 
+  // —— 平台-1 数据过滤：Server Query → Authorization Filter → Allowed
+  //     Records（单元面：冲突规则与单点裁决同源、理由与序保持；HTTP 面：
+  //     群文件列表行级隐没非 normal 行）——
+  {
+    // 单元面：独立小规则集（deny 某行 / allow 主人 / 默认拒）
+    memex::server::AuthorizationService faz;
+    faz.add_rule(memex::server::RuleEffect::ExplicitDeny, "deny-f2",
+                 [](const memex::server::AuthzQuery& q) {
+                   return q.resource.find("/file:2") != std::string::npos;
+                 });
+    faz.add_rule(memex::server::RuleEffect::ExplicitAllow, "allow-owner",
+                 [](const memex::server::AuthzQuery& q) {
+                   return q.context == "owner";
+                 });
+    const auto hits = faz.filter_allowed(
+        4, [](std::size_t i) {
+          return memex::server::AuthzQuery{"alice", "file:read",
+                                           "group:9/file:" +
+                                               std::to_string(i + 1),
+                                           "owner"};
+        });
+    // 行 2 被显式拒（Deny 压 Allow）；其余放行且理由=命中规则名、序保持
+    CHECK(hits.size() == 3);
+    CHECK(hits[0].index == 0 && hits[0].reason == "allow:allow-owner");
+    CHECK(hits[1].index == 2 && hits[1].reason == "allow:allow-owner");
+    CHECK(hits[2].index == 3 && hits[2].reason == "allow:allow-owner");
+    // 全未命中=默认拒：context 不匹配 → 颗粒无存
+    CHECK(faz.filter_allowed(2, [](std::size_t) {
+            return memex::server::AuthzQuery{"alice", "file:read",
+                                             "group:9/file:1", "other"};
+          }).empty());
+    // 单点 authorize 与过滤同源：同查询同结果
+    CHECK(!faz.authorize({"alice", "file:read", "group:9/file:2", "owner"})
+               .allowed);
+    CHECK(faz.authorize({"alice", "file:read", "group:9/file:1", "owner"})
+              .allowed);
+  }
+  // HTTP 面：gid2 传两行、隔离其一 → 群列表只余 normal 行（群主同滤——
+  // 显式拒先于管理允许）；成员/群主同见
+  {
+    const std::string g2 = "group:" + std::to_string(gid2);
+    const auto upa = http(port, "POST", "/files/upload?target=" + g2,
+                          {{"Authorization", "Bearer " + tok["owner1"]},
+                           {"X-File-Name", "keep.bin"}},
+                          std::string("keep-bytes"));
+    CHECK(upa.status == 200);
+    const auto upb = http(port, "POST", "/files/upload?target=" + g2,
+                          {{"Authorization", "Bearer " + tok["owner1"]},
+                           {"X-File-Name", "gone.bin"}},
+                          std::string("gone-bytes"));
+    CHECK(upb.status == 200);
+    const auto id_keep = jint(upa.body, "id");
+    const auto id_gone = jint(upb.body, "id");
+    CHECK(store.set_file_status(id_gone,
+                                ServerStore::FileStatus::Quarantine));
+    for (const char* who : {"owner1", "member1"}) {
+      const auto ls = http(port, "GET", "/files/list?target=" + g2, H(who),
+                           "");
+      CHECK(ls.status == 200);
+      CHECK(ls.body.find("\"id\":" + std::to_string(id_keep)) !=
+            std::string::npos);
+      // 隔离行连元数据一起隐没（群主也不例外的口径=file-not-normal 拒
+      // 先于一切允许，冲突规则写死）
+      CHECK(ls.body.find("\"id\":" + std::to_string(id_gone)) ==
+            std::string::npos);
+    }
+  }
+
   // —— 存储未配置：面在、字节面 503、元数据面照常 ——
   {
     bare = std::make_unique<memex::server::FileServer>(io, store, nullptr, 0);

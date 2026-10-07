@@ -1170,7 +1170,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                                is_group ? "" : account, limit, offset,
                                is_group ? -1 : 0);
     json arr = json::array();
-    for (const auto& m : rows) {
+    auto emit = [&arr](const ServerStore::FileMeta& m) {
       arr.push_back({{"id", m.id},
                      {"owner", m.owner},
                      {"file_name", m.file_name},
@@ -1179,6 +1179,36 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                      {"pin", m.pin},
                      {"status", static_cast<int>(m.status)},
                      {"upload_ts", m.upload_ts}});
+    };
+    if (is_group) {
+      // 数据过滤（平台-1）：记录级可见性走统一裁决——非 normal 态
+      // （隔离/过期）连元数据一起对全员隐没（ExplicitDeny 先于群主/
+      // 管理员允许，冲突规则写死），成员经继承面见 normal 行；路由级
+      // 判权已挡非成员，这里是行级第二道（蓝图§七：授权在数据访问层
+      // 生效，不是只在 UI 层）。
+      const auto hits = impl_.az.filter_allowed(
+          rows.size(), [this, &account, &gid, &rows](std::size_t i) {
+            AuthzQuery q;
+            q.subject = account;
+            q.action = "file:read";
+            q.resource = "group:" + std::to_string(gid) + "/file:" +
+                         std::to_string(rows[i].id);
+            q.context = "owner=" + account;
+            return q;
+          });
+      for (const auto& h : hits) {
+        emit(rows[h.index]);
+      }
+      if (hits.size() != rows.size()) {
+        std::cout << "[MEMEX] files list filter account=" << account
+                  << " group=" << gid << " allowed=" << hits.size()
+                  << " filtered=" << (rows.size() - hits.size()) << std::endl;
+      }
+    } else {
+      // 个人/自有面：personal-owner 全允许，行级过滤恒等——不过滤
+      for (const auto& m : rows) {
+        emit(m);
+      }
     }
     respond_json(200, {{"ok", true}, {"files", arr}});
   }
