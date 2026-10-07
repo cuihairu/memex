@@ -221,7 +221,8 @@
 
 ## R26 群服务器工具：agent + 负载状态 + 远程会话（2026-10-04，设计=docs/design/群服务器工具.md）
 
-- [ ] R26-1 memex agent：轻量常驻（Linux 起步），注册/心跳/负载上报（CPU/内存/磁盘/负载）。
+- [x] R26-1 memex agent：轻量常驻（Linux 起步），注册/心跳/负载上报（CPU/内存/磁盘/负载）。
+  - 2026-10-07 收口（b8bf382 服务端＋e26063d agent）：store 加 group_servers 表（同 gid+name UNIQUE 复用行；token_hash=SHA-256 摘要 UNIQUE——明文只在登记回包出现一次、不进日志）＋四方法 server_enroll（重登记=轮换令牌、id 稳定）/server_by_token_hash/server_heartbeat（最近一拍整拍覆盖）/server_list；FileServer 三路由 /files/group-servers/{enroll,heartbeat,list}——登记=memo:config（owner/admin）、心跳=agent 令牌鉴权非人会话（错令牌 401、缺数值字段 400）、列表=群成员入群即授权（online=last_seen 90s 新鲜度＝默认 30s 心跳错过两拍仍在线；令牌摘要永不出现）。memex_agent（Linux 起步，UNIX 守卫）：--server/--token/--interval/--path/--once 常驻，只读采样不开监听口不落盘——/proc/stat 两拍差分 CPU%（首拍 250ms 差分窗、之后逐拍前移）、/proc/meminfo、statvfs 磁盘、getloadavg；失败按间隔重试，--once exit 0/1、缺参 exit 2。附带 FileServer 悬空 accept 修复：do_accept 裸 this 链式续挂，作用域实例析构后 io 线程在悬空 this 上跑完成回调（加 R26-1 测试段改时序后偶发段错误 gdb 实锤）——析构先落 alive 旗标（回调按值持同一 shared_ptr）＋错误态停链不再空转，test_files_api 临时面实例改存活到 io 停摆后。测试：test_files_api 扩 R26-1 段（登记判权/令牌只存摘要/心跳 401 400/列表绿灯/轮换 id 稳定老令牌失效/幽灵群）＋新 test_agent（真 agent 进程 × in-process FileServer 真 TCP：--once exit 0→绿灯＋内存/磁盘真值非占位；错令牌/连不上 exit 1），ctest 40/40 全绿（files_api 连跑 5 遍稳）。
 - [ ] R26-2 群服务器面板：服务器列表红绿灯+状态详情（R25 状态视图实例化）。
 - [ ] R26-3 远程会话：SSH 起步（RDP/VNC 随后），一次性短票+接入留痕（谁/何时/连哪台/时长）。
 - [ ] R26-4 凭据面：服务器凭据只存服务端（R24 加密面）、客户端零凭据；memex 只做「看+连」，操作类归 croupier。
