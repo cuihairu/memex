@@ -39,6 +39,17 @@ constexpr std::uint16_t kDefaultPort = 24360;
 constexpr std::uint16_t kDefaultWebhookPort = 24361;
 constexpr const char* kDefaultDb = "memex-server.db";
 
+// R23-5 逗号分隔小写扩展名表（黑/白名单共用；空白项剔除）
+std::vector<std::string> split_ext_list(const char* csv) {
+  std::vector<std::string> out;
+  std::istringstream in(csv);
+  std::string item;
+  while (std::getline(in, item, ',')) {
+    if (!item.empty()) out.push_back(item);
+  }
+  return out;
+}
+
 // db_path 由 main 统一解析（--db 剥离会就地改写 argv，不能再从 argv 复读）
 int cmd_serve(int argc, char** argv, const std::string& db_path) {
   std::uint16_t port = kDefaultPort;
@@ -47,6 +58,8 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
   // 外网单向 uplink 面（R23-4）默认关闭：须显式 --uplink-port 开启
   //（安全默认：开启即明示暴露范围，见装配处日志）
   int uplink_port = 0;
+  // R23-5 外网面防护参数：缺省只让危险扩展黑名单生效，其余显式开启
+  memex::server::UplinkPolicy uplink_policy;
   memex::server::S3Config s3;
   s3.region = "auto";
   for (int i = 0; i < argc; ++i) {
@@ -75,6 +88,28 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
         std::cerr << "无效 uplink 端口（0＝关闭外网入口）\n";
         return 2;
       }
+    } else if (arg == "--uplink-ext-denylist" && i + 1 < argc) {
+      // R23-5 黑名单整表替换（逗号分隔小写扩展名；空串=清空=不限）
+      uplink_policy.ext_denylist.clear();
+      for (const auto& e : split_ext_list(argv[++i])) {
+        uplink_policy.ext_denylist.push_back(e);
+      }
+    } else if (arg == "--uplink-ext-allowlist" && i + 1 < argc) {
+      // R23-5 白名单模式（非空即启用：名单外一律拒，黑名单失效）
+      uplink_policy.ext_allowlist.clear();
+      for (const auto& e : split_ext_list(argv[++i])) {
+        uplink_policy.ext_allowlist.push_back(e);
+      }
+    } else if (arg == "--uplink-max-mb" && i + 1 < argc) {
+      uplink_policy.max_upload_bytes =
+          static_cast<std::int64_t>(std::atoll(argv[++i])) * 1024 * 1024;
+      if (uplink_policy.max_upload_bytes < 0) {
+        std::cerr << "无效 --uplink-max-mb（须 ≥0，0=沿用全局上限）\n";
+        return 2;
+      }
+    } else if (arg == "--uplink-login-secret" && i + 1 < argc) {
+      // R23-5 外网登录二次验证（部署级第二口令；TOTP 另批）
+      uplink_policy.login_secret = argv[++i];
     } else if (arg == "--s3-endpoint" && i + 1 < argc) {
       s3.endpoint = argv[++i];
     } else if (arg == "--s3-bucket" && i + 1 < argc) {
@@ -136,6 +171,25 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
               << "）：暴露范围=外网单向上传（/uplink/session|upload|mine|"
                  "delete；无任何下载/读取内网数据端点，上传全审计）。"
                  "生产建议该口随隧道单独出网、内网面不出网\n";
+    // R23-5 防护状态明示（黑名单缺省生效；其余防护显式开启才显示）
+    if (!uplink_policy.ext_allowlist.empty()) {
+      std::cout << "[MEMEX] uplink 类型白名单已启用（"
+                << uplink_policy.ext_allowlist.size()
+                << " 项；名单外一律拒收）\n";
+    } else if (!uplink_policy.ext_denylist.empty()) {
+      std::cout << "[MEMEX] uplink 类型黑名单生效（"
+                << uplink_policy.ext_denylist.size()
+                << " 项危险扩展名；--uplink-ext-allowlist 可切白名单模式）\n";
+    }
+    if (uplink_policy.max_upload_bytes > 0) {
+      std::cout << "[MEMEX] uplink 单文件上限 "
+                << uplink_policy.max_upload_bytes / 1024 / 1024 << "MiB\n";
+    }
+    if (!uplink_policy.login_secret.empty()) {
+      std::cout << "[MEMEX] uplink 登录二次验证已启用（请求须带 secondary）\n";
+    }
+    // 扫描钩子（scan.hpp）缺省直通＝引擎未接入；接 clamd 等引擎时在此
+    // 装配 uplink_policy.scanner 并补一行启用明示
   }
 
   memex::server::ServerStore store;
@@ -173,7 +227,7 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
       try {
         uplink = std::make_unique<memex::server::FileServer>(
             io, store, s3_storage, static_cast<std::uint16_t>(uplink_port),
-            /*uplink_mode=*/true, file_sessions);
+            /*uplink_mode=*/true, file_sessions, uplink_policy);
       } catch (const std::exception& e) {
         std::cerr << "[MEMEX] uplink 端口绑定失败，外网入口未启用"
                      "（内网面不受影响）：" << e.what() << std::endl;

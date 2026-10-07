@@ -97,6 +97,30 @@ std::string query_param(const std::string& query, const char* key) {
   return "";
 }
 
+// R23-5 外网面扩展名判定：白名单模式（allowlist 非空）严格比对——后缀
+// 不在名单内一律拒、无后缀也拒；黑名单模式无后缀不命中（放过常规无后缀
+// 文件名）。后缀取最后一段小写化比对。
+bool ext_allowed(const UplinkPolicy& p, const std::string& file_name) {
+  const auto dot = file_name.rfind('.');
+  const bool has_ext =
+      dot != std::string::npos && dot + 1 < file_name.size() &&
+      file_name.find_first_of("/\\", dot) == std::string::npos;
+  std::string ext;
+  if (has_ext) {
+    ext = file_name.substr(dot + 1);
+    for (auto& c : ext) {
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+  }
+  if (!p.ext_allowlist.empty()) {
+    return has_ext && std::find(p.ext_allowlist.begin(), p.ext_allowlist.end(),
+                                ext) != p.ext_allowlist.end();
+  }
+  if (!has_ext) return true;
+  return std::find(p.ext_denylist.begin(), p.ext_denylist.end(), ext) ==
+         p.ext_denylist.end();
+}
+
 } // namespace
 
 // 会话库实体（hpp 前置声明的 memex::server::FileSessions）：双实例部署时
@@ -117,14 +141,18 @@ struct FileServer::Impl {
   AuthorizationService az;
   // R23-4：true=外网单向面实例（只挂 /uplink/* 写入端点）
   bool uplink_mode{false};
+  // R23-5 外网面防护参数（只在 uplink_mode=true 实例消费）
+  UplinkPolicy uplink_policy;
   // 会话令牌库：共享句柄（R23-4 双实例一面一份没意义，见 FileSessions
   // 注）。单 io_context 线程驱动（与消息面/webhook 同一线程模型），不加锁。
   std::shared_ptr<FileSessions> sessions;
 
   explicit Impl(ServerStore& s, std::shared_ptr<S3Storage> st,
                 bool uplink = false,
-                std::shared_ptr<FileSessions> shared_sessions = {})
+                std::shared_ptr<FileSessions> shared_sessions = {},
+                UplinkPolicy policy = {})
       : store(s), storage(std::move(st)), uplink_mode(uplink),
+        uplink_policy(std::move(policy)),
         sessions(shared_sessions ? std::move(shared_sessions)
                                  : std::make_shared<FileSessions>()) {
     register_policies();
@@ -268,7 +296,8 @@ struct FileServer::Impl {
       const std::string& account, bool is_group, std::uint64_t gid,
       const std::string& uid, const std::string& file_name,
       const std::string& body, bool is_inbox,
-      ServerStore::FileSource source = ServerStore::FileSource::Internal) {
+      ServerStore::FileSource source = ServerStore::FileSource::Internal,
+      const UploadScanner* scanner = nullptr) {
     UploadOutcome out;
     if (!storage) {
       out.http_status = 503;
@@ -295,6 +324,15 @@ struct FileServer::Impl {
       out.second_transfer = true;
       out.file_hash = hit->file_hash;
       out.object_key = hit->object_key;
+      return out;
+    }
+    // R23-5 扫描钩子（受理序：判权→秒传→扫描→扣费→落字节→落元数据）。
+    // 秒传命中已跳过——同哈希同归属内容不变，判定幂等；命中拒收 422
+    //（此步在扣费/落字节之前，无回滚面；审计流水由调用面照记）
+    if (scanner && scanner->scan(file_name, body) ==
+                       UploadScanner::Verdict::Infected) {
+      out.http_status = 422;
+      out.error = "文件未通过安全扫描（已拒收）";
       return out;
     }
     // 对象键按内容寻址于目标前缀内（设计铁律 3：groups/{gid}/、users/{uid}/）
@@ -514,10 +552,18 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "Content-Length 缺失或非法"}});
       return false;
     }
-    // 路由感知上限：upload 收大字节，其余路由只收小 JSON/空 body
-    body_cap_ = (path_ == "/files/upload" || path_ == "/uplink/upload")
-                    ? kMaxUpload
-                    : kMaxJsonBody;
+    // 路由感知上限：upload 收大字节，其余路由只收小 JSON/空 body；
+    // uplink 面可配独立上限（R23-5，0=沿用全局）
+    if (path_ == "/files/upload") {
+      body_cap_ = kMaxUpload;
+    } else if (path_ == "/uplink/upload") {
+      body_cap_ = impl_.uplink_policy.max_upload_bytes > 0
+                      ? static_cast<std::size_t>(
+                            impl_.uplink_policy.max_upload_bytes)
+                      : kMaxUpload;
+    } else {
+      body_cap_ = kMaxJsonBody;
+    }
     return true;
   }
 
@@ -623,6 +669,22 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     const std::string account = j["account"].get<std::string>();
     const std::string password = j["password"].get<std::string>();
+    // R23-5 二次验证（仅外网面、部署显式配置）：secondary 常量时间比对
+    //（双方过 sha256 再逐字节异或累计，长度信息不经比较时序外泄）
+    if (uplink && !impl_.uplink_policy.login_secret.empty()) {
+      const std::string provided =
+          j.contains("secondary") && j["secondary"].is_string()
+              ? j["secondary"].get<std::string>()
+              : "";
+      const std::string a = sha256_hex(impl_.uplink_policy.login_secret);
+      const std::string b = sha256_hex(provided);
+      unsigned char diff = 0;
+      for (std::size_t i = 0; i < a.size(); ++i) diff |= static_cast<unsigned char>(a[i] ^ b[i]);
+      if (diff != 0) {
+        respond_json(401, {{"ok", false}, {"error", "二级口令缺失或不匹配"}});
+        return;
+      }
+    }
     // 与消息面同源口令校验（store 摘要 + PBKDF2）；token 只存哈希
     const auto row = impl_.store.find_account(account);
     std::string token;
@@ -670,6 +732,12 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
   void route_uplink_upload(const std::string& body) {
     const std::string account = uplink_account_or_respond();
     if (account.empty()) return;
+    // R23-5 类型白名单/黑名单（外网入口不受信，先于判权做廉价检查）
+    if (!ext_allowed(impl_.uplink_policy, file_name_)) {
+      respond_json(422, {{"ok", false},
+                         {"error", "该文件类型在外网入口不允许上传"}});
+      return;
+    }
     const Decision d = impl_.az.authorize(
         {account, "file:upload", "user:" + account, "owner=" + account});
     if (!d.allowed) {
@@ -680,7 +748,14 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     const auto r =
         impl_.handle_upload(account, /*is_group=*/false, /*gid=*/0, account,
                             file_name_, body, /*is_inbox=*/true,
-                            ServerStore::FileSource::Uplink);
+                            ServerStore::FileSource::Uplink,
+                            impl_.uplink_policy.scanner.get());
+    if (r.http_status == 422) {
+      // 扫描拒收也是审计事件（外网上传全留痕：谁/何时/什么/为什么拒）
+      std::cout << "[MEMEX] uplink scan-reject account=" << account
+                << " name=" << file_name_ << " size=" << body.size()
+                << std::endl;
+    }
     if (r.http_status != 200) {
       respond_json(r.http_status, {{"ok", false}, {"error", r.error}});
       return;
@@ -1304,9 +1379,11 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
 FileServer::FileServer(asio::io_context& io, ServerStore& store,
                        std::shared_ptr<S3Storage> storage, std::uint16_t port,
                        bool uplink_mode,
-                       std::shared_ptr<FileSessions> sessions)
+                       std::shared_ptr<FileSessions> sessions,
+                       UplinkPolicy uplink_policy)
     : impl_(std::make_unique<Impl>(store, std::move(storage), uplink_mode,
-                                   std::move(sessions))),
+                                   std::move(sessions),
+                                   std::move(uplink_policy))),
       acceptor_(io, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port)) {}
 
 FileServer::~FileServer() = default;

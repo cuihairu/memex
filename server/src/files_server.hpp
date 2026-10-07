@@ -16,8 +16,11 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "authz.hpp"
+#include "scan.hpp"
 #include "storage.hpp"
 #include "store.hpp"
 
@@ -28,6 +31,27 @@ namespace memex::server {
 struct FileSessions;
 // 建两面共享的会话库句柄（实体私有，FileSession 不外泄）
 std::shared_ptr<FileSessions> make_file_sessions();
+
+// R23-5 外网面防护参数（只作用于 uplink_mode=true 实例；按「安全默认」
+// 原则：缺省只让危险扩展黑名单生效，其余防护一律显式开启）
+struct UplinkPolicy {
+  // 危险扩展名黑名单（小写、不带点；无后缀不命中）——缺省常见可执行/
+  // 脚本/安装包集；--uplink-ext-denylist 显式给值即整表替换（空串=清空）
+  std::vector<std::string> ext_denylist = {
+      "exe", "dll", "bat", "cmd", "com", "scr", "msi", "msp", "cpl",
+      "hta", "jar", "js", "jse", "vbs", "vbe", "wsf", "wsh", "ps1",
+      "sh",  "bash", "apk", "deb", "rpm",
+  };
+  // 非空＝白名单模式：后缀不在名单内一律拒（无后缀也拒），黑名单失效
+  std::vector<std::string> ext_allowlist;
+  // uplink 面独立大小上限（收 body 前拦截，413）；0=沿用全局 kMaxUpload
+  std::int64_t max_upload_bytes = 0;
+  // 非空＝外网登录二次验证：/uplink/session 请求体须带 secondary 字段
+  // 匹配（部署级第二口令；TOTP 另批），不匹配 401
+  std::string login_secret;
+  // 安全扫描钩子（R23-5）：infected 拒收 422 字节不落；空=直通
+  std::shared_ptr<UploadScanner> scanner;
+};
 
 class FileServer {
  public:
@@ -40,7 +64,8 @@ class FileServer {
   FileServer(asio::io_context& io, ServerStore& store,
              std::shared_ptr<S3Storage> storage, std::uint16_t port,
              bool uplink_mode = false,
-             std::shared_ptr<FileSessions> sessions = {});
+             std::shared_ptr<FileSessions> sessions = {},
+             UplinkPolicy uplink_policy = {});
   ~FileServer();
 
   FileServer(const FileServer&) = delete;

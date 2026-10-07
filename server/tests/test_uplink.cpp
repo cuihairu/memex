@@ -16,6 +16,7 @@
 
 #include "cred.hpp"
 #include "files_server.hpp"
+#include "scan.hpp"
 #include "storage.hpp"
 #include "store.hpp"
 
@@ -177,6 +178,18 @@ std::int64_t uq_used(ServerStore& s, const std::string& uid) {
   return q.has_value() ? q->used_bytes : -1;
 }
 
+// R23-5 扫描钩子假面：按文件名后缀判定（.evil=感染），记录调用
+struct FakeScanner final : public memex::server::UploadScanner {
+  mutable int calls{0};
+  Verdict scan(const std::string& name,
+               const std::string&) const override {
+    ++calls;
+    return name.size() >= 5 && name.substr(name.size() - 5) == ".evil"
+               ? Verdict::Infected
+               : Verdict::Clean;
+  }
+};
+
 } // namespace
 
 int main() {
@@ -331,6 +344,134 @@ int main() {
              {{"Authorization", "Bearer " + ua}}, "").status == 404);
   CHECK(http(uport, "POST", "/uplink/delete?id=abc",
              {{"Authorization", "Bearer " + ua}}, "").status == 400);
+
+  // —— R23-5 防护：缺省黑名单／白名单模式／自定义黑名单／大小上限／
+  //    扫描钩子／登录二次验证（各自独立实例，同 store 同会话库）——
+  // 缺省黑名单（危险扩展名拒；.txt 不受限）
+  CHECK(http(uport, "POST", "/uplink/upload",
+             {{"Authorization", "Bearer " + ua},
+              {"X-File-Name", " Trojan.exe"}},
+             blob).status == 422);
+  CHECK(http(uport, "POST", "/uplink/upload",
+             {{"Authorization", "Bearer " + ua},
+              {"X-File-Name", "ok.txt"}},
+             blob).status == 200);
+
+  // 白名单模式：allowlist={txt}——.bin/无后缀一律拒，.txt 过
+  memex::server::UplinkPolicy wl;
+  wl.ext_allowlist = {"txt"};
+  memex::server::FileServer uplink_w(io, store, fake, 0, true, sessions, wl);
+  uplink_w.start_accept();
+  const auto uw = jstr(
+      http(uplink_w.port(), "POST", "/uplink/session", {},
+           "{\"account\":\"alice\",\"password\":\"pw-alice\"}").body,
+      "token");
+  CHECK(!uw.empty());
+  CHECK(http(uplink_w.port(), "POST", "/uplink/upload",
+             {{"Authorization", "Bearer " + uw},
+              {"X-File-Name", "evil.bin"}},
+             blob).status == 422);
+  CHECK(http(uplink_w.port(), "POST", "/uplink/upload",
+             {{"Authorization", "Bearer " + uw},
+              {"X-File-Name", "noext"}},
+             blob).status == 422); // 白名单模式下无后缀也拒
+  CHECK(http(uplink_w.port(), "POST", "/uplink/upload",
+             {{"Authorization", "Bearer " + uw},
+              {"X-File-Name", "fine.TXT"}}, // 大小写不敏感
+             blob).status == 200);
+
+  // 自定义黑名单（整表替换）：{bin} 拒 .bin、放行 .exe（缺省表不残留）
+  memex::server::UplinkPolicy dl;
+  dl.ext_denylist = {"bin"};
+  memex::server::FileServer uplink_d(io, store, fake, 0, true, sessions, dl);
+  uplink_d.start_accept();
+  const auto ud = jstr(
+      http(uplink_d.port(), "POST", "/uplink/session", {},
+           "{\"account\":\"alice\",\"password\":\"pw-alice\"}").body,
+      "token");
+  CHECK(http(uplink_d.port(), "POST", "/uplink/upload",
+             {{"Authorization", "Bearer " + ud},
+              {"X-File-Name", "a.bin"}},
+             blob).status == 422);
+  CHECK(http(uplink_d.port(), "POST", "/uplink/upload",
+             {{"Authorization", "Bearer " + ud},
+              {"X-File-Name", "b.exe"}},
+             blob).status == 200);
+
+  // 大小上限（收 body 前拦截 413）：4 字节上限收 5 字节体
+  memex::server::UplinkPolicy ml;
+  ml.max_upload_bytes = 4;
+  memex::server::FileServer uplink_m(io, store, fake, 0, true, sessions, ml);
+  uplink_m.start_accept();
+  CHECK(http(uplink_m.port(), "POST", "/uplink/upload",
+             {{"Authorization", "Bearer " + ua},
+              {"X-File-Name", "big.txt"}},
+             "12345").status == 413);
+  CHECK(http(uplink_m.port(), "POST", "/uplink/upload",
+             {{"Authorization", "Bearer " + ua},
+              {"X-File-Name", "ok.txt"}},
+             "1234").status == 200);
+
+  // 扫描钩子：.evil 感染拒收 422——字节不落、元数据无行、配额不扣、
+  // 流水无行；clean 放行且调用计数；秒传命中跳过扫描（判定幂等）
+  const auto scanner = std::make_shared<FakeScanner>();
+  memex::server::UplinkPolicy sl;
+  sl.scanner = scanner;
+  memex::server::FileServer uplink_s(io, store, fake, 0, true, sessions, sl);
+  uplink_s.start_accept();
+  const auto us2 = jstr(
+      http(uplink_s.port(), "POST", "/uplink/session", {},
+           "{\"account\":\"bob\",\"password\":\"pw-bob\"}").body,
+      "token");
+  // seed：给 bob 建配额行（后续断言拒收不扣费），顺带吃一次扫描调用
+  CHECK(http(uplink_s.port(), "POST", "/uplink/upload",
+             {{"Authorization", "Bearer " + us2},
+              {"X-File-Name", "seed.txt"}},
+             std::string("seed")).status == 200);
+  const std::int64_t bob_quota_before = uq_used(store, "bob");
+  CHECK(bob_quota_before == 4);
+  CHECK(http(uplink_s.port(), "POST", "/uplink/upload",
+             {{"Authorization", "Bearer " + us2},
+              {"X-File-Name", "bug.evil"}},
+             blob).status == 422);
+  CHECK(scanner->calls == 2);
+  CHECK(uq_used(store, "bob") == bob_quota_before); // 拒收无扣费
+  CHECK(fake->objects_.count("users/bob/" + memex::server::sha256_hex(blob)) ==
+        0); // 字节不落
+  CHECK(store.list_uplink_logs("bob", 100).size() == 1); // 流水只记 seed
+  const auto clean_up = http(uplink_s.port(), "POST", "/uplink/upload",
+                             {{"Authorization", "Bearer " + us2},
+                              {"X-File-Name", "good.txt"}},
+                             blob);
+  CHECK(clean_up.status == 200);
+  CHECK(scanner->calls == 3);
+  // 同内容重传：秒传命中不进扫描（calls 不再增）
+  const auto dedup = http(uplink_s.port(), "POST", "/uplink/upload",
+                          {{"Authorization", "Bearer " + us2},
+                           {"X-File-Name", "again.txt"}},
+                          blob);
+  CHECK(dedup.status == 200);
+  CHECK(jhas(dedup.body, "\"second_transfer\":true"));
+  CHECK(scanner->calls == 3);
+
+  // 登录二次验证（部署级第二口令）：缺 secondary／错值 401，对值换到
+  // uplink scope 令牌
+  memex::server::UplinkPolicy vl;
+  vl.login_secret = "s3cret";
+  memex::server::FileServer uplink_v(io, store, fake, 0, true, sessions, vl);
+  uplink_v.start_accept();
+  CHECK(http(uplink_v.port(), "POST", "/uplink/session", {},
+             "{\"account\":\"alice\",\"password\":\"pw-alice\"}").status ==
+        401);
+  CHECK(http(uplink_v.port(), "POST", "/uplink/session", {},
+             "{\"account\":\"alice\",\"password\":\"pw-alice\","
+             "\"secondary\":\"wrong\"}").status == 401);
+  const auto vs_r =
+      http(uplink_v.port(), "POST", "/uplink/session", {},
+           "{\"account\":\"alice\",\"password\":\"pw-alice\","
+           "\"secondary\":\"s3cret\"}");
+  CHECK(vs_r.status == 200);
+  CHECK(jhas(vs_r.body, "\"scope\":\"uplink\""));
 
   io.stop();
   th.join();
