@@ -42,6 +42,10 @@ inline std::string compose_notice_text(std::string_view title,
 // 编码为完整帧（长度前缀 + 序列化 Envelope）。
 std::string encode(const Message& msg);
 
+// 序列化为纯载荷（不含长度前缀）：直连安全通道的封套输入面——
+// 密文帧自行成帧（长度前缀 + 计数 + 密文），载荷语义与 decode_payload 对偶。
+std::string encode_payload(const Message& msg);
+
 // 从纯载荷（FrameDecoder 解出的帧体）解析；空载荷或解析失败抛 ProtocolError。
 Message decode_payload(std::string_view payload);
 

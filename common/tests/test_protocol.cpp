@@ -55,6 +55,30 @@ void test_roundtrip() {
   CHECK(back.has_text());
   CHECK(back.text().text() == "对账单已归档，可检索");
 
+  // 纯载荷对偶（平台-8 安全通道输入面）：encode＝长度前缀＋encode_payload
+  const std::string payload = encode_payload(m);
+  const std::string full = encode(m);
+  CHECK(full.size() == kLengthPrefixSize + payload.size());
+  CHECK(full.compare(kLengthPrefixSize, payload.size(), payload) == 0);
+  CHECK(decode_payload(payload).text().text() == m.text().text());
+
+  // 平台-8 握手字段（Hello bytes 扩展）往返
+  Message h;
+  h.set_type(v1::HELLO);
+  h.set_from("dev-A");
+  h.set_to("dev-B");
+  h.mutable_hello()->set_proto_version(2);
+  h.mutable_hello()->set_identity_pub(std::string(32, '\x01'));
+  h.mutable_hello()->set_eph_pub(std::string(32, '\x02'));
+  h.mutable_hello()->set_nonce(std::string(16, '\x03'));
+  h.mutable_hello()->set_sig(std::string(64, '\x04'));
+  const Message hb = decode_frame(encode(h));
+  CHECK(hb.hello().proto_version() == 2);
+  CHECK(hb.hello().identity_pub().size() == 32);
+  CHECK(hb.hello().eph_pub().size() == 32);
+  CHECK(hb.hello().nonce().size() == 16);
+  CHECK(hb.hello().sig().size() == 64);
+
   // 各类型字段逐一往返
   Message f;
   f.set_type(v1::FILE_META);

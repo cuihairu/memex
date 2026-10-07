@@ -41,7 +41,11 @@ enum MsgType {
 message Hello {
   string device_id = 1;     // 终端标识
   string device_name = 2;   // 展示名
-  uint32 proto_version = 3; // 直连协议版本
+  uint32 proto_version = 3; // 直连协议版本（2＝平台-8 直连安全握手 v1：身份+X25519+AEAD）
+  bytes identity_pub = 4;   // 设备身份 Ed25519 公钥（32B，TOFU 定针校验——发现宣告不担认证）
+  bytes eph_pub = 5;        // 握手 X25519 临时公钥（32B，仅本次握手有效，用即弃）
+  bytes nonce = 6;          // 握手随机盐（16B，进签名文本与密钥派生）
+  bytes sig = 7;            // Ed25519 签名（64B，签握手文本哈希——长期身份私钥持证证明）
 }
 
 message Text {

@@ -54,11 +54,23 @@ bool DirectEngine::start() {
     return false;
   }
 
+  // 平台-8：设备身份（Ed25519，缺失即生成落库）。身份未就绪即拒绝启动
+  // （fail-closed——没有身份就无法通过握手，不退回明文直连）。
+  identity_ = DeviceIdentity::load(store_.get());
+  if (!identity_.valid()) {
+    qWarning() << "[直连引擎] 设备身份未就绪";
+    store_->close();
+    store_.reset();
+    return false;
+  }
+
   transport_ = std::make_unique<DirectTransport>();
   transport_->set_device_id(device_id_);
+  transport_->set_secure(&identity_, store_.get());
   if (!transport_->listen()) {
     qWarning() << "[直连引擎] TCP 监听失败";
     transport_.reset();
+    identity_ = DeviceIdentity{};
     store_.reset();
     return false;
   }
@@ -67,6 +79,7 @@ bool DirectEngine::start() {
   fopts.download_dir = download_dir_;
   file_service_ = std::make_unique<FileTransferService>(fopts);
   file_service_->set_device_id(device_id_);
+  file_service_->set_secure(&identity_, store_.get());
 
   discovery_ = std::make_unique<DiscoveryService>(device_id_, device_name_);
   discovery_->set_tcp_port(transport_->port());
@@ -81,6 +94,7 @@ bool DirectEngine::start() {
     file_service_.reset();
     transport_->stop();
     transport_.reset();
+    identity_ = DeviceIdentity{};
     store_.reset();
     return false;
   }
@@ -112,10 +126,12 @@ bool DirectEngine::start() {
   connect(transport_.get(), &DirectTransport::delivered, this,
           [this](quint64 seq, bool ok) { emit text_delivered(seq, ok); });
 
-  // 文件传输：连接移交与信号转发（QString 化），目录作业链在 file_finished 驱动
+  // 文件传输：连接移交与信号转发（QString 化），目录作业链在 file_finished 驱动；
+  // 移交携带该连接的安全信道（已握手），数据面续用其密钥
   connect(transport_.get(), &DirectTransport::file_incoming, this,
-          [this](QTcpSocket* socket, const memex::protocol::Message& meta) {
-            file_service_->handle_incoming(socket, meta);
+          [this](QTcpSocket* socket, const memex::protocol::Message& meta,
+                 std::shared_ptr<SecureChannel> ch) {
+            file_service_->handle_incoming(socket, meta, std::move(ch));
           });
   connect(file_service_.get(), &FileTransferService::file_progress, this,
           [this](const std::string& id, quint64 done, quint64 total) {
@@ -165,6 +181,7 @@ void DirectEngine::stop() {
   transport_.reset();
   file_service_.reset();
   store_.reset();
+  identity_ = DeviceIdentity{}; // 信道已随 transport_ 亡，释放身份密钥
 }
 
 bool DirectEngine::running() const { return running_; }

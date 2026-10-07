@@ -14,9 +14,12 @@ add_library(memex_engine_direct STATIC
   engine/direct/direct_engine.cpp
   engine/direct/discovery.cpp
   engine/direct/direct_transport.cpp
-  engine/direct/file_transfer.cpp)
+  engine/direct/file_transfer.cpp
+  engine/direct/secure_channel.cpp)
 target_include_directories(memex_engine_direct PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(memex_engine_direct PUBLIC memex_core memex_common Qt6::Core Qt6::Network)
+# 平台-8 直连安全：Ed25519 身份 + X25519 握手 + HKDF/AES-GCM（libcrypto）
+target_link_libraries(memex_engine_direct PUBLIC memex_core memex_common
+  Qt6::Core Qt6::Network OpenSSL::Crypto)
 
 add_library(memex_engine_collab STATIC
   engine/collab/collab_engine.cpp
@@ -129,6 +132,16 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(direct_file PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 240)
+
+  # 平台-8 直连安全验收：信道对拨（密文不可见/篡改拒/重放拒）、真引擎
+  # raw-socket 协议腿（握手+密文+ACK+定针）、明文直插拒、TOFU 定针
+  # （错针拒+清针恢复）、重启同库同公钥
+  add_executable(test_direct_secure engine/direct/tests/test_direct_secure.cpp)
+  target_link_libraries(test_direct_secure PRIVATE memex_engine_direct)
+  add_test(NAME direct_secure COMMAND test_direct_secure)
+  set_tests_properties(direct_secure PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
 
   # T2.1 协作登录验收：真实服务端进程 + 双引擎互踢 + 登录记录查询
   add_executable(test_collab_login engine/collab/tests/test_collab_login.cpp)

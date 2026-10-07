@@ -8,8 +8,6 @@
 
 namespace memex::client {
 
-using memex::protocol::DecodeStatus;
-using memex::protocol::FrameDecoder;
 using memex::protocol::Message;
 using memex::protocol::MsgType;
 using memex::protocol::ProtocolError;
@@ -81,6 +79,12 @@ FileTransferService::FileTransferService(FileTransferOptions opts,
 
 FileTransferService::~FileTransferService() { stop(); }
 
+void FileTransferService::set_secure(const DeviceIdentity* self,
+                                     LocalStore* store) {
+  self_ = self;
+  store_ = store;
+}
+
 // ---------- 发送侧 ----------
 
 std::string FileTransferService::send_file(const QHostAddress& target,
@@ -88,6 +92,11 @@ std::string FileTransferService::send_file(const QHostAddress& target,
                                            const std::string& peer_id,
                                            const QString& local_path,
                                            const QString& rel_path) {
+  if (!self_ || !store_) {
+    // 平台-8：安全材料未注入即拒发（不退回明文）
+    qWarning() << "[文件传输] 安全材料未就绪，拒发";
+    return {};
+  }
   const QFileInfo fi(local_path);
   if (!fi.isFile() || !fi.isReadable()) {
     qWarning() << "[文件传输] 本地文件不可读：" << local_path;
@@ -107,6 +116,9 @@ std::string FileTransferService::send_file(const QHostAddress& target,
   o.rel_path = rel_path.isEmpty() ? fi.fileName() : rel_path;
   o.total = static_cast<quint64>(fi.size());
   o.sha256 = sha;
+  // 每连接一个安全信道（发起方）：先握手后发元数据
+  o.ch = std::make_shared<SecureChannel>(SecureChannel::Role::kInitiator,
+                                         self_, store_, device_id_, peer_id);
 
   const std::string id = o.id;
   outgoing_.emplace(id, std::move(o));
@@ -120,39 +132,59 @@ std::string FileTransferService::send_file(const QHostAddress& target,
     finish_outgoing(id, false, QStringLiteral("传输超时"));
   });
 
-  // 连接即发元数据（size/sha256 供对端做续传协商与完整性校验）
+  // 连接即启动握手（HELLO1）
   connect(p->socket, &QTcpSocket::connected, this, [this, id] {
     Outgoing* p = outgoing(id);
-    if (!p) return;
-    Message meta;
-    meta.set_type(MsgType::FILE_META);
-    meta.set_from(device_id_);
-    meta.set_to(p->peer_id);
-    auto* fm = meta.mutable_file_meta();
-    fm->set_transfer_id(p->id);
-    fm->set_rel_path(p->rel_path.toStdString());
-    fm->set_name(QFileInfo(p->local_path).fileName().toStdString());
-    fm->set_size(p->total);
-    fm->set_sha256(p->sha256.toStdString());
-    reply(p->socket, meta);
-  });
-
-  // 控制面回包：kFileResume 定起点，kFileDone 定终态
-  connect(p->socket, &QTcpSocket::readyRead, this, [this, id] {
-    Outgoing* p = outgoing(id);
-    if (!p) return;
-    const QByteArray data = p->socket->readAll();
-    p->timer->start(opts_.timeout_ms);
-    std::vector<std::string> payloads;
-    const DecodeStatus st = p->decoder.feed(
-        std::string_view(data.constData(),
-                         static_cast<std::size_t>(data.size())),
-        payloads);
-    if (st == DecodeStatus::kZeroLength || st == DecodeStatus::kTooLarge) {
-      finish_outgoing(id, false, QStringLiteral("对端控制帧非法"));
+    if (!p || !p->ch) {
+      finish_outgoing(id, false, QStringLiteral("安全信道未就绪"));
       return;
     }
-    for (const auto& payload : payloads) {
+    const std::string hello = p->ch->start();
+    if (hello.empty()) {
+      finish_outgoing(id, false, QStringLiteral("握手启动失败"));
+      return;
+    }
+    p->socket->write(QByteArray(hello.data(),
+                                static_cast<qsizetype>(hello.size())));
+  });
+
+  // 握手回执 + 控制面回包：kFileResume 定起点，kFileDone 定终态
+  connect(p->socket, &QTcpSocket::readyRead, this, [this, id] {
+    Outgoing* p = outgoing(id);
+    if (!p || !p->ch) return;
+    const QByteArray data = p->socket->readAll();
+    p->timer->start(opts_.timeout_ms);
+    const SecureChannel::Fed fed = p->ch->feed(
+        std::string_view(data.constData(),
+                         static_cast<std::size_t>(data.size())));
+    if (fed.failed) {
+      finish_outgoing(id, false,
+                      QStringLiteral("握手失败：%1").arg(fed.reason));
+      return;
+    }
+    if (!fed.reply.empty()) {
+      p->socket->write(QByteArray(fed.reply.data(),
+                                  static_cast<qsizetype>(fed.reply.size())));
+    }
+    if (fed.established && !p->meta_sent) {
+      // 握手已立：发元数据（size/sha256 供对端做续传协商与完整性校验）
+      Message meta;
+      meta.set_type(MsgType::FILE_META);
+      meta.set_from(device_id_);
+      meta.set_to(p->peer_id);
+      auto* fm = meta.mutable_file_meta();
+      fm->set_transfer_id(p->id);
+      fm->set_rel_path(p->rel_path.toStdString());
+      fm->set_name(QFileInfo(p->local_path).fileName().toStdString());
+      fm->set_size(p->total);
+      fm->set_sha256(p->sha256.toStdString());
+      if (!reply(p->socket, meta, p->ch)) {
+        finish_outgoing(id, false, QStringLiteral("元数据封装失败"));
+        return;
+      }
+      p->meta_sent = true;
+    }
+    for (const auto& payload : fed.payloads) {
       Message m;
       try {
         m = memex::protocol::decode_payload(payload);
@@ -210,7 +242,7 @@ std::string FileTransferService::send_file(const QHostAddress& target,
 // 在途窗口：socket 待写字节低于窗口才续读文件，防大文件撑爆发送缓冲
 void FileTransferService::pump(const std::string& id) {
   Outgoing* p = outgoing(id);
-  if (!p || !p->resumed) return;
+  if (!p || !p->resumed || !p->ch) return;
   while (p->offset < p->total &&
          p->socket->bytesToWrite() <
              static_cast<qint64>(opts_.window_bytes)) {
@@ -222,11 +254,21 @@ void FileTransferService::pump(const std::string& id) {
       finish_outgoing(id, false, QStringLiteral("本地文件读取失败"));
       return;
     }
-    QByteArray head;
-    append_u64(head, p->offset);
-    append_u32(head, static_cast<std::uint32_t>(data.size()));
-    p->socket->write(head);
-    p->socket->write(data);
+    // 数据块＝一个载荷：[u64 offset][u32 len][数据]，整体经信道密文成帧
+    QByteArray chunk;
+    chunk.reserve(static_cast<qsizetype>(kChunkHeaderSize) + data.size());
+    append_u64(chunk, p->offset);
+    append_u32(chunk, static_cast<std::uint32_t>(data.size()));
+    chunk.append(data);
+    const std::string wire = p->ch->protect(
+        std::string_view(chunk.constData(),
+                         static_cast<std::size_t>(chunk.size())));
+    if (wire.empty()) {
+      finish_outgoing(id, false, QStringLiteral("数据块封装失败"));
+      return;
+    }
+    p->socket->write(
+        QByteArray(wire.data(), static_cast<qsizetype>(wire.size())));
     p->offset += static_cast<quint64>(data.size());
     emit file_progress(id, p->offset, p->total);
   }
@@ -259,7 +301,21 @@ void FileTransferService::finish_outgoing(const std::string& id, bool ok,
 // ---------- 接收侧 ----------
 
 void FileTransferService::handle_incoming(QTcpSocket* socket,
-                                          const Message& meta) {
+                                          const Message& meta,
+                                          std::shared_ptr<SecureChannel> ch) {
+  if (!ch || !ch->established() || ch->failed()) {
+    qWarning() << "[文件传输] 连接未过安全握手，拒绝文件";
+    socket->abort();
+    socket->deleteLater();
+    return;
+  }
+  // 身份绑定：元数据 from/to 必须与已认证信道一致
+  if (meta.from() != ch->peer_id() || meta.to() != device_id_) {
+    qWarning() << "[文件传输] 元数据身份与信道不符，拒绝";
+    socket->abort();
+    socket->deleteLater();
+    return;
+  }
   if (opts_.download_dir.isEmpty()) {
     qWarning() << "[文件传输] 未配置接收目录，拒绝文件";
     socket->abort();
@@ -291,6 +347,7 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
   in.total = b.size();
   in.sha256 = QString::fromStdString(b.sha256());
   in.socket = socket;
+  in.ch = std::move(ch); // 数据面续用同一信道
   in.hasher = std::make_unique<QCryptographicHash>(QCryptographicHash::Sha256);
   in.file = std::make_unique<QFile>(in.part_path);
 
@@ -305,7 +362,7 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
       done.set_to(in.peer_id);
       done.mutable_file_done()->set_ok(true);
       done.mutable_file_done()->set_sha256(in.sha256.toStdString());
-      reply(socket, done);
+      reply(socket, done, in.ch);
       emit file_progress(in.id, in.total, in.total);
       emit file_received(in.id, in.final_path);
       emit file_finished(in.id, true, {});
@@ -359,7 +416,7 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
     done.set_to(in.peer_id);
     done.mutable_file_done()->set_ok(false);
     done.mutable_file_done()->set_error("无法写盘");
-    reply(socket, done);
+    reply(socket, done, in.ch);
     qWarning() << "[文件传输] 落地文件打开失败：" << in.part_path;
     socket->disconnect(this);
     socket->flush();
@@ -379,17 +436,31 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
   connect(p->timer, &QTimer::timeout, this,
           [this, socket] { fail_incoming(socket, QStringLiteral("传输超时")); });
 
-  // 数据面：二进制块状态机（u64 offset + u32 len + 数据，大端）
+  // 数据面：经安全信道解封，每个密文载荷＝一个数据块
+  // （u64 offset + u32 len + 数据，大端；len 严格等于载荷余长）
   connect(socket, &QTcpSocket::readyRead, this, [this, socket] {
     Incoming* p = incoming(socket);
-    if (!p) return;
-    p->buf.append(socket->readAll());
+    if (!p || !p->ch) return;
+    const QByteArray data = socket->readAll();
     p->timer->start(opts_.timeout_ms);
-    while (true) {
-      if (p->buf.size() < kChunkHeaderSize) return;
-      const quint64 off = read_u64(p->buf.constData());
-      const quint32 len = read_u32(p->buf.constData() + 8);
-      if (len == 0 || len > kMaxChunkSize) {
+    const SecureChannel::Fed fed = p->ch->feed(
+        std::string_view(data.constData(),
+                         static_cast<std::size_t>(data.size())));
+    if (fed.failed) {
+      fail_incoming(socket,
+                    QStringLiteral("安全信道失效：%1").arg(fed.reason));
+      return;
+    }
+    for (const auto& payload : fed.payloads) {
+      if (payload.size() < static_cast<std::size_t>(kChunkHeaderSize)) {
+        fail_incoming(socket, QStringLiteral("数据块帧非法"));
+        return;
+      }
+      const quint64 off = read_u64(payload.data());
+      const quint32 len = read_u32(payload.data() + 8);
+      if (len == 0 || len > kMaxChunkSize ||
+          static_cast<std::size_t>(len) !=
+              payload.size() - static_cast<std::size_t>(kChunkHeaderSize)) {
         fail_incoming(socket, QStringLiteral("数据块帧非法"));
         return;
       }
@@ -397,17 +468,13 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
         fail_incoming(socket, QStringLiteral("数据块偏移不连续"));
         return;
       }
-      if (p->buf.size() < kChunkHeaderSize + static_cast<qsizetype>(len)) {
-        return;
-      }
-      const QByteArray data = p->buf.mid(kChunkHeaderSize,
-                                         static_cast<qsizetype>(len));
-      p->hasher->addData(data);
-      if (p->file->write(data) != static_cast<qint64>(len)) {
+      const QByteArray chunk(payload.data() + kChunkHeaderSize,
+                             static_cast<qsizetype>(len));
+      p->hasher->addData(chunk);
+      if (p->file->write(chunk) != static_cast<qint64>(len)) {
         fail_incoming(socket, QStringLiteral("写盘失败"));
         return;
       }
-      p->buf.remove(0, kChunkHeaderSize + static_cast<qsizetype>(len));
       p->expect += len;
       emit file_progress(p->id, p->expect, p->total);
       if (p->expect == p->total) {
@@ -439,7 +506,7 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
   resume.set_to(peer_id);
   resume.mutable_file_resume()->set_transfer_id(id);
   resume.mutable_file_resume()->set_offset(p->expect);
-  reply(socket, resume);
+  reply(socket, resume, p->ch);
 }
 
 // 收满：整文件哈希比对 → 原子改名落地 → 终态回执
@@ -462,7 +529,7 @@ void FileTransferService::finalize_incoming(QTcpSocket* socket) {
     done.set_to(in.peer_id);
     done.mutable_file_done()->set_ok(true);
     done.mutable_file_done()->set_sha256(in.sha256.toStdString());
-    reply(socket, done);
+    reply(socket, done, in.ch);
     emit file_progress(in.id, in.total, in.total);
     emit file_received(in.id, in.final_path);
     emit file_finished(in.id, true, {});
@@ -475,7 +542,7 @@ void FileTransferService::finalize_incoming(QTcpSocket* socket) {
     done.set_to(in.peer_id);
     done.mutable_file_done()->set_ok(false);
     done.mutable_file_done()->set_error("哈希不一致");
-    reply(socket, done);
+    reply(socket, done, in.ch);
     emit file_finished(in.id, false, QStringLiteral("哈希不一致"));
   }
   // 回执先行落网（flush），再优雅关闭；abort 会把刚写的回执帧一起丢掉
@@ -504,10 +571,20 @@ void FileTransferService::fail_incoming(QTcpSocket* socket,
 
 // ---------- 公共 ----------
 
-void FileTransferService::reply(QTcpSocket* socket, const Message& msg) {
-  const std::string frame = memex::protocol::encode(msg);
-  socket->write(QByteArray(frame.data(),
-                           static_cast<qsizetype>(frame.size())));
+bool FileTransferService::reply(QTcpSocket* socket, const Message& msg,
+                                const std::shared_ptr<SecureChannel>& ch) {
+  if (!ch || ch->failed()) {
+    qWarning() << "[文件传输] 回包时信道已失效";
+    return false;
+  }
+  const std::string wire =
+      ch->protect(memex::protocol::encode_payload(msg));
+  if (wire.empty()) {
+    qWarning() << "[文件传输] 回包封装失败";
+    return false;
+  }
+  socket->write(QByteArray(wire.data(), static_cast<qsizetype>(wire.size())));
+  return true;
 }
 
 void FileTransferService::stop() {

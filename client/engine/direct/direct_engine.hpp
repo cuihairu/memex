@@ -18,6 +18,7 @@
 #include "direct_transport.hpp"
 #include "discovery.hpp"
 #include "file_transfer.hpp"
+#include "secure_channel.hpp"
 
 namespace memex::client {
 
@@ -67,6 +68,10 @@ public:
   std::string status_text() const;
   const std::string& device_id() const { return device_id_; }
 
+  // 平台-8：本端设备身份公钥（64 hex；start() 失败或未启动为空）。
+  // 同库重启取回同一身份——对端 TOFU 定针跨会话稳定。
+  std::string identity_pub_hex() const { return identity_.pub_hex(); }
+
   // 本端协作账号（T4.2）：登录／登出时同步进发现宣告（仅作对端显示与
   // 跨态判定；空=未登录）。
   void set_collab_account(const std::string& account);
@@ -97,6 +102,9 @@ private:
   QString db_path_;
   QString download_dir_;
   std::unique_ptr<LocalStore> store_;
+  // 设备身份（Ed25519）：成员序在 transport_/file_service_ 之前析构在后，
+  // 信道持有指针随它们先亡（声明序＝逆析构序）
+  DeviceIdentity identity_;
   std::unique_ptr<DirectTransport> transport_;
   std::unique_ptr<DiscoveryService> discovery_;
   std::unique_ptr<FileTransferService> file_service_;

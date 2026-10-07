@@ -2,10 +2,12 @@
 
 namespace memex::protocol {
 
-std::string encode(const Message& msg) {
+std::string encode(const Message& msg) { return encode_frame(encode_payload(msg)); }
+
+std::string encode_payload(const Message& msg) {
   std::string payload;
   msg.SerializeToString(&payload);
-  return encode_frame(payload);
+  return payload;
 }
 
 Message decode_payload(std::string_view payload) {

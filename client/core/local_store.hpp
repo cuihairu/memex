@@ -106,6 +106,21 @@ public:
                    qint64 file_size);
   QList<QSqlRecord> scan_history(const QString& file_hash) const;
 
+  // —— 平台-8 直连安全：设备身份与对端定针（TOFU）——
+  // 身份种子只存本机库（不出日志不进网络，对外只有公钥）；
+  // 定针＝首触记录对端身份公钥，此后不符即拒（换钥/冒充显式暴露）。
+  // 读身份（seed/pub 均 64 hex）；无记录或损坏返回 false。
+  bool read_identity(std::string* seed_hex, std::string* pub_hex);
+  // 落身份（INSERT OR IGNORE——并发首跑先入者为准，读方回读实际行）。
+  bool save_identity(const std::string& seed_hex, const std::string& pub_hex);
+  // 对端定针查询：无记录返回空串。
+  std::string peer_identity_pub(const std::string& device_id);
+  // 首触定针（IGNORE：已有记录不覆盖——防身份静默漂移与改写）。
+  bool pin_peer_identity(const std::string& device_id,
+                         const std::string& pub_hex);
+  // 清除定针（对端合法换钥时显式重置，重触再定针）。
+  bool clear_peer_identity(const std::string& device_id);
+
 private:
   bool ensure_schema();
 

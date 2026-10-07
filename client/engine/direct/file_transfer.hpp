@@ -1,8 +1,10 @@
 // 直连态文件传输（T1.3）：分块字节流 + 偏移协商断点续传 + 整文件 SHA-256 校验。
-// 控制面复用 common 帧协议（kFileMeta / kFileResume / kFileDone，JSON 帧）；
-// 数据面为二进制块（u64 offset + u32 len + 数据，大端），单文件独占一条 TCP
-// 连接（复用直连端口段，随发现宣告）。中断保留 .memex-part，重发自动从
-// 偏移续传；收满做整文件哈希比对，通过后原子改名落地。
+// 控制面与数据面统一走连接级安全信道（SecureChannel，平台-8）：先握手
+// （Ed25519 身份 + X25519 会话 + TOFU 定针）再收发，控制帧与数据块均为
+// AEAD 密文载荷（数据块＝一个载荷：u64 offset + u32 len + 数据，大端），
+// 握手不成即连接失效，无明文回退。单文件独占一条 TCP 连接（复用直连端口
+// 段，随发现宣告）。中断保留 .memex-part，重发自动从偏移续传；收满做整
+// 文件哈希比对，通过后原子改名落地。
 #pragma once
 
 #include <QCryptographicHash>
@@ -20,7 +22,11 @@
 #include <memex/protocol/frame.hpp>
 #include <memex/protocol/messages.hpp>
 
+#include "secure_channel.hpp"
+
 namespace memex::client {
+
+class LocalStore;
 
 struct FileTransferOptions {
   QString download_dir;           // 接收落地根目录
@@ -39,6 +45,9 @@ public:
 
   void set_device_id(std::string id) { device_id_ = std::move(id); }
   void set_download_dir(const QString& dir) { opts_.download_dir = dir; }
+  // 平台-8：安全信道材料（身份与本地库）。未设置时拒发新传输
+  // （fail-closed，不退回明文）；接收侧信道随连接移交而来。
+  void set_secure(const DeviceIdentity* self, LocalStore* store);
 
   // 发起文件发送（异步）：返回传输 ID，失败为空。rel_path 为空取文件名；
   // 目录传输由上层按相对路径逐文件调用。
@@ -49,8 +58,10 @@ public:
   // 中止发送。对端感知连接断开后保留 .memex-part，重发即续传。
   void cancel(const std::string& transfer_id);
 
-  // 接入 DirectTransport 移交的文件连接（已解出 kFileMeta，此后字节流不走帧解码）。
-  void handle_incoming(QTcpSocket* socket, const memex::protocol::Message& meta);
+  // 接入 DirectTransport 移交的文件连接（已解出 kFileMeta 且握手已立；
+  // 此后数据面经同一信道解封，每个数据块一个密文载荷）。
+  void handle_incoming(QTcpSocket* socket, const memex::protocol::Message& meta,
+                       std::shared_ptr<SecureChannel> ch);
 
   void stop();
 
@@ -76,7 +87,8 @@ private:
     std::unique_ptr<QFile> file;
     QTcpSocket* socket{nullptr};
     QTimer* timer{nullptr};
-    memex::protocol::FrameDecoder decoder;
+    std::shared_ptr<SecureChannel> ch; // 连接级安全信道（发起方）
+    bool meta_sent{false};             // 握手已立、FILE_META 已写出
   };
 
   // 接收侧：缓冲区内做二进制块状态机；.memex-part 保留供续传
@@ -93,7 +105,7 @@ private:
     std::unique_ptr<QCryptographicHash> hasher;
     QTcpSocket* socket{nullptr};
     QTimer* timer{nullptr};
-    QByteArray buf;
+    std::shared_ptr<SecureChannel> ch; // 连接级安全信道（响应方，随连接移交）
   };
 
   Outgoing* outgoing(const std::string& id);
@@ -103,10 +115,14 @@ private:
   void finish_outgoing(const std::string& id, bool ok, const QString& error);
   void fail_incoming(QTcpSocket* socket, const QString& error);
   void finalize_incoming(QTcpSocket* socket);
-  void reply(QTcpSocket* socket, const memex::protocol::Message& msg);
+  // 经信道密文回包；信道不可用返回 false（调用方按连接中断收尾）
+  bool reply(QTcpSocket* socket, const memex::protocol::Message& msg,
+             const std::shared_ptr<SecureChannel>& ch);
 
   FileTransferOptions opts_;
   std::string device_id_;
+  const DeviceIdentity* self_{nullptr};
+  LocalStore* store_{nullptr};
   std::map<std::string, Outgoing> outgoing_;
   std::map<QTcpSocket*, Incoming> incoming_;
 };

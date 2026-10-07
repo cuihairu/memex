@@ -1,6 +1,7 @@
 #include "local_store.hpp"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDebug>
 #include <QDir>
 #include <QFileInfo>
@@ -84,10 +85,15 @@ bool LocalStore::ensure_schema() {
     return false;
   }
   // 对端维度查询索引（会话列表与历史加载）
-  return q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_messages_peer_ts "
-                               "ON messages(peer, ts_ms)"));
+  if (!q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_messages_peer_ts "
+                             "ON messages(peer, ts_ms)"))) {
+    qWarning() << "[本地库] peer_ts 索引失败：" << q.lastError().text();
+    return false;
+  }
 // —— R23-1 存储抽象层基础：文件表（元文件记录、配额、秒传键）
 // 客户端仅落地元数据；对象存储交互通过 memex server 完成（直连对象存储被禁）。
+// （原此处误留 return，其后建表全部成为死代码——files/配额表从未落地，
+//  平台-8 device_identity 首个真实使用者踩爆，顺手修复）
   q.exec(
       "CREATE TABLE IF NOT EXISTS files ("
       " id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -113,8 +119,20 @@ bool LocalStore::ensure_schema() {
       " uid TEXT PRIMARY KEY,"
       " used_bytes INTEGER NOT NULL DEFAULT 0)");
   // 对文件表查询索引（按归属与哈希检索）
-  return q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_files_owner "
-                               "ON files(owner)"));
+  q.exec(QStringLiteral("CREATE INDEX IF NOT EXISTS idx_files_owner "
+                        "ON files(owner)"));
+  // 平台-8 直连安全：设备身份（单行）与对端身份定针（TOFU）
+  q.exec(
+      "CREATE TABLE IF NOT EXISTS device_identity ("
+      " id INTEGER PRIMARY KEY CHECK (id = 1),"
+      " seed_hex TEXT NOT NULL,"
+      " pub_hex TEXT NOT NULL,"
+      " created_ms INTEGER NOT NULL DEFAULT 0)");
+  return q.exec(
+      "CREATE TABLE IF NOT EXISTS direct_peer_keys ("
+      " device_id TEXT PRIMARY KEY,"
+      " pub_hex TEXT NOT NULL,"
+      " first_seen_ms INTEGER NOT NULL DEFAULT 0)");
 }
 
 bool LocalStore::append(const StoredMessage& msg, bool* inserted) {
@@ -488,6 +506,76 @@ QList<QSqlRecord> LocalStore::scan_history(const QString& file_hash) const {
   QList<QSqlRecord> out;
   while (q.next()) out.append(q.record());
   return out;
+}
+
+// —— 平台-8 直连安全：设备身份与对端定针 ——
+
+bool LocalStore::read_identity(std::string* seed_hex, std::string* pub_hex) {
+  if (!open_ || !seed_hex || !pub_hex) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "SELECT seed_hex, pub_hex FROM device_identity WHERE id = 1"));
+  if (!q.exec() || !q.next()) return false;
+  *seed_hex = q.value(0).toString().toStdString();
+  *pub_hex = q.value(1).toString().toStdString();
+  return seed_hex->size() == 64 && pub_hex->size() == 64;
+}
+
+bool LocalStore::save_identity(const std::string& seed_hex,
+                               const std::string& pub_hex) {
+  if (!open_ || seed_hex.size() != 64 || pub_hex.size() != 64) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "INSERT OR IGNORE INTO device_identity (id, seed_hex, pub_hex, created_ms)"
+      " VALUES (1, ?, ?, ?)"));
+  q.addBindValue(QString::fromStdString(seed_hex));
+  q.addBindValue(QString::fromStdString(pub_hex));
+  q.addBindValue(QDateTime::currentMSecsSinceEpoch());
+  if (!q.exec()) {
+    qWarning() << "[本地库] 设备身份落库失败：" << q.lastError().text();
+    return false;
+  }
+  return true;
+}
+
+std::string LocalStore::peer_identity_pub(const std::string& device_id) {
+  if (!open_ || device_id.empty()) return {};
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(
+      QStringLiteral("SELECT pub_hex FROM direct_peer_keys WHERE device_id = ?"));
+  q.addBindValue(QString::fromStdString(device_id));
+  if (!q.exec() || !q.next()) return {};
+  return q.value(0).toString().toStdString();
+}
+
+bool LocalStore::pin_peer_identity(const std::string& device_id,
+                                   const std::string& pub_hex) {
+  if (!open_ || device_id.empty() || pub_hex.size() != 64) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "INSERT OR IGNORE INTO direct_peer_keys (device_id, pub_hex, first_seen_ms)"
+      " VALUES (?, ?, ?)"));
+  q.addBindValue(QString::fromStdString(device_id));
+  q.addBindValue(QString::fromStdString(pub_hex));
+  q.addBindValue(QDateTime::currentMSecsSinceEpoch());
+  if (!q.exec()) {
+    qWarning() << "[本地库] 对端定针失败：" << q.lastError().text();
+    return false;
+  }
+  return true;
+}
+
+bool LocalStore::clear_peer_identity(const std::string& device_id) {
+  if (!open_ || device_id.empty()) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(
+      QStringLiteral("DELETE FROM direct_peer_keys WHERE device_id = ?"));
+  q.addBindValue(QString::fromStdString(device_id));
+  if (!q.exec()) {
+    qWarning() << "[本地库] 清除定针失败：" << q.lastError().text();
+    return false;
+  }
+  return true;
 }
 
 } // namespace memex::client

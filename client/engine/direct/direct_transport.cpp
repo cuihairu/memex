@@ -5,19 +5,22 @@
 
 namespace memex::client {
 
-using memex::protocol::DecodeStatus;
-using memex::protocol::FrameDecoder;
 using memex::protocol::Message;
 using memex::protocol::MsgType;
 
 namespace {
-constexpr int kAckTimeoutMs = 3000;
-constexpr int kMaxStreamFrame = 4 * 1024 * 1024; // 与 common 上限一致
+constexpr int kAckTimeoutMs = 3000; // 含握手（握手为 µs 级，不起独立定时）
 } // namespace
 
 DirectTransport::DirectTransport(QObject* parent) : QObject(parent) {
   connect(&server_, &QTcpServer::newConnection, this,
           &DirectTransport::on_new_connection);
+}
+
+void DirectTransport::set_secure(const DeviceIdentity* self,
+                                 LocalStore* store) {
+  self_ = self;
+  store_ = store;
 }
 
 bool DirectTransport::listen(quint16 preferred) {
@@ -43,58 +46,78 @@ void DirectTransport::stop() {
     }
   }
   pending_.clear();
-  // 只清理仍在帧解码阶段的入站连接；文件连接已移交文件服务，由其自管
-  for (auto& [socket, decoder] : inbound_decoders_) {
+  // 只清理仍在入站信道阶段的连接；文件连接已移交文件服务，由其自管
+  for (auto& [socket, ch] : inbound_channels_) {
     socket->disconnect(this);
     socket->abort();
     socket->deleteLater();
   }
-  inbound_decoders_.clear();
+  inbound_channels_.clear();
   server_.close();
 }
 
 void DirectTransport::on_new_connection() {
   while (server_.hasPendingConnections()) {
     QTcpSocket* socket = server_.nextPendingConnection();
-    inbound_decoders_[socket] = std::make_unique<FrameDecoder>();
+    // 平台-8：每入站连接一个安全信道（响应方）；未注入身份即信道失效，
+    // 连接收到首字节即断（fail-closed，无明文回退）。
+    inbound_channels_[socket] = std::make_shared<SecureChannel>(
+        SecureChannel::Role::kResponder, self_, store_, device_id_,
+        std::string{});
     connect(socket, &QTcpSocket::readyRead, this, [this, socket] {
       on_inbound_ready(socket);
     });
     connect(socket, &QTcpSocket::disconnected, this, [this, socket] {
-      inbound_decoders_.erase(socket);
+      inbound_channels_.erase(socket);
       socket->deleteLater();
     });
   }
 }
 
 void DirectTransport::on_inbound_ready(QTcpSocket* socket) {
-  const auto it = inbound_decoders_.find(socket);
-  if (it == inbound_decoders_.end()) return;
+  const auto it = inbound_channels_.find(socket);
+  if (it == inbound_channels_.end()) return;
+  const std::shared_ptr<SecureChannel> ch = it->second;
 
   const QByteArray data = socket->readAll();
-  std::vector<std::string> payloads;
-  const DecodeStatus st =
-      it->second->feed(std::string_view(data.constData(),
-                                         static_cast<std::size_t>(data.size())),
-                       payloads);
-  if (st == DecodeStatus::kZeroLength || st == DecodeStatus::kTooLarge) {
-    qWarning() << "[直连接入] 非法帧，断开：" << memex::protocol::decode_status_name(st);
+  const SecureChannel::Fed fed = ch->feed(
+      std::string_view(data.constData(),
+                       static_cast<std::size_t>(data.size())));
+  if (fed.failed) {
+    qWarning() << "[直连接入] 安全信道失效，断开：" << fed.reason;
+    inbound_channels_.erase(socket);
+    socket->disconnect(this);
     socket->abort();
+    socket->deleteLater();
     return;
   }
-  for (const auto& payload : payloads) {
-    if (inbound_decoders_.find(socket) == inbound_decoders_.end()) return; // 已移交或清理
-    handle_payload(socket, payload);
+  if (!fed.reply.empty()) {
+    socket->write(QByteArray(fed.reply.data(),
+                             static_cast<qsizetype>(fed.reply.size())));
+  }
+  for (const auto& payload : fed.payloads) {
+    if (inbound_channels_.find(socket) == inbound_channels_.end()) return; // 已移交或清理
+    handle_payload(socket, payload, ch);
   }
 }
 
-void DirectTransport::handle_payload(QTcpSocket* socket, const std::string& payload) {
+void DirectTransport::handle_payload(QTcpSocket* socket,
+                                     const std::string& payload,
+                                     const std::shared_ptr<SecureChannel>& ch) {
   Message msg;
   try {
     msg = memex::protocol::decode_payload(payload);
   } catch (const memex::protocol::ProtocolError& e) {
     qWarning() << "[直连接入] 载荷解析失败：" << e.what();
-    return; // 畸形载荷丢弃，不断开（可能只是个别坏帧）
+    return; // 畸形载荷丢弃，不断开（AEAD 已认证来源，仅个别坏帧）
+  }
+
+  // 身份绑定：应用层 from/to 必须与已认证信道一致（防已认证对端冒名）
+  const std::string authed_peer = ch->peer_id();
+  if (msg.from() != authed_peer || msg.to() != device_id_) {
+    qWarning() << "[直连接入] 应用层身份与信道不符，丢弃："
+               << QString::fromStdString(msg.from());
+    return;
   }
 
   switch (msg.type()) {
@@ -107,26 +130,31 @@ void DirectTransport::handle_payload(QTcpSocket* socket, const std::string& payl
     emit text_received(from_id, to_id, static_cast<quint64>(msg.seq()),
                        msg.ts_ms(), text);
 
-    // 送达确认：ACK 携带原 seq
+    // 送达确认：ACK 携带原 seq，经信道密文回写
     Message ack;
     ack.set_type(MsgType::ACK);
     ack.set_seq(msg.seq());
     ack.set_from(device_id_);
     ack.set_to(msg.from());
     ack.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
-    const std::string frame = memex::protocol::encode(ack);
-    socket->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
+    const std::string wire =
+        ch->protect(memex::protocol::encode_payload(ack));
+    if (wire.empty()) {
+      qWarning() << "[直连接入] 回执封装失败（信道已失效）";
+      return;
+    }
+    socket->write(QByteArray(wire.data(), static_cast<qsizetype>(wire.size())));
     break;
   }
   case MsgType::ACK:
     // 入站连接不承载发送确认（确认走各自出站连接）
     break;
   case MsgType::FILE_META:
-    // T1.3：文件连接整体移交文件服务（此后为二进制块流，不走帧解码）
-    inbound_decoders_.erase(socket);
+    // T1.3：文件连接整体移交文件服务（此后数据面经同一信道解密）
+    inbound_channels_.erase(socket);
     socket->disconnect(this);
     socket->setParent(nullptr);
-    emit file_incoming(socket, msg);
+    emit file_incoming(socket, msg, ch);
     return;
   default:
     // 其余类型由后续任务接入
@@ -141,11 +169,20 @@ void DirectTransport::send_text(const QHostAddress& target, quint16 target_port,
     emit delivered(seq, false);
     return;
   }
+  if (!self_ || !store_) {
+    // 平台-8：安全材料未注入即拒发（不退回明文）
+    qWarning() << "[直连发出] 安全材料未就绪，拒发 seq=" << seq;
+    emit delivered(seq, false);
+    return;
+  }
 
   QTcpSocket* socket = new QTcpSocket(this);
   QTimer* timer = new QTimer(socket);
   timer->setSingleShot(true);
-  pending_.emplace(seq, Pending{socket, timer});
+  // 每连接一个信道（发起方）：先握手后发信，握手失败即送达失败
+  auto ch = std::make_shared<SecureChannel>(SecureChannel::Role::kInitiator,
+                                            self_, store_, device_id_, to_id);
+  pending_.emplace(seq, Pending{socket, timer, std::move(ch), false});
 
   // 幂等收尾：确认一次即断开并释放，后续信号（abort 触发）全部失效
   auto done = std::make_shared<bool>(false);
@@ -160,38 +197,64 @@ void DirectTransport::send_text(const QHostAddress& target, quint16 target_port,
     emit delivered(seq, ok);
   };
 
-  connect(socket, &QTcpSocket::connected, this, [this, socket, to_id, seq, text] {
-    Message msg;
-    msg.set_type(MsgType::TEXT);
-    msg.set_seq(seq);
-    msg.set_from(device_id_);
-    msg.set_to(to_id);
-    msg.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
-    msg.mutable_text()->set_text(text);
-    const std::string frame = memex::protocol::encode(msg);
-    socket->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
-  });
-
-  connect(socket, &QTcpSocket::readyRead, this, [socket, seq, finish] {
-    // 出站连接只期待一帧 kAck；累积缓冲容忍半包
-    QByteArray buf = socket->property("inbuf").toByteArray();
-    buf.append(socket->readAll());
-    socket->setProperty("inbuf", buf);
-    if (buf.size() < 4) return;
-    const quint32 len =
-        (quint32(quint8(buf[0])) << 24) | (quint32(quint8(buf[1])) << 16) |
-        (quint32(quint8(buf[2])) << 8) | quint32(quint8(buf[3]));
-    if (len == 0 || len > kMaxStreamFrame) {
-      finish(false);
+  connect(socket, &QTcpSocket::connected, this, [this, seq, finish] {
+    const auto it = pending_.find(seq);
+    if (it == pending_.end()) return;
+    const std::string hello = it->second.ch->start();
+    if (hello.empty()) {
+      finish(false); // 握手启动失败（身份/随机数未就绪）
       return;
     }
-    if (buf.size() < qsizetype(4 + len)) return;
-    try {
-      const Message ack = memex::protocol::decode_payload(
-          std::string_view(buf.constData() + 4, len));
-      finish(ack.type() == MsgType::ACK && ack.seq() == seq);
-    } catch (const memex::protocol::ProtocolError&) {
-      finish(false);
+    QTcpSocket* s = it->second.socket;
+    s->write(QByteArray(hello.data(), static_cast<qsizetype>(hello.size())));
+  });
+
+  connect(socket, &QTcpSocket::readyRead, this,
+          [this, seq, to_id, text, finish] {
+    const auto it = pending_.find(seq);
+    if (it == pending_.end()) return;
+    Pending& p = it->second;
+
+    const QByteArray data = p.socket->readAll();
+    const SecureChannel::Fed fed = p.ch->feed(
+        std::string_view(data.constData(),
+                         static_cast<std::size_t>(data.size())));
+    if (fed.failed) {
+      finish(false); // 握手失败或密文认证失败——连接即送达失败
+      return;
+    }
+    if (fed.established && !p.text_sent) {
+      Message msg;
+      msg.set_type(MsgType::TEXT);
+      msg.set_seq(seq);
+      msg.set_from(device_id_);
+      msg.set_to(to_id);
+      msg.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+      msg.mutable_text()->set_text(text);
+      const std::string wire =
+          p.ch->protect(memex::protocol::encode_payload(msg));
+      if (wire.empty()) {
+        finish(false);
+        return;
+      }
+      p.socket->write(
+          QByteArray(wire.data(), static_cast<qsizetype>(wire.size())));
+      p.text_sent = true;
+    }
+    for (const auto& payload : fed.payloads) {
+      if (!p.text_sent) {
+        finish(false); // 未发先收，协议违例
+        return;
+      }
+      Message m;
+      try {
+        m = memex::protocol::decode_payload(payload);
+      } catch (const memex::protocol::ProtocolError&) {
+        finish(false);
+        return;
+      }
+      finish(m.type() == MsgType::ACK && m.seq() == seq);
+      return; // 出站连接只期待一帧 ACK
     }
   });
 
