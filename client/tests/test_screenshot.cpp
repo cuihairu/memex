@@ -14,9 +14,11 @@
 #include <QImage>
 #include <QPainter>
 #include <QPixmap>
+#include <QProcess>
 #include <QRandomGenerator>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTcpServer>
 #include <QUdpSocket>
 
 #include <functional>
@@ -52,6 +54,21 @@ bool wait_until(const std::function<bool()>& cond, int timeout_ms) {
     QThread::msleep(5);
   }
   return true;
+}
+
+quint16 free_port() {
+  QTcpServer probe;
+  probe.listen(QHostAddress::LocalHost, 0);
+  const quint16 port = probe.serverPort();
+  probe.close();
+  return port;
+}
+
+bool port_listening(quint16 port) {
+  QTcpServer probe;
+  const bool busy = probe.listen(QHostAddress::LocalHost, port);
+  if (busy) probe.close();
+  return busy;
 }
 
 bool reddish(QRgb c) { return qRed(c) > 150 && qGreen(c) < 100 && qBlue(c) < 100; }
@@ -206,8 +223,39 @@ void test_region_math() {
 // —— ③ 端到端：注入截屏 → 标注 → 确认 → 发送 → 对端收到 ——
 
 void test_end_to_end() {
+  // 平台-10 授权门（蓝图§十九）接线后，直发文件须过服务端四问（CI 踩实：
+  // 裸窗未登录＝fail-closed 拒，文件永不到达）——双方账号落真服务端、
+  // 主窗登录协作态；双方均未分配部门＝同路径＝放行路径
+  const QString server_bin = QStringLiteral(MEMEX_SERVER_BIN);
+  QTemporaryDir srv_tmp;
+  CHECK(srv_tmp.isValid());
+  const QString srv_db = srv_tmp.filePath(QStringLiteral("srv.db"));
+  CHECK(QProcess::execute(server_bin,
+                          {QStringLiteral("account"), QStringLiteral("add"),
+                           QStringLiteral("alice"), QStringLiteral("pass-a"),
+                           QStringLiteral("--db"), srv_db}) == 0);
+  CHECK(QProcess::execute(server_bin,
+                          {QStringLiteral("account"), QStringLiteral("add"),
+                           QStringLiteral("bob"), QStringLiteral("pass-b"),
+                           QStringLiteral("--db"), srv_db}) == 0);
+  const quint16 port = free_port();
+  QProcess server;
+  server.setProcessChannelMode(QProcess::ForwardedChannels);
+  server.start(server_bin, {QStringLiteral("serve"), QStringLiteral("--db"),
+                            srv_db, QStringLiteral("--port"),
+                            QString::number(port)});
+  CHECK(server.waitForStarted(5000));
+  CHECK(wait_until([&] { return port_listening(port); }, 8000));
+
+  // 起跑前清场：临时目录是全局共享，先前崩溃运行可能残留截图连坐本 run
+  QDir(QDir::tempPath() + QStringLiteral("/memex-screenshots"))
+      .removeRecursively();
+
   MainWindow window;
   window.show();
+  window.login_collab(QStringLiteral("127.0.0.1"), port,
+                      QStringLiteral("alice"), QStringLiteral("pass-a"));
+  CHECK(wait_until([&] { return window.collab_logged_in(); }, 8000));
 
   const QString peer_id = QStringLiteral("dev-shot-peer");
   DirectEngine peer("dev-shot-peer", QString());
@@ -216,7 +264,10 @@ void test_end_to_end() {
                    [&](const QString&, const QString& path) {
                      received_path = path;
                    });
+  // 先起发现再宣告协作账号：discovery_ 随 start() 建立，set_account 在
+  // running 态会立即补一轮宣告——主窗对端表随即持有 account＝授权门 to=既知
   CHECK(peer.start());
+  peer.set_collab_account("bob");
   CHECK(wait_until([&] { return window.has_direct_peer(peer_id); }, 10000));
 
   window.open_direct_peer(peer_id);
@@ -275,6 +326,9 @@ void test_end_to_end() {
         return dir.isEmpty();
       },
       10000));
+
+  server.kill();
+  server.waitForFinished(3000);
 }
 
 } // namespace

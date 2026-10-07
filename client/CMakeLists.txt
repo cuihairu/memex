@@ -394,6 +394,9 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_screenshot PRIVATE
     memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
     OpenSSL::Crypto)
+  # 平台-10 授权门接线后，截图 e2e 须起真服务端过四问（MEMEX_SERVER_BIN）
+  target_compile_definitions(test_screenshot PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
   add_test(NAME screenshot COMMAND test_screenshot)
   set_tests_properties(screenshot PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
