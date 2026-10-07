@@ -543,6 +543,16 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
                                {"allow_cross_dept_file", p.allow_cross_dept_file()},
                                {"allow_forward_file", p.allow_forward_file()}});
     }
+    // 权限模型「群在组织架构可见」：群组清单随组织架构一并下发
+    j["groups"] = nlohmann::json::array();
+    for (const auto& g : msg.org_data().groups()) {
+      nlohmann::json gj = {{"group_id", g.group_id()},
+                           {"name", g.name()},
+                           {"owner", g.owner()}};
+      gj["members"] = nlohmann::json::array();
+      for (const auto& m : g.members()) gj["members"].push_back(m);
+      j["groups"].push_back(gj);
+    }
     emit org_received(QString::fromStdString(j.dump()));
     break;
   }

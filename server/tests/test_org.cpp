@@ -235,6 +235,8 @@ int main() {
   {
     memex::server::ServerStore srv_store;
     CHECK(srv_store.open(db));
+    // 权限模型「群在组织架构可见」：建一群，断言 ORG_DATA 群组清单下发
+    CHECK(srv_store.create_group("平台组", "alice", {"dave"}) > 0);
     asio::io_context io;
     memex::server::CollabServer server(io, srv_store, 0);
     server.start_accept();
@@ -280,6 +282,16 @@ int main() {
     CHECK(has_dept);   // 部门树下发
     CHECK(has_dave);   // 成员资料（直属上级）下发
     CHECK(has_admin);  // 角色分级可见
+    // 群组清单（/etc/group 类比：全量群透明可查，含成员名单）
+    bool has_org_group = false;
+    for (const auto& g : od.groups()) {
+      if (g.name() != "平台组" || g.owner() != "alice") continue;
+      has_org_group = false;
+      for (const auto& m : g.members()) {
+        if (m == "dave") has_org_group = true;
+      }
+    }
+    CHECK(has_org_group);
 
     io.stop();
     io_thread.join();

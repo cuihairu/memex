@@ -1894,6 +1894,104 @@ int main() {
                {{"Authorization", "Bearer " + btok}}, "").status == 200);
   }
 
+  // —— 平台-12 权限模型接线：群能力面统一门（未配置=现行允许、配置禁即
+  //     拒；停用即 403 deny:capability-<名>，重启用即恢复）——
+  {
+    const std::string gids = std::to_string(gid);
+    const std::string gid2s = std::to_string(gid2);
+    std::int64_t cap_ts = 1700000000000;
+    // memo：读/写双路由都挡
+    CHECK(store.group_capability_set(gid, "memo", false, "owner1", cap_ts++));
+    const auto cm = http(port, "GET", "/files/group-memo/list?gid=" + gids,
+                         H("member1"), "");
+    CHECK(cm.status == 403);
+    CHECK(jstr(cm.body, "error").find("deny:capability-memo") !=
+          std::string::npos);
+    CHECK(http(port, "POST", "/files/group-memo/save", H("admin1"),
+               "{\"gid\":" + gids +
+                   ",\"title\":\"t\",\"content\":\"c\"}").status == 403);
+    CHECK(store.group_capability_set(gid, "memo", true, "owner1", cap_ts++));
+    CHECK(http(port, "GET", "/files/group-memo/list?gid=" + gids,
+               H("member1"), "").status == 200);
+    // vault：初始化前 info 也挡（面级停用，不只挡已建箱）
+    CHECK(store.group_capability_set(gid, "vault", false, "owner1", cap_ts++));
+    const auto cv = http(port, "GET", "/files/group-vault/info?gid=" + gids,
+                         H("member1"), "");
+    CHECK(cv.status == 403);
+    CHECK(jstr(cv.body, "error").find("deny:capability-vault") !=
+          std::string::npos);
+    CHECK(store.group_capability_set(gid, "vault", true, "owner1", cap_ts++));
+    CHECK(http(port, "GET", "/files/group-vault/info?gid=" + gids,
+               H("member1"), "").status == 200);
+    // tools：tools／ci／pack 三族同门（群工具面=CI/CD、打包、配置导出）
+    CHECK(store.group_capability_set(gid, "tools", false, "owner1", cap_ts++));
+    const auto ct = http(port, "GET", "/files/group-tools/list?gid=" + gids,
+                         H("member1"), "");
+    CHECK(ct.status == 403);
+    CHECK(jstr(ct.body, "error").find("deny:capability-tools") !=
+          std::string::npos);
+    CHECK(http(port, "GET", "/files/group-ci/list?gid=" + gids, H("member1"),
+               "").status == 403);
+    CHECK(http(port, "GET", "/files/group-pack/list?gid=" + gids,
+               H("member1"), "").status == 403);
+    CHECK(store.group_capability_set(gid, "tools", true, "owner1", cap_ts++));
+    CHECK(http(port, "GET", "/files/group-tools/list?gid=" + gids,
+               H("member1"), "").status == 200);
+    // server_tools：列表（成员读）与登记（管理写）同门
+    CHECK(store.group_capability_set(gid, "server_tools", false, "owner1",
+                                     cap_ts++));
+    const auto cs =
+        http(port, "GET", "/files/group-servers/list?gid=" + gids,
+             H("member1"), "");
+    CHECK(cs.status == 403);
+    CHECK(jstr(cs.body, "error").find("deny:capability-server_tools") !=
+          std::string::npos);
+    CHECK(http(port, "POST", "/files/group-servers/enroll", H("owner1"),
+               "{\"gid\":" + gids +
+                   ",\"name\":\"cap-1\",\"host\":\"10.0.0.9\"}").status == 403);
+    CHECK(store.group_capability_set(gid, "server_tools", true, "owner1",
+                                     cap_ts++));
+    CHECK(http(port, "GET", "/files/group-servers/list?gid=" + gids,
+               H("member1"), "").status == 200);
+    // files：上传/列表/下载/删除四动词（gid2 独立群，探针文件用毕即清）
+    const auto up_cap = http(
+        port, "POST", "/files/upload?target=group:" + gid2s,
+        {{"Authorization", "Bearer " + tok.at("member1")},
+         {"X-File-Name", "cap-probe.txt"}},
+        "cap-bytes");
+    CHECK(up_cap.status == 200);
+    const std::int64_t id_cap = jint(up_cap.body, "id");
+    CHECK(store.group_capability_set(gid2, "files", false, "owner1",
+                                     cap_ts++));
+    const auto uf = http(
+        port, "POST", "/files/upload?target=group:" + gid2s,
+        {{"Authorization", "Bearer " + tok.at("member1")},
+         {"X-File-Name", "cap-denied.txt"}},
+        "nope");
+    CHECK(uf.status == 403);
+    CHECK(jstr(uf.body, "error").find("deny:capability-files") !=
+          std::string::npos);
+    CHECK(http(port, "GET", "/files/list?target=group:" + gid2s,
+               H("member1"), "").status == 403);
+    CHECK(http(port, "GET", "/files/download?id=" + std::to_string(id_cap),
+               H("member1"), "").status == 403);
+    CHECK(http(port, "POST", "/files/manage/delete?id=" + std::to_string(id_cap),
+               H("owner1"), "").status == 403);
+    CHECK(store.group_capability_set(gid2, "files", true, "owner1", cap_ts++));
+    const auto up_ok = http(
+        port, "POST", "/files/upload?target=group:" + gid2s,
+        {{"Authorization", "Bearer " + tok.at("member1")},
+         {"X-File-Name", "cap-recovered.txt"}},
+        "back");
+    CHECK(up_ok.status == 200);
+    CHECK(http(port, "POST",
+               "/files/manage/delete?id=" + std::to_string(id_cap),
+               H("owner1"), "").status == 200);
+    CHECK(http(port, "POST",
+               "/files/manage/delete?id=" + std::to_string(jint(up_ok.body, "id")),
+               H("owner1"), "").status == 200);
+  }
+
   io.stop();
   th.join();
 

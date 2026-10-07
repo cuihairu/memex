@@ -1702,6 +1702,31 @@ void MainWindow::build_org_tree(const QString& org_json) {
       item->setText(2, manager);
     }
   }
+  // 群组（权限模型「群在组织架构可见」，/etc/group 类比）：全量群透明可查
+  if (j.contains("groups") && !j["groups"].empty()) {
+    auto* groups_root = new QTreeWidgetItem(tree);
+    groups_root->setText(
+        0, QStringLiteral("群组（%1）").arg(j["groups"].size()));
+    for (const auto& g : j["groups"]) {
+      const QString name =
+          QString::fromStdString(g.value("name", std::string{}));
+      const QString owner =
+          QString::fromStdString(g.value("owner", std::string{}));
+      auto* item = new QTreeWidgetItem(groups_root);
+      item->setText(0, QStringLiteral("%1（群主 %2，%3 人）")
+                           .arg(name, owner)
+                           .arg(g.contains("members")
+                                    ? static_cast<int>(g["members"].size())
+                                    : 0));
+      if (g.contains("members")) {
+        for (const auto& m : g["members"]) {
+          auto* mem = new QTreeWidgetItem(item);
+          mem->setText(
+              0, QString::fromStdString(m.get<std::string>()));
+        }
+      }
+    }
+  }
   tree->expandAll();
   auto* close = new QPushButton(QStringLiteral("关闭"), &dlg);
   connect(close, &QPushButton::clicked, &dlg, &QDialog::accept);

@@ -151,6 +151,16 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       op->set_allow_cross_dept_file(p.allow_cross_dept_file);
       op->set_allow_forward_file(p.allow_forward_file);
     }
+    // 权限模型「群在组织架构可见」（/etc/group 类比）：全量群透明可查，
+    // 不按查看者裁剪（与成员/部门的 T4.6 可见性口径不同——群是权限载体，
+    // 透明可查是模型明文规则）。
+    for (const auto& g : server_.store().groups_list()) {
+      auto* og = data->add_groups();
+      og->set_group_id(g.group_id);
+      og->set_name(g.name);
+      og->set_owner(g.owner);
+      for (const auto& m : g.members) og->add_members(m);
+    }
     send(memex::protocol::encode(out));
     break;
   }

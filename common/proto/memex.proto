@@ -146,10 +146,19 @@ message OrgPolicy {
   bool allow_forward_file = 6;    // 允许直连文件再转发（平台-10，默认允）
 }
 
+// 群组（权限模型「群在组织架构可见」/etc/group 类比）：全量群透明可查。
+message OrgGroup {
+  uint64 group_id = 1;        // 群号
+  string name = 2;            // 群名
+  string owner = 3;           // 群主账号
+  repeated string members = 4; // 成员账号（含群主）
+}
+
 message OrgData {
   repeated OrgDepartment departments = 1;
   repeated OrgMember members = 2;
   repeated OrgPolicy policies = 3; // 策略开关（T3.4，随组织架构一并下发）
+  repeated OrgGroup groups = 4;    // 群组清单（权限模型：组织架构可见）
 }
 
 // —— 群聊（T4.1）——

@@ -464,6 +464,15 @@ struct FileServer::Impl {
       out.error = "无权删除（" + d.reason + "）";
       return out;
     }
+    // 平台-12 群文件能力门：停用即拒（群文件面整面熄灭含删除）
+    if (!meta->belong_gid.empty() &&
+        !store.group_capability_enabled(
+            static_cast<std::uint64_t>(std::stoull(meta->belong_gid)),
+            "files")) {
+      out.http_status = 403;
+      out.error = "群文件能力已被管理员停用（deny:capability-files）";
+      return out;
+    }
     if (!store.delete_file_meta(file_id)) {
       out.http_status = 404;
       out.error = "文件不存在";
@@ -1044,6 +1053,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                          {"error", "无权上传（" + d.reason + "）"}});
       return;
     }
+    if (is_group && !capability_gate(gid, "files", "群文件")) return;
     const auto r = impl_.handle_upload(account, is_group, gid, uid,
                                        file_name_, body, is_inbox);
     if (r.http_status != 200) {
@@ -1082,6 +1092,12 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (!d.allowed) {
       respond_json(403,
                    {{"ok", false}, {"error", "无权读取（" + d.reason + "）"}});
+      return;
+    }
+    if (!meta->belong_gid.empty() &&
+        !capability_gate(
+            static_cast<std::uint64_t>(std::stoull(meta->belong_gid)),
+            "files", "群文件")) {
       return;
     }
     if (!impl_.storage) {
@@ -1137,6 +1153,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                    {{"ok", false}, {"error", "无权列表（" + d.reason + "）"}});
       return;
     }
+    if (is_group && !capability_gate(gid, "files", "群文件")) return;
     int limit = 200, offset = 0;
     const std::string lim = query_param(query_, "limit");
     const std::string off = query_param(query_, "offset");
@@ -1322,6 +1339,12 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (!d.allowed) {
       respond_json(403,
                    {{"ok", false}, {"error", "无权置顶（" + d.reason + "）"}});
+      return;
+    }
+    if (!meta->belong_gid.empty() &&
+        !capability_gate(
+            static_cast<std::uint64_t>(std::stoull(meta->belong_gid)),
+            "files", "群文件")) {
       return;
     }
     if (!impl_.store.set_file_pin(meta->id, pin_s == "1")) {
@@ -1590,6 +1613,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
       return;
     }
+    if (!capability_gate(gid, "memo", "群备忘录")) return;
     const Decision d = impl_.az.authorize(
         {account, "file:list", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -1649,6 +1673,8 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
     const std::string title = j["title"].get<std::string>();
     const std::string content = j["content"].get<std::string>();
+    // 新建/编辑两分支共此一门（门在分支外，防新建绕行）
+    if (!capability_gate(gid, "memo", "群备忘录")) return;
     if (j.contains("id") && !j["id"].is_null()) {
       if (!j["id"].is_number_integer()) {
         respond_json(400, {{"ok", false}, {"error", "id 须为整数"}});
@@ -1717,6 +1743,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       return;
     }
     // 删除恒归管理员（开放编辑开放的是写，不是删——防误删共享知识）
+    if (!capability_gate(gid, "memo", "群备忘录")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:delete", group_memo_resource(gid, id),
          "owner=" + account});
@@ -1749,6 +1776,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(404, {{"ok", false}, {"error", "备忘录不存在"}});
       return;
     }
+    if (!capability_gate(row->group_id, "memo", "群备忘录")) return;
     const Decision d = impl_.az.authorize(
         {account, "file:read", group_memo_resource(row->group_id, id),
          "owner=" + account});
@@ -1791,6 +1819,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(404, {{"ok", false}, {"error", "备忘录不存在"}});
       return;
     }
+    if (!capability_gate(row->group_id, "memo", "群备忘录")) return;
     if (!group_memo_write_allowed(account, row->group_id,
                                   group_memo_resource(row->group_id, id))) {
       respond_json(403, {{"ok", false},
@@ -1837,6 +1866,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     const std::uint64_t gid =
         static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    if (!capability_gate(gid, "memo", "群备忘录")) return;
     const Decision d = impl_.az.authorize({account, "memo:config",
                                            group_resource(gid),
                                            "owner=" + account});
@@ -1904,6 +1934,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
       return;
     }
+    if (!capability_gate(gid, "vault", "群密码箱")) return;
     if (!vault_unlock_allowed(account, gid)) {
       respond_json(403, {{"ok", false},
                          {"error", "无权查看（非群成员或不在授权名单）"}});
@@ -1945,6 +1976,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                           "wrapped_dek（非空）"}});
       return;
     }
+    if (!capability_gate(gid, "vault", "群密码箱")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:write", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -1985,6 +2017,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                           "wrapped_dek（非空）"}});
       return;
     }
+    if (!capability_gate(gid, "vault", "群密码箱")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:write", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -2009,6 +2042,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
       return;
     }
+    if (!capability_gate(gid, "vault", "群密码箱")) return;
     if (!vault_unlock_allowed(account, gid)) {
       respond_json(403, {{"ok", false},
                          {"error", "无权查看（非群成员或不在授权名单）"}});
@@ -2053,6 +2087,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                          {"error", "action 须为 reveal（查看）或 copy（复制）"}});
       return;
     }
+    if (!capability_gate(gid, "vault", "群密码箱")) return;
     if (!vault_unlock_allowed(account, gid)) {
       respond_json(403, {{"ok", false},
                          {"error", "无权查看（非群成员或不在授权名单）"}});
@@ -2111,6 +2146,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     const std::string secret_ct = j["secret_ct"].get<std::string>();
     const std::string secret_nonce = j["secret_nonce"].get<std::string>();
     // 管理员维护条目（memo:write 规则命中 owner/admin；不开放成员写）
+    if (!capability_gate(gid, "vault", "群密码箱")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:write", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -2175,6 +2211,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       return;
     }
     // 删条目恒归管理员（memo:delete 规则命中 owner/admin）
+    if (!capability_gate(gid, "vault", "群密码箱")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:delete", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -2219,6 +2256,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     // 授权名单仅群主可改（vault:config 由 group-owner 命中、group-admin
     // 显式排除——收窄群主的共享授权不归管理员）
+    if (!capability_gate(gid, "vault", "群密码箱")) return;
     const Decision d = impl_.az.authorize(
         {account, "vault:config", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -2246,6 +2284,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       return;
     }
     // 审计查询=管理面（memo:config 规则命中 owner/admin）
+    if (!capability_gate(gid, "vault", "群密码箱")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:config", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -2272,6 +2311,19 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         .authorize({account, "file:read", group_resource(gid),
                     "owner=" + account})
         .allowed;
+  }
+
+  // —— 平台-12 权限模型接线：群能力面统一门 ——
+  // 未配置=现行允许、配置禁即拒（首段步进口径）。放在既有角色判权之后、
+  // 动作之前：非成员先吃 403 角色拒，不向未授权者泄露能力配置状态。
+  bool capability_gate(std::uint64_t gid, const char* cap,
+                       const char* label) {
+    if (impl_.store.group_capability_enabled(gid, cap)) return true;
+    respond_json(403,
+                 {{"ok", false},
+                  {"error", std::string(label) +
+                       "能力已被管理员停用（deny:capability-" + cap + "）"}});
+    return false;
   }
 
   // 工具白名单配置（仅群主/管理员＝memo:config；actions 须为字符串数组）
@@ -2308,6 +2360,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       }
       actions.push_back(a.get<std::string>());
     }
+    if (!capability_gate(gid, "tools", "群工具")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:config", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -2339,6 +2392,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
       return;
     }
+    if (!capability_gate(gid, "tools", "群工具")) return;
     if (!tool_call_allowed(account, gid)) {
       respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
       return;
@@ -2385,6 +2439,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
     const std::string tool = j["tool"].get<std::string>();
     const std::string action = j["action"].get<std::string>();
+    if (!capability_gate(gid, "tools", "群工具")) return;
     if (!tool_call_allowed(account, gid)) {
       respond_json(403,
                    {{"ok", false}, {"error", "无权调用（非群成员）"}});
@@ -2442,6 +2497,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       return;
     }
     // 审计查询=管理面（memo:config 规则命中 owner/admin）
+    if (!capability_gate(gid, "tools", "群工具")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:config", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -2509,6 +2565,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                    {{"ok", false}, {"error", "gid 须为正整数、name 非空"}});
       return;
     }
+    if (!capability_gate(gid, "tools", "群工具")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:config", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -2543,6 +2600,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
       return;
     }
+    if (!capability_gate(gid, "tools", "群工具")) return;
     if (!tool_call_allowed(account, gid)) {
       respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
       return;
@@ -2589,6 +2647,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     const std::uint64_t gid =
         static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
     const std::string pipeline = j["pipeline"].get<std::string>();
+    if (!capability_gate(gid, "tools", "群工具")) return;
     if (!tool_call_allowed(account, gid)) {
       respond_json(403, {{"ok", false}, {"error", "无权触发（非群成员）"}});
       return;
@@ -2663,6 +2722,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
       return;
     }
+    if (!capability_gate(gid, "tools", "群工具")) return;
     if (!tool_call_allowed(account, gid)) {
       respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
       return;
@@ -2720,6 +2780,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     const std::string version = j["version"].get<std::string>();
     const std::string note =
         j.contains("note") ? j["note"].get<std::string>() : std::string();
+    if (!capability_gate(gid, "tools", "群工具")) return;
     if (!tool_call_allowed(account, gid)) {
       respond_json(403, {{"ok", false}, {"error", "无权打包（非群成员）"}});
       return;
@@ -2778,6 +2839,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
       return;
     }
+    if (!capability_gate(gid, "tools", "群工具")) return;
     if (!tool_call_allowed(account, gid)) {
       respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
       return;
@@ -2814,6 +2876,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     const std::uint64_t gid =
         static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    if (!capability_gate(gid, "tools", "群工具")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:config", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -2841,6 +2904,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       return;
     }
     // 管理面（快照含成员与白名单；memo:config 命中 owner/admin）
+    if (!capability_gate(gid, "tools", "群工具")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:config", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -2943,6 +3007,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       }
       value = j["value"].get<std::string>();
     }
+    if (!capability_gate(gid, "tools", "群工具")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:config", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -2997,6 +3062,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
       return;
     }
+    if (!capability_gate(gid, "tools", "群工具")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:config", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -3049,6 +3115,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                     {"error", "gid 须为正整数、name/host 非空"}});
       return;
     }
+    if (!capability_gate(gid, "server_tools", "群服务器工具")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:config", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
@@ -3106,6 +3173,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(401, {{"ok", false}, {"error", "注册令牌无效"}});
       return;
     }
+    if (!capability_gate(srv->group_id, "server_tools", "群服务器工具")) return;
     impl_.store.server_heartbeat(
         srv->id, j["cpu_percent"].get<double>(),
         j["mem_used_mb"].get<double>(), j["mem_total_mb"].get<double>(),
@@ -3127,6 +3195,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
       return;
     }
+    if (!capability_gate(gid, "server_tools", "群服务器工具")) return;
     if (!tool_call_allowed(account, gid)) {
       respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
       return;
@@ -3199,6 +3268,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                     {"error", "协议暂只支持 ssh（RDP/VNC 随后）"}});
       return;
     }
+    if (!capability_gate(gid, "server_tools", "群服务器工具")) return;
     if (!tool_call_allowed(account, gid)) {
       respond_json(403,
                    {{"ok", false}, {"error", "无权发起会话（非群成员）"}});
@@ -3245,6 +3315,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(401, {{"ok", false}, {"error", "短票无效或已过期"}});
       return;
     }
+    if (!capability_gate(sess->group_id, "server_tools", "群服务器工具")) return;
     if (!impl_.store.server_session_mark_redeemed(sess->id, now_ms())) {
       respond_json(409, {{"ok", false}, {"error", "短票已使用"}});
       return;
@@ -3282,6 +3353,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
     const std::uint64_t id =
         static_cast<std::uint64_t>(j["session_id"].get<std::int64_t>());
+    if (!capability_gate(gid, "server_tools", "群服务器工具")) return;
     if (!tool_call_allowed(account, gid)) {
       respond_json(403, {{"ok", false}, {"error", "无权操作（非群成员）"}});
       return;
@@ -3307,6 +3379,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
       return;
     }
+    if (!capability_gate(gid, "server_tools", "群服务器工具")) return;
     if (!tool_call_allowed(account, gid)) {
       respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
       return;
@@ -3365,6 +3438,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       }
       value = j["value"].get<std::string>();
     }
+    if (!capability_gate(gid, "server_tools", "群服务器工具")) return;
     const Decision d = impl_.az.authorize(
         {account, "memo:config", group_resource(gid), "owner=" + account});
     if (!d.allowed) {
