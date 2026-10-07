@@ -239,6 +239,21 @@ struct FileServer::Impl {
                   }
                   return !store.group_role(*gid, q.subject).empty();
                 });
+    // 显式允许：任务分配（R27-1 权限模型「谁能分配」）——同任一群的
+    // 共同成员，或同部门（department_path 相同且非空）；无关系默认拒
+    az.add_rule(RuleEffect::ExplicitAllow, "task-assign",
+                [this](const AuthzQuery& q) {
+                  if (q.action != "task:assign") return false;
+                  const std::string target =
+                      resource_owner_prefix(q.resource);
+                  if (target.empty() || target == q.subject) return false;
+                  if (store.co_members(q.subject, target)) return true;
+                  const auto pa = store.member_profile(q.subject);
+                  const auto pb = store.member_profile(target);
+                  return pa.has_value() && pb.has_value() &&
+                         !pa->department_path.empty() &&
+                         pa->department_path == pb->department_path;
+                });
   }
 
   // 资源串约定："group:{gid}[/file:{id}]"、"user:{uid}[/file:{id}]"
@@ -698,6 +713,23 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (path_ == "/files/memo" && method_ == "DELETE") {
       return route_memo_delete();
     }
+    // R27-1 个人任务清单：建（分配=「谁能分配」判权）/我的清单＋我派出/
+    // 完成（清单主人）/提醒回执（清单主人）/撤回（主人或分配人）
+    if (path_ == "/files/tasks" && method_ == "POST") {
+      return route_task_create(body);
+    }
+    if (path_ == "/files/tasks" && method_ == "GET") {
+      return route_tasks_list();
+    }
+    if (path_ == "/files/tasks/done" && method_ == "POST") {
+      return route_task_done(body);
+    }
+    if (path_ == "/files/tasks/reminded" && method_ == "POST") {
+      return route_task_reminded(body);
+    }
+    if (path_ == "/files/tasks/delete" && method_ == "POST") {
+      return route_task_delete(body);
+    }
     // R24-2 群备忘录：群维度共享知识（管理员维护；开放编辑后成员可写，
     // 全部编辑逐笔留痕可回滚）。判权走 AuthorizationService 群规则。
     if (path_ == "/files/group-memo/list" && method_ == "GET") {
@@ -1028,6 +1060,189 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     std::cout << "[MEMEX] uplink delete account=" << account << " id=" << id
               << std::endl;
+    respond_json(200, {{"ok", true}});
+  }
+
+  // —— R27-1 个人任务清单 ——
+
+  void route_task_create(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("title") ||
+        !j["title"].is_string() ||
+        j["title"].get<std::string>().empty() ||
+        (j.contains("note") && !j["note"].is_string()) ||
+        (j.contains("due_ms") && !j["due_ms"].is_number_integer()) ||
+        (j.contains("assignee") && !j["assignee"].is_string())) {
+      respond_json(
+          400,
+          {{"ok", false},
+           {"error", "缺少字段：title（非空）；note/due_ms/assignee 可选"}});
+      return;
+    }
+    std::string assignee = account;
+    if (j.contains("assignee") && !j["assignee"].get<std::string>().empty()) {
+      assignee = j["assignee"].get<std::string>();
+    }
+    if (assignee != account) {
+      // 分配=特权动作：同群/同部门才可互派（task-assign 规则现查现裁）
+      const Decision d = impl_.az.authorize(
+          {account, "task:assign", "user:" + assignee, "owner=" + account});
+      if (!d.allowed) {
+        respond_json(403,
+                     {{"ok", false},
+                      {"error", "无权分配给 " + assignee + "（" + d.reason +
+                           "；同群或同部门才能互派任务）"}});
+        return;
+      }
+    }
+    const std::int64_t due_ms =
+        j.contains("due_ms") ? j["due_ms"].get<std::int64_t>() : 0;
+    const std::string note =
+        j.contains("note") ? j["note"].get<std::string>() : "";
+    const std::int64_t id = impl_.store.task_create(
+        assignee, account, j["title"].get<std::string>(), note, due_ms,
+        now_ms());
+    if (id <= 0) {
+      respond_json(404, {{"ok", false}, {"error", "任务接收人不存在"}});
+      return;
+    }
+    if (assignee != account) {
+      std::cout << "[MEMEX] files task assign account=" << account
+                << " to=" << assignee << " id=" << id << std::endl;
+    }
+    respond_json(200, {{"ok", true}, {"id", id}});
+  }
+
+  void route_tasks_list() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json mine = json::array();
+    for (const auto& t : impl_.store.tasks_of(account)) {
+      mine.push_back({{"id", t.id},
+                      {"creator", t.creator},
+                      {"title", t.title},
+                      {"note", t.note},
+                      {"due_ms", t.due_ms},
+                      {"reminded_ms", t.reminded_ms},
+                      {"done", t.done},
+                      {"done_ms", t.done_ms},
+                      {"created_ms", t.created_ms}});
+    }
+    json assigned = json::array();
+    for (const auto& t : impl_.store.tasks_assigned_by(account)) {
+      assigned.push_back({{"id", t.id},
+                          {"owner", t.owner},
+                          {"title", t.title},
+                          {"note", t.note},
+                          {"due_ms", t.due_ms},
+                          {"done", t.done},
+                          {"done_ms", t.done_ms},
+                          {"created_ms", t.created_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"tasks", mine},
+                       {"assigned_by_me", assigned}});
+  }
+
+  void route_task_done(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number_integer() ||
+        !j.contains("done") || !j["done"].is_boolean()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：id/done"}});
+      return;
+    }
+    const std::int64_t id = j["id"].get<std::int64_t>();
+    const auto row = impl_.store.task_by_id(id);
+    if (!row.has_value()) {
+      respond_json(404, {{"ok", false}, {"error", "任务不存在"}});
+      return;
+    }
+    if (row->owner != account) {
+      respond_json(403, {{"ok", false},
+                         {"error", "只有清单主人能勾完成/回退"}});
+      return;
+    }
+    if (!impl_.store.task_set_done(id, j["done"].get<bool>(), now_ms())) {
+      respond_json(500, {{"ok", false}, {"error", "任务状态更新失败"}});
+      return;
+    }
+    respond_json(200, {{"ok", true}});
+  }
+
+  void route_task_reminded(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number_integer()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：id"}});
+      return;
+    }
+    const std::int64_t id = j["id"].get<std::int64_t>();
+    const auto row = impl_.store.task_by_id(id);
+    if (!row.has_value()) {
+      respond_json(404, {{"ok", false}, {"error", "任务不存在"}});
+      return;
+    }
+    if (row->owner != account) {
+      respond_json(403, {{"ok", false},
+                         {"error", "提醒回执归清单主人"}});
+      return;
+    }
+    impl_.store.task_mark_reminded(id, now_ms());
+    respond_json(200, {{"ok", true}});
+  }
+
+  void route_task_delete(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number_integer()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：id"}});
+      return;
+    }
+    const std::int64_t id = j["id"].get<std::int64_t>();
+    const auto row = impl_.store.task_by_id(id);
+    if (!row.has_value()) {
+      respond_json(404, {{"ok", false}, {"error", "任务不存在"}});
+      return;
+    }
+    // 撤回（删）：清单主人或分配人皆可（自建=同一人自然可删）
+    if (row->owner != account && row->creator != account) {
+      respond_json(403, {{"ok", false},
+                         {"error", "只有清单主人或分配人能撤回任务"}});
+      return;
+    }
+    if (!impl_.store.task_delete(id)) {
+      respond_json(404, {{"ok", false}, {"error", "任务不存在"}});
+      return;
+    }
     respond_json(200, {{"ok", true}});
   }
 

@@ -1,0 +1,343 @@
+// R27-1 个人任务清单窗口（实现）。服务端裁决一切判权（完成归清单主人、
+// 撤回归主人或分配人、分配按「同群/同部门」现查现裁）——客户端只提交
+// 与展示，不自造规则。
+#include "task_dialog.hpp"
+
+#include <QComboBox>
+#include <QDateTime>
+#include <QDateTimeEdit>
+#include <QHBoxLayout>
+#include <QHeaderView>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QMessageBox>
+#include <QPalette>
+#include <QPushButton>
+#include <QSettings>
+#include <QTimer>
+#include <QVBoxLayout>
+
+#include "engine/collab/files_client.hpp"
+#include "notify_center.hpp"
+
+namespace memex::client {
+namespace {
+constexpr int kPollMs = 30000; // 开窗期间 30s 轮询（到期待办检查）
+} // namespace
+
+TaskDialog::TaskDialog(QWidget* parent) : QDialog(parent) {
+  setWindowTitle(QStringLiteral("任务清单"));
+  resize(560, 520);
+  client_ = new FilesClient(this);
+  build_ui();
+
+  // 登录回执：成功即拉列表＋起轮询；失败给状态行
+  connect(client_, &FilesClient::logged_in, this, [this] {
+    set_status(QStringLiteral("已连接（") + client_->account() +
+               QStringLiteral("）"));
+    btn_add_->setEnabled(true);
+    refresh();
+    if (!findChild<QTimer*>("task_poll")) {
+      auto* poll = new QTimer(this);
+      poll->setObjectName(QStringLiteral("task_poll"));
+      connect(poll, &QTimer::timeout, this, [this] { check_due(); refresh(); });
+      poll->start(kPollMs);
+    }
+  });
+  connect(client_, &FilesClient::login_failed, this,
+          [this](const QString& r) {
+            set_status(QStringLiteral("连接失败：") + r, true);
+            btn_connect_->setEnabled(true);
+          });
+  connect(client_, &FilesClient::tasks_listed, this,
+          &TaskDialog::populate);
+  connect(client_, &FilesClient::task_created, this, [this](qint64) {
+    title_->clear();
+    note_->clear();
+    set_status(QStringLiteral("任务已添加"));
+    refresh();
+  });
+  connect(client_, &FilesClient::task_done_set, this, [this](qint64) {
+    set_status(QStringLiteral("任务状态已更新"));
+    refresh();
+  });
+  connect(client_, &FilesClient::task_deleted, this, [this](qint64) {
+    set_status(QStringLiteral("任务已撤回"));
+    refresh();
+  });
+  connect(client_, &FilesClient::request_failed, this,
+          [this](const QString& op, int status, const QString& error) {
+            if (op == QStringLiteral("task.list")) return; // 轮询失败不刷状态行
+            set_status(QStringLiteral("操作失败（%1：%2 %3）")
+                           .arg(op, QString::number(status), error),
+                       true);
+          });
+}
+
+void TaskDialog::build_ui() {
+  auto* layout = new QVBoxLayout(this);
+
+  // 连接区（与文件助手同构：地址/端口/账号/口令）
+  auto* conn = new QHBoxLayout;
+  host_ = new QLineEdit(this);
+  host_->setPlaceholderText(QStringLiteral("服务器地址"));
+  port_ = new QLineEdit(this);
+  port_->setPlaceholderText(QStringLiteral("文件端口"));
+  port_->setMaximumWidth(90);
+  account_box_ = new QLineEdit(this);
+  account_box_->setPlaceholderText(QStringLiteral("账号"));
+  account_box_->setMaximumWidth(110);
+  password_ = new QLineEdit(this);
+  password_->setPlaceholderText(QStringLiteral("口令"));
+  password_->setEchoMode(QLineEdit::Password);
+  btn_connect_ = new QPushButton(QStringLiteral("连接"), this);
+  conn->addWidget(host_);
+  conn->addWidget(port_);
+  conn->addWidget(account_box_);
+  conn->addWidget(password_);
+  conn->addWidget(btn_connect_);
+  layout->addLayout(conn);
+
+  // 任务列表
+  list_ = new QListWidget(this);
+  list_->setAlternatingRowColors(true);
+  layout->addWidget(list_, 1);
+
+  // 录入区：标题＋备注＋到期＋分配给
+  auto* form1 = new QHBoxLayout;
+  title_ = new QLineEdit(this);
+  title_->setPlaceholderText(QStringLiteral("任务标题"));
+  note_ = new QLineEdit(this);
+  note_->setPlaceholderText(QStringLiteral("备注（可空）"));
+  form1->addWidget(title_, 2);
+  form1->addWidget(note_, 3);
+  layout->addLayout(form1);
+  auto* form2 = new QHBoxLayout;
+  due_ = new QDateTimeEdit(this);
+  due_->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
+  due_->setCalendarPopup(true);
+  due_->setDateTime(QDateTime::currentDateTime());
+  assignee_ = new QComboBox(this);
+  assignee_->setEditable(true);
+  assignee_->addItem(QStringLiteral("（自己）"));
+  form2->addWidget(new QLabel(QStringLiteral("提醒时间"), this));
+  form2->addWidget(due_);
+  form2->addWidget(new QLabel(QStringLiteral("分配给"), this));
+  form2->addWidget(assignee_, 1);
+  layout->addLayout(form2);
+
+  // 操作区
+  auto* ops = new QHBoxLayout;
+  btn_add_ = new QPushButton(QStringLiteral("添加任务"), this);
+  btn_add_->setEnabled(false);
+  btn_toggle_ = new QPushButton(QStringLiteral("完成/回退"), this);
+  btn_delete_ = new QPushButton(QStringLiteral("撤回"), this);
+  btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
+  ops->addWidget(btn_add_);
+  ops->addWidget(btn_toggle_);
+  ops->addWidget(btn_delete_);
+  ops->addWidget(btn_refresh_);
+  ops->addStretch(1);
+  layout->addLayout(ops);
+
+  status_ = new QLabel(this);
+  layout->addWidget(status_);
+
+  connect(btn_connect_, &QPushButton::clicked, this, [this] {
+    connect_to(host_->text(), port_->text().toUShort(),
+               account_box_->text(), password_->text());
+  });
+  connect(btn_add_, &QPushButton::clicked, this, [this] {
+    const QString who = assignee_->currentText().trimmed();
+    add_task(title_->text().trimmed(), note_->text().trimmed(),
+             due_->dateTime().toMSecsSinceEpoch(),
+             who.startsWith(QStringLiteral("（")) ? QString() : who);
+  });
+  connect(btn_toggle_, &QPushButton::clicked, this,
+          [this] { toggle_selected_done(); });
+  connect(btn_delete_, &QPushButton::clicked, this, [this] {
+    if (selected_id() < 0) {
+      set_status(QStringLiteral("先选中一条任务"), true);
+      return;
+    }
+    const auto ret = QMessageBox::question(
+        this, QStringLiteral("撤回任务"),
+        QStringLiteral("确定撤回选中的任务？（清单主人或分配人可撤）"));
+    if (ret == QMessageBox::Yes) delete_selected();
+  });
+  connect(btn_refresh_, &QPushButton::clicked, this, [this] { refresh(); });
+  connect(list_, &QListWidget::itemDoubleClicked, this,
+          [this](QListWidgetItem*) { toggle_selected_done(); });
+}
+
+void TaskDialog::connect_to(const QString& host, quint16 files_port,
+                            const QString& acc, const QString& pass) {
+  if (host.isEmpty() || acc.isEmpty()) {
+    set_status(QStringLiteral("服务器地址与账号不能为空"), true);
+    return;
+  }
+  if (files_port == 0) {
+    set_status(QStringLiteral("文件面端口非法"), true);
+    return;
+  }
+  host_->setText(host);
+  port_->setText(QString::number(files_port));
+  account_box_->setText(acc);
+  QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
+  settings.setValue(QStringLiteral("files_port"), QString::number(files_port));
+  btn_connect_->setEnabled(false);
+  account_ = acc;
+  client_->login(host, files_port, acc, pass);
+}
+
+bool TaskDialog::is_connected() const { return client_->is_logged_in(); }
+
+void TaskDialog::set_assignees(const QStringList& accounts) {
+  while (assignee_->count() > 1) assignee_->removeItem(assignee_->count() - 1);
+  for (const QString& a : accounts) {
+    if (!a.isEmpty() && a != account_) assignee_->addItem(a);
+  }
+}
+
+bool TaskDialog::add_task(const QString& title, const QString& note,
+                          qint64 due_ms, const QString& assignee) {
+  if (title.isEmpty()) {
+    set_status(QStringLiteral("标题不能为空"), true);
+    return false;
+  }
+  if (!is_connected()) {
+    set_status(QStringLiteral("未连接文件面"), true);
+    return false;
+  }
+  client_->create_task(title, note, due_ms, assignee);
+  return true;
+}
+
+bool TaskDialog::toggle_selected_done() {
+  const qint64 id = selected_id();
+  if (id < 0) {
+    set_status(QStringLiteral("先选中一条任务"), true);
+    return false;
+  }
+  // 现值取反：列表行带 done 态（数据角色）
+  const auto* item = list_->currentItem();
+  const bool cur = item->data(Qt::UserRole + 1).toBool();
+  client_->set_task_done(id, !cur);
+  return true;
+}
+
+bool TaskDialog::delete_selected() {
+  const qint64 id = selected_id();
+  if (id < 0) {
+    set_status(QStringLiteral("先选中一条任务"), true);
+    return false;
+  }
+  client_->delete_task(id); // 确认框归按钮路径（程序化入口不弹框供测试）
+  return true;
+}
+
+void TaskDialog::refresh() {
+  if (is_connected()) client_->list_tasks();
+}
+
+void TaskDialog::check_due() {
+  if (!is_connected()) return;
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  for (int i = 0; i < list_->count(); ++i) {
+    const auto* it = list_->item(i);
+    if (it->data(Qt::UserRole + 1).toBool()) continue; // 已完成不提醒
+    const qint64 due = it->data(Qt::UserRole + 2).toLongLong();
+    const qint64 reminded = it->data(Qt::UserRole + 3).toLongLong();
+    if (due <= 0 || due > now || reminded != 0) continue;
+    NotificationCenter::instance().on_notice(
+        QStringLiteral("任务提醒"), it->data(Qt::UserRole + 4).toString(),
+        QStringLiteral("任务已到期待办"), /*IMPORTANT*/ 2, QString(), now,
+        QStringLiteral("task-%1-%2").arg(it->data(Qt::UserRole).toLongLong()).arg(now));
+    client_->mark_task_reminded(it->data(Qt::UserRole).toLongLong());
+  }
+}
+
+qint64 TaskDialog::selected_id() const {
+  const auto* item = list_->currentItem();
+  return item ? item->data(Qt::UserRole).toLongLong() : -1;
+}
+
+void TaskDialog::populate(const QJsonArray& mine, const QJsonArray& assigned) {
+  list_->clear();
+  for (const auto& v : mine) {
+    const auto t = v.toObject();
+    const QString creator =
+        t.value(QStringLiteral("creator")).toString();
+    const bool self = creator == account_;
+    const qint64 due = static_cast<qint64>(
+        t.value(QStringLiteral("due_ms")).toDouble());
+    QString when;
+    if (due > 0) {
+      when = QStringLiteral("  提醒 %1")
+                 .arg(QDateTime::fromMSecsSinceEpoch(due)
+                          .toString(QStringLiteral("MM-dd HH:mm")));
+    }
+    auto* item =
+        new QListWidgetItem(QStringLiteral("%1%2  %3%4")
+                                .arg(t.value(QStringLiteral("done")).toBool()
+                                         ? QStringLiteral("[x] ")
+                                         : QStringLiteral("[ ] "),
+                                     t.value(QStringLiteral("title"))
+                                         .toString(),
+                                     self ? QStringLiteral("自建")
+                                          : QStringLiteral("由 %1 分配")
+                                                .arg(creator),
+                                     when),
+                            list_);
+    item->setData(Qt::UserRole,
+                  t.value(QStringLiteral("id")).toDouble());
+    item->setData(Qt::UserRole + 1,
+                  t.value(QStringLiteral("done")).toBool());
+    item->setData(Qt::UserRole + 2, due);
+    item->setData(Qt::UserRole + 3,
+                  static_cast<qint64>(
+                      t.value(QStringLiteral("reminded_ms")).toDouble()));
+    item->setData(Qt::UserRole + 4,
+                  t.value(QStringLiteral("title")).toString());
+    if (t.value(QStringLiteral("done")).toBool()) {
+      item->setForeground(Qt::gray);
+    }
+  }
+  // 我派出的折叠进列表尾（只读视角：完成与否看得到，动作在对方清单）
+  for (const auto& v : assigned) {
+    const auto t = v.toObject();
+    auto* item = new QListWidgetItem(
+        QStringLiteral("[→] %1  派给 %2%3")
+            .arg(t.value(QStringLiteral("title")).toString(),
+                 t.value(QStringLiteral("owner")).toString(),
+                 t.value(QStringLiteral("done")).toBool()
+                     ? QStringLiteral("（已完成）")
+                     : QString()),
+        list_);
+    item->setData(Qt::UserRole, t.value(QStringLiteral("id")).toDouble());
+    item->setData(Qt::UserRole + 1,
+                  t.value(QStringLiteral("done")).toBool());
+    // 派出行不可在本人侧勾完成/提醒（服务端也会拒——owner 才是动作主体）
+    item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
+  }
+  set_status(QStringLiteral("清单已刷新（%1 项）").arg(mine.size()));
+}
+
+void TaskDialog::set_status(const QString& text, bool error) {
+  status_->setText(error ? QStringLiteral("⚠ %1").arg(text) : text);
+  // 错误红色：QSS 不好控主题，用调色板直改（恢复用空参刷新路径重设）
+  QPalette p = status_->palette();
+  p.setColor(QPalette::WindowText,
+             error ? QColor(Qt::red)
+                   : list_->palette().color(QPalette::WindowText));
+  status_->setPalette(p);
+}
+
+QString TaskDialog::status_text() const { return status_->text(); }
+
+int TaskDialog::task_count() const { return list_->count(); }
+
+} // namespace memex::client

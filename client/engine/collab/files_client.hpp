@@ -156,6 +156,19 @@ class FilesClient : public QObject {
   // 收件箱文件删除（/files/manage/delete，personal-owner 仅本人）
   void delete_file(qint64 file_id);
 
+  // —— 个人任务清单（R27-1 /files/tasks）——
+  // 建（assignee 空=自建；非空=分配给他人，服务端按「同群/同部门」判权）
+  void create_task(const QString& title, const QString& note, qint64 due_ms,
+                   const QString& assignee = QString());
+  // 我的清单＋我派出的（一次双数组）
+  void list_tasks();
+  // 完成/回退（仅清单主人）
+  void set_task_done(qint64 id, bool done);
+  // 提醒回执（仅清单主人；服务端只落一次时刻）
+  void mark_task_reminded(qint64 id);
+  // 撤回（清单主人或分配人）
+  void delete_task(qint64 id);
+
  signals:
   void logged_in();
   void login_failed(const QString& reason);
@@ -205,6 +218,11 @@ class FilesClient : public QObject {
   void upload_finished(qint64 file_id, bool second_transfer);
   void download_finished(const QString& save_path);
   void file_deleted(qint64 file_id);
+  void task_created(qint64 id);
+  void tasks_listed(const QJsonArray& mine, const QJsonArray& assigned_by_me);
+  void task_done_set(qint64 id);
+  void task_reminded(qint64 id);
+  void task_deleted(qint64 id);
   // 统一失败通道：op=操作名（"memo.create"/"inbox.upload"/…）、
   // status=HTTP 状态码（0=网络层失败）、error=服务端 error 字段或网络串
   void request_failed(const QString& op, int status, const QString& error);

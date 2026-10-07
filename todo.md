@@ -238,7 +238,8 @@
 
 ## R27 个人任务清单与外部工具接入（2026-10-04，调查分析=docs/design/个人任务清单与外部工具接入.md）
 
-- [ ] R27-1 本地 todolist：自建/完成/提醒 + 他人分配（谁能分配按权限模型）。
+- [x] R27-1 本地 todolist：自建/完成/提醒 + 他人分配（谁能分配按权限模型）。
+  - 2026-10-08 收口：store 加 tasks 表（owner=清单主人/creator=创建人；due_ms/reminded_ms/done/done_ms；ghost 双查）＋七方法（task_create 双方须已建账号/tasks_of 倒序/tasks_assigned_by/task_by_id/task_set_done/task_mark_reminded 只落一次不回退/task_delete/co_members 同任一群共同成员现查）；FileServer 加 az 规则 task-assign（ExplicitAllow：同任一群共同成员或同部门 department_path 相同且非空，无关系 default-deny——判权先于存在性检查不泄露账号存在性）＋五路由 /files/tasks（POST 建含分配/GET 双数组 tasks＋assigned_by_me/POST done|reminded|delete）：完成与提醒回执归清单主人、撤回归主人或分配人、分配=特权动作现查现裁；客户端 FilesClient 五方法五信号＋TaskDialog 新窗（连接区/清单列表[来源标注 自建|由 X 分配/派出行只读]/录入区 标题＋备注＋提醒时间＋分配给（候选=组织架构账号）/完成勾选/撤回/30s 轮询到期待办→通知中心 IMPORTANT 强提醒＋服务端回执只提醒一次）；主窗加「任务」一级菜单（设计拍板：常驻可见不埋设置页；与既有会话/通讯录栏布局重排留后续如实注明）。测试：test_files_api 扩 R27-1 段（未登录 401/空标题 400/无关系与幽灵分配 default-deny 403/同群放行/同部门放行/完成与回执主人专属 403 腿/列表带 creator/撤回三腿），新 test_task_dialog（真服务端×离屏双窗：错口令/自建/同群分配→对端见来源/勾完成/主人撤回跨端刷新对齐/到期提醒通知计数＋回执不重复提醒；回执与列表刷新两连接不保证序=节流重拉锁真态），ctest 44/44 全绿；提醒开窗期轮询为准，关窗后台提醒随通知中心常驻化留后续如实注明。
 - [ ] R27-2 Provider SPI + L1 跳转框架：capabilities 声明制（L1 跳转/L2 只读/L3 双向），detailUrl 必带。
 - [ ] R27-3 首批 provider：GitHub Issues、飞书任务（Task v2）、钉钉待办——各做到能力声明深度。
 - [ ] R27-4 二批 provider：Jira/Linear（按需启动）；禅道只接 L1 跳转；Teambition 不接。

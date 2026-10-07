@@ -1894,6 +1894,68 @@ int main() {
                {{"Authorization", "Bearer " + btok}}, "").status == 200);
   }
 
+  // —— R27-1 个人任务清单：自建/分配（权限模型「谁能分配」判权）/
+  //     完成（归清单主人）/提醒回执/撤回（主人或分配人）——
+  {
+    // 未登录 401
+    CHECK(http(port, "GET", "/files/tasks", {}, "").status == 401);
+    // 自建 200；空标题 400
+    CHECK(http(port, "POST", "/files/tasks", H("owner1"),
+               "{\"title\":\"给自己排个活\",\"note\":\"备注\"}").status == 200);
+    CHECK(http(port, "POST", "/files/tasks", H("owner1"), "{\"title\":\"\"}")
+              .status == 400);
+    // 无关系/幽灵分配默认拒（task-assign 未命中 → default-deny；判权
+    // 先于存在性检查——不向调用方泄露账号存在性）
+    const auto td = http(port, "POST", "/files/tasks", H("member1"),
+                         "{\"title\":\"x\",\"assignee\":\"outsider\"}");
+    CHECK(td.status == 403);
+    CHECK(jstr(td.body, "error").find("default-deny") != std::string::npos);
+    CHECK(http(port, "POST", "/files/tasks", H("owner1"),
+               "{\"title\":\"x\",\"assignee\":\"ghost\"}").status == 403);
+    // 同群分配放行（owner1/member1 同在 gid 群——现查现裁）
+    const auto ta = http(port, "POST", "/files/tasks", H("owner1"),
+                         "{\"title\":\"帮我看下机器\",\"assignee\":\"member1\"}");
+    CHECK(ta.status == 200);
+    const std::int64_t tid = jint(ta.body, "id");
+    // 同部门分配放行（department_path 相同且非空）
+    const int cap_dept = store.ensure_department_path("公司/任务面");
+    CHECK(cap_dept > 0);
+    CHECK(store.set_member_profile("admin1", cap_dept, "工程师", ""));
+    CHECK(store.set_member_profile("outsider", cap_dept, "工程师", ""));
+    CHECK(http(port, "POST", "/files/tasks", H("admin1"),
+               "{\"title\":\"同部门可派\",\"assignee\":\"outsider\"}")
+              .status == 200);
+    // 完成/提醒归清单主人：member1 勾完成与回执 200；分配人 owner1 403
+    CHECK(http(port, "POST", "/files/tasks/done", H("member1"),
+               "{\"id\":" + std::to_string(tid) + ",\"done\":true}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/tasks/done", H("owner1"),
+               "{\"id\":" + std::to_string(tid) + ",\"done\":true}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/tasks/reminded", H("member1"),
+               "{\"id\":" + std::to_string(tid) + "}").status == 200);
+    CHECK(http(port, "POST", "/files/tasks/reminded", H("owner1"),
+               "{\"id\":" + std::to_string(tid) + "}").status == 403);
+    const auto trow = store.task_by_id(tid);
+    CHECK(trow.has_value() && trow->done && trow->reminded_ms > 0);
+    // 列表：主人清单带分派来源（creator），分配人见 assigned_by_me
+    const auto lt = http(port, "GET", "/files/tasks", H("member1"), "");
+    CHECK(lt.status == 200);
+    CHECK(lt.body.find("帮我看下机器") != std::string::npos);
+    CHECK(lt.body.find("\"creator\":\"owner1\"") != std::string::npos);
+    const auto la = http(port, "GET", "/files/tasks", H("owner1"), "");
+    CHECK(la.status == 200);
+    CHECK(la.body.find("assigned_by_me") != std::string::npos);
+    CHECK(la.body.find("帮我看下机器") != std::string::npos);
+    // 撤回：无关第三者 403；分配人可撤自己派的；删后再删 404
+    CHECK(http(port, "POST", "/files/tasks/delete", H("admin1"),
+               "{\"id\":" + std::to_string(tid) + "}").status == 403);
+    CHECK(http(port, "POST", "/files/tasks/delete", H("owner1"),
+               "{\"id\":" + std::to_string(tid) + "}").status == 200);
+    CHECK(http(port, "POST", "/files/tasks/delete", H("owner1"),
+               "{\"id\":" + std::to_string(tid) + "}").status == 404);
+  }
+
   // —— 平台-12 权限模型接线：群能力面统一门（未配置=现行允许、配置禁即
   //     拒；停用即 403 deny:capability-<名>，重启用即恢复）——
   {

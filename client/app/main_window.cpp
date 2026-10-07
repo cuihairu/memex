@@ -17,6 +17,8 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QInputDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QLabel>
 #include <QMenuBar>
 #include <QMenu>
@@ -27,6 +29,7 @@
 #include "group_ci_dialog.hpp"
 #include "group_pack_dialog.hpp"
 #include "group_server_dialog.hpp"
+#include "task_dialog.hpp"
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
@@ -236,6 +239,32 @@ void MainWindow::build_ui() {
     file_assistant_->show();
     file_assistant_->raise();
     file_assistant_->activateWindow();
+  });
+
+  // R27-1 个人任务清单：一级菜单入口（设计拍板：与会话/通讯录同级常驻，
+  // 不埋设置页；独立文件面会话窗口）
+  auto* task_menu = menuBar()->addMenu(QStringLiteral("任务"));
+  auto* act_tasks = task_menu->addAction(QStringLiteral("任务清单…"));
+  connect(act_tasks, &QAction::triggered, this, [this] {
+    if (!task_dialog_) {
+      task_dialog_ = new TaskDialog(this);
+      task_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    // 分配候选=组织架构账号（未拉到组织架构时候选只剩「自己」）
+    const QJsonDocument od = QJsonDocument::fromJson(last_org_json_.toUtf8());
+    QStringList accounts;
+    if (od.isObject()) {
+      for (const auto& m : od.object().value(QStringLiteral("members"))
+                               .toArray()) {
+        accounts << m.toObject()
+                        .value(QStringLiteral("account"))
+                        .toString();
+      }
+    }
+    task_dialog_->set_assignees(accounts);
+    task_dialog_->show();
+    task_dialog_->raise();
+    task_dialog_->activateWindow();
   });
 
   // —— 设置：开机启动（T4.7；勾选态与登记文件同步）＋主题（R19 · T4.9）——

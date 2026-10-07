@@ -48,6 +48,8 @@ qt_add_executable(memex_client
   app/theme_settings_page.hpp
   app/file_assistant.cpp
   app/file_assistant.hpp
+  app/task_dialog.cpp
+  app/task_dialog.hpp
   app/group_memo_dialog.cpp
   app/group_memo_dialog.hpp
   app/group_ci_dialog.cpp
@@ -311,12 +313,33 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # R27-1 任务清单窗口冒烟：真服务端进程 × 离屏 QDialog——连接→自建→
+  # 同群分配（权限模型「谁能分配」现查）→对端清单见来源→勾完成→撤回→
+  # 到期提醒（通知中心触发＋服务端回执只提醒一次）。判权矩阵走
+  # test_files_api 协议腿，不在此重复
+  add_executable(test_task_dialog
+    app/tests/test_task_dialog.cpp
+    app/task_dialog.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp)
+  target_link_libraries(test_task_dialog PRIVATE
+    memex_engine_collab Qt6::Widgets)
+  target_include_directories(test_task_dialog PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_task_dialog PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME task_dialog COMMAND test_task_dialog)
+  set_tests_properties(task_dialog PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # T2.4 模式切换与降级验收：不重启切换、历史合并展示（来源字段）、
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/task_dialog.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -348,6 +371,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_tray.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/task_dialog.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -377,6 +401,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_screenshot.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/task_dialog.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -428,6 +453,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_icon.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/task_dialog.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -458,6 +484,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_theme.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/task_dialog.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -486,6 +513,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_chat_actions.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/task_dialog.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -514,6 +542,7 @@ if(MEMEX_BUILD_TESTS)
     tests/test_flash_alert.cpp
     app/main_window.cpp
     app/file_assistant.cpp
+    app/task_dialog.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp

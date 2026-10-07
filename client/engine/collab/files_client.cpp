@@ -693,6 +693,64 @@ void FilesClient::delete_file(qint64 file_id) {
             });
 }
 
+// —— 个人任务清单（R27-1）——
+
+void FilesClient::create_task(const QString& title, const QString& note,
+                              qint64 due_ms, const QString& assignee) {
+  QJsonObject body{{QStringLiteral("title"), title}};
+  if (!note.isEmpty()) body.insert(QStringLiteral("note"), note);
+  if (due_ms > 0) body.insert(QStringLiteral("due_ms"), static_cast<double>(due_ms));
+  if (!assignee.isEmpty()) body.insert(QStringLiteral("assignee"), assignee);
+  send_json(QStringLiteral("task.create"), QStringLiteral("POST"),
+            QStringLiteral("/files/tasks"), body,
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit task_created(static_cast<qint64>(
+                    resp.value(QStringLiteral("id")).toDouble()));
+              }
+            });
+}
+
+void FilesClient::list_tasks() {
+  send_json(QStringLiteral("task.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/tasks"), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit tasks_listed(
+                    resp.value(QStringLiteral("tasks")).toArray(),
+                    resp.value(QStringLiteral("assigned_by_me")).toArray());
+              }
+            });
+}
+
+void FilesClient::set_task_done(qint64 id, bool done) {
+  send_json(QStringLiteral("task.done"), QStringLiteral("POST"),
+            QStringLiteral("/files/tasks/done"),
+            {{QStringLiteral("id"), static_cast<double>(id)},
+             {QStringLiteral("done"), done}},
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit task_done_set(id);
+            });
+}
+
+void FilesClient::mark_task_reminded(qint64 id) {
+  send_json(QStringLiteral("task.reminded"), QStringLiteral("POST"),
+            QStringLiteral("/files/tasks/reminded"),
+            {{QStringLiteral("id"), static_cast<double>(id)}},
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit task_reminded(id);
+            });
+}
+
+void FilesClient::delete_task(qint64 id) {
+  send_json(QStringLiteral("task.delete"), QStringLiteral("POST"),
+            QStringLiteral("/files/tasks/delete"),
+            {{QStringLiteral("id"), static_cast<double>(id)}},
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit task_deleted(id);
+            });
+}
+
 void FilesClient::download_file(qint64 file_id, const QString& file_name,
                                 const QString& save_dir) {
   if (token_.isEmpty()) {

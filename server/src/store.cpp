@@ -190,6 +190,20 @@ bool ServerStore::ensure_schema() {
       "  updated_by TEXT NOT NULL DEFAULT '',"
       "  updated_ms INTEGER NOT NULL,"
       "  PRIMARY KEY(gid, capability));"
+      // R27-1 个人任务清单：分配=建到别人清单（owner≠creator），完成/
+      // 提醒归 owner，撤回（删）owner 或 creator 皆可（判权在路由层）
+      "CREATE TABLE IF NOT EXISTS tasks ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  owner TEXT NOT NULL,"
+      "  creator TEXT NOT NULL,"
+      "  title TEXT NOT NULL,"
+      "  note TEXT NOT NULL DEFAULT '',"
+      "  due_ms INTEGER NOT NULL DEFAULT 0,"
+      "  reminded_ms INTEGER NOT NULL DEFAULT 0,"
+      "  done INTEGER NOT NULL DEFAULT 0,"
+      "  done_ms INTEGER NOT NULL DEFAULT 0,"
+      "  created_ms INTEGER NOT NULL);"
+      "CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner);"
       // T2.6 组织架构：部门树（parent_id 成树）＋成员资料
       //（直属上级为独立单列——每人至多一名，结构性约束）
       "CREATE TABLE IF NOT EXISTS departments ("
@@ -3424,6 +3438,163 @@ std::vector<ServerStore::GroupCapability> ServerStore::group_capabilities_list(
   }
   sqlite3_finalize(st);
   return out;
+}
+
+// —— R27-1 个人任务清单 ——
+
+namespace {
+ServerStore::TaskRow task_row_read(sqlite3_stmt* st) {
+  ServerStore::TaskRow t;
+  t.id = sqlite3_column_int64(st, 0);
+  t.owner = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+  t.creator = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+  t.title = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+  t.note = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+  t.due_ms = sqlite3_column_int64(st, 5);
+  t.reminded_ms = sqlite3_column_int64(st, 6);
+  t.done = sqlite3_column_int(st, 7) != 0;
+  t.done_ms = sqlite3_column_int64(st, 8);
+  t.created_ms = sqlite3_column_int64(st, 9);
+  return t;
+}
+const char* kTaskCols =
+    "id, owner, creator, title, note, due_ms, reminded_ms, done, done_ms,"
+    " created_ms";
+} // namespace
+
+std::int64_t ServerStore::task_create(const std::string& owner,
+                                      const std::string& creator,
+                                      const std::string& title,
+                                      const std::string& note,
+                                      std::int64_t due_ms,
+                                      std::int64_t created_ms) {
+  if (owner.empty() || creator.empty() || title.empty()) return 0;
+  // 双方都须为已建账号（幽灵账号不给建）
+  if (!find_account(owner) || !find_account(creator)) return 0;
+  const char* sql =
+      "INSERT INTO tasks(owner, creator, title, note, due_ms, created_ms)"
+      " VALUES(?,?,?,?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, owner.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, creator.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, title.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, note.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, due_ms);
+  sqlite3_bind_int64(st, 6, created_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok ? sqlite3_last_insert_rowid(db_) : 0;
+}
+
+std::vector<ServerStore::TaskRow> ServerStore::tasks_of(
+    const std::string& owner) {
+  std::vector<TaskRow> out;
+  const std::string sql =
+      std::string("SELECT ") + kTaskCols + " FROM tasks WHERE owner = ?"
+      " ORDER BY id DESC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    return out;
+  }
+  sqlite3_bind_text(st, 1, owner.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) out.push_back(task_row_read(st));
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::TaskRow> ServerStore::tasks_assigned_by(
+    const std::string& creator) {
+  std::vector<TaskRow> out;
+  const std::string sql =
+      std::string("SELECT ") + kTaskCols + " FROM tasks WHERE creator = ?"
+      " AND owner != ? ORDER BY id DESC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    return out;
+  }
+  sqlite3_bind_text(st, 1, creator.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, creator.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) out.push_back(task_row_read(st));
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::optional<ServerStore::TaskRow> ServerStore::task_by_id(std::int64_t id) {
+  const std::string sql =
+      std::string("SELECT ") + kTaskCols + " FROM tasks WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_int64(st, 1, id);
+  std::optional<TaskRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) out = task_row_read(st);
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::task_set_done(std::int64_t id, bool done,
+                                std::int64_t done_ms) {
+  const char* sql =
+      "UPDATE tasks SET done = ?, done_ms = ? WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int(st, 1, done ? 1 : 0);
+  sqlite3_bind_int64(st, 2, done ? done_ms : 0);
+  sqlite3_bind_int64(st, 3, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::task_mark_reminded(std::int64_t id,
+                                     std::int64_t reminded_ms) {
+  // 只落一次：已有回执不回退（多端各提醒一次，时刻取最早）
+  const char* sql =
+      "UPDATE tasks SET reminded_ms = ? WHERE id = ? AND"
+      " (reminded_ms = 0 OR reminded_ms > ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, reminded_ms);
+  sqlite3_bind_int64(st, 2, id);
+  sqlite3_bind_int64(st, 3, reminded_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::task_delete(std::int64_t id) {
+  const char* sql = "DELETE FROM tasks WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::co_members(const std::string& a, const std::string& b) {
+  if (a.empty() || a == b) return false;
+  const char* sql =
+      "SELECT 1 FROM group_members m1 JOIN group_members m2"
+      " ON m1.group_id = m2.group_id"
+      " WHERE m1.account = ? AND m2.account = ? LIMIT 1;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, a.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, b.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_ROW;
+  sqlite3_finalize(st);
+  return ok;
 }
 
 std::optional<GroupInfo> ServerStore::group_info(std::uint64_t group_id) {

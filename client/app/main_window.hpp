@@ -34,6 +34,7 @@ class GroupVaultDialog;
 class GroupCiDialog;
 class GroupPackDialog;
 class GroupServerDialog;
+class TaskDialog;
 
 class MainWindow : public QMainWindow {
 public:
@@ -241,6 +242,7 @@ private:
   QPointer<GroupCiDialog> group_ci_; // R25-2 群 CI/CD 窗口（懒建）
   QPointer<GroupPackDialog> group_pack_; // R25-3 打包/导出窗口（懒建）
   QPointer<GroupServerDialog> group_server_; // R26-2 群服务器面板窗口（懒建）
+  QPointer<TaskDialog> task_dialog_; // R27-1 任务清单窗口（懒建）
 
   QLabel* device_count_{nullptr};
   QLineEdit* search_box_{nullptr};
