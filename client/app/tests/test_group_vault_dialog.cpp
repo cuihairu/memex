@@ -278,12 +278,13 @@ int main(int argc, char** argv) {
     return member.status_text().contains(QStringLiteral("操作失败"));
   }, 8000));
   // 恢复全成员（空名单）→ bob 回落可读
+  //（owner 状态行上一轮已是「授权名单已更新」，等它不变＝立即通过——
+  // 用幂等 GET 重试等 member 侧真正回落，不赌状态行变化时机）
   CHECK(owner.set_acl({}));
   CHECK(wait_until([&] {
-    return owner.status_text().contains(QStringLiteral("授权名单已更新"));
-  }, 8000));
-  member.refresh();
-  CHECK(wait_until([&] {
+    if (!member.status_text().contains(QStringLiteral("共 1 条"))) {
+      member.refresh();
+    }
     return member.status_text().contains(QStringLiteral("共 1 条"));
   }, 8000));
 

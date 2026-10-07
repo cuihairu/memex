@@ -14,6 +14,7 @@
 #include <QPalette>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QVBoxLayout>
 
@@ -30,6 +31,16 @@ constexpr int kRoleContent = Qt::UserRole + 4;
 QString fmt_time(qint64 ms) {
   return QDateTime::fromMSecsSinceEpoch(ms)
       .toString(QStringLiteral("MM-dd HH:mm"));
+}
+
+// R24-4 UI 边界：疑似密码识别（关键词或「password= xxx」类赋值形态）。
+// 只提示不拦截——硬禁言会误伤「WiFi 密码请看密码箱」这类合法正文。
+bool looks_like_secret(const QString& text) {
+  static const QRegularExpression re(
+      QStringLiteral("密码|口令|pass(word|wd)?\\s*[=:]|token\\s*[=:]|"
+                     "api[_-]?key\\s*[=:]|secret\\s*[=:]|bearer\\s+\\S"),
+      QRegularExpression::CaseInsensitiveOption);
+  return re.match(text).hasMatch();
 }
 } // namespace
 
@@ -85,7 +96,15 @@ GroupMemoDialog::GroupMemoDialog(QWidget* parent) : QDialog(parent) {
               it->setText(QStringLiteral("（群备忘录暂无条目）"));
               it->setFlags(Qt::NoItemFlags);
             }
-            set_status(QStringLiteral("共 %1 条").arg(memos.size()), false);
+            if (secret_hint_) {
+              // R24-4：疑似密码提示随刷新挂住（不被「共 N 条」冲掉）
+              set_status(QStringLiteral("共 %1 条（⚠ 疑似密码内容：密码请放群密码箱"
+                                        "——备忘录明文共享）")
+                             .arg(memos.size()),
+                         true);
+            } else {
+              set_status(QStringLiteral("共 %1 条").arg(memos.size()), false);
+            }
           });
   connect(client_, &FilesClient::group_memo_saved, this, [this](qint64) {
     const bool was_edit = editing_id_ > 0;
@@ -227,11 +246,15 @@ void GroupMemoDialog::build_ui() {
     QString title = it->data(kRoleTitle).toString();
     QString content = it->data(kRoleContent).toString();
     if (!edit_dialog(&title, &content, title, content)) return;
+    if (!confirm_secret_memo(title, content)) return;
+    secret_hint_ = looks_like_secret(title) || looks_like_secret(content);
     client_->save_group_memo(gid_, title.trimmed(), content, it->data(kRoleId).toLongLong());
   });
   connect(btn_new_, &QPushButton::clicked, this, [this] {
     QString title, content;
     if (!edit_dialog(&title, &content, QString(), QString())) return;
+    if (!confirm_secret_memo(title, content)) return;
+    secret_hint_ = looks_like_secret(title) || looks_like_secret(content);
     client_->save_group_memo(gid_, title.trimmed(), content, 0);
   });
   connect(btn_history_, &QPushButton::clicked, this,
@@ -307,8 +330,27 @@ void GroupMemoDialog::set_group(quint64 gid, const QString& group_name) {
 
 bool GroupMemoDialog::submit_entry(const QString& title, const QString& content) {
   if (title.trimmed().isEmpty() || content.trimmed().isEmpty()) return false;
+  // R24-4 UI 边界：疑似密码只提示不拦（密码箱才是归宿；提示随刷新挂住）
+  secret_hint_ = looks_like_secret(title) || looks_like_secret(content);
+  if (secret_hint_) {
+    set_status(QStringLiteral("疑似密码内容：密码请放群密码箱（全程密文＋查看留痕）；"
+                              "备忘录为明文共享，慎放敏感值"),
+               true);
+  }
   client_->save_group_memo(gid_, title.trimmed(), content, editing_id_);
   return true;
+}
+
+// 手工路径疑似密码二次确认（程序化入口只挂提示不吊测试）
+bool GroupMemoDialog::confirm_secret_memo(const QString& title,
+                                          const QString& content) {
+  if (!looks_like_secret(title) && !looks_like_secret(content)) return true;
+  return QMessageBox::warning(this, QStringLiteral("疑似密码"),
+                              QStringLiteral("内容疑似密码/凭据：密码请放群密码箱"
+                                             "（密文留痕），备忘录是明文共享。"
+                                             "仍要保存到备忘录？"),
+                              QMessageBox::Yes | QMessageBox::No,
+                              QMessageBox::No) == QMessageBox::Yes;
 }
 
 bool GroupMemoDialog::edit_selected() {

@@ -187,6 +187,20 @@ int main(int argc, char** argv) {
                QStringLiteral("host=10.0.0.1 port=5432");
   }, 8000));
 
+  // —— R24-4 UI 边界：疑似密码提示（只提示不拦）——
+  // 密码形内容：提示挂起＋条目照常落库（密码箱才是归宿，备忘录明文共享）
+  CHECK(dlg.submit_entry(QStringLiteral("WiFi 密码"),
+                         QStringLiteral("password=Abc12345")));
+  CHECK(wait_until([&] { return dlg.secret_hint_shown(); }, 8000));
+  CHECK(wait_until([&] { return dlg.stream_count() == 2; }, 8000));
+  CHECK(dlg.status_text().contains(QStringLiteral("疑似密码")));
+  // 正常内容（host= 端口面不算凭据）：不触发提示
+  CHECK(dlg.submit_entry(QStringLiteral("环境信息"),
+                         QStringLiteral("host=10.0.0.9 port=5433")));
+  CHECK(wait_until([&] { return dlg.stream_count() == 3; }, 8000));
+  CHECK(!dlg.secret_hint_shown());
+  CHECK(!dlg.status_text().contains(QStringLiteral("疑似密码")));
+
   server.terminate();
   server.waitForFinished(3000);
 

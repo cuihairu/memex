@@ -53,12 +53,16 @@ class GroupMemoDialog : public QDialog {
   QListWidget* history_list() const { return hist_list_; }
   // 回滚历史窗中选中的修订笔（「回滚到选中这笔」按钮与测试共用入口）
   void rollback_selected_rev();
+  // R24-4 疑似密码提示现挂否（最近一次提交触发；正常内容自动回落 false）
+  bool secret_hint_shown() const { return secret_hint_; }
 
  private:
   void build_ui();
   // 标题+正文编辑子对话框（手工新建/编辑共用；OK 回传两字段，全非空）
   bool edit_dialog(QString* title, QString* content,
                    const QString& init_title, const QString& init_content);
+  // R24-4 手工路径疑似密码二次确认（无疑似或用户坚持＝放行）
+  bool confirm_secret_memo(const QString& title, const QString& content);
   void set_status(const QString& text, bool error = false);
   void end_edit();
 
@@ -79,6 +83,7 @@ class GroupMemoDialog : public QDialog {
   QPushButton* btn_delete_;
   QPushButton* btn_refresh_;
   qint64 editing_id_{0}; // 0=新建；>0=正在改的条目 id
+  bool secret_hint_{false}; // R24-4 疑似密码提示挂起（列表刷新时随状态行带出）
   // 历史子对话框列表（非模态存活期观察点；关闭置空）
   QListWidget* hist_list_{nullptr};
   qint64 hist_memo_id_{0}; // 历史窗当前查看的条目 id（回滚目标）
