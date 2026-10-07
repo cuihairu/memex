@@ -26,6 +26,7 @@
 #include "group_vault_dialog.hpp"
 #include "group_ci_dialog.hpp"
 #include "group_pack_dialog.hpp"
+#include "group_server_dialog.hpp"
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
@@ -1329,6 +1330,7 @@ void MainWindow::show_group_menu(const QPoint& pos) {
     auto* act_vault = menu.addAction(QStringLiteral("群密码箱…"));
     auto* act_ci = menu.addAction(QStringLiteral("CI/CD 流水线…"));
     auto* act_pack = menu.addAction(QStringLiteral("打包与导出…"));
+    auto* act_server = menu.addAction(QStringLiteral("服务器…"));
     menu.addSeparator();
     auto* act_leave = menu.addAction(QStringLiteral("退出群聊"));
     connect(act_invite, &QAction::triggered, this,
@@ -1384,6 +1386,18 @@ void MainWindow::show_group_menu(const QPoint& pos) {
       group_pack_->show();
       group_pack_->raise();
       group_pack_->activateWindow();
+    });
+    connect(act_server, &QAction::triggered, this, [this, gid] {
+      // R26-2 群服务器面板：独立文件面会话窗口（懒建复用，换群重拉）
+      const auto it = groups_.find(gid);
+      if (!group_server_) {
+        group_server_ = new GroupServerDialog(this);
+      }
+      group_server_->set_group(gid, it != groups_.end() ? it->name
+                                                        : QStringLiteral("群 %1").arg(gid));
+      group_server_->show();
+      group_server_->raise();
+      group_server_->activateWindow();
     });
     connect(act_leave, &QAction::triggered, this, [this, gid] {
       if (QMessageBox::question(

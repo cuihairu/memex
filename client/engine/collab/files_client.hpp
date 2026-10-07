@@ -120,6 +120,13 @@ class FilesClient : public QObject {
   // 掩码元数据列表（tool/updated_by/updated_ms；永不含凭据值）
   void tool_cred_list(quint64 gid);
 
+  // —— 群服务器面（R26-1 /files/group-servers）——
+  // 登记（仅群主/管理员；回包带一次性注册令牌——喂给服务器上的 agent；
+  // 重登记=轮换令牌，旧 agent 立即失联）
+  void server_enroll(quint64 gid, const QString& name, const QString& host);
+  // 服务器列表（群成员入群即授权；红绿灯=服务端 online 键＋最近一拍指标）
+  void server_list(quint64 gid);
+
   // —— 收件箱（R23-3 文件助手混排面）——
   // GET /files/list?target=inbox：备忘录+文件时间倒序混排条目
   void list_inbox();
@@ -166,6 +173,8 @@ class FilesClient : public QObject {
   void tool_cred_saved(qint64 gid, const QString& tool);
   void tool_cred_removed(qint64 gid, const QString& tool);
   void tool_credentials_listed(const QJsonArray& credentials);
+  void server_enrolled(qint64 gid, qint64 server_id, const QString& token);
+  void servers_listed(const QJsonArray& servers);
   void inbox_listed(const QJsonArray& items); // type=memo|file 混排条目
   void upload_finished(qint64 file_id, bool second_transfer);
   void download_finished(const QString& save_path);

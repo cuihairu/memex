@@ -507,6 +507,36 @@ void FilesClient::tool_cred_list(quint64 gid) {
             });
 }
 
+// —— R26-2 群服务器面（令牌只在登记回包出现一次） ——
+
+void FilesClient::server_enroll(quint64 gid, const QString& name,
+                                const QString& host) {
+  send_json(QStringLiteral("group-server.enroll"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-servers/enroll"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("name"), name},
+             {QStringLiteral("host"), host}},
+            [this, gid](bool ok, int, const QJsonObject& resp,
+                        const QString&) {
+              if (!ok) return;
+              emit server_enrolled(
+                  static_cast<qint64>(gid),
+                  static_cast<qint64>(
+                      resp.value(QStringLiteral("id")).toDouble()),
+                  resp.value(QStringLiteral("token")).toString());
+            });
+}
+
+void FilesClient::server_list(quint64 gid) {
+  send_json(QStringLiteral("group-server.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-servers/list?gid=%1").arg(gid), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit servers_listed(
+                  resp.value(QStringLiteral("servers")).toArray());
+            });
+}
+
 void FilesClient::list_inbox() {
   send_json(QStringLiteral("inbox.list"), QStringLiteral("GET"),
             QStringLiteral("/files/list?target=inbox"), {},

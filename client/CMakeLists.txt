@@ -51,6 +51,8 @@ qt_add_executable(memex_client
   app/group_ci_dialog.hpp
   app/group_pack_dialog.cpp
   app/group_pack_dialog.hpp
+  app/group_server_dialog.cpp
+  app/group_server_dialog.hpp
   app/group_vault_crypto.cpp
   app/group_vault_crypto.hpp
   app/group_vault_dialog.cpp
@@ -267,6 +269,24 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # R26-2 群服务器面板冒烟：真服务端进程 × 离屏 QDialog——登记（令牌一次
+  # 性显示）→agent --once 心跳→列表绿/红两态；成员只读、越权登记 403
+  # 状态行（服务端判权矩阵走 test_files_api，不在此重复）
+  add_executable(test_group_server_dialog
+    app/tests/test_group_server_dialog.cpp
+    app/group_server_dialog.cpp)
+  target_link_libraries(test_group_server_dialog PRIVATE
+    memex_engine_collab Qt6::Widgets)
+  target_include_directories(test_group_server_dialog PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_group_server_dialog PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_AGENT_BIN="$<TARGET_FILE:memex_agent>")
+  add_test(NAME group_server_dialog COMMAND test_group_server_dialog)
+  set_tests_properties(group_server_dialog PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # T2.4 模式切换与降级验收：不重启切换、历史合并展示（来源字段）、
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch
@@ -278,6 +298,7 @@ if(MEMEX_BUILD_TESTS)
     app/group_vault_dialog.cpp
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -308,6 +329,7 @@ if(MEMEX_BUILD_TESTS)
     app/group_vault_dialog.cpp
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -336,6 +358,7 @@ if(MEMEX_BUILD_TESTS)
     app/group_vault_dialog.cpp
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -383,6 +406,7 @@ if(MEMEX_BUILD_TESTS)
     app/group_vault_dialog.cpp
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -412,6 +436,7 @@ if(MEMEX_BUILD_TESTS)
     app/group_vault_dialog.cpp
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -439,6 +464,7 @@ if(MEMEX_BUILD_TESTS)
     app/group_vault_dialog.cpp
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -466,6 +492,7 @@ if(MEMEX_BUILD_TESTS)
     app/group_vault_dialog.cpp
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
