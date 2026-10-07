@@ -1,6 +1,9 @@
 # 双引擎静态库：各自完整，只共享数据层（经 client/core）
 qt_standard_project_setup()
 
+# R24-3 密码箱客户端面：PBKDF2/AES-256-GCM 本地解锁派生（与服务端同 libcrypto）
+find_package(OpenSSL CONFIG REQUIRED)
+
 # 共享内核：本地库、会话、联系人（T1.2 起：LocalStore）
 add_library(memex_core STATIC
   core/local_store.cpp)
@@ -43,14 +46,19 @@ qt_add_executable(memex_client
   app/file_assistant.cpp
   app/file_assistant.hpp
   app/group_memo_dialog.cpp
-  app/group_memo_dialog.hpp)
+  app/group_memo_dialog.hpp
+  app/group_vault_crypto.cpp
+  app/group_vault_crypto.hpp
+  app/group_vault_dialog.cpp
+  app/group_vault_dialog.hpp)
 target_include_directories(memex_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_compile_definitions(memex_client PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 target_link_libraries(memex_client PRIVATE
   memex_engine_direct
   memex_engine_collab
   Qt6::Widgets
-  Qt6::Sql)
+  Qt6::Sql
+  OpenSSL::Crypto)
 
 # 分发体属性：Windows GUI 子系统（双击启动不弹控制台；--version 等控制台面经
 # 句柄重定向仍可用）；macOS .app bundle（dmg 分发体，Info.plist 由 CMake 生成）。
@@ -202,6 +210,24 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # R24-3 群密码箱窗口冒烟：真服务端进程 × 离屏 QDialog——本地派生建箱
+  # →解锁→条目加密存取→查看解密→复制留痕→改箱密码/重置箱重包裹；权限面
+  # （成员 403/名单收窄/审计管理面）走 test_files_client 引擎级腿，不在此重复
+  add_executable(test_group_vault_dialog
+    app/tests/test_group_vault_dialog.cpp
+    app/group_vault_dialog.cpp
+    app/group_vault_crypto.cpp)
+  target_link_libraries(test_group_vault_dialog PRIVATE
+    memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
+  target_include_directories(test_group_vault_dialog PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_group_vault_dialog PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME group_vault_dialog COMMAND test_group_vault_dialog)
+  set_tests_properties(group_vault_dialog PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 120)
+
   # T2.4 模式切换与降级验收：不重启切换、历史合并展示（来源字段）、
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch
@@ -209,6 +235,8 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -218,7 +246,8 @@ if(MEMEX_BUILD_TESTS)
   target_include_directories(test_mode_switch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_mode_switch PRIVATE
-    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
   target_compile_definitions(test_mode_switch PRIVATE
     MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
   add_test(NAME mode_switch COMMAND test_mode_switch)
@@ -234,6 +263,8 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -243,7 +274,8 @@ if(MEMEX_BUILD_TESTS)
   target_include_directories(test_tray PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_tray PRIVATE
-    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
   add_test(NAME tray COMMAND test_tray)
   set_tests_properties(tray PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
@@ -257,6 +289,8 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -266,7 +300,8 @@ if(MEMEX_BUILD_TESTS)
   target_include_directories(test_screenshot PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_screenshot PRIVATE
-    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
   add_test(NAME screenshot COMMAND test_screenshot)
   set_tests_properties(screenshot PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
@@ -299,6 +334,8 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -308,7 +345,8 @@ if(MEMEX_BUILD_TESTS)
   target_include_directories(test_icon PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_icon PRIVATE
-    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
   add_test(NAME icon COMMAND test_icon)
   set_tests_properties(icon PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
@@ -323,6 +361,8 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -332,7 +372,8 @@ if(MEMEX_BUILD_TESTS)
   target_include_directories(test_theme PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_theme PRIVATE
-    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
   add_test(NAME theme COMMAND test_theme)
   set_tests_properties(theme PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
@@ -345,6 +386,8 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -354,7 +397,8 @@ if(MEMEX_BUILD_TESTS)
   target_include_directories(test_chat_actions PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_chat_actions PRIVATE
-    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
   add_test(NAME chat_actions COMMAND test_chat_actions)
   set_tests_properties(chat_actions PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
@@ -367,6 +411,8 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/file_assistant.cpp
     app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
@@ -376,7 +422,8 @@ if(MEMEX_BUILD_TESTS)
   target_include_directories(test_flash_alert PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_flash_alert PRIVATE
-    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql)
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
   add_test(NAME flash_alert COMMAND test_flash_alert)
   set_tests_properties(flash_alert PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"

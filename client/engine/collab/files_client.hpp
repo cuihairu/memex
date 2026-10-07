@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include <functional>
 
@@ -53,6 +54,34 @@ class FilesClient : public QObject {
   // 开放全员编辑开关（仅群主/管理员）
   void set_group_memo_open_edit(quint64 gid, bool open);
 
+  // —— 群密码箱（R24-3 /files/group-vault）——
+  // 客户端只见 b64 密文与包裹块（全程密文；派生/加解密在 group_vault_crypto）
+  // 箱状态（exists=false=未建箱；exists=true 带 kdf_salt/kdf_iters/
+  // wrapped_dek/acl）
+  void group_vault_info(quint64 gid);
+  // 建箱（仅群主/管理员；重复 409；iters 服务端校验 ≥10000）
+  void init_group_vault(quint64 gid, const QString& kdf_salt, int kdf_iters,
+                        const QString& wrapped_dek);
+  // 换箱密码/重置箱：覆盖包裹块（客户端先重包 DEK 或换新 DEK 再调）
+  void rekey_group_vault(quint64 gid, const QString& kdf_salt, int kdf_iters,
+                         const QString& wrapped_dek);
+  // 条目掩码列表（updated_ms 倒序；不带 secret_*——密文只经 access 留痕）
+  void list_group_vault_entries(quint64 gid);
+  // 取条目密文（action=reveal|copy；服务端每访落审计）
+  void access_group_vault_entry(quint64 gid, qint64 id,
+                                const QString& action);
+  // 建改条目（id=0 新建；>0 改；密文已在客户端备好）
+  void save_group_vault_entry(quint64 gid, const QString& name,
+                              const QString& account_name,
+                              const QString& secret_ct,
+                              const QString& secret_nonce, qint64 id = 0);
+  // 删条目（恒归群主/管理员）
+  void delete_group_vault_entry(quint64 gid, qint64 id);
+  // 授权名单（仅群主；空=恢复全成员）
+  void set_group_vault_acl(quint64 gid, const QStringList& accounts);
+  // 访问审计（仅群主/管理员；倒序）
+  void group_vault_audit(quint64 gid);
+
   // —— 收件箱（R23-3 文件助手混排面）——
   // GET /files/list?target=inbox：备忘录+文件时间倒序混排条目
   void list_inbox();
@@ -78,6 +107,15 @@ class FilesClient : public QObject {
   void group_memo_history_fetched(const QJsonArray& revisions);
   void group_memo_rolled_back(qint64 id);
   void group_memo_open_edit_set(bool open);
+  void group_vault_info_fetched(const QJsonObject& info); // 含 exists 键
+  void group_vault_initialized();
+  void group_vault_rekeyed();
+  void group_vault_listed(const QJsonArray& entries);
+  void group_vault_accessed(const QJsonObject& entry); // 含 secret_*
+  void group_vault_entry_saved(qint64 id);
+  void group_vault_entry_deleted(qint64 id);
+  void group_vault_acl_set();
+  void group_vault_audit_listed(const QJsonArray& rows);
   void inbox_listed(const QJsonArray& items); // type=memo|file 混排条目
   void upload_finished(qint64 file_id, bool second_transfer);
   void download_finished(const QString& save_path);

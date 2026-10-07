@@ -23,6 +23,7 @@
 
 #include "file_assistant.hpp"
 #include "group_memo_dialog.hpp"
+#include "group_vault_dialog.hpp"
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
@@ -1323,6 +1324,7 @@ void MainWindow::show_group_menu(const QPoint& pos) {
     auto* act_ann = menu.addAction(QStringLiteral("设置群公告…"));
     auto* act_hist = menu.addAction(QStringLiteral("公告编辑历史…"));
     auto* act_memo = menu.addAction(QStringLiteral("群备忘录…"));
+    auto* act_vault = menu.addAction(QStringLiteral("群密码箱…"));
     menu.addSeparator();
     auto* act_leave = menu.addAction(QStringLiteral("退出群聊"));
     connect(act_invite, &QAction::triggered, this,
@@ -1342,6 +1344,18 @@ void MainWindow::show_group_menu(const QPoint& pos) {
       group_memo_->show();
       group_memo_->raise();
       group_memo_->activateWindow();
+    });
+    connect(act_vault, &QAction::triggered, this, [this, gid] {
+      // R24-3 群密码箱：独立文件面会话窗口（懒建复用，换群重拉）
+      const auto it = groups_.find(gid);
+      if (!group_vault_) {
+        group_vault_ = new GroupVaultDialog(this);
+      }
+      group_vault_->set_group(gid, it != groups_.end() ? it->name
+                                                       : QStringLiteral("群 %1").arg(gid));
+      group_vault_->show();
+      group_vault_->raise();
+      group_vault_->activateWindow();
     });
     connect(act_leave, &QAction::triggered, this, [this, gid] {
       if (QMessageBox::question(

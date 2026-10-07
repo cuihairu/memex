@@ -388,6 +388,193 @@ int main(int argc, char** argv) {
   cli.group_memo_history(gm_id);
   CHECK(wait_until([&] { return fail_status == 404; }, 8000));
 
+  // —— R24-3 群密码箱腿：b64 串存取面（加密派生在客户端，引擎级腿只验
+  // HTTP 面——盐/包裹块/密文不透明串来去；真派生解锁在
+  // test_group_vault_dialog 真加密走）——
+  // 建第二个群（bob 在员），与备忘录群分域防串扰
+  quint64 va_gid = 0;
+  QObject::connect(&ce, &CollabEngine::group_result, &ce,
+                   [&](bool ok, const QString&, const QString& op, quint64 id) {
+                     if (ok && op == QStringLiteral("create"))
+                       va_gid = id;
+                   });
+  ce.create_group(QStringLiteral("密码箱测试群"), {QStringLiteral("bob")});
+  CHECK(wait_until([&] { return va_gid > 0; }, 8000));
+
+  QJsonObject va_info;
+  QObject::connect(&cli, &FilesClient::group_vault_info_fetched, &cli,
+                   [&](const QJsonObject& info) { va_info = info; });
+  bool va_inited = false, va_rekeyed = false, va_deleted = false;
+  int va_acl_count = 0;
+  int va_saved_count = 0;
+  qint64 va_saved_id = 0;
+  QObject::connect(&cli, &FilesClient::group_vault_initialized,
+                   &cli, [&] { va_inited = true; });
+  QObject::connect(&cli, &FilesClient::group_vault_rekeyed,
+                   &cli, [&] { va_rekeyed = true; });
+  QObject::connect(&cli, &FilesClient::group_vault_acl_set,
+                   &cli, [&] { ++va_acl_count; });
+  QObject::connect(&cli, &FilesClient::group_vault_entry_deleted,
+                   &cli, [&](qint64) { va_deleted = true; });
+  QObject::connect(&cli, &FilesClient::group_vault_entry_saved, &cli,
+                   [&](qint64 id) {
+                     va_saved_id = id;
+                     ++va_saved_count;
+                   });
+  QJsonArray va_list, va_audit, va_bob_list;
+  QJsonObject va_entry;
+  QObject::connect(&cli, &FilesClient::group_vault_listed, &cli,
+                   [&](const QJsonArray& arr) { va_list = arr; });
+  QObject::connect(&cli, &FilesClient::group_vault_audit_listed, &cli,
+                   [&](const QJsonArray& arr) { va_audit = arr; });
+  QObject::connect(&cli, &FilesClient::group_vault_accessed, &cli,
+                   [&](const QJsonObject& e) { va_entry = e; });
+  QObject::connect(&bob, &FilesClient::group_vault_listed, &bob,
+                   [&](const QJsonArray& arr) { va_bob_list = arr; });
+
+  // 未建箱：info exists=false；成员建箱 403（仅群主/管理员）
+  va_info = QJsonObject{};
+  cli.group_vault_info(va_gid);
+  CHECK(wait_until([&] {
+    return va_info.value(QStringLiteral("exists")).isBool() &&
+           !va_info.value(QStringLiteral("exists")).toBool();
+  }, 8000));
+  fail_status = 0;
+  bob.init_group_vault(va_gid, QStringLiteral("c2FsdDEyMzQ1Njc4"),
+                       600000, QStringLiteral("d3JhcHBlZA"));
+  CHECK(wait_until([&] { return fail_status == 403; }, 8000));
+  // 群主建箱（b64 串直传——真材料在对话框腿生成）；重复 409
+  cli.init_group_vault(va_gid, QStringLiteral("c2FsdDEyMzQ1Njc4"), 600000,
+                       QStringLiteral("d3JhcHBlZA"));
+  CHECK(wait_until([&] { return va_inited; }, 8000));
+  fail_status = 0;
+  cli.init_group_vault(va_gid, QStringLiteral("c2FsdDEyMzQ1Njc4"), 600000,
+                       QStringLiteral("d3JhcHBlZA"));
+  CHECK(wait_until([&] { return fail_status == 409; }, 8000));
+  // info 带回盐/迭代数/包裹块＋空名单
+  va_info = QJsonObject{};
+  cli.group_vault_info(va_gid);
+  CHECK(wait_until([&] {
+    return va_info.value(QStringLiteral("exists")).toBool() &&
+           va_info.value(QStringLiteral("kdf_salt")).toString() ==
+               QStringLiteral("c2FsdDEyMzQ1Njc4") &&
+           va_info.value(QStringLiteral("kdf_iters")).toInt() == 600000 &&
+           va_info.value(QStringLiteral("wrapped_dek")).toString() ==
+               QStringLiteral("d3JhcHBlZA") &&
+           va_info.value(QStringLiteral("acl")).toArray().isEmpty();
+  }, 8000));
+  // 成员维护条目 403；群主建条目（假密文串——服务端不关心内容）
+  fail_status = 0;
+  bob.save_group_vault_entry(va_gid, QStringLiteral("成员条目"),
+                             QStringLiteral("ops"), QStringLiteral("Q1RfMQ"),
+                             QStringLiteral("bm9uY2UxMg"));
+  CHECK(wait_until([&] { return fail_status == 403; }, 8000));
+  cli.save_group_vault_entry(va_gid, QStringLiteral("生产库WiFi"),
+                             QStringLiteral("wifi-ops"),
+                             QStringLiteral("Q1RfMQ"), QStringLiteral("bm9uY2UxMg"));
+  CHECK(wait_until([&] { return va_saved_id > 0; }, 8000));
+  const qint64 va_id = va_saved_id;
+  // 列表掩码面：有名称/账号、无 secret_ct/secret_nonce
+  va_list = QJsonArray{};
+  cli.list_group_vault_entries(va_gid);
+  CHECK(wait_until([&] { return va_list.size() == 1; }, 8000));
+  CHECK(va_list.at(0)
+            .toObject()
+            .value(QStringLiteral("name"))
+            .toString() == QStringLiteral("生产库WiFi"));
+  CHECK(!va_list.at(0)
+             .toObject()
+             .value(QStringLiteral("secret_ct"))
+             .isString());
+  // 成员可访问（默认全成员）：reveal 带回密文；坏 action 400；幽灵 404
+  va_entry = QJsonObject{};
+  bob.access_group_vault_entry(va_gid, va_id, QStringLiteral("reveal"));
+  CHECK(wait_until([&] {
+    return va_entry.value(QStringLiteral("secret_ct")).toString() ==
+           QStringLiteral("Q1RfMQ");
+  }, 8000));
+  fail_status = 0;
+  bob.access_group_vault_entry(va_gid, va_id, QStringLiteral("export"));
+  CHECK(wait_until([&] { return fail_status == 400; }, 8000));
+  fail_status = 0;
+  bob.access_group_vault_entry(va_gid, 99999, QStringLiteral("copy"));
+  CHECK(wait_until([&] { return fail_status == 404; }, 8000));
+  // 群主 copy → 审计两行（reveal+copy，倒序最新在前）
+  va_entry = QJsonObject{};
+  cli.access_group_vault_entry(va_gid, va_id, QStringLiteral("copy"));
+  CHECK(wait_until(
+      [&] {
+        return va_entry.value(QStringLiteral("secret_nonce")).toString() ==
+               QStringLiteral("bm9uY2UxMg");
+      },
+      8000));
+  va_audit = QJsonArray{};
+  cli.group_vault_audit(va_gid);
+  // 两行：bob reveal＋alice copy（坏 action/幽灵 404 都不落审计——服务端
+  // 在留痕前就拒了）；倒序最新在前
+  CHECK(wait_until([&] { return va_audit.size() == 2; }, 8000));
+  CHECK(va_audit.at(0)
+            .toObject()
+            .value(QStringLiteral("action"))
+            .toString() == QStringLiteral("copy"));
+  CHECK(va_audit.at(1)
+            .toObject()
+            .value(QStringLiteral("actor"))
+            .toString() == QStringLiteral("bob"));
+  // 成员查审计 403（管理面）
+  fail_status = 0;
+  bob.group_vault_audit(va_gid);
+  CHECK(wait_until([&] { return fail_status == 403; }, 8000));
+  // 名单：成员设 403；群主收窄到 bob 后仍可读；空名单恢复全成员
+  fail_status = 0;
+  bob.set_group_vault_acl(va_gid, {QStringLiteral("bob")});
+  CHECK(wait_until([&] { return fail_status == 403; }, 8000));
+  cli.set_group_vault_acl(va_gid, {QStringLiteral("bob")});
+  CHECK(wait_until([&] { return va_acl_count == 1; }, 8000));
+  va_info = QJsonObject{};
+  cli.group_vault_info(va_gid);
+  CHECK(wait_until([&] {
+    return va_info.value(QStringLiteral("acl")).toArray().size() == 1 &&
+           va_info.value(QStringLiteral("acl")).toArray().at(0).toString() ==
+               QStringLiteral("bob");
+  }, 8000));
+  va_bob_list = QJsonArray{};
+  bob.list_group_vault_entries(va_gid);
+  CHECK(wait_until([&] { return va_bob_list.size() == 1; }, 8000));
+  cli.set_group_vault_acl(va_gid, {});
+  CHECK(wait_until([&] { return va_acl_count == 2; }, 8000));
+  // 成员删 403；群主删后 access 404
+  fail_status = 0;
+  bob.delete_group_vault_entry(va_gid, va_id);
+  CHECK(wait_until([&] { return fail_status == 403; }, 8000));
+  cli.delete_group_vault_entry(va_gid, va_id);
+  CHECK(wait_until([&] { return va_deleted; }, 8000));
+  fail_status = 0;
+  bob.access_group_vault_entry(va_gid, va_id, QStringLiteral("reveal"));
+  CHECK(wait_until([&] { return fail_status == 404; }, 8000));
+  // 重包裹：成员 403；群主换盐/迭代数生效
+  fail_status = 0;
+  bob.rekey_group_vault(va_gid, QStringLiteral("c2FsdDIyMzQ1Njc4"), 720000,
+                        QStringLiteral("d3JhcHBlZDI"));
+  CHECK(wait_until([&] { return fail_status == 403; }, 8000));
+  cli.rekey_group_vault(va_gid, QStringLiteral("c2FsdDIyMzQ1Njc4"), 720000,
+                        QStringLiteral("d3JhcHBlZDI"));
+  CHECK(wait_until([&] { return va_rekeyed; }, 8000));
+  va_info = QJsonObject{};
+  cli.group_vault_info(va_gid);
+  CHECK(wait_until([&] {
+    return va_info.value(QStringLiteral("kdf_salt")).toString() ==
+               QStringLiteral("c2FsdDIyMzQ1Njc4") &&
+           va_info.value(QStringLiteral("kdf_iters")).toInt() == 720000 &&
+           va_info.value(QStringLiteral("wrapped_dek")).toString() ==
+               QStringLiteral("d3JhcHBlZDI");
+  }, 8000));
+  // 无箱群 rekey 404
+  fail_status = 0;
+  cli.rekey_group_vault(gm_gid, QStringLiteral("c2FsdDEyMzQ1Njc4"), 600000,
+                        QStringLiteral("d3JhcHBlZA"));
+  CHECK(wait_until([&] { return fail_status == 404; }, 8000));
+
   server.terminate();
   server.waitForFinished(3000);
 

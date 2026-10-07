@@ -234,6 +234,123 @@ void FilesClient::set_group_memo_open_edit(quint64 gid, bool open) {
             });
 }
 
+// —— R24-3 群密码箱（全程密文：客户端只传 b64 盐/包裹块/条目密文）——
+
+void FilesClient::group_vault_info(quint64 gid) {
+  send_json(QStringLiteral("group-vault.info"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-vault/info?gid=%1").arg(gid), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit group_vault_info_fetched(resp);
+            });
+}
+
+void FilesClient::init_group_vault(quint64 gid, const QString& kdf_salt,
+                                   int kdf_iters,
+                                   const QString& wrapped_dek) {
+  send_json(QStringLiteral("group-vault.init"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-vault/init"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("kdf_salt"), kdf_salt},
+             {QStringLiteral("kdf_iters"), kdf_iters},
+             {QStringLiteral("wrapped_dek"), wrapped_dek}},
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit group_vault_initialized();
+            });
+}
+
+void FilesClient::rekey_group_vault(quint64 gid, const QString& kdf_salt,
+                                    int kdf_iters,
+                                    const QString& wrapped_dek) {
+  send_json(QStringLiteral("group-vault.rekey"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-vault/rekey"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("kdf_salt"), kdf_salt},
+             {QStringLiteral("kdf_iters"), kdf_iters},
+             {QStringLiteral("wrapped_dek"), wrapped_dek}},
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit group_vault_rekeyed();
+            });
+}
+
+void FilesClient::list_group_vault_entries(quint64 gid) {
+  send_json(QStringLiteral("group-vault.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-vault/list?gid=%1").arg(gid), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit group_vault_listed(
+                  resp.value(QStringLiteral("entries")).toArray());
+            });
+}
+
+void FilesClient::access_group_vault_entry(quint64 gid, qint64 id,
+                                           const QString& action) {
+  send_json(QStringLiteral("group-vault.access"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-vault/access"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("id"), static_cast<double>(id)},
+             {QStringLiteral("action"), action}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit group_vault_accessed(resp);
+            });
+}
+
+void FilesClient::save_group_vault_entry(quint64 gid, const QString& name,
+                                         const QString& account_name,
+                                         const QString& secret_ct,
+                                         const QString& secret_nonce,
+                                         qint64 id) {
+  QJsonObject body{{QStringLiteral("gid"), static_cast<double>(gid)},
+                   {QStringLiteral("name"), name},
+                   {QStringLiteral("account_name"), account_name},
+                   {QStringLiteral("secret_ct"), secret_ct},
+                   {QStringLiteral("secret_nonce"), secret_nonce}};
+  if (id > 0) body.insert(QStringLiteral("id"), static_cast<double>(id));
+  send_json(QStringLiteral("group-vault.save"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-vault/save"), body,
+            [this, id](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit group_vault_entry_saved(
+                  id > 0 ? id
+                         : static_cast<qint64>(resp.value(QStringLiteral("id"))
+                                                   .toDouble()));
+            });
+}
+
+void FilesClient::delete_group_vault_entry(quint64 gid, qint64 id) {
+  send_json(QStringLiteral("group-vault.delete"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-vault/delete"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("id"), static_cast<double>(id)}},
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit group_vault_entry_deleted(id);
+            });
+}
+
+void FilesClient::set_group_vault_acl(quint64 gid,
+                                      const QStringList& accounts) {
+  QJsonArray arr;
+  for (const QString& a : accounts) arr.append(a);
+  send_json(QStringLiteral("group-vault.acl"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-vault/acl"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("accounts"), arr}},
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit group_vault_acl_set();
+            });
+}
+
+void FilesClient::group_vault_audit(quint64 gid) {
+  send_json(QStringLiteral("group-vault.audit"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-vault/audit?gid=%1").arg(gid), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit group_vault_audit_listed(
+                  resp.value(QStringLiteral("rows")).toArray());
+            });
+}
+
 void FilesClient::list_inbox() {
   send_json(QStringLiteral("inbox.list"), QStringLiteral("GET"),
             QStringLiteral("/files/list?target=inbox"), {},
