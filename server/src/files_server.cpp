@@ -29,6 +29,8 @@ constexpr std::size_t kMaxUpload = 512u * 1024 * 1024; // 单文件上限 512MiB
 constexpr std::int64_t kSessionTtlMs = 12 * 3600 * 1000; // 令牌 12h
 // R26-1 agent 在线判定窗：默认 30s 心跳的 3 倍宽限（错过两拍仍算在线）
 constexpr std::int64_t kAgentOnlineMs = 90 * 1000;
+// R26-3 一次性短票有效期：签发后 60s 内须兑现（过期=401 重签）
+constexpr std::int64_t kSessionTicketTtlMs = 60 * 1000;
 
 std::int64_t now_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -779,6 +781,23 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/group-servers/list" && method_ == "GET") {
       return route_group_servers_list();
+    }
+    // R26-3 远程会话（SSH 起步）：签一次性短票＋接入留痕＋短票兑现＋
+    // 收尾（谁/何时/连哪台/时长全程可回溯）
+    if (path_ == "/files/group-servers/session/request" &&
+        method_ == "POST") {
+      return route_group_servers_session_request(body);
+    }
+    if (path_ == "/files/group-servers/session/redeem" &&
+        method_ == "POST") {
+      return route_group_servers_session_redeem(body);
+    }
+    if (path_ == "/files/group-servers/session/close" &&
+        method_ == "POST") {
+      return route_group_servers_session_close(body);
+    }
+    if (path_ == "/files/group-servers/sessions" && method_ == "GET") {
+      return route_group_servers_sessions();
     }
     respond_json(404, {{"ok", false}, {"error", "路径不存在"}});
   }
@@ -3066,6 +3085,179 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
            {"load1", r.load1}});
     }
     respond_json(200, {{"ok", true}, {"gid", gid}, {"servers", arr}});
+  }
+
+  // —— R26-3 远程会话（SSH 起步；memex 只做「看+连」，操作类归
+  // croupier）——
+
+  // 签发一次性短票（群成员；server_id 须属该群）。留痕即签发：行内记
+  // 谁/何时/连哪台/协议；短票明文只此一次出门，库里只存摘要。
+  void route_group_servers_session_request(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("server_id") ||
+        !j["server_id"].is_number_integer()) {
+      respond_json(400,
+                   {{"ok", false}, {"error", "缺少字段：gid/server_id"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::uint64_t sid =
+        static_cast<std::uint64_t>(j["server_id"].get<std::int64_t>());
+    const std::string protocol =
+        j.contains("protocol") && j["protocol"].is_string()
+            ? j["protocol"].get<std::string>()
+            : "ssh";
+    if (gid == 0 || sid == 0) {
+      respond_json(400,
+                   {{"ok", false},
+                    {"error", "gid/server_id 须为正整数"}});
+      return;
+    }
+    if (protocol != "ssh") {
+      // RDP/VNC 随后（走同一短票/留痕面，到批再开）
+      respond_json(400,
+                   {{"ok", false},
+                    {"error", "协议暂只支持 ssh（RDP/VNC 随后）"}});
+      return;
+    }
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403,
+                   {{"ok", false}, {"error", "无权发起会话（非群成员）"}});
+      return;
+    }
+    const std::string ticket = random_salt_hex();
+    const std::uint64_t id = impl_.store.server_session_open(
+        gid, sid, account, protocol, sha256_hex(ticket), now_ms());
+    if (id == 0) {
+      respond_json(404, {{"ok", false}, {"error", "服务器不存在"}});
+      return;
+    }
+    // 短票不进日志
+    std::cout << "[MEMEX] files group-servers session request account="
+              << account << " gid=" << gid << " server=" << sid
+              << " session=" << id << " protocol=" << protocol << std::endl;
+    respond_json(200, {{"ok", true},
+                       {"gid", gid},
+                       {"session_id", id},
+                       {"protocol", protocol},
+                       {"ticket", ticket},
+                       {"expires_ms", now_ms() + kSessionTicketTtlMs}});
+  }
+
+  // 短票兑现（一次性；短票即凭据——无会话头）。客户端拉起本地 ssh 前
+  // 即时兑现；过期/错票 401、重放 409。
+  void route_group_servers_session_redeem(const std::string& body) {
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("ticket") || !j["ticket"].is_string() ||
+        j["ticket"].get<std::string>().empty()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：ticket"}});
+      return;
+    }
+    const auto sess = impl_.store.server_session_by_ticket(
+        sha256_hex(j["ticket"].get<std::string>()));
+    if (!sess.has_value() ||
+        now_ms() - sess->opened_ms > kSessionTicketTtlMs) {
+      respond_json(401, {{"ok", false}, {"error", "短票无效或已过期"}});
+      return;
+    }
+    if (!impl_.store.server_session_mark_redeemed(sess->id, now_ms())) {
+      respond_json(409, {{"ok", false}, {"error", "短票已使用"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-servers session redeem session="
+              << sess->id << " account=" << sess->actor << std::endl;
+    respond_json(200, {{"ok", true},
+                       {"session_id", sess->id},
+                       {"gid", sess->group_id},
+                       {"server_name", sess->server_name},
+                       {"host", sess->host},
+                       {"protocol", sess->protocol}});
+  }
+
+  // 收尾（本人、进行中才可）：closed_ms 落点＝时长可算（路由层算，
+  // 行内存原始两拍）
+  void route_group_servers_session_close(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("session_id") ||
+        !j["session_id"].is_number_integer()) {
+      respond_json(400,
+                   {{"ok", false}, {"error", "缺少字段：gid/session_id"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::uint64_t id =
+        static_cast<std::uint64_t>(j["session_id"].get<std::int64_t>());
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权操作（非群成员）"}});
+      return;
+    }
+    if (!impl_.store.server_session_close(gid, id, account, now_ms())) {
+      respond_json(409,
+                   {{"ok", false},
+                    {"error", "会话不存在/非本人/已结束"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-servers session close session=" << id
+              << " account=" << account << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"session_id", id}});
+  }
+
+  // 接入留痕列表（群成员）：谁/何时/连哪台/协议/是否兑现/时长；短票
+  // 摘要永不出现
+  void route_group_servers_sessions() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
+      return;
+    }
+    json arr = json::array();
+    for (const auto& s : impl_.store.server_session_list(gid)) {
+      arr.push_back(
+          {{"id", s.id},
+           {"server_id", s.server_id},
+           {"server_name", s.server_name},
+           {"host", s.host},
+           {"actor", s.actor},
+           {"protocol", s.protocol},
+           {"opened_ms", s.opened_ms},
+           {"redeemed", s.redeemed_ms > 0},
+           {"open", s.closed_ms == 0},
+           {"duration_ms",
+            s.closed_ms > 0 ? s.closed_ms - s.opened_ms : 0}});
+    }
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"sessions", arr}});
   }
 
   void respond_json(int status, const json& body) {

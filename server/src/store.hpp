@@ -758,6 +758,37 @@ public:
                         double load1, std::int64_t ts_ms);
   std::vector<GroupServerRow> server_list(std::uint64_t group_id);
 
+  // —— R26-3 远程会话面：一次性短票＋接入留痕（谁/何时/连哪台/协议/
+  // 是否兑现/何时结束——时长=closed_ms-opened_ms 由路由层算）——
+  struct ServerSessionRow {
+    std::uint64_t id{0};
+    std::uint64_t group_id{0};
+    std::uint64_t server_id{0};
+    std::string server_name;
+    std::string host;
+    std::string actor;
+    std::string protocol; // ssh 起步（RDP/VNC 随后）
+    std::int64_t opened_ms{0};
+    std::int64_t redeemed_ms{0}; // 0=短票未兑现
+    std::int64_t closed_ms{0};   // 0=进行中
+  };
+  // 开会话（留痕起点；ticket_hash=SHA-256 hex）——server_id 须属该群，
+  // 不属=0
+  std::uint64_t server_session_open(std::uint64_t group_id,
+                                    std::uint64_t server_id,
+                                    const std::string& actor,
+                                    const std::string& protocol,
+                                    const std::string& ticket_hash,
+                                    std::int64_t ts_ms);
+  // 短票兑现（一次性）：回会话行；查无=行内已兑现=过期的按路由层校验
+  std::optional<ServerSessionRow> server_session_by_ticket(
+      const std::string& ticket_hash);
+  bool server_session_mark_redeemed(std::uint64_t id, std::int64_t ts_ms);
+  // 关会话（时长终点）：行须属该群该人且进行中
+  bool server_session_close(std::uint64_t group_id, std::uint64_t id,
+                            const std::string& actor, std::int64_t ts_ms);
+  std::vector<ServerSessionRow> server_session_list(std::uint64_t group_id);
+
 private:
   bool ensure_schema();
 

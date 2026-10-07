@@ -1366,6 +1366,100 @@ int main() {
               .status == 403);
   }
 
+  // —— R26-3 远程会话（SSH 起步）：短票签发/一次性兑现/收尾留痕/判权 ——
+  {
+    const std::string gids = std::to_string(gid);
+    const auto en3 = http(port, "POST", "/files/group-servers/enroll",
+                          H("owner1"),
+                          "{\"gid\":" + gids +
+                              ",\"name\":\"ssh-box\",\"host\":\"10.0.0.7\"}");
+    CHECK(en3.status == 200);
+    const std::int64_t sid = jint(en3.body, "id");
+    // 签发：未登录 401；缺字段 400；非成员 403；协议 400；幽灵服务器 404
+    CHECK(http(port, "POST", "/files/group-servers/session/request", {},
+               "{\"gid\":" + gids + ",\"server_id\":" + std::to_string(sid) +
+                   "}")
+              .status == 401);
+    CHECK(http(port, "POST", "/files/group-servers/session/request",
+               H("member1"), "{\"gid\":" + gids + "}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/group-servers/session/request",
+               H("outsider"),
+               "{\"gid\":" + gids +
+                   ",\"server_id\":" + std::to_string(sid) + "}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-servers/session/request",
+               H("member1"),
+               "{\"gid\":" + gids + ",\"server_id\":" + std::to_string(sid) +
+                   ",\"protocol\":\"rdp\"}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/group-servers/session/request",
+               H("member1"),
+               "{\"gid\":" + gids + ",\"server_id\":999999999}")
+              .status == 404);
+    // 成员签发 200：一次性短票出门
+    const auto rq =
+        http(port, "POST", "/files/group-servers/session/request",
+             H("member1"),
+             "{\"gid\":" + gids + ",\"server_id\":" + std::to_string(sid) +
+                 "}");
+    CHECK(rq.status == 200);
+    const std::string ticket = jstr(rq.body, "ticket");
+    CHECK(!ticket.empty());
+    const std::int64_t ssid = jint(rq.body, "session_id");
+    CHECK(ssid > 0);
+    // 兑现：错票 401；正票 200 回目标；重放 409（一次性）
+    CHECK(http(port, "POST", "/files/group-servers/session/redeem", {},
+               "{\"ticket\":\"bogus\"}").status == 401);
+    const auto rd = http(port, "POST", "/files/group-servers/session/redeem",
+                         {}, "{\"ticket\":\"" + ticket + "\"}");
+    CHECK(rd.status == 200);
+    CHECK(jstr(rd.body, "host") == "10.0.0.7");
+    CHECK(jstr(rd.body, "protocol") == "ssh");
+    CHECK(http(port, "POST", "/files/group-servers/session/redeem", {},
+               "{\"ticket\":\"" + ticket + "\"}").status == 409);
+    // 收尾：非本人 409（群主也关不了别人的会话）；本人 200；重复收尾 409
+    CHECK(http(port, "POST", "/files/group-servers/session/close",
+               H("owner1"),
+               "{\"gid\":" + gids + ",\"session_id\":" +
+                   std::to_string(ssid) + "}")
+              .status == 409);
+    CHECK(http(port, "POST", "/files/group-servers/session/close",
+               H("member1"),
+               "{\"gid\":" + gids + ",\"session_id\":" +
+                   std::to_string(ssid) + "}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-servers/session/close",
+               H("member1"),
+               "{\"gid\":" + gids + ",\"session_id\":" +
+                   std::to_string(ssid) + "}")
+              .status == 409);
+    // 留痕列表：非成员 403；成员见行（谁/连哪台/协议/已兑现/已收尾）；
+    // 短票永不出现
+    CHECK(http(port, "GET", "/files/group-servers/sessions?gid=" + gids,
+               H("outsider"), "").status == 403);
+    const auto ls = http(port, "GET",
+                         "/files/group-servers/sessions?gid=" + gids,
+                         H("member1"), "");
+    CHECK(ls.status == 200);
+    CHECK(ls.body.find("\"actor\":\"member1\"") != std::string::npos);
+    CHECK(ls.body.find("\"host\":\"10.0.0.7\"") != std::string::npos);
+    CHECK(ls.body.find("\"redeemed\":true") != std::string::npos);
+    CHECK(ls.body.find("\"open\":false") != std::string::npos);
+    CHECK(ls.body.find("ticket") == std::string::npos);
+    // 另一笔进行中：未兑现的行明示（未使用短票）
+    CHECK(http(port, "POST", "/files/group-servers/session/request",
+               H("owner1"),
+               "{\"gid\":" + gids + ",\"server_id\":" + std::to_string(sid) +
+                   "}")
+              .status == 200);
+    const auto ls2 = http(port, "GET",
+                          "/files/group-servers/sessions?gid=" + gids,
+                          H("member1"), "");
+    CHECK(ls2.body.find("\"redeemed\":false") != std::string::npos);
+    CHECK(ls2.body.find("\"open\":true") != std::string::npos);
+  }
+
   // —— 存储未配置：面在、字节面 503、元数据面照常 ——
   {
     bare = std::make_unique<memex::server::FileServer>(io, store, nullptr, 0);

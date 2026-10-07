@@ -409,7 +409,21 @@ bool ServerStore::ensure_schema() {
       "  load1 REAL NOT NULL DEFAULT 0,"
       "  UNIQUE (group_id, name));"
       "CREATE INDEX IF NOT EXISTS idx_gs_gid"
-      " ON group_servers(group_id);"; // 本段为 schema 字符串最后一段
+      " ON group_servers(group_id);"
+      // —— R26-3 远程会话：接入留痕（谁/何时/连哪台/协议/短票是否兑现/
+      // 何时结束）；短票只存 SHA-256 摘要，明文只在签发回包出现一次——
+      "CREATE TABLE IF NOT EXISTS group_server_sessions ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  group_id INTEGER NOT NULL,"
+      "  server_id INTEGER NOT NULL,"
+      "  actor TEXT NOT NULL,"
+      "  protocol TEXT NOT NULL DEFAULT 'ssh',"
+      "  ticket_hash TEXT NOT NULL UNIQUE,"
+      "  opened_ms INTEGER NOT NULL,"
+      "  redeemed_ms INTEGER NOT NULL DEFAULT 0,"
+      "  closed_ms INTEGER NOT NULL DEFAULT 0);"
+      "CREATE INDEX IF NOT EXISTS idx_gss_gid"
+      " ON group_server_sessions(group_id, id);"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -4033,6 +4047,154 @@ std::vector<ServerStore::GroupServerRow> ServerStore::server_list(
     r.disk_used_mb = sqlite3_column_double(st, 10);
     r.disk_total_mb = sqlite3_column_double(st, 11);
     r.load1 = sqlite3_column_double(st, 12);
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// —— R26-3 远程会话面 ——
+
+std::uint64_t ServerStore::server_session_open(std::uint64_t group_id,
+                                               std::uint64_t server_id,
+                                               const std::string& actor,
+                                               const std::string& protocol,
+                                               const std::string& ticket_hash,
+                                               std::int64_t ts_ms) {
+  // 短票锚定的服务器须属该群（不透他群服务器存在性）
+  sqlite3_stmt* chk = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT id FROM group_servers WHERE id = ? AND"
+                         " group_id = ?;",
+                         -1, &chk, nullptr) != SQLITE_OK) {
+    return 0;
+  }
+  sqlite3_bind_int64(chk, 1, static_cast<sqlite3_int64>(server_id));
+  sqlite3_bind_int64(chk, 2, static_cast<sqlite3_int64>(group_id));
+  const bool owned = sqlite3_step(chk) == SQLITE_ROW;
+  sqlite3_finalize(chk);
+  if (!owned) return 0;
+  const char* sql =
+      "INSERT INTO group_server_sessions(group_id, server_id, actor,"
+      " protocol, ticket_hash, opened_ms) VALUES(?,?,?,?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_int64(st, 2, static_cast<sqlite3_int64>(server_id));
+  sqlite3_bind_text(st, 3, actor.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, protocol.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 5, ticket_hash.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 6, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  const std::uint64_t id =
+      ok ? static_cast<std::uint64_t>(sqlite3_last_insert_rowid(db_)) : 0;
+  sqlite3_finalize(st);
+  return id;
+}
+
+std::optional<ServerStore::ServerSessionRow>
+ServerStore::server_session_by_ticket(const std::string& ticket_hash) {
+  const char* sql =
+      "SELECT s.id, s.group_id, s.server_id, g.name, g.host, s.actor,"
+      " s.protocol, s.opened_ms, s.redeemed_ms, s.closed_ms"
+      " FROM group_server_sessions s"
+      " JOIN group_servers g ON g.id = s.server_id"
+      " WHERE s.ticket_hash = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_text(st, 1, ticket_hash.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<ServerSessionRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    ServerSessionRow r;
+    r.id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
+    r.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    r.server_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 2));
+    const char* n = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    const char* h = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    r.server_name = n ? n : "";
+    r.host = h ? h : "";
+    r.actor = a ? a : "";
+    r.protocol = p ? p : "";
+    r.opened_ms = sqlite3_column_int64(st, 7);
+    r.redeemed_ms = sqlite3_column_int64(st, 8);
+    r.closed_ms = sqlite3_column_int64(st, 9);
+    out = std::move(r);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::server_session_mark_redeemed(std::uint64_t id,
+                                               std::int64_t ts_ms) {
+  // 一次性闸：redeemed_ms=0 才更新（并发双兑只有一胜）
+  const char* sql =
+      "UPDATE group_server_sessions SET redeemed_ms=? WHERE id = ? AND"
+      " redeemed_ms = 0;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, ts_ms);
+  sqlite3_bind_int64(st, 2, static_cast<sqlite3_int64>(id));
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::server_session_close(std::uint64_t group_id,
+                                       std::uint64_t id,
+                                       const std::string& actor,
+                                       std::int64_t ts_ms) {
+  const char* sql =
+      "UPDATE group_server_sessions SET closed_ms=? WHERE id = ? AND"
+      " group_id = ? AND actor = ? AND closed_ms = 0;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, ts_ms);
+  sqlite3_bind_int64(st, 2, static_cast<sqlite3_int64>(id));
+  sqlite3_bind_int64(st, 3, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 4, actor.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ServerStore::ServerSessionRow> ServerStore::server_session_list(
+    std::uint64_t group_id) {
+  std::vector<ServerSessionRow> out;
+  const char* sql =
+      "SELECT s.id, s.group_id, s.server_id, g.name, g.host, s.actor,"
+      " s.protocol, s.opened_ms, s.redeemed_ms, s.closed_ms"
+      " FROM group_server_sessions s"
+      " JOIN group_servers g ON g.id = s.server_id"
+      " WHERE s.group_id = ? ORDER BY s.id DESC LIMIT 200;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    ServerSessionRow r;
+    r.id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
+    r.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    r.server_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 2));
+    const char* n = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    const char* h = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    r.server_name = n ? n : "";
+    r.host = h ? h : "";
+    r.actor = a ? a : "";
+    r.protocol = p ? p : "";
+    r.opened_ms = sqlite3_column_int64(st, 7);
+    r.redeemed_ms = sqlite3_column_int64(st, 8);
+    r.closed_ms = sqlite3_column_int64(st, 9);
     out.push_back(std::move(r));
   }
   sqlite3_finalize(st);
