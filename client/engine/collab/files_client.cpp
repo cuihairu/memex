@@ -927,6 +927,138 @@ void FilesClient::bind_office_seat(qint64 id, const QString& account) {
             });
 }
 
+// —— 远程协助（二期）——
+
+void FilesClient::assist_request(const QString& target,
+                                 const QStringList& perms) {
+  QJsonArray arr;
+  for (const auto& p : perms) arr.append(p);
+  send_json(QStringLiteral("assist.request"), QStringLiteral("POST"),
+            QStringLiteral("/files/assist/request"),
+            {{QStringLiteral("target"), target},
+             {QStringLiteral("perms"), arr}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit assist_requested(
+                    resp.value(QStringLiteral("id")).toString());
+              }
+            });
+}
+
+void FilesClient::assist_respond(const QString& id, bool approve,
+                                 const QStringList& perms) {
+  QJsonObject body{{QStringLiteral("id"), id},
+                   {QStringLiteral("approve"), approve}};
+  if (approve && !perms.isEmpty()) {
+    QJsonArray arr;
+    for (const auto& p : perms) arr.append(p);
+    body.insert(QStringLiteral("perms"), arr);
+  }
+  send_json(QStringLiteral("assist.respond"), QStringLiteral("POST"),
+            QStringLiteral("/files/assist/respond"), body,
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit assist_responded(id);
+            });
+}
+
+void FilesClient::assist_start(const QString& id) {
+  send_json(QStringLiteral("assist.start"), QStringLiteral("POST"),
+            QStringLiteral("/files/assist/start"),
+            {{QStringLiteral("id"), id}},
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit assist_started(id);
+            });
+}
+
+void FilesClient::assist_end(const QString& id, const QString& reason) {
+  QJsonObject body{{QStringLiteral("id"), id}};
+  if (!reason.isEmpty()) body.insert(QStringLiteral("reason"), reason);
+  send_json(QStringLiteral("assist.end"), QStringLiteral("POST"),
+            QStringLiteral("/files/assist/end"), body,
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit assist_ended(id);
+            });
+}
+
+void FilesClient::fetch_assist_sessions() {
+  send_json(QStringLiteral("assist.sessions"), QStringLiteral("GET"),
+            QStringLiteral("/files/assist/sessions"), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit assist_sessions_listed(
+                    resp.value(QStringLiteral("sessions")).toArray());
+              }
+            });
+}
+
+void FilesClient::fetch_assist_audit(const QString& id) {
+  send_json(QStringLiteral("assist.audit"), QStringLiteral("POST"),
+            QStringLiteral("/files/assist/audit"),
+            {{QStringLiteral("id"), id}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit assist_audit_listed(
+                    resp.value(QStringLiteral("audits")).toArray());
+              }
+            });
+}
+
+void FilesClient::push_assist_frame(const QString& id, qint64 seq,
+                                    const QString& jpeg_b64) {
+  send_json(QStringLiteral("assist.frame"), QStringLiteral("POST"),
+            QStringLiteral("/files/assist/frame"),
+            {{QStringLiteral("id"), id},
+             {QStringLiteral("seq"), static_cast<double>(seq)},
+             {QStringLiteral("jpeg_b64"), jpeg_b64}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit assist_frame_pushed(static_cast<qint64>(
+                    resp.value(QStringLiteral("seq")).toDouble()));
+              }
+            });
+}
+
+void FilesClient::pull_assist_frame(const QString& id) {
+  send_json(QStringLiteral("assist.frame"), QStringLiteral("GET"),
+            QStringLiteral("/files/assist/frame?id=") + id, {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit assist_frame_pulled(
+                    static_cast<qint64>(
+                        resp.value(QStringLiteral("seq")).toDouble()),
+                    resp.value(QStringLiteral("jpeg_b64")).toString());
+              }
+            });
+}
+
+void FilesClient::send_assist_input(const QString& id, const QString& kind,
+                                    double x, double y, const QString& key) {
+  QJsonObject body{{QStringLiteral("id"), id},
+                   {QStringLiteral("kind"), kind}};
+  if (kind != QStringLiteral("key")) {
+    body.insert(QStringLiteral("x"), x);
+    body.insert(QStringLiteral("y"), y);
+  } else {
+    body.insert(QStringLiteral("key"), key);
+  }
+  send_json(QStringLiteral("assist.input"), QStringLiteral("POST"),
+            QStringLiteral("/files/assist/input"), body,
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit assist_input_sent();
+            });
+}
+
+void FilesClient::fetch_assist_input(const QString& id) {
+  send_json(QStringLiteral("assist.input"), QStringLiteral("GET"),
+            QStringLiteral("/files/assist/input?id=") + id, {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit assist_inputs_listed(
+                    resp.value(QStringLiteral("events")).toArray());
+              }
+            });
+}
+
 void FilesClient::download_file(qint64 file_id, const QString& file_name,
                                 const QString& save_dir) {
   if (token_.isEmpty()) {

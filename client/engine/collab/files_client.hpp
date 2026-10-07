@@ -210,6 +210,32 @@ class FilesClient : public QObject {
   // 绑定/解绑占用者（account 空=解绑；一人一工位，换座先解绑）
   void bind_office_seat(qint64 id, const QString& account);
 
+  // —— 远程协助（二期 /files/assist；模型层平台-11，consent/audit 红线
+  //     与部门放行开关全在服务端）——
+  // 发起协助（perms=view/keyboard/mouse/clipboard/file 非空子集）
+  void assist_request(const QString& target, const QStringList& perms);
+  // 受控方批/拒（approve=false 忽略 perms；实批 ⊆ 申请可缩不可扩）
+  void assist_respond(const QString& id, bool approve,
+                      const QStringList& perms);
+  // 启动（approved→active；任一当事方）
+  void assist_start(const QString& id);
+  // 结束/撤权（受控方 active 期结束=撤权即时生效；任一当事方）
+  void assist_end(const QString& id, const QString& reason);
+  // 我的会话台账（发起或受控，倒序）＝过程持续可见面
+  void fetch_assist_sessions();
+  // 会话审计链（当事方可读）
+  void fetch_assist_audit(const QString& id);
+  // 受控方推帧（JPEG b64；服务端只存最新帧不落库，终态即擦）
+  void push_assist_frame(const QString& id, qint64 seq,
+                         const QString& jpeg_b64);
+  // 发起方拉最新帧（无帧回 seq=0 空 b64）
+  void pull_assist_frame(const QString& id);
+  // 发起方发输入事件（kind=mouse_move|mouse_click|key；须对应权限位）
+  void send_assist_input(const QString& id, const QString& kind, double x,
+                         double y, const QString& key);
+  // 受控方取走输入事件（FIFO 取走即清）
+  void fetch_assist_input(const QString& id);
+
  signals:
   void logged_in();
   void login_failed(const QString& reason);
@@ -277,6 +303,16 @@ class FilesClient : public QObject {
   void office_seat_saved(qint64 id);
   void office_seat_deleted();
   void office_seat_bound();
+  void assist_requested(const QString& id);
+  void assist_responded(const QString& id);
+  void assist_started(const QString& id);
+  void assist_ended(const QString& id);
+  void assist_sessions_listed(const QJsonArray& sessions);
+  void assist_audit_listed(const QJsonArray& audits);
+  void assist_frame_pushed(qint64 seq);
+  void assist_frame_pulled(qint64 seq, const QString& jpeg_b64);
+  void assist_input_sent();
+  void assist_inputs_listed(const QJsonArray& events);
   // 统一失败通道：op=操作名（"memo.create"/"inbox.upload"/…）、
   // status=HTTP 状态码（0=网络层失败）、error=服务端 error 字段或网络串
   void request_failed(const QString& op, int status, const QString& error);

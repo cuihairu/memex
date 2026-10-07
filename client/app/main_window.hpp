@@ -39,6 +39,7 @@ class ApprovalDialog;
 class ReportDialog;
 class AuditDialog;
 class OfficeMapDialog;
+class AssistDialog;
 
 class MainWindow : public QMainWindow {
 public:
@@ -251,6 +252,7 @@ private:
   QPointer<ReportDialog> report_dialog_; // 二期·日报周报窗口（懒建）
   QPointer<AuditDialog> audit_dialog_; // 二期·会话审计窗口（懒建）
   QPointer<OfficeMapDialog> office_dialog_; // 二期·办公室位置图窗口（懒建）
+  QPointer<AssistDialog> assist_dialog_; // 二期·远程协助窗口（懒建）
 
   QLabel* device_count_{nullptr};
   QLineEdit* search_box_{nullptr};

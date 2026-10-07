@@ -32,6 +32,7 @@
 #include "task_dialog.hpp"
 #include "approval_dialog.hpp"
 #include "report_dialog.hpp"
+#include "assist_dialog.hpp"
 #include "audit_dialog.hpp"
 #include "office_map_dialog.hpp"
 #include <QMessageBox>
@@ -313,6 +314,18 @@ void MainWindow::build_ui() {
     office_dialog_->show();
     office_dialog_->raise();
     office_dialog_->activateWindow();
+  });
+  // 二期·远程协助：受控方显式确认＋过程持续可见（consent/audit 红线在
+  // 服务端，客户端只做门面）
+  auto* act_assist = collab_menu->addAction(QStringLiteral("远程协助…"));
+  connect(act_assist, &QAction::triggered, this, [this] {
+    if (!assist_dialog_) {
+      assist_dialog_ = new AssistDialog(this);
+      assist_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    assist_dialog_->show();
+    assist_dialog_->raise();
+    assist_dialog_->activateWindow();
   });
 
   // —— 设置：开机启动（T4.7；勾选态与登记文件同步）＋主题（R19 · T4.9）——

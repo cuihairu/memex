@@ -2217,6 +2217,157 @@ int main() {
               .status == 404);
   }
 
+  // —— 二期 远程协助：协议面＋媒体中继（模型层平台-11 在 store：
+  //     五态/consent 红线/audit 红线/部门开关默认禁；此处验路由判权、
+  //     状态门与媒体回环）——
+  {
+    // 未登录 401
+    CHECK(http(port, "POST", "/files/assist/request", {},
+               "{\"target\":\"member1\",\"perms\":[\"view\"]}").status == 401);
+    // 部门放行开关默认禁（白名单口径）：默认全局行禁 → 403
+    CHECK(http(port, "POST", "/files/assist/request", H("owner1"),
+               "{\"target\":\"member1\",\"perms\":[\"view\"]}").status ==
+          403);
+    // 开全局放行（直调 store；CLI assist policy set 同款）
+    CHECK(store.assist_policy_set(true, "", "admin1", 1700000001000));
+    // 形态门：自协助 400／幽灵受控方 404／非法权限名 400
+    CHECK(http(port, "POST", "/files/assist/request", H("owner1"),
+               "{\"target\":\"owner1\",\"perms\":[\"view\"]}").status == 400);
+    CHECK(http(port, "POST", "/files/assist/request", H("owner1"),
+               "{\"target\":\"ghost\",\"perms\":[\"view\"]}").status == 404);
+    CHECK(http(port, "POST", "/files/assist/request", H("owner1"),
+               "{\"target\":\"member1\",\"perms\":[\"root\"]}").status == 400);
+    // 发起 200：会话 id ra- 前缀（store 层生成）
+    const auto req = http(port, "POST", "/files/assist/request", H("owner1"),
+                          "{\"target\":\"member1\",\"perms\":[\"view\","
+                          "\"mouse\",\"keyboard\"]}");
+    CHECK(req.status == 200);
+    const std::string sid = jstr(req.body, "id");
+    CHECK(sid.rfind("ra-", 0) == 0);
+    // consent 红线：批/拒只属受控方本人——发起方自批 403
+    CHECK(http(port, "POST", "/files/assist/respond", H("owner1"),
+               "{\"id\":\"" + sid + "\",\"approve\":true}")
+              .status == 403);
+    // 实批 ⊆ 申请（可缩不可扩）：clipboard 不在申请集 → 409
+    CHECK(http(port, "POST", "/files/assist/respond", H("member1"),
+               "{\"id\":\"" + sid +
+                   "\",\"approve\":true,\"perms\":[\"view\",\"clipboard\"]}")
+              .status == 409);
+    // 缩权批准：只给 view+mouse（keyboard 留作未批腿）
+    CHECK(http(port, "POST", "/files/assist/respond", H("member1"),
+               "{\"id\":\"" + sid +
+                   "\",\"approve\":true,\"perms\":[\"view\",\"mouse\"]}")
+              .status == 200);
+    // 媒体状态门：未 start 推帧 409
+    CHECK(http(port, "POST", "/files/assist/frame", H("member1"),
+               "{\"id\":\"" + sid + "\",\"jpeg_b64\":\"ZmFrZQ==\",\"seq\":1}")
+              .status == 409);
+    // 非当事方 start 403；发起方 start 200；重复 start 409
+    CHECK(http(port, "POST", "/files/assist/start", H("admin1"),
+               "{\"id\":\"" + sid + "\"}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/assist/start", H("owner1"),
+               "{\"id\":\"" + sid + "\"}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/assist/start", H("owner1"),
+               "{\"id\":\"" + sid + "\"}")
+              .status == 409);
+    // 推帧=受控方专属：发起方推 403；受控方推 200（seq 回带）
+    CHECK(http(port, "POST", "/files/assist/frame", H("owner1"),
+               "{\"id\":\"" + sid + "\",\"jpeg_b64\":\"ZnJvbV9oZWxwZXI=\","
+               "\"seq\":9}")
+              .status == 403);
+    const auto pf = http(port, "POST", "/files/assist/frame", H("member1"),
+                         "{\"id\":\"" + sid +
+                             "\",\"jpeg_b64\":\"ZmFrZQ==\",\"seq\":7}");
+    CHECK(pf.status == 200);
+    CHECK(jint(pf.body, "seq") == 7);
+    // 拉帧=发起方专属且须 view：受控方拉 403；发起方拉回环同 seq 同帧
+    CHECK(http(port, "GET", "/files/assist/frame?id=" + sid, H("member1"),
+               "")
+              .status == 403);
+    const auto gf = http(port, "GET", "/files/assist/frame?id=" + sid,
+                         H("owner1"), "");
+    CHECK(gf.status == 200);
+    CHECK(jint(gf.body, "seq") == 7);
+    CHECK(gf.body.find("ZmFrZQ==") != std::string::npos);
+    // 输入权限位：keyboard 未批 → key 403；mouse 已批 → click 200；
+    // 受控方发输入=侧别 403
+    CHECK(http(port, "POST", "/files/assist/input", H("owner1"),
+               "{\"id\":\"" + sid + "\",\"kind\":\"key\",\"key\":\"a\"}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/assist/input", H("owner1"),
+               "{\"id\":\"" + sid +
+                   "\",\"kind\":\"mouse_click\",\"x\":0.5,\"y\":0.25}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/assist/input", H("member1"),
+               "{\"id\":\"" + sid + "\",\"kind\":\"mouse_click\",\"x\":0.1,"
+               "\"y\":0.1}")
+              .status == 403);
+    // 取走即清（FIFO 不重投）：发起方取输入=侧别 403；受控方取见一笔，
+    // 再取空
+    CHECK(http(port, "GET", "/files/assist/input?id=" + sid, H("owner1"), "")
+              .status == 403);
+    const auto gi = http(port, "GET", "/files/assist/input?id=" + sid,
+                         H("member1"), "");
+    CHECK(gi.status == 200);
+    CHECK(gi.body.find("mouse_click") != std::string::npos);
+    CHECK(gi.body.find("\"x\":0.5") != std::string::npos); // 原样转发带坐标
+    const auto gi2 = http(port, "GET", "/files/assist/input?id=" + sid,
+                          H("member1"), "");
+    CHECK(gi2.status == 200);
+    CHECK(gi2.body.find("mouse_click") == std::string::npos);
+    // 台账（过程持续可见）：双方视角都见会话行（状态 active）
+    const auto ls = http(port, "GET", "/files/assist/sessions", H("owner1"),
+                         "");
+    CHECK(ls.status == 200);
+    CHECK(ls.body.find(sid) != std::string::npos);
+    CHECK(ls.body.find("\"active\"") != std::string::npos);
+    // 审计链当事方可读、非当事方 403
+    const auto aud = http(port, "POST", "/files/assist/audit", H("member1"),
+                          "{\"id\":\"" + sid + "\"}");
+    CHECK(aud.status == 200);
+    CHECK(aud.body.find("\"request\"") != std::string::npos);
+    CHECK(aud.body.find("\"approve\"") != std::string::npos);
+    CHECK(aud.body.find("\"start\"") != std::string::npos);
+    CHECK(http(port, "POST", "/files/assist/audit", H("admin1"),
+               "{\"id\":\"" + sid + "\"}")
+              .status == 403);
+    // 受控方 end=撤权即时生效：媒体槽即擦（再拉帧 409 非进行中）、
+    // 重复 end 409
+    CHECK(http(port, "POST", "/files/assist/end", H("member1"),
+               "{\"id\":\"" + sid + "\",\"reason\":\"收工\"}")
+              .status == 200);
+    CHECK(http(port, "GET", "/files/assist/frame?id=" + sid, H("owner1"), "")
+              .status == 409);
+    CHECK(http(port, "POST", "/files/assist/end", H("member1"),
+               "{\"id\":\"" + sid + "\"}")
+              .status == 409);
+    // deny 终态腿：新会话被拒后再 respond 409
+    const auto req2 = http(port, "POST", "/files/assist/request", H("owner1"),
+                           "{\"target\":\"admin1\",\"perms\":[\"view\"]}");
+    CHECK(req2.status == 200);
+    const std::string sid2 = jstr(req2.body, "id");
+    CHECK(http(port, "POST", "/files/assist/respond", H("admin1"),
+               "{\"id\":\"" + sid2 + "\",\"approve\":false}")
+              .status == 200);
+    // 终态守卫：denied 后带合法实批再批 → 409（空 perms 则先被形态门
+    // 400 拒——批准须非空子集，与 store 口径一致）
+    CHECK(http(port, "POST", "/files/assist/respond", H("admin1"),
+               "{\"id\":\"" + sid2 + "\",\"approve\":true,\"perms\":[]}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/assist/respond", H("admin1"),
+               "{\"id\":\"" + sid2 +
+                   "\",\"approve\":true,\"perms\":[\"view\"]}")
+              .status == 409);
+    // 台账收口：终态 closed 与 denied 都在
+    const auto ls2 = http(port, "GET", "/files/assist/sessions", H("owner1"),
+                          "");
+    CHECK(ls2.status == 200);
+    CHECK(ls2.body.find("\"closed\"") != std::string::npos);
+    CHECK(ls2.body.find("\"denied\"") != std::string::npos);
+  }
+
   // —— R27-2 外部任务登记：provider/ext_key 成对、个人登记不转派、
   //     列表回带引用（详情 URL 由客户端 SPI 解析，服务端只存引用）——
   {
