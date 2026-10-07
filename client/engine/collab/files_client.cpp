@@ -755,6 +755,57 @@ void FilesClient::delete_task(qint64 id) {
             });
 }
 
+// —— 审批（二期·请假起步）——
+
+void FilesClient::create_approval(const QString& type, const QString& from,
+                                  const QString& to, const QString& reason) {
+  QJsonObject body{{QStringLiteral("type"), type}};
+  if (!from.isEmpty()) body.insert(QStringLiteral("from"), from);
+  if (!to.isEmpty()) body.insert(QStringLiteral("to"), to);
+  if (!reason.isEmpty()) body.insert(QStringLiteral("reason"), reason);
+  send_json(QStringLiteral("approval.create"), QStringLiteral("POST"),
+            QStringLiteral("/files/approvals"), body,
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit approval_created(static_cast<qint64>(
+                    resp.value(QStringLiteral("id")).toDouble()));
+              }
+            });
+}
+
+void FilesClient::list_approvals() {
+  send_json(QStringLiteral("approval.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/approvals"), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit approvals_listed(
+                    resp.value(QStringLiteral("mine")).toArray(),
+                    resp.value(QStringLiteral("pending")).toArray());
+              }
+            });
+}
+
+void FilesClient::decide_approval(qint64 id, bool approved,
+                                  const QString& note) {
+  QJsonObject body{{QStringLiteral("id"), static_cast<double>(id)},
+                   {QStringLiteral("approved"), approved}};
+  if (!note.isEmpty()) body.insert(QStringLiteral("note"), note);
+  send_json(QStringLiteral("approval.decide"), QStringLiteral("POST"),
+            QStringLiteral("/files/approvals/decide"), body,
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit approval_decided(id);
+            });
+}
+
+void FilesClient::withdraw_approval(qint64 id) {
+  send_json(QStringLiteral("approval.withdraw"), QStringLiteral("POST"),
+            QStringLiteral("/files/approvals/withdraw"),
+            {{QStringLiteral("id"), static_cast<double>(id)}},
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit approval_withdrawn(id);
+            });
+}
+
 void FilesClient::download_file(qint64 file_id, const QString& file_name,
                                 const QString& save_dir) {
   if (token_.isEmpty()) {

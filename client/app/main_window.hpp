@@ -35,6 +35,7 @@ class GroupCiDialog;
 class GroupPackDialog;
 class GroupServerDialog;
 class TaskDialog;
+class ApprovalDialog;
 
 class MainWindow : public QMainWindow {
 public:
@@ -243,6 +244,7 @@ private:
   QPointer<GroupPackDialog> group_pack_; // R25-3 打包/导出窗口（懒建）
   QPointer<GroupServerDialog> group_server_; // R26-2 群服务器面板窗口（懒建）
   QPointer<TaskDialog> task_dialog_; // R27-1 任务清单窗口（懒建）
+  QPointer<ApprovalDialog> approval_dialog_; // 二期·审批窗口（懒建）
 
   QLabel* device_count_{nullptr};
   QLineEdit* search_box_{nullptr};

@@ -30,6 +30,7 @@
 #include "group_pack_dialog.hpp"
 #include "group_server_dialog.hpp"
 #include "task_dialog.hpp"
+#include "approval_dialog.hpp"
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
@@ -265,6 +266,17 @@ void MainWindow::build_ui() {
     task_dialog_->show();
     task_dialog_->raise();
     task_dialog_->activateWindow();
+  });
+  // 二期·审批（请假起步）：同组常驻入口；判权全在服务端，窗口无候选面
+  auto* act_approvals = task_menu->addAction(QStringLiteral("审批…"));
+  connect(act_approvals, &QAction::triggered, this, [this] {
+    if (!approval_dialog_) {
+      approval_dialog_ = new ApprovalDialog(this);
+      approval_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    approval_dialog_->show();
+    approval_dialog_->raise();
+    approval_dialog_->activateWindow();
   });
 
   // —— 设置：开机启动（T4.7；勾选态与登记文件同步）＋主题（R19 · T4.9）——

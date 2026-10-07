@@ -254,6 +254,36 @@ struct FileServer::Impl {
                          !pa->department_path.empty() &&
                          pa->department_path == pb->department_path;
                 });
+    // 显式拒绝：自建自审不成立（申请人本人对己申请无决定权）。deny 层
+    // 先于一切 allow——放 deny 是钉死不变量：后续任何 allow 规则（含
+    // personal-owner 这类不滤 action 的属主规则）都越不过自审红线
+    az.add_rule(RuleEffect::ExplicitDeny, "approval-self-decide",
+                [](const AuthzQuery& q) {
+                  if (q.action != "approval:decide") return false;
+                  const std::string applicant =
+                      resource_owner_prefix(q.resource);
+                  return !applicant.empty() && applicant == q.subject;
+                });
+    // 显式允许：审批决定（二期·审批）——申请人的直属上级（平台-3
+    // 汇报线现查现裁），或 org-admin 基础角色兜底且申请人无直属上级；
+    // 未命中 default-deny 不自造
+    az.add_rule(RuleEffect::ExplicitAllow, "approval-decide",
+                [this](const AuthzQuery& q) {
+                  if (q.action != "approval:decide") return false;
+                  const std::string applicant =
+                      resource_owner_prefix(q.resource);
+                  if (applicant.empty() || applicant == q.subject) {
+                    return false; // 自审不成立（自建申请须他人决）
+                  }
+                  const auto chain = store.manager_chain(applicant);
+                  if (!chain.empty()) return chain.front() == q.subject;
+                  // 无直属上级：org-admin 兜底（基础或追加角色皆算）
+                  const auto roles = store.effective_roles(q.subject, now_ms());
+                  for (const auto& r : roles) {
+                    if (r == "org-admin") return true;
+                  }
+                  return false;
+                });
   }
 
   // 资源串约定："group:{gid}[/file:{id}]"、"user:{uid}[/file:{id}]"
@@ -729,6 +759,20 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/tasks/delete" && method_ == "POST") {
       return route_task_delete(body);
+    }
+    // 二期·审批（请假起步）：申请/双列表/决定/撤回；判权 az
+    // approval-decide（直属上级现查或无上级 org-admin 兜底）
+    if (path_ == "/files/approvals" && method_ == "POST") {
+      return route_approval_create(body);
+    }
+    if (path_ == "/files/approvals" && method_ == "GET") {
+      return route_approvals_list();
+    }
+    if (path_ == "/files/approvals/decide" && method_ == "POST") {
+      return route_approval_decide(body);
+    }
+    if (path_ == "/files/approvals/withdraw" && method_ == "POST") {
+      return route_approval_withdraw(body);
     }
     // R24-2 群备忘录：群维度共享知识（管理员维护；开放编辑后成员可写，
     // 全部编辑逐笔留痕可回滚）。判权走 AuthorizationService 群规则。
@@ -1267,6 +1311,184 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (!impl_.store.task_delete(id)) {
       respond_json(404, {{"ok", false}, {"error", "任务不存在"}});
+      return;
+    }
+    respond_json(200, {{"ok", true}});
+  }
+
+  // —— 二期·审批（请假起步，设计稿 docs/design/审批与日报周报.md §一）——
+  // 四态 pending|approved|rejected|withdrawn；审批人判定=az 规则
+  // approval-decide（直属上级现查；无上级=org-admin 兜底）；自建自审
+  // 不成立；全部动作留痕不删改
+  void route_approval_create(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    // 一期固定模板「请假」：类型白名单（年假/事假/病假/调休）
+    static const char* kTypes[] = {"年假", "事假", "病假", "调休"};
+    if (!j.is_object() || !j.contains("type") || !j["type"].is_string()) {
+      respond_json(400, {{"ok", false},
+                         {"error",
+                          "缺少字段：type（年假/事假/病假/调休）；"
+                          "from/to/reason 可选"}});
+      return;
+    }
+    const std::string type = j["type"].get<std::string>();
+    bool type_ok = false;
+    for (const char* t : kTypes) {
+      if (type == t) type_ok = true;
+    }
+    if (!type_ok) {
+      respond_json(400, {{"ok", false},
+                         {"error", "type 须为 年假/事假/病假/调休"}});
+      return;
+    }
+    const std::string from = j.contains("from") && j["from"].is_string()
+                                 ? j["from"].get<std::string>()
+                                 : "";
+    const std::string to = j.contains("to") && j["to"].is_string()
+                               ? j["to"].get<std::string>()
+                               : "";
+    const std::string reason = j.contains("reason") && j["reason"].is_string()
+                                   ? j["reason"].get<std::string>()
+                                   : "";
+    const std::int64_t id = impl_.store.approval_create(
+        account, type, from, to, reason, now_ms());
+    if (id <= 0) {
+      respond_json(500, {{"ok", false}, {"error", "申请创建失败"}});
+      return;
+    }
+    respond_json(200, {{"ok", true}, {"id", id}});
+  }
+
+  void route_approvals_list() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json mine = json::array();
+    for (const auto& a : impl_.store.approvals_of(account)) {
+      mine.push_back({{"id", a.id},
+                      {"type", a.type},
+                      {"from", a.leave_from},
+                      {"to", a.leave_to},
+                      {"reason", a.reason},
+                      {"status", a.status},
+                      {"decider", a.decider},
+                      {"decision_note", a.decision_note},
+                      {"created_ms", a.created_ms},
+                      {"decided_ms", a.decided_ms}});
+    }
+    // 待我决：全量 pending 逐行走 az approval:decide 现裁（不向无权者
+    // 泄露他人申请的存在；判权不过的行直接不出现）
+    json pending = json::array();
+    for (const auto& a : impl_.store.approvals_pending()) {
+      const Decision d = impl_.az.authorize(
+          {account, "approval:decide", "user:" + a.applicant,
+           "owner=" + a.applicant});
+      if (!d.allowed) continue;
+      pending.push_back({{"id", a.id},
+                         {"applicant", a.applicant},
+                         {"type", a.type},
+                         {"from", a.leave_from},
+                         {"to", a.leave_to},
+                         {"reason", a.reason},
+                         {"created_ms", a.created_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"mine", mine}, {"pending", pending}});
+  }
+
+  void route_approval_decide(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number_integer() ||
+        !j.contains("approved") || !j["approved"].is_boolean() ||
+        (j.contains("note") && !j["note"].is_string())) {
+      respond_json(400,
+                   {{"ok", false}, {"error", "缺少字段：id/approved"}});
+      return;
+    }
+    const std::int64_t id = j["id"].get<std::int64_t>();
+    const auto row = impl_.store.approval_by_id(id);
+    if (!row.has_value()) {
+      respond_json(404, {{"ok", false}, {"error", "申请不存在"}});
+      return;
+    }
+    // 判权先于状态检查（对无权者与对不存在者同口径 403，不泄露状态）
+    const Decision d = impl_.az.authorize(
+        {account, "approval:decide", "user:" + row->applicant,
+         "owner=" + row->applicant});
+    if (!d.allowed) {
+      respond_json(403, {{"ok", false},
+                         {"error", "无权决定该申请（" + d.reason +
+                                   "；直属上级或无上级时 org-admin）"}});
+      return;
+    }
+    if (row->status != "pending") {
+      respond_json(409, {{"ok", false},
+                         {"error", "该申请已决（" + row->status +
+                                   "），不可重复决定"}});
+      return;
+    }
+    const std::string note =
+        j.contains("note") && j["note"].is_string()
+            ? j["note"].get<std::string>()
+            : "";
+    if (!impl_.store.approval_decide(id, account, j["approved"].get<bool>(),
+                                     note, now_ms())) {
+      respond_json(409, {{"ok", false}, {"error", "决定落库失败（状态已变）"}});
+      return;
+    }
+    std::cout << "[MEMEX] approval decide account=" << account
+              << " id=" << id
+              << " result=" << (j["approved"].get<bool>() ? "approved"
+                                                          : "rejected")
+              << std::endl;
+    respond_json(200, {{"ok", true}});
+  }
+
+  void route_approval_withdraw(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number_integer()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：id"}});
+      return;
+    }
+    const std::int64_t id = j["id"].get<std::int64_t>();
+    const auto row = impl_.store.approval_by_id(id);
+    if (!row.has_value()) {
+      respond_json(404, {{"ok", false}, {"error", "申请不存在"}});
+      return;
+    }
+    if (row->applicant != account) {
+      respond_json(403, {{"ok", false}, {"error", "只有申请人能撤回"}});
+      return;
+    }
+    if (row->status != "pending") {
+      respond_json(409, {{"ok", false},
+                         {"error", "该申请已决（" + row->status + "）"}});
+      return;
+    }
+    if (!impl_.store.approval_withdraw(id, account)) {
+      respond_json(409, {{"ok", false}, {"error", "撤回落库失败（状态已变）"}});
       return;
     }
     respond_json(200, {{"ok", true}});

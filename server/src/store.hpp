@@ -672,6 +672,40 @@ public:
   // 的共同成员（现查现裁=入群即授权、退群即失）
   bool co_members(const std::string& a, const std::string& b);
 
+  // —— 二期·审批（请假起步，设计稿 docs/design/审批与日报周报.md）——
+  // 四态写死：pending→approved|rejected|withdrawn；只有 pending 可决；
+  // 撤回=申请人专属且仅 pending；决定不删改（全程留痕）
+  struct ApprovalRow {
+    std::int64_t id{0};
+    std::string applicant; // 申请人
+    std::string type;      // 请假类型（年假/事假/病假/调休 白名单）
+    std::string leave_from;
+    std::string leave_to;
+    std::string reason;
+    std::string status; // pending|approved|rejected|withdrawn
+    std::string decider;
+    std::string decision_note;
+    std::int64_t created_ms{0};
+    std::int64_t decided_ms{0};
+  };
+  std::int64_t approval_create(const std::string& applicant,
+                               const std::string& type,
+                               const std::string& leave_from,
+                               const std::string& leave_to,
+                               const std::string& reason,
+                               std::int64_t created_ms);
+  // 我申请的（id 倒序）
+  std::vector<ApprovalRow> approvals_of(const std::string& applicant);
+  // 全部待决（id 倒序；可见性过滤在路由层按判权逐行裁）
+  std::vector<ApprovalRow> approvals_pending();
+  std::optional<ApprovalRow> approval_by_id(std::int64_t id);
+  // 决定（UPDATE ... WHERE status='pending' 守卫，重复决=假）
+  bool approval_decide(std::int64_t id, const std::string& decider,
+                       bool approved, const std::string& note,
+                       std::int64_t decided_ms);
+  // 撤回（申请人专属；UPDATE ... WHERE applicant=? AND status='pending'）
+  bool approval_withdraw(std::int64_t id, const std::string& applicant);
+
   // —— T4.2 跨态会话 ——
   // 建立（start）：插入一行进行中记录（同会话重复 start 只记首条）。
   bool cross_log_start(const std::string& account,

@@ -173,6 +173,17 @@ class FilesClient : public QObject {
   // 撤回（清单主人或分配人）
   void delete_task(qint64 id);
 
+  // —— 审批（二期·请假起步 /files/approvals）——
+  // 建申请（type 白名单：年假/事假/病假/调休；from/to/reason 可选）
+  void create_approval(const QString& type, const QString& from,
+                       const QString& to, const QString& reason);
+  // 我申请的＋待我决（一次双数组；待我决按判权现裁后下发）
+  void list_approvals();
+  // 决定（直属上级或无上级 org-admin，服务端现裁）
+  void decide_approval(qint64 id, bool approved, const QString& note);
+  // 撤回（申请人专属且仅 pending）
+  void withdraw_approval(qint64 id);
+
  signals:
   void logged_in();
   void login_failed(const QString& reason);
@@ -227,6 +238,10 @@ class FilesClient : public QObject {
   void task_done_set(qint64 id);
   void task_reminded(qint64 id);
   void task_deleted(qint64 id);
+  void approval_created(qint64 id);
+  void approvals_listed(const QJsonArray& mine, const QJsonArray& pending);
+  void approval_decided(qint64 id); // 同意/拒绝共用；终态以列表回查为准
+  void approval_withdrawn(qint64 id);
   // 统一失败通道：op=操作名（"memo.create"/"inbox.upload"/…）、
   // status=HTTP 状态码（0=网络层失败）、error=服务端 error 字段或网络串
   void request_failed(const QString& op, int status, const QString& error);

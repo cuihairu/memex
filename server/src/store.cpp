@@ -206,6 +206,20 @@ bool ServerStore::ensure_schema() {
       "  provider TEXT NOT NULL DEFAULT '',"
       "  ext_key TEXT NOT NULL DEFAULT '');"
       "CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner);"
+      // 二期·审批（请假起步）：四态 pending|approved|rejected|withdrawn
+      //（决定不删改全程留痕；判权在路由层 az——直属上级或无上级 admin 兜底）
+      "CREATE TABLE IF NOT EXISTS approvals ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  applicant TEXT NOT NULL,"
+      "  type TEXT NOT NULL,"
+      "  leave_from TEXT NOT NULL DEFAULT '',"
+      "  leave_to TEXT NOT NULL DEFAULT '',"
+      "  reason TEXT NOT NULL DEFAULT '',"
+      "  status TEXT NOT NULL DEFAULT 'pending',"
+      "  decider TEXT NOT NULL DEFAULT '',"
+      "  decision_note TEXT NOT NULL DEFAULT '',"
+      "  created_ms INTEGER NOT NULL,"
+      "  decided_ms INTEGER NOT NULL DEFAULT 0);"
       // T2.6 组织架构：部门树（parent_id 成树）＋成员资料
       //（直属上级为独立单列——每人至多一名，结构性约束）
       "CREATE TABLE IF NOT EXISTS departments ("
@@ -3611,6 +3625,140 @@ bool ServerStore::co_members(const std::string& a, const std::string& b) {
   sqlite3_bind_text(st, 1, a.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 2, b.c_str(), -1, SQLITE_TRANSIENT);
   const bool ok = sqlite3_step(st) == SQLITE_ROW;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+// —— 二期·审批（请假起步）——
+
+namespace {
+ServerStore::ApprovalRow approval_row_read(sqlite3_stmt* st) {
+  ServerStore::ApprovalRow t;
+  t.id = sqlite3_column_int64(st, 0);
+  t.applicant = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+  t.type = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+  t.leave_from = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+  t.leave_to = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+  t.reason = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+  t.status = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+  t.decider = reinterpret_cast<const char*>(sqlite3_column_text(st, 7));
+  t.decision_note = reinterpret_cast<const char*>(sqlite3_column_text(st, 8));
+  t.created_ms = sqlite3_column_int64(st, 9);
+  t.decided_ms = sqlite3_column_int64(st, 10);
+  return t;
+}
+const char* kApprovalCols =
+    "id, applicant, type, leave_from, leave_to, reason, status, decider,"
+    " decision_note, created_ms, decided_ms";
+} // namespace
+
+std::int64_t ServerStore::approval_create(const std::string& applicant,
+                                          const std::string& type,
+                                          const std::string& leave_from,
+                                          const std::string& leave_to,
+                                          const std::string& reason,
+                                          std::int64_t created_ms) {
+  if (applicant.empty() || type.empty()) return 0;
+  if (!find_account(applicant)) return 0; // 幽灵账号不给建
+  const char* sql =
+      "INSERT INTO approvals(applicant, type, leave_from, leave_to, reason,"
+      " status, created_ms) VALUES(?,?,?,?,?,'pending',?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, applicant.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, type.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, leave_from.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, leave_to.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 5, reason.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 6, created_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok ? sqlite3_last_insert_rowid(db_) : 0;
+}
+
+std::vector<ServerStore::ApprovalRow> ServerStore::approvals_of(
+    const std::string& applicant) {
+  std::vector<ApprovalRow> out;
+  const std::string sql =
+      std::string("SELECT ") + kApprovalCols +
+      " FROM approvals WHERE applicant = ? ORDER BY id DESC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    return out;
+  }
+  sqlite3_bind_text(st, 1, applicant.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) out.push_back(approval_row_read(st));
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::ApprovalRow> ServerStore::approvals_pending() {
+  std::vector<ApprovalRow> out;
+  const std::string sql =
+      std::string("SELECT ") + kApprovalCols +
+      " FROM approvals WHERE status = 'pending' ORDER BY id DESC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    return out;
+  }
+  while (sqlite3_step(st) == SQLITE_ROW) out.push_back(approval_row_read(st));
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::optional<ServerStore::ApprovalRow> ServerStore::approval_by_id(
+    std::int64_t id) {
+  const std::string sql =
+      std::string("SELECT ") + kApprovalCols +
+      " FROM approvals WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_int64(st, 1, id);
+  std::optional<ApprovalRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) out = approval_row_read(st);
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::approval_decide(std::int64_t id, const std::string& decider,
+                                  bool approved, const std::string& note,
+                                  std::int64_t decided_ms) {
+  if (decider.empty()) return false;
+  const char* sql =
+      "UPDATE approvals SET status = ?, decider = ?, decision_note = ?,"
+      " decided_ms = ? WHERE id = ? AND status = 'pending';";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, approved ? "approved" : "rejected", -1,
+                    SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, decider.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, note.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, decided_ms);
+  sqlite3_bind_int64(st, 5, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) == 1; // 非 pending=0 行改动=拒
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::approval_withdraw(std::int64_t id,
+                                    const std::string& applicant) {
+  const char* sql =
+      "UPDATE approvals SET status = 'withdrawn', decided_ms = ?"
+      " WHERE id = ? AND applicant = ? AND status = 'pending';";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, now_ms());
+  sqlite3_bind_int64(st, 2, id);
+  sqlite3_bind_text(st, 3, applicant.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) == 1; // 他人/非 pending=0 行=拒
   sqlite3_finalize(st);
   return ok;
 }

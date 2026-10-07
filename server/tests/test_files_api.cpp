@@ -1956,6 +1956,86 @@ int main() {
                "{\"id\":" + std::to_string(tid) + "}").status == 404);
   }
 
+  // —— 二期·审批（请假起步）：固定模板白名单/审批人=直属上级（无上级
+  //     org-admin 兜底）/四态流转/判权先于状态/全程留痕 ——
+  {
+    // 未登录 401
+    CHECK(http(port, "GET", "/files/approvals", {}, "").status == 401);
+    // 白名单外类型拒；合法类型 200
+    CHECK(http(port, "POST", "/files/approvals", H("member1"),
+               "{\"type\":\"探亲\"}").status == 400);
+    const auto a1 = http(port, "POST", "/files/approvals", H("member1"),
+                         "{\"type\":\"年假\",\"from\":\"2026-10-12\","
+                         "\"to\":\"2026-10-14\",\"reason\":\"家里有事\"}");
+    CHECK(a1.status == 200);
+    const std::int64_t aid = jint(a1.body, "id");
+    // 审批人=直属上级：reporting_set member1→owner1；owner1 待决可见，
+    // 无关者 admin1 列表不见该行（判权不过的行不出现=不泄露存在性）
+    CHECK(store.reporting_set("member1", "owner1", 1));
+    const auto lp = http(port, "GET", "/files/approvals", H("owner1"), "");
+    CHECK(lp.status == 200);
+    CHECK(lp.body.find("\"applicant\":\"member1\"") != std::string::npos);
+    const auto ln = http(port, "GET", "/files/approvals", H("admin1"), "");
+    CHECK(ln.body.find("\"applicant\":\"member1\"") == std::string::npos);
+    // 判权先于状态检查：admin1 对存在申请同口径 403（与不存在者一致）
+    CHECK(http(port, "POST", "/files/approvals/decide", H("admin1"),
+               "{\"id\":" + std::to_string(aid) + ",\"approved\":true}")
+              .status == 403);
+    // 自建自审不成立：member1 决自己的申请 403（申请人≠审批人写死）
+    CHECK(http(port, "POST", "/files/approvals/decide", H("member1"),
+               "{\"id\":" + std::to_string(aid) + ",\"approved\":true}")
+              .status == 403);
+    // 直属上级批准（带意见）；重复决 409（只有 pending 可决）
+    CHECK(http(port, "POST", "/files/approvals/decide", H("owner1"),
+               "{\"id\":" + std::to_string(aid) +
+                   ",\"approved\":true,\"note\":\"同意\"}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/approvals/decide", H("owner1"),
+               "{\"id\":" + std::to_string(aid) + ",\"approved\":true}")
+              .status == 409);
+    const auto arow = store.approval_by_id(aid);
+    CHECK(arow.has_value() && arow->status == "approved" &&
+          arow->decider == "owner1" && arow->decision_note == "同意" &&
+          arow->decided_ms > 0);
+    // 撤回：申请人专属且仅 pending——已决申请撤回 409；pending 新申请
+    // 他人撤 403、自己撤 200；撤后再决 409
+    const auto a2 = http(port, "POST", "/files/approvals", H("member1"),
+                         "{\"type\":\"调休\"}");
+    CHECK(a2.status == 200);
+    const std::int64_t a2id = jint(a2.body, "id");
+    CHECK(http(port, "POST", "/files/approvals/withdraw", H("owner1"),
+               "{\"id\":" + std::to_string(a2id) + "}").status == 403);
+    CHECK(http(port, "POST", "/files/approvals/withdraw", H("member1"),
+               "{\"id\":" + std::to_string(a2id) + "}").status == 200);
+    CHECK(http(port, "POST", "/files/approvals/decide", H("owner1"),
+               "{\"id\":" + std::to_string(a2id) + ",\"approved\":false}")
+              .status == 409);
+    CHECK(store.approval_by_id(a2id)->status == "withdrawn");
+    // org-admin 兜底：无直属上级申请人 outsider → 授 admin1 org-admin
+    // 后可见可决；有上级的申请 admin1 仍不可决（直属上级优先写死）
+    const auto a3 = http(port, "POST", "/files/approvals", H("outsider"),
+                         "{\"type\":\"病假\"}");
+    CHECK(a3.status == 200);
+    const std::int64_t a3id = jint(a3.body, "id");
+    CHECK(store.role_grant("admin1", "org-admin", "", 0, 0, "admin1", 1) > 0);
+    const auto lo = http(port, "GET", "/files/approvals", H("admin1"), "");
+    CHECK(lo.body.find("\"applicant\":\"outsider\"") != std::string::npos);
+    CHECK(http(port, "POST", "/files/approvals/decide", H("admin1"),
+               "{\"id\":" + std::to_string(a3id) + ",\"approved\":true}")
+              .status == 200);
+    // member1 有直属上级（owner1），admin1 即便 org-admin 也只 403
+    const auto a4 = http(port, "POST", "/files/approvals", H("member1"),
+                         "{\"type\":\"事假\"}");
+    CHECK(http(port, "POST", "/files/approvals/decide", H("admin1"),
+               "{\"id\":" + std::to_string(jint(a4.body, "id")) +
+                   ",\"approved\":true}")
+              .status == 403);
+    // 我申请的列表回带终态与审批人（留痕可对账）
+    const auto lm = http(port, "GET", "/files/approvals", H("member1"), "");
+    CHECK(lm.body.find("\"decider\":\"owner1\"") != std::string::npos);
+    CHECK(lm.body.find("withdrawn") != std::string::npos);
+  }
+
   // —— R27-2 外部任务登记：provider/ext_key 成对、个人登记不转派、
   //     列表回带引用（详情 URL 由客户端 SPI 解析，服务端只存引用）——
   {
