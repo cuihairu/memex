@@ -243,7 +243,8 @@
 
 ## 平台化改造（2026-10-04 用户计划书，蓝图=docs/design/基础平台化改造计划（身份-组织-授权-归档）.md）
 
-- [ ] 平台-1 授权统一服务 AuthorizationService：subject/action/resource/context→ALLOW/DENY+reason；数据过滤（Server Query→Filter→Allowed Records）；冲突规则（Explicit Deny>Allow>Inherited>Default）写死——一期必做。
+- [x] 平台-1 授权统一服务 AuthorizationService：subject/action/resource/context→ALLOW/DENY+reason；数据过滤（Server Query→Filter→Allowed Records）；冲突规则（Explicit Deny>Allow>Inherited>Default）写死——一期必做。
+  - 2026-10-07 收口（09a456a；骨架 6fdbee R23-2 已立）：判权三件套前两件随 R23-2 落地——subject/action/resource/context→Decision{allowed,reason}（reason=命中规则名 deny:*/allow:*/inherited:*/default-deny）、冲突规则写死 ExplicitDeny>ExplicitAllow>Inherited>DefaultDeny（白名单口径、同档先注册先匹配）；本笔补第三件数据过滤腿——authz 加 filter_allowed(count, query_for)：对查询结果集逐条构造授权查询裁决，只放行 allowed 记录、返回（原下标→理由）保持查询序，与单点 authorize 同规则桶同顺序不另立口径（蓝图§七：授权在数据访问层生效，不是只在 UI 层）；落地示范=route_list 群分支——群文件列表行级过 file:read（非 normal 态=隔离/过期连元数据一起对全员隐没：ExplicitDeny 先于群主/管理员允许是写死口径的自然推论；成员经继承面见 normal 行；路由级判权仍是第一道、行级是第二道），个人/自有面 personal-owner 全允许行级恒等不过滤（如实注明），被滤时聚合留痕 allowed/filtered 计数。测试：test_files_api 扩平台-1 段（单元：Deny 压 Allow 的行被滤、其余理由=命中规则名＋序保持、context 不匹配全默认拒、单点 authorize 与过滤同源同结果；HTTP：gid2 传两行隔离其一→群主/成员列表只余 normal 行、隔离行 id 全列表不可见），ctest 41/41 全绿。
 - [ ] 平台-2 Identity 模型补全：Credential 独立（Password/Token/Certificate/SSO/Device Credential 预留）、Session 加 device_id/expire/logout_reason、IdentityBinding。
 - [ ] 平台-3 Organization 与授权拆开：Account 拆 Membership/RoleAssignment/ReportingLine 三关联（一人多部门/多角色/临时代理）。
 - [ ] 平台-4 Archive Event Sourcing：Message immutable + MessageEvent append-only（created/delivered/read/recalled/edited）；重投演示可重建。
