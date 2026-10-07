@@ -7,6 +7,7 @@
 // 删群文件、管理员/群主可管、配额任免权）、删除退费与对象引用计数。
 #include <asio.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
@@ -1694,6 +1695,184 @@ int main() {
     CHECK(store.identity_unbind(bid));
     CHECK(!store.identity_find("corp-sso", "alice@corp").has_value());
     CHECK(!store.identity_unbind(bid));
+
+    // —— 平台-3 组织三关联：多部门归属／带时间窗追加授权／汇报线 ——
+    // Membership：一人多部门；重复入拒；幽灵账号/幽灵部门拒；移除落净
+    const int d1 = store.ensure_department_path("公司/研发部");
+    const int d2 = store.ensure_department_path("公司/平台组");
+    CHECK(d1 > 0 && d2 > 0);
+    CHECK(!store.membership_add("ghost", d1, 1)); // 幽灵账号
+    CHECK(!store.membership_add("owner1", 999999, 1)); // 幽灵部门
+    CHECK(store.membership_add("owner1", d1, 1700000100000));
+    CHECK(store.membership_add("owner1", d2, 1700000100001)); // 第二部门
+    CHECK(!store.membership_add("owner1", d1, 2)); // 唯一约束（已入）
+    const auto mems = store.memberships_of("owner1");
+    CHECK(mems.size() == 2);
+    CHECK(mems[0].department_id == d1 && mems[1].department_id == d2);
+    CHECK(mems[0].created_ms == 1700000100000);
+    CHECK(store.membership_remove("owner1", d1));
+    CHECK(!store.membership_remove("owner1", d1)); // 再移=false
+    CHECK(store.memberships_of("owner1").size() == 1);
+    CHECK(store.membership_remove("owner1", d2)); // 清场
+
+    // RoleAssignment：基础角色（accounts.role）∪ 窗内授权；0 端点=不开窗
+    CHECK(store.role_grant("ghost", "admin", "", 0, 0, "root", 1) == 0);
+    CHECK(store.role_grant("owner1", "", "", 0, 0, "root", 1) == 0);
+    CHECK(store.role_grant("owner1", "admin", "", 200, 100, "root", 1) ==
+          0); // 时间窗倒置
+    const std::int64_t now3 = 1700000200000;
+    const auto base_row3 = store.find_account("owner1");
+    CHECK(base_row3.has_value());
+    const std::string base3 = base_row3->role; // 基础角色（accounts.role）
+    const auto rid =
+        store.role_grant("owner1", "admin", "", 0, 0, "admin1", 1);
+    CHECK(rid > 0); // 无窗=恒生效
+    CHECK(store.effective_roles("owner1", now3).size() >= 1);
+    {
+      const auto er = store.effective_roles("owner1", now3);
+      CHECK(std::find(er.begin(), er.end(), "admin") != er.end());
+      CHECK(std::find(er.begin(), er.end(), base3) != er.end()); // 基础仍在
+    }
+    const auto rid2 =
+        store.role_grant("owner1", "auditor", "公司/研发部", now3 + 60000,
+                         now3 + 120000, "admin1", 2); // 临时代理=时间窗
+    CHECK(rid2 > 0);
+    {
+      const auto before = store.effective_roles("owner1", now3);
+      CHECK(std::find(before.begin(), before.end(), "auditor") ==
+            before.end()); // 未生效不含
+      const auto in_win =
+          store.effective_roles("owner1", now3 + 60000);
+      CHECK(std::find(in_win.begin(), in_win.end(), "auditor") !=
+            in_win.end()); // 生效含（from<=at）
+      const auto last_ms =
+          store.effective_roles("owner1", now3 + 119999);
+      CHECK(std::find(last_ms.begin(), last_ms.end(), "auditor") !=
+            last_ms.end());
+      const auto expired = store.effective_roles("owner1", now3 + 120000);
+      CHECK(std::find(expired.begin(), expired.end(), "auditor") ==
+            expired.end()); // 过期不含（until 闭开区间）
+    }
+    const auto ledger = store.role_assignments("owner1");
+    CHECK(ledger.size() == 2); // 台账含过期行（不随窗蒸发）
+    CHECK(ledger[1].role == "auditor" && ledger[1].scope == "公司/研发部");
+    CHECK(ledger[1].granted_by == "admin1");
+    CHECK(store.role_revoke(rid2));
+    CHECK(!store.role_revoke(rid2)); // 再撤=false
+    {
+      const auto after = store.effective_roles("owner1", now3 + 60000);
+      CHECK(std::find(after.begin(), after.end(), "auditor") == after.end());
+    }
+    // 可见性 admin 判定走有效角色：member 授 admin 即得管理员视野
+    CHECK(store.set_visibility("member", "outsider", true, false, ""));
+    {
+      const auto as_member = store.visible_members("member1");
+      bool sees = false;
+      for (const auto& m : as_member)
+        if (m.account == "outsider") sees = true;
+      CHECK(!sees); // 隐藏行对普通成员隐没
+    }
+    const auto mid =
+        store.role_grant("member1", "admin", "", 0, 0, "admin1", 3);
+    CHECK(mid > 0);
+    {
+      const auto as_admin = store.visible_members("member1");
+      bool sees = false;
+      for (const auto& m : as_admin)
+        if (m.account == "outsider") sees = true;
+      CHECK(sees); // 追加授权即得管理员视野
+    }
+    CHECK(store.role_revoke(mid));
+    {
+      const auto as_member2 = store.visible_members("member1");
+      bool sees = false;
+      for (const auto& m : as_member2)
+        if (m.account == "outsider") sees = true;
+      CHECK(!sees); // 撤销即收回
+    }
+    CHECK(store.set_visibility("member", "outsider", false, false, "")); // 清场
+
+    // set_member_profile 双写：dept→memberships replace-set＋镜像列；
+    // manager→reporting 落行＋镜像列（单值视图语义不变）
+    CHECK(store.set_member_profile("member1", d1, "工程师", "admin1"));
+    {
+      const auto ms = store.memberships_of("member1");
+      CHECK(ms.size() == 1 && ms[0].department_id == d1); // 权威表落行
+      const auto p = store.member_profile("member1");
+      CHECK(p.has_value());
+      CHECK(p->department_path == "公司/研发部"); // 镜像列可读
+      CHECK(p->title == "工程师" && p->manager == "admin1");
+    }
+    CHECK(store.manager_chain("member1").front() == "admin1");
+    CHECK(store.set_member_profile("member1", -1, "", "")); // 清场=replace-set 空
+    CHECK(store.memberships_of("member1").empty());
+    CHECK(store.set_member_profile("owner1", -1, "", "")); // 建档（镜像落点）
+
+    // ReportingLine：自为上级/幽灵/成环拒；权威表落行＋镜像同步；
+    // 链路沿新表逐级上溯
+    CHECK(!store.reporting_set("ghost", "member1", 1));
+    CHECK(!store.reporting_set("owner1", "ghost", 1));
+    CHECK(!store.reporting_set("owner1", "owner1", 1)); // 自为上级
+    CHECK(store.reporting_set("owner1", "member1", 1700000300000));
+    CHECK(!store.reporting_set("member1", "owner1", 1)); // 会成环
+    {
+      const auto p = store.member_profile("owner1");
+      CHECK(p.has_value());
+      CHECK(p->manager == "member1"); // 镜像列同步
+    }
+    CHECK(store.manager_chain("owner1").front() == "member1");
+    CHECK(store.reporting_set("member1", "admin1", 1700000300001));
+    const auto chain3 = store.manager_chain("owner1");
+    CHECK(chain3.size() == 2); // member1 → admin1
+    CHECK(chain3[0] == "member1" && chain3[1] == "admin1");
+    CHECK(store.reporting_clear("member1"));
+    CHECK(store.manager_chain("owner1").size() == 1);
+    {
+      const auto p = store.member_profile("owner1");
+      CHECK(p.has_value() && p->manager == "member1");
+    }
+    CHECK(store.reporting_clear("owner1")); // 清场
+    {
+      const auto p = store.member_profile("owner1");
+      CHECK(p.has_value() && p->manager.empty()); // 镜像列同步清除
+    }
+    CHECK(store.manager_chain("owner1").empty());
+
+    // 老库迁移（幂等）：member_profiles 单列部门/上级 → 三关联权威表
+    const std::string legacy_db3 =
+        "memex_test_legacy3_" + std::to_string(::getpid()) + ".db";
+    std::remove(legacy_db3.c_str());
+    sqlite3* raw3 = nullptr;
+    CHECK(sqlite3_open(legacy_db3.c_str(), &raw3) == SQLITE_OK);
+    char* err3 = nullptr;
+    sqlite3_exec(
+        raw3,
+        "CREATE TABLE accounts (account TEXT PRIMARY KEY,"
+        " display_name TEXT NOT NULL, salt TEXT NOT NULL,"
+        " digest TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member',"
+        " created_ms INTEGER NOT NULL);"
+        "CREATE TABLE member_profiles (account TEXT PRIMARY KEY,"
+        " department_id INTEGER, title TEXT NOT NULL DEFAULT '',"
+        " manager TEXT NOT NULL DEFAULT '', updated_ms INTEGER NOT NULL);"
+        "INSERT INTO accounts VALUES('old1','旧号','s','d','member',"
+        "1700000000000);"
+        "INSERT INTO accounts VALUES('old2','旧号2','s','d','member',"
+        "1700000000000);"
+        "INSERT INTO member_profiles VALUES('old1',7,'工程师','old2',"
+        "1700000001000);",
+        nullptr, nullptr, &err3);
+    CHECK(err3 == nullptr);
+    sqlite3_close(raw3);
+    {
+      memex::server::ServerStore lst3;
+      CHECK(lst3.open(legacy_db3)); // ensure_schema 迁移单值列进三关联
+      const auto migs = lst3.memberships_of("old1");
+      CHECK(migs.size() == 1 && migs[0].department_id == 7);
+      CHECK(lst3.manager_chain("old1").size() == 1);
+      // 迁移不镜改原行（单值视图仍可读）
+      CHECK(lst3.role_assignments().empty()); // 授权台账不动老数据
+    }
+    std::remove(legacy_db3.c_str());
   }
 
   // —— 存储未配置：面在、字节面 503、元数据面照常 ——

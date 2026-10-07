@@ -464,6 +464,45 @@ bool ServerStore::ensure_schema() {
       "  logout_reason TEXT NOT NULL DEFAULT '');"
       "CREATE INDEX IF NOT EXISTS idx_sessions_account"
       " ON sessions(account, created_ms);"
+      // —— 平台-3 三关联（Membership/RoleAssignment/ReportingLine）：
+      //     一人多部门、多角色（临时代理=带时间窗的授权）、直属上级
+      //     独立成表（沿用每人至多一名）——
+      "CREATE TABLE IF NOT EXISTS org_memberships ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  account TEXT NOT NULL,"
+      "  department_id INTEGER NOT NULL,"
+      "  created_ms INTEGER NOT NULL,"
+      "  UNIQUE(account, department_id));"
+      "CREATE INDEX IF NOT EXISTS idx_org_memberships_dept"
+      " ON org_memberships(department_id);"
+      "CREATE TABLE IF NOT EXISTS org_role_assignments ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  account TEXT NOT NULL,"
+      "  role TEXT NOT NULL,"
+      "  scope TEXT NOT NULL DEFAULT '',"
+      "  valid_from_ms INTEGER NOT NULL DEFAULT 0,"
+      "  valid_until_ms INTEGER NOT NULL DEFAULT 0,"
+      "  granted_by TEXT NOT NULL DEFAULT '',"
+      "  created_ms INTEGER NOT NULL);"
+      "CREATE INDEX IF NOT EXISTS idx_org_roles_account"
+      " ON org_role_assignments(account, role);"
+      "CREATE TABLE IF NOT EXISTS org_reporting_lines ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  account TEXT NOT NULL UNIQUE,"
+      "  manager_account TEXT NOT NULL,"
+      "  created_ms INTEGER NOT NULL);"
+      // 老库迁移（幂等）：member_profiles 单列部门/上级 → 三关联
+      "INSERT INTO org_memberships(account, department_id, created_ms)"
+      " SELECT account, department_id, updated_ms FROM member_profiles"
+      " WHERE department_id IS NOT NULL AND NOT EXISTS"
+      " (SELECT 1 FROM org_memberships m"
+      "  WHERE m.account = member_profiles.account"
+      "  AND m.department_id = member_profiles.department_id);"
+      "INSERT INTO org_reporting_lines(account, manager_account, created_ms)"
+      " SELECT account, manager, updated_ms FROM member_profiles"
+      " WHERE manager != '' AND NOT EXISTS"
+      " (SELECT 1 FROM org_reporting_lines l"
+      "  WHERE l.account = member_profiles.account);"
       // 老库迁移：accounts 内联口令 → credentials（幂等：已有行不重迁）
       "INSERT INTO credentials(account, type, salt, digest, created_ms)"
       " SELECT account, 'password', salt, digest, created_ms FROM accounts"
@@ -1525,19 +1564,123 @@ bool ServerStore::set_member_profile(const std::string& account,
       " ON CONFLICT(account) DO UPDATE SET department_id = excluded.department_id,"
       " title = excluded.title, manager = excluded.manager,"
       " updated_ms = excluded.updated_ms;";
-  sqlite3_stmt* st = nullptr;
-  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
-  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
-  if (department_id < 0) {
-    sqlite3_bind_null(st, 2);
-  } else {
-    sqlite3_bind_int(st, 2, department_id);
+  if (!find_account(account)) return false;           // 账号不存在
+  if (manager == account) return false;               // 不得自为上级
+  if (!manager.empty() && !find_account(manager)) {
+    return false;                                     // 上级账号不存在
   }
-  sqlite3_bind_text(st, 3, title.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_text(st, 4, manager.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_int64(st, 5, now_ms());
-  const bool ok = sqlite3_step(st) == SQLITE_DONE;
-  sqlite3_finalize(st);
+  if (!manager.empty()) {
+    // 环校验：从拟设上级沿权威表链路上溯，若回到本人则构成环
+    std::string cur = manager;
+    std::set<std::string> seen;
+    while (!cur.empty() && cur != account) {
+      if (!seen.insert(cur).second) break; // 既有环防御，止步
+      sqlite3_stmt* s = nullptr;
+      if (sqlite3_prepare_v2(
+              db_,
+              "SELECT manager_account FROM org_reporting_lines"
+              " WHERE account = ?;",
+              -1, &s, nullptr) != SQLITE_OK)
+        return false;
+      sqlite3_bind_text(s, 1, cur.c_str(), -1, SQLITE_TRANSIENT);
+      std::string next;
+      if (sqlite3_step(s) == SQLITE_ROW &&
+          sqlite3_column_type(s, 0) != SQLITE_NULL) {
+        next = reinterpret_cast<const char*>(sqlite3_column_text(s, 0));
+      }
+      sqlite3_finalize(s);
+      if (next == account) return false; // 链路回到本人：环
+      cur = next;
+    }
+  }
+  // 平台-3：三关联权威表与单值镜像同事务写（member_profiles 的
+  // department_id/manager 列=单值视图，消费者 member_profile/manager_chain
+  // 不改语义；多部门/链路独立维护走 membership_*/reporting_*）。
+  // SAVEPOINT 而非 BEGIN：import_members 在外层事务内逐行调用本函数
+  char* tx = nullptr;
+  if (sqlite3_exec(db_, "SAVEPOINT mprof;", nullptr, nullptr, &tx) !=
+      SQLITE_OK) {
+    sqlite3_free(tx);
+    return false;
+  }
+  bool ok = true;
+  {
+    sqlite3_stmt* d = nullptr;
+    ok = sqlite3_prepare_v2(db_,
+                            "DELETE FROM org_memberships WHERE account = ?;",
+                            -1, &d, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(d, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+      ok = sqlite3_step(d) == SQLITE_DONE;
+    }
+    sqlite3_finalize(d);
+  }
+  if (ok && department_id >= 0) {
+    sqlite3_stmt* i = nullptr;
+    ok = sqlite3_prepare_v2(
+             db_,
+             "INSERT INTO org_memberships(account, department_id, created_ms)"
+             " VALUES(?,?,?);",
+             -1, &i, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(i, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int(i, 2, department_id);
+      sqlite3_bind_int64(i, 3, now_ms());
+      ok = sqlite3_step(i) == SQLITE_DONE;
+    }
+    sqlite3_finalize(i);
+  }
+  if (ok) {
+    sqlite3_stmt* r = nullptr;
+    ok = sqlite3_prepare_v2(
+             db_,
+             "DELETE FROM org_reporting_lines WHERE account = ?;",
+             -1, &r, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(r, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+      ok = sqlite3_step(r) == SQLITE_DONE;
+    }
+    sqlite3_finalize(r);
+  }
+  if (ok && !manager.empty()) {
+    sqlite3_stmt* i = nullptr;
+    ok = sqlite3_prepare_v2(
+             db_,
+             "INSERT INTO org_reporting_lines(account, manager_account,"
+             " created_ms) VALUES(?,?,?);",
+             -1, &i, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(i, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(i, 2, manager.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64(i, 3, now_ms());
+      ok = sqlite3_step(i) == SQLITE_DONE;
+    }
+    sqlite3_finalize(i);
+  }
+  if (ok) {
+    sqlite3_stmt* st = nullptr;
+    ok = sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+      if (department_id < 0) {
+        sqlite3_bind_null(st, 2);
+      } else {
+        sqlite3_bind_int(st, 2, department_id);
+      }
+      sqlite3_bind_text(st, 3, title.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, 4, manager.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64(st, 5, now_ms());
+      ok = sqlite3_step(st) == SQLITE_DONE;
+    }
+    sqlite3_finalize(st);
+  }
+  if (ok) {
+    ok = sqlite3_exec(db_, "RELEASE mprof;", nullptr, nullptr, &tx) == SQLITE_OK;
+  } else {
+    sqlite3_exec(db_, "ROLLBACK TO mprof;", nullptr, nullptr, &tx);
+    sqlite3_exec(db_, "RELEASE mprof;", nullptr, nullptr, &tx);
+  }
+  sqlite3_free(tx);
   return ok;
 }
 
@@ -1603,14 +1746,322 @@ std::vector<std::string> ServerStore::manager_chain(
   std::vector<std::string> chain;
   std::set<std::string> seen{account};
   std::string cur = account;
+  // 平台-3：沿权威表 org_reporting_lines 逐级上溯（镜像列不入链路判定）
   while (true) {
-    const auto p = member_profile(cur);
-    if (!p || p->manager.empty()) break;
-    if (!seen.insert(p->manager).second) break; // 环防御
-    chain.push_back(p->manager);
-    cur = p->manager;
+    sqlite3_stmt* s = nullptr;
+    if (sqlite3_prepare_v2(
+            db_,
+            "SELECT manager_account FROM org_reporting_lines"
+            " WHERE account = ?;",
+            -1, &s, nullptr) != SQLITE_OK)
+      break;
+    sqlite3_bind_text(s, 1, cur.c_str(), -1, SQLITE_TRANSIENT);
+    std::string next;
+    if (sqlite3_step(s) == SQLITE_ROW &&
+        sqlite3_column_type(s, 0) != SQLITE_NULL) {
+      next = reinterpret_cast<const char*>(sqlite3_column_text(s, 0));
+    }
+    sqlite3_finalize(s);
+    if (next.empty()) break;
+    if (!seen.insert(next).second) break; // 环防御
+    chain.push_back(next);
+    cur = next;
   }
   return chain;
+}
+
+// —— 平台-3：组织三关联（成员/授权/汇报线）——
+
+bool ServerStore::membership_add(const std::string& account, int department_id,
+                                 std::int64_t ts_ms) {
+  if (!find_account(account).has_value()) return false;
+  if (department_id < 0) return false;
+  sqlite3_stmt* d = nullptr;
+  if (sqlite3_prepare_v2(db_, "SELECT 1 FROM departments WHERE id = ?;", -1,
+                         &d, nullptr) != SQLITE_OK)
+    return false;
+  sqlite3_bind_int(d, 1, department_id);
+  const bool dept_ok = sqlite3_step(d) == SQLITE_ROW;
+  sqlite3_finalize(d);
+  if (!dept_ok) return false;
+  const char* sql =
+      "INSERT INTO org_memberships(account, department_id, created_ms)"
+      " VALUES(?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 2, department_id);
+  sqlite3_bind_int64(st, 3, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE; // 唯一冲突（已入）→ false
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::membership_remove(const std::string& account,
+                                    int department_id) {
+  const char* sql =
+      "DELETE FROM org_memberships WHERE account = ? AND department_id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 2, department_id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ServerStore::OrgMembership> ServerStore::memberships_of(
+    const std::string& account) {
+  std::vector<OrgMembership> out;
+  const char* sql =
+      "SELECT id, account, department_id, created_ms FROM org_memberships"
+      " WHERE account = ? ORDER BY id;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    OrgMembership m;
+    m.id = sqlite3_column_int64(st, 0);
+    m.account = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    m.department_id = sqlite3_column_int(st, 2);
+    m.created_ms = sqlite3_column_int64(st, 3);
+    out.push_back(std::move(m));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::int64_t ServerStore::role_grant(const std::string& account,
+                                     const std::string& role,
+                                     const std::string& scope,
+                                     std::int64_t valid_from_ms,
+                                     std::int64_t valid_until_ms,
+                                     const std::string& granted_by,
+                                     std::int64_t ts_ms) {
+  if (!find_account(account).has_value()) return 0;
+  if (role.empty()) return 0;
+  // 时间窗倒置拒（0 端点=不开窗不参与比较）
+  if (valid_from_ms > 0 && valid_until_ms > 0 && valid_from_ms >= valid_until_ms)
+    return 0;
+  const char* sql =
+      "INSERT INTO org_role_assignments(account, role, scope, valid_from_ms,"
+      " valid_until_ms, granted_by, created_ms) VALUES(?,?,?,?,?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, role.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, scope.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, valid_from_ms);
+  sqlite3_bind_int64(st, 5, valid_until_ms);
+  sqlite3_bind_text(st, 6, granted_by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 7, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok ? sqlite3_last_insert_rowid(db_) : 0;
+}
+
+bool ServerStore::role_revoke(std::int64_t id) {
+  const char* sql = "DELETE FROM org_role_assignments WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<std::string> ServerStore::effective_roles(
+    const std::string& account, std::int64_t at_ms) {
+  std::vector<std::string> out;
+  // 基础角色（accounts.role）
+  sqlite3_stmt* b = nullptr;
+  if (sqlite3_prepare_v2(db_, "SELECT role FROM accounts WHERE account = ?;",
+                         -1, &b, nullptr) == SQLITE_OK) {
+    sqlite3_bind_text(b, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(b) == SQLITE_ROW && sqlite3_column_type(b, 0) != SQLITE_NULL) {
+      out.push_back(reinterpret_cast<const char*>(sqlite3_column_text(b, 0)));
+    }
+    sqlite3_finalize(b);
+  }
+  // 窗内追加授权：from=0 不设下界；until=0 不设上界；否则 from<=at<until
+  sqlite3_stmt* st = nullptr;
+  const char* sql =
+      "SELECT role FROM org_role_assignments WHERE account = ?"
+      " AND (valid_from_ms = 0 OR valid_from_ms <= ?)"
+      " AND (valid_until_ms = 0 OR ? < valid_until_ms) ORDER BY id;";
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 2, at_ms);
+  sqlite3_bind_int64(st, 3, at_ms);
+  std::set<std::string> seen(out.begin(), out.end());
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    if (sqlite3_column_type(st, 0) == SQLITE_NULL) continue;
+    std::string role = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    if (role.empty() || !seen.insert(role).second) continue;
+    out.push_back(std::move(role));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::RoleAssignment> ServerStore::role_assignments(
+    const std::string& account) {
+  std::vector<RoleAssignment> out;
+  std::string sql =
+      "SELECT id, account, role, scope, valid_from_ms, valid_until_ms,"
+      " granted_by, created_ms FROM org_role_assignments";
+  if (!account.empty()) sql += " WHERE account = ?";
+  sql += " ORDER BY id;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK)
+    return out;
+  if (!account.empty())
+    sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    RoleAssignment r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.account = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.role = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.scope = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    r.valid_from_ms = sqlite3_column_int64(st, 4);
+    r.valid_until_ms = sqlite3_column_int64(st, 5);
+    r.granted_by = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    r.created_ms = sqlite3_column_int64(st, 7);
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::reporting_set(const std::string& account,
+                                const std::string& manager,
+                                std::int64_t ts_ms) {
+  if (!find_account(account).has_value()) return false;
+  if (manager.empty() || manager == account) return false; // 自为上级拒
+  if (!find_account(manager).has_value()) return false;
+  // 环校验：manager 的上游链不得回到 account（沿权威表走）
+  {
+    std::set<std::string> seen{account};
+    std::string cur = manager;
+    int guard = 0;
+    while (!cur.empty() && guard++ < 256) {
+      if (!seen.insert(cur).second) return false; // manager 已在环上
+      if (cur == account) return false;
+      sqlite3_stmt* s = nullptr;
+      if (sqlite3_prepare_v2(
+              db_,
+              "SELECT manager_account FROM org_reporting_lines"
+              " WHERE account = ?;",
+              -1, &s, nullptr) != SQLITE_OK)
+        return false;
+      sqlite3_bind_text(s, 1, cur.c_str(), -1, SQLITE_TRANSIENT);
+      std::string next;
+      if (sqlite3_step(s) == SQLITE_ROW &&
+          sqlite3_column_type(s, 0) != SQLITE_NULL) {
+        next = reinterpret_cast<const char*>(sqlite3_column_text(s, 0));
+      }
+      sqlite3_finalize(s);
+      cur = next;
+    }
+  }
+  char* tx = nullptr;
+  if (sqlite3_exec(db_, "SAVEPOINT rpt;", nullptr, nullptr, &tx) != SQLITE_OK) {
+    sqlite3_free(tx);
+    return false;
+  }
+  bool ok = true;
+  {
+    sqlite3_stmt* d = nullptr;
+    ok = sqlite3_prepare_v2(
+             db_, "DELETE FROM org_reporting_lines WHERE account = ?;", -1, &d,
+             nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(d, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+      ok = sqlite3_step(d) == SQLITE_DONE;
+    }
+    sqlite3_finalize(d);
+  }
+  if (ok) {
+    sqlite3_stmt* i = nullptr;
+    ok = sqlite3_prepare_v2(
+             db_,
+             "INSERT INTO org_reporting_lines(account, manager_account,"
+             " created_ms) VALUES(?,?,?);",
+             -1, &i, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(i, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(i, 2, manager.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64(i, 3, ts_ms);
+      ok = sqlite3_step(i) == SQLITE_DONE;
+    }
+    sqlite3_finalize(i);
+  }
+  if (ok) { // 镜像列同步（有档案才更；无档案不建档）
+    sqlite3_stmt* u = nullptr;
+    ok = sqlite3_prepare_v2(
+             db_,
+             "UPDATE member_profiles SET manager = ?, updated_ms = ?"
+             " WHERE account = ?;",
+             -1, &u, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(u, 1, manager.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_int64(u, 2, now_ms());
+      sqlite3_bind_text(u, 3, account.c_str(), -1, SQLITE_TRANSIENT);
+      ok = sqlite3_step(u) == SQLITE_DONE;
+    }
+    sqlite3_finalize(u);
+  }
+  if (ok) {
+    ok = sqlite3_exec(db_, "RELEASE rpt;", nullptr, nullptr, &tx) == SQLITE_OK;
+  } else {
+    sqlite3_exec(db_, "ROLLBACK TO rpt;", nullptr, nullptr, &tx);
+    sqlite3_exec(db_, "RELEASE rpt;", nullptr, nullptr, &tx);
+  }
+  sqlite3_free(tx);
+  return ok;
+}
+
+bool ServerStore::reporting_clear(const std::string& account) {
+  if (!find_account(account).has_value()) return false;
+  char* tx = nullptr;
+  if (sqlite3_exec(db_, "SAVEPOINT rpt;", nullptr, nullptr, &tx) != SQLITE_OK) {
+    sqlite3_free(tx);
+    return false;
+  }
+  bool ok = true;
+  {
+    sqlite3_stmt* d = nullptr;
+    ok = sqlite3_prepare_v2(
+             db_, "DELETE FROM org_reporting_lines WHERE account = ?;", -1, &d,
+             nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_text(d, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+      ok = sqlite3_step(d) == SQLITE_DONE;
+    }
+    sqlite3_finalize(d);
+  }
+  if (ok) { // 镜像列同步（有档案才清；无档案不动）
+    sqlite3_stmt* u = nullptr;
+    ok = sqlite3_prepare_v2(
+             db_,
+             "UPDATE member_profiles SET manager = '', updated_ms = ?"
+             " WHERE account = ?;",
+             -1, &u, nullptr) == SQLITE_OK;
+    if (ok) {
+      sqlite3_bind_int64(u, 1, now_ms());
+      sqlite3_bind_text(u, 2, account.c_str(), -1, SQLITE_TRANSIENT);
+      ok = sqlite3_step(u) == SQLITE_DONE;
+    }
+    sqlite3_finalize(u);
+  }
+  if (ok) {
+    ok = sqlite3_exec(db_, "RELEASE rpt;", nullptr, nullptr, &tx) == SQLITE_OK;
+  } else {
+    sqlite3_exec(db_, "ROLLBACK TO rpt;", nullptr, nullptr, &tx);
+    sqlite3_exec(db_, "RELEASE rpt;", nullptr, nullptr, &tx);
+  }
+  sqlite3_free(tx);
+  return ok;
 }
 
 OrgImportResult ServerStore::import_members(
@@ -1879,9 +2330,11 @@ std::vector<MemberProfile> ServerStore::visible_members(
     const std::string& viewer) {
   VisCtx ctx;
   ctx.rows = visibility_list();
+  // 平台-3：admin 判定走有效角色（基础 ∪ 窗内追加授权）
+  const auto vroles = effective_roles(viewer, now_ms());
+  ctx.is_admin = std::find(vroles.begin(), vroles.end(), "admin") != vroles.end();
   if (const auto vprof = member_profile(viewer)) {
     ctx.vdept = vprof->department_path;
-    ctx.is_admin = vprof->role == "admin";
   }
   for (const auto& a : visibility_allows()) {
     if (a.viewer == viewer) ctx.allows.insert(a.target);
@@ -1970,9 +2423,10 @@ std::vector<std::pair<int, std::string>> ServerStore::visible_departments(
   //（客户端按全路径成树，链缺一级成员就挂不上）
   VisCtx ctx;
   ctx.rows = visibility_list();
+  const auto vroles = effective_roles(viewer, now_ms());
+  ctx.is_admin = std::find(vroles.begin(), vroles.end(), "admin") != vroles.end();
   if (const auto vprof = member_profile(viewer)) {
     ctx.vdept = vprof->department_path;
-    ctx.is_admin = vprof->role == "admin";
   }
   for (const auto& a : visibility_allows()) {
     if (a.viewer == viewer) ctx.allows.insert(a.target);

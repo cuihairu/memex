@@ -748,6 +748,15 @@ int cmd_audit(int argc, char** argv, const std::string& db_path) {
 //   org set <账号> [--dept 路径] [--title 职务] [--manager 账号|none]
 //   org import <CSV>               批量导入（账号,部门,职务,直属上级；
 //                                  错误行校验拒绝并报告行号）
+// 平台-3 组织三关联（权威表多值/带时间窗，member_profiles 单值列作镜像）：
+//   org membership add|remove <账号> <部门路径> | list <账号>
+//                                  多部门归属（org_memberships）
+//   org role grant <账号> <role> [--scope 路径] [--from 毫秒]
+//       [--until 毫秒] [--by 操作者] | revoke <id> | list [账号]
+//                                  追加授权台账（org_role_assignments；
+//                                  有效角色=基础∪窗内授权）
+//   org reporting set <账号> <上级账号> | clear <账号>
+//                                  汇报线（org_reporting_lines；环防御）
 // 通讯录可见性（T4.6）：
 //   org hide/unhide <账号>         成员隐藏／恢复（管理员、本人与白名单仍可见）
 //   org dept hide/unhide <路径>    部门整树隐藏（部门内自己人仍互见）
@@ -758,7 +767,9 @@ int cmd_audit(int argc, char** argv, const std::string& db_path) {
 int cmd_org(int argc, char** argv, const std::string& db_path) {
   if (argc < 1) {
     std::cerr << "用法：memex_server org dept add <路径> | dept list | "
-                 "member <账号> | set … | import <CSV> | hide/unhide <账号> | "
+                 "member <账号> | set … | import <CSV> | "
+                 "membership add|remove|list … | role grant|revoke|list … | "
+                 "reporting set|clear <账号> <上级> | hide/unhide <账号> | "
                  "dept hide|restrict <路径> | fields … | allow/disallow … | "
                  "visibility list [--db <库>]\n";
     return 2;
@@ -835,17 +846,31 @@ int cmd_org(int argc, char** argv, const std::string& db_path) {
       return 2;
     }
     const auto p = store.member_profile(argv[1]);
-    if (!p) {
+    const auto mems = store.memberships_of(argv[1]);
+    if (!p && mems.empty()) {
       std::cerr << "成员未建档：" << argv[1] << "\n";
       return 1;
     }
-    std::cout << "账号：" << p->account << "（" << p->display_name << "）\n"
-              << "部门：" << (p->department_path.empty() ? "（未分配）"
-                                                         : p->department_path)
-              << "\n职务：" << (p->title.empty() ? "（无）" : p->title) << "\n"
-              << "直属上级：" << (p->manager.empty() ? "（无）" : p->manager)
-              << "\n";
+    // 平台-3：部门列权威表多值（无档案行也有归属视图）；其余单值走镜像列
+    if (p) {
+      std::cout << "账号：" << p->account << "（" << p->display_name << "）\n";
+    } else {
+      std::cout << "账号：" << mems.front().account << "（无档案）\n";
+    }
+    if (mems.empty()) {
+      std::cout << "部门：（未分配）\n";
+    } else {
+      std::cout << "部门：";
+      for (std::size_t i = 0; i < mems.size(); ++i)
+        std::cout << (i ? "、" : "") << store.department_path(
+                                            mems[i].department_id);
+      std::cout << "\n";
+    }
     const auto chain = store.manager_chain(argv[1]);
+    std::cout << "职务："
+              << (p && !p->title.empty() ? p->title : "（无）") << "\n"
+              << "直属上级："
+              << (chain.empty() ? "（无）" : chain.front()) << "\n";
     if (!chain.empty()) {
       std::cout << "上级链路（逐级上溯）：";
       for (std::size_t i = 0; i < chain.size(); ++i) {
@@ -853,7 +878,167 @@ int cmd_org(int argc, char** argv, const std::string& db_path) {
       }
       std::cout << "\n";
     }
+    const auto eff = store.effective_roles(argv[1],
+                                           std::chrono::duration_cast<
+                                               std::chrono::milliseconds>(
+                                               std::chrono::system_clock::
+                                                   now()
+                                                       .time_since_epoch())
+                                               .count());
+    std::cout << "有效角色：";
+    for (std::size_t i = 0; i < eff.size(); ++i)
+      std::cout << (i ? "、" : "") << eff[i];
+    std::cout << "\n";
     return 0;
+  }
+
+  // —— 平台-3：组织三关联（多部门归属／追加授权／汇报线独立维护）——
+  if (sub == "membership") {
+    // 用法：org membership add|remove <账号> <部门路径> | list <账号>
+    const auto dept_id_by_path =
+        [&store](const std::string& path) -> int {
+      for (const auto& [id, p] : store.department_list())
+        if (p == path) return id;
+      return -1;
+    };
+    if (argc >= 4 && std::string_view(argv[1]) == "add") {
+      const int id = store.ensure_department_path(argv[3]);
+      if (id < 0) {
+        std::cerr << "部门路径非法：" << argv[3] << "\n";
+        return 1;
+      }
+      const std::int64_t ts =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count();
+      if (!store.membership_add(argv[2], id, ts)) {
+        std::cerr << "归属失败（账号不存在或已在该部门）：" << argv[2]
+                  << " → " << argv[3] << "\n";
+        return 1;
+      }
+      std::cout << "已加入部门：" << argv[2] << " → " << argv[3]
+                << "（id " << id << "）\n";
+      return 0;
+    }
+    if (argc >= 4 && std::string_view(argv[1]) == "remove") {
+      const int id = dept_id_by_path(argv[3]);
+      if (id < 0 || !store.membership_remove(argv[2], id)) {
+        std::cerr << "移除失败（部门或归属不存在）：" << argv[2] << " × "
+                  << argv[3] << "\n";
+        return 1;
+      }
+      std::cout << "已移出部门：" << argv[2] << " × " << argv[3] << "\n";
+      return 0;
+    }
+    if (argc >= 3 && std::string_view(argv[1]) == "list") {
+      for (const auto& m : store.memberships_of(argv[2])) {
+        std::cout << m.id << '\t' << m.account << '\t'
+                  << store.department_path(m.department_id) << '\t'
+                  << m.created_ms << '\n';
+      }
+      return 0;
+    }
+    std::cerr << "用法：org membership add|remove <账号> <部门路径> | "
+                 "list <账号>\n";
+    return 2;
+  }
+
+  if (sub == "role") {
+    // 用法：org role grant <账号> <role> [--scope 路径] [--from 毫秒]
+    //            [--until 毫秒] [--by 操作者] | revoke <id> | list [账号]
+    if (argc >= 2 && std::string_view(argv[1]) == "grant") {
+      if (argc < 4) {
+        std::cerr << "用法：org role grant <账号> <role> [--scope 路径] "
+                     "[--from 毫秒] [--until 毫秒] [--by 操作者]\n";
+        return 2;
+      }
+      std::string scope, by;
+      std::int64_t from = 0, until = 0;
+      for (int i = 4; i + 1 < argc; i += 2) {
+        const std::string_view flag = argv[i];
+        const char* val = argv[i + 1];
+        if (flag == "--scope") scope = val;
+        else if (flag == "--from") from = std::strtoll(val, nullptr, 10);
+        else if (flag == "--until") until = std::strtoll(val, nullptr, 10);
+        else if (flag == "--by") by = val;
+      }
+      const std::int64_t ts =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count();
+      const std::int64_t id = store.role_grant(argv[2], argv[3], scope, from,
+                                               until, by, ts);
+      if (id == 0) {
+        std::cerr << "授权失败（账号不存在、role 为空或时间窗倒置）\n";
+        return 1;
+      }
+      std::cout << "已授权：" << argv[2] << " ← " << argv[3]
+                << (scope.empty() ? "" : "（scope " + scope + "）")
+                << "（台账 id " << id << "）\n";
+      return 0;
+    }
+    if (argc >= 3 && std::string_view(argv[1]) == "revoke") {
+      if (!store.role_revoke(std::strtoll(argv[2], nullptr, 10))) {
+        std::cerr << "撤销失败（台账 id 不存在）：" << argv[2] << "\n";
+        return 1;
+      }
+      std::cout << "已撤销授权台账：" << argv[2] << "\n";
+      return 0;
+    }
+    if (argc >= 2 && std::string_view(argv[1]) == "list") {
+      const std::string only = argc >= 3 ? argv[2] : "";
+      const std::int64_t now =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count();
+      std::cout << "id\t账号\t角色\tscope\t生效自\t生效至\t授予人\t状态\n";
+      for (const auto& r : store.role_assignments(only)) {
+        const bool active =
+            (r.valid_from_ms == 0 || r.valid_from_ms <= now) &&
+            (r.valid_until_ms == 0 || now < r.valid_until_ms);
+        std::cout << r.id << '\t' << r.account << '\t' << r.role << '\t'
+                  << (r.scope.empty() ? "（全scope）" : r.scope) << '\t'
+                  << (r.valid_from_ms == 0 ? "（即起）"
+                                           : std::to_string(r.valid_from_ms))
+                  << '\t'
+                  << (r.valid_until_ms == 0 ? "（无限）"
+                                            : std::to_string(r.valid_until_ms))
+                  << '\t' << (r.granted_by.empty() ? "（未记）" : r.granted_by)
+                  << '\t' << (active ? "生效中" : "未生效/已过期") << '\n';
+      }
+      return 0;
+    }
+    std::cerr << "用法：org role grant <账号> <role> [--scope 路径] "
+                 "[--from 毫秒] [--until 毫秒] [--by 操作者] | "
+                 "revoke <id> | list [账号]\n";
+    return 2;
+  }
+
+  if (sub == "reporting") {
+    // 用法：org reporting set <账号> <上级账号> | clear <账号>
+    if (argc >= 4 && std::string_view(argv[1]) == "set") {
+      const std::int64_t ts =
+          std::chrono::duration_cast<std::chrono::milliseconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count();
+      if (!store.reporting_set(argv[2], argv[3], ts)) {
+        std::cerr << "设置失败（账号不存在、自为上级或会成环）："
+                  << argv[2] << " → " << argv[3] << "\n";
+        return 1;
+      }
+      std::cout << "已设直属上级：" << argv[2] << " → " << argv[3] << "\n";
+      return 0;
+    }
+    if (argc >= 3 && std::string_view(argv[1]) == "clear") {
+      if (!store.reporting_clear(argv[2])) {
+        std::cerr << "清除失败（账号不存在）：" << argv[2] << "\n";
+        return 1;
+      }
+      std::cout << "已清直属上级：" << argv[2] << "\n";
+      return 0;
+    }
+    std::cerr << "用法：org reporting set <账号> <上级账号> | clear <账号>\n";
+    return 2;
   }
 
   // —— T4.6 通讯录可见性（成员级）：隐藏／敏感字段／白名单例外 ——
