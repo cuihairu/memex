@@ -728,6 +728,28 @@ public:
   // 直接下属（org_reporting_lines 反查：manager_account=? 去重）
   std::vector<std::string> direct_reports(const std::string& manager);
 
+  // —— 二期·办公室位置图（设计稿 docs/design/办公室位置图.md）——
+  // 抽象平面（网格归一化坐标 0~1，不画真实底图）；工位即楼层归属
+  //（本人楼层=本人占用工位所在楼层，不从部门推导）；编辑权 org-admin
+  //（az office:manage 在路由层裁）
+  struct SeatRow {
+    std::int64_t id{0};
+    std::string floor;      // 楼层号（"3F"）
+    std::string label;      // 工位号（UNIQUE(floor,label)）
+    double x{0};            // 归一化坐标 0~1
+    double y{0};
+    std::string account;    // 占用者（空=空位；一人一工位=部分唯一索引）
+  };
+  // 建/改位（拖拽落位即 upsert；UNIQUE(floor,label) 冲突=改坐标）→ id
+  std::int64_t seat_upsert(const std::string& floor, const std::string& label,
+                           double x, double y, std::int64_t ts_ms);
+  bool seat_delete(std::int64_t id);
+  // 绑定/解绑占用者（account 空=解绑；幽灵拒；一人一工位=换座先解绑）
+  bool seat_bind(std::int64_t id, const std::string& account,
+                 std::int64_t ts_ms);
+  std::vector<SeatRow> seats_on_floor(const std::string& floor);
+  std::optional<SeatRow> seat_of(const std::string& account);
+
   // —— T4.2 跨态会话 ——
   // 建立（start）：插入一行进行中记录（同会话重复 start 只记首条）。
   bool cross_log_start(const std::string& account,

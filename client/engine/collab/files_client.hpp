@@ -199,6 +199,17 @@ class FilesClient : public QObject {
   // 查阅日志（台账自阅，同样持证）
   void fetch_audit_reads();
 
+  // —— 办公室位置图（二期 /files/office-map）——
+  // 看平面（floor 空=自楼层；org-admin 可指定层；回包含 can_manage）
+  void fetch_office_map(const QString& floor = QString());
+  // 建/改位（拖拽落位即 upsert；坐标归一化 0~1，服务端夹越界）
+  void save_office_seat(const QString& floor, const QString& label, double x,
+                        double y);
+  // 删工位（org-admin）
+  void delete_office_seat(qint64 id);
+  // 绑定/解绑占用者（account 空=解绑；一人一工位，换座先解绑）
+  void bind_office_seat(qint64 id, const QString& account);
+
  signals:
   void logged_in();
   void login_failed(const QString& reason);
@@ -262,6 +273,10 @@ class FilesClient : public QObject {
   void team_reports_listed(const QJsonArray& team); // author 分组＋reports
   void audit_searched(const QJsonArray& messages);
   void audit_reads_listed(const QJsonArray& reads);
+  void office_map_fetched(const QJsonObject& map); // floor/can_manage/seats
+  void office_seat_saved(qint64 id);
+  void office_seat_deleted();
+  void office_seat_bound();
   // 统一失败通道：op=操作名（"memo.create"/"inbox.upload"/…）、
   // status=HTTP 状态码（0=网络层失败）、error=服务端 error 字段或网络串
   void request_failed(const QString& op, int status, const QString& error);

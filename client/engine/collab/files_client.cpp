@@ -877,6 +877,56 @@ void FilesClient::fetch_audit_reads() {
             });
 }
 
+// —— 办公室位置图（二期）——
+
+void FilesClient::fetch_office_map(const QString& floor) {
+  QString path = QStringLiteral("/files/office-map");
+  if (!floor.isEmpty()) {
+    path += QStringLiteral("?floor=") +
+            QString::fromUtf8(QUrl::toPercentEncoding(floor));
+  }
+  send_json(QStringLiteral("office.map"), QStringLiteral("GET"), path, {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) emit office_map_fetched(resp);
+            });
+}
+
+void FilesClient::save_office_seat(const QString& floor, const QString& label,
+                                   double x, double y) {
+  send_json(QStringLiteral("office.seat"), QStringLiteral("POST"),
+            QStringLiteral("/files/office-map/seat"),
+            {{QStringLiteral("floor"), floor},
+             {QStringLiteral("label"), label},
+             {QStringLiteral("x"), x},
+             {QStringLiteral("y"), y}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit office_seat_saved(static_cast<qint64>(
+                    resp.value(QStringLiteral("id")).toDouble()));
+              }
+            });
+}
+
+void FilesClient::delete_office_seat(qint64 id) {
+  send_json(QStringLiteral("office.seat.delete"), QStringLiteral("POST"),
+            QStringLiteral("/files/office-map/seat"),
+            {{QStringLiteral("remove"), true},
+             {QStringLiteral("id"), static_cast<double>(id)}},
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit office_seat_deleted();
+            });
+}
+
+void FilesClient::bind_office_seat(qint64 id, const QString& account) {
+  QJsonObject body{{QStringLiteral("id"), static_cast<double>(id)}};
+  if (!account.isEmpty()) body.insert(QStringLiteral("account"), account);
+  send_json(QStringLiteral("office.bind"), QStringLiteral("POST"),
+            QStringLiteral("/files/office-map/bind"), body,
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit office_seat_bound();
+            });
+}
+
 void FilesClient::download_file(qint64 file_id, const QString& file_name,
                                 const QString& save_dir) {
   if (token_.isEmpty()) {

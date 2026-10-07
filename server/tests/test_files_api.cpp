@@ -2145,6 +2145,78 @@ int main() {
     CHECK(reads.body.find("关键词=审计暗号") != std::string::npos);
   }
 
+  // —— 二期·办公室位置图：自楼层可见（同层互见）/org-admin 编辑/一人
+  //     一工位/越界坐标夹回 ——
+  {
+    // 未登录 401；编辑权 org-admin（组织级面）：member1 建座 403
+    CHECK(http(port, "GET", "/files/office-map", {}, "").status == 401);
+    CHECK(http(port, "POST", "/files/office-map/seat", H("member1"),
+               "{\"floor\":\"3F\",\"label\":\"A-01\",\"x\":0.2,\"y\":0.3}")
+              .status == 403);
+    // admin1（审批段已授 org-admin）建三座（3F 两座、2F 一座）
+    const auto s1 = http(port, "POST", "/files/office-map/seat", H("admin1"),
+                         "{\"floor\":\"3F\",\"label\":\"A-01\",\"x\":0.2,"
+                         "\"y\":0.3}");
+    CHECK(s1.status == 200);
+    const std::int64_t seat1 = jint(s1.body, "id");
+    const auto s2 = http(port, "POST", "/files/office-map/seat", H("admin1"),
+                         "{\"floor\":\"3F\",\"label\":\"A-02\",\"x\":0.4,"
+                         "\"y\":0.3}");
+    CHECK(s2.status == 200);
+    const std::int64_t seat2 = jint(s2.body, "id");
+    CHECK(http(port, "POST", "/files/office-map/seat", H("admin1"),
+               "{\"floor\":\"2F\",\"label\":\"B-01\",\"x\":0.5,\"y\":0.5}")
+              .status == 200);
+    // 拖拽改位=同 (floor,label) upsert 覆盖坐标；越界夹回 0~1（9→1、-3→0）
+    CHECK(http(port, "POST", "/files/office-map/seat", H("admin1"),
+               "{\"floor\":\"3F\",\"label\":\"A-01\",\"x\":9,\"y\":-3}")
+              .status == 200);
+    // 绑定：幽灵 409；绑定后 member1 自楼层互见（3F 两座、2F 不出现）
+    CHECK(http(port, "POST", "/files/office-map/bind", H("admin1"),
+               "{\"id\":" + std::to_string(seat1) +
+                   ",\"account\":\"ghost\"}")
+              .status == 409);
+    CHECK(http(port, "POST", "/files/office-map/bind", H("admin1"),
+               "{\"id\":" + std::to_string(seat1) +
+                   ",\"account\":\"member1\"}")
+              .status == 200);
+    const auto m1 = http(port, "GET", "/files/office-map", H("member1"), "");
+    CHECK(m1.status == 200);
+    CHECK(m1.body.find("\"floor\":\"3F\"") != std::string::npos);
+    CHECK(m1.body.find("A-02") != std::string::npos);
+    CHECK(m1.body.find("B-01") == std::string::npos); // 只见自楼层
+    CHECK(m1.body.find("\"can_manage\":false") != std::string::npos);
+    CHECK(m1.body.find("\"x\":1.0") != std::string::npos); // 越界夹回
+    // 无工位者=空图（floor 空串，不造楼层）
+    const auto m2 = http(port, "GET", "/files/office-map", H("owner1"), "");
+    CHECK(m2.status == 200);
+    CHECK(m2.body.find("\"floor\":\"\"") != std::string::npos);
+    // org-admin 跨层查看 ?floor=；can_manage=true
+    const auto m3 = http(port, "GET", "/files/office-map?floor=2F",
+                         H("admin1"), "");
+    CHECK(m3.status == 200);
+    CHECK(m3.body.find("\"floor\":\"2F\"") != std::string::npos);
+    CHECK(m3.body.find("B-01") != std::string::npos);
+    CHECK(m3.body.find("\"can_manage\":true") != std::string::npos);
+    // 一人一工位：member1 已占 A-01，直接绑 A-02 拒 409（换座先解绑，
+    // 不静默顶替）；解绑后可绑
+    CHECK(http(port, "POST", "/files/office-map/bind", H("admin1"),
+               "{\"id\":" + std::to_string(seat2) +
+                   ",\"account\":\"member1\"}")
+              .status == 409);
+    CHECK(http(port, "POST", "/files/office-map/bind", H("admin1"),
+               "{\"id\":" + std::to_string(seat1) + ",\"account\":\"\"}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/office-map/bind", H("admin1"),
+               "{\"id\":" + std::to_string(seat2) +
+                   ",\"account\":\"member1\"}")
+              .status == 200);
+    // 删座：不存在 404
+    CHECK(http(port, "POST", "/files/office-map/seat", H("admin1"),
+               "{\"remove\":true,\"id\":999999}")
+              .status == 404);
+  }
+
   // —— R27-2 外部任务登记：provider/ext_key 成对、个人登记不转派、
   //     列表回带引用（详情 URL 由客户端 SPI 解析，服务端只存引用）——
   {

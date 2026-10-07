@@ -33,6 +33,7 @@
 #include "approval_dialog.hpp"
 #include "report_dialog.hpp"
 #include "audit_dialog.hpp"
+#include "office_map_dialog.hpp"
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
@@ -301,6 +302,17 @@ void MainWindow::build_ui() {
     audit_dialog_->show();
     audit_dialog_->raise();
     audit_dialog_->activateWindow();
+  });
+  // 二期·办公室位置图：抽象平面＋拖拽落位（编辑归 org-admin，服务端现裁）
+  auto* act_office = collab_menu->addAction(QStringLiteral("办公室位置图…"));
+  connect(act_office, &QAction::triggered, this, [this] {
+    if (!office_dialog_) {
+      office_dialog_ = new OfficeMapDialog(this);
+      office_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    office_dialog_->show();
+    office_dialog_->raise();
+    office_dialog_->activateWindow();
   });
 
   // —— 设置：开机启动（T4.7；勾选态与登记文件同步）＋主题（R19 · T4.9）——

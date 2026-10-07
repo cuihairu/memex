@@ -52,6 +52,7 @@ qt_add_executable(memex_client
   app/approval_dialog.cpp
   app/report_dialog.cpp
   app/audit_dialog.cpp
+  app/office_map_dialog.cpp
   engine/task/task_provider.cpp
   engine/task/task_http.cpp
   engine/task/github_provider.cpp
@@ -59,6 +60,7 @@ qt_add_executable(memex_client
   engine/task/feishu_provider.cpp
   app/task_dialog.hpp
   app/approval_dialog.hpp
+  app/office_map_dialog.hpp
   app/group_memo_dialog.cpp
   app/group_memo_dialog.hpp
   app/group_ci_dialog.cpp
@@ -332,6 +334,7 @@ if(MEMEX_BUILD_TESTS)
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/audit_dialog.cpp
+    app/office_map_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -405,6 +408,24 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # 二期·办公室位置图窗口冒烟：真服务端进程 × 离屏 QDialog——member1
+  # 无权编辑 403 状态行明示→admin1（org-admin）建座＋拖拽落位保存回查→
+  # 同层互见（工位即楼层归属）→搜索过滤→绑定/解绑。判权协议腿走
+  # test_files_api 位置图段，不在此重复
+  add_executable(test_office_map_dialog
+    app/tests/test_office_map_dialog.cpp
+    app/office_map_dialog.cpp)
+  target_link_libraries(test_office_map_dialog PRIVATE
+    memex_engine_collab Qt6::Widgets)
+  target_include_directories(test_office_map_dialog PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_office_map_dialog PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME office_map_dialog COMMAND test_office_map_dialog)
+  set_tests_properties(office_map_dialog PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # T2.4 模式切换与降级验收：不重启切换、历史合并展示（来源字段）、
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch
@@ -415,6 +436,7 @@ if(MEMEX_BUILD_TESTS)
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/audit_dialog.cpp
+    app/office_map_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -455,6 +477,7 @@ if(MEMEX_BUILD_TESTS)
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/audit_dialog.cpp
+    app/office_map_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -493,6 +516,7 @@ if(MEMEX_BUILD_TESTS)
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/audit_dialog.cpp
+    app/office_map_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -553,6 +577,7 @@ if(MEMEX_BUILD_TESTS)
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/audit_dialog.cpp
+    app/office_map_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -592,6 +617,7 @@ if(MEMEX_BUILD_TESTS)
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/audit_dialog.cpp
+    app/office_map_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -629,6 +655,7 @@ if(MEMEX_BUILD_TESTS)
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/audit_dialog.cpp
+    app/office_map_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp
@@ -666,6 +693,7 @@ if(MEMEX_BUILD_TESTS)
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/audit_dialog.cpp
+    app/office_map_dialog.cpp
     engine/task/task_provider.cpp
     engine/task/task_http.cpp
     engine/task/github_provider.cpp

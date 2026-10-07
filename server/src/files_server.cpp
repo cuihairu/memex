@@ -323,6 +323,17 @@ struct FileServer::Impl {
                   }
                   return false;
                 });
+    // 显式允许：办公室位置图编辑（二期）——org-admin 基础角色（组织级
+    // 面归组织管理员；群面才是 group-admin，层级不混）；未命中 default-deny
+    az.add_rule(RuleEffect::ExplicitAllow, "office-manage",
+                [this](const AuthzQuery& q) {
+                  if (q.action != "office:manage") return false;
+                  const auto roles = store.effective_roles(q.subject, now_ms());
+                  for (const auto& r : roles) {
+                    if (r == "org-admin") return true;
+                  }
+                  return false;
+                });
   }
 
   // 资源串约定："group:{gid}[/file:{id}]"、"user:{uid}[/file:{id}]"
@@ -832,6 +843,17 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/audit/reads" && method_ == "GET") {
       return route_audit_reads();
+    }
+    // 办公室位置图（二期）：看自楼层（org-admin 可 ?floor= 指定层）/
+    // 编辑工位/绑定占用者
+    if (path_ == "/files/office-map" && method_ == "GET") {
+      return route_office_map();
+    }
+    if (path_ == "/files/office-map/seat" && method_ == "POST") {
+      return route_office_seat(body);
+    }
+    if (path_ == "/files/office-map/bind" && method_ == "POST") {
+      return route_office_bind(body);
     }
     // R24-2 群备忘录：群维度共享知识（管理员维护；开放编辑后成员可写，
     // 全部编辑逐笔留痕可回滚）。判权走 AuthorizationService 群规则。
@@ -1786,6 +1808,137 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                      {"ts_ms", r.ts_ms}});
     }
     respond_json(200, {{"ok", true}, {"reads", std::move(arr)}});
+  }
+
+  // —— 办公室位置图（二期，设计稿 docs/design/办公室位置图.md）：
+  //     看自楼层（同层互见=位置图语义本体；无工位=空图不造楼层）；
+  //     编辑权 org-admin（az office:manage）；工位即楼层归属——
+  static json seat_row_json(const ServerStore::SeatRow& s) {
+    return {{"id", s.id},
+            {"floor", s.floor},
+            {"label", s.label},
+            {"x", s.x},
+            {"y", s.y},
+            {"account", s.account}};
+  }
+
+  bool office_can_manage(const std::string& account) {
+    const Decision d = impl_.az.authorize(
+        {account, "office:manage", "office", "owner=" + account});
+    return d.allowed;
+  }
+
+  void route_office_map() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::string floor;
+    if (office_can_manage(account)) {
+      // org-admin 可跨层查看（?floor= 指定；缺省=自楼层）
+      floor = query_param(query_, "floor");
+    }
+    if (floor.empty()) {
+      const auto mine = impl_.store.seat_of(account);
+      floor = mine.has_value() ? mine->floor : ""; // 无工位=空图不造楼层
+    }
+    json arr = json::array();
+    if (!floor.empty()) {
+      for (const auto& s : impl_.store.seats_on_floor(floor)) {
+        arr.push_back(seat_row_json(s));
+      }
+    }
+    respond_json(200, {{"ok", true},
+                       {"floor", floor},
+                       {"can_manage", office_can_manage(account)},
+                       {"seats", std::move(arr)}});
+  }
+
+  void route_office_seat(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    if (!office_can_manage(account)) {
+      respond_json(403, {{"ok", false}, {"error", "工位编辑归 org-admin"}});
+      return;
+    }
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (j.is_object() && j.contains("remove") && j["remove"].is_boolean() &&
+        j["remove"].get<bool>()) {
+      if (!j.contains("id") || !j["id"].is_number_integer()) {
+        respond_json(400, {{"ok", false}, {"error", "缺少字段：id"}});
+        return;
+      }
+      if (!impl_.store.seat_delete(j["id"].get<std::int64_t>())) {
+        respond_json(404, {{"ok", false}, {"error", "工位不存在"}});
+        return;
+      }
+      respond_json(200, {{"ok", true}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("floor") || !j["floor"].is_string() ||
+        !j.contains("label") || !j["label"].is_string() ||
+        !j.contains("x") || !j["x"].is_number() || !j.contains("y") ||
+        !j["y"].is_number()) {
+      respond_json(
+          400, {{"ok", false}, {"error", "缺少字段：floor/label/x/y"}});
+      return;
+    }
+    double x = j["x"].get<double>();
+    double y = j["y"].get<double>();
+    // 归一化坐标夹 0~1（越界=夹回不造假数据）
+    x = std::max(0.0, std::min(1.0, x));
+    y = std::max(0.0, std::min(1.0, y));
+    const std::int64_t id = impl_.store.seat_upsert(
+        j["floor"].get<std::string>(), j["label"].get<std::string>(), x, y,
+        now_ms());
+    if (id <= 0) {
+      respond_json(500, {{"ok", false}, {"error", "工位落库失败"}});
+      return;
+    }
+    respond_json(200, {{"ok", true}, {"id", id}});
+  }
+
+  void route_office_bind(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    if (!office_can_manage(account)) {
+      respond_json(403, {{"ok", false}, {"error", "工位绑定归 org-admin"}});
+      return;
+    }
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number_integer() ||
+        (j.contains("account") && !j["account"].is_string())) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：id"}});
+      return;
+    }
+    const std::string target =
+        j.contains("account") ? j["account"].get<std::string>() : "";
+    // 换座纪律：一人一工位（部分唯一索引守卫）——目标已占用他座=拒，
+    // 先解绑再绑（不静默顶替他人座位）
+    if (!impl_.store.seat_bind(j["id"].get<std::int64_t>(), target,
+                               now_ms())) {
+      respond_json(409, {{"ok", false},
+                         {"error",
+                          "绑定失败（工位不存在、账号不存在或该账号已占用"
+                          "其他工位——换座须先解绑）"}});
+      return;
+    }
+    std::cout << "[MEMEX] office seat " << (target.empty() ? "unbind"
+                                                           : "bind")
+              << " id=" << j["id"].get<std::int64_t>()
+              << (target.empty() ? "" : " account=" + target)
+              << " by=" << account << std::endl;
+    respond_json(200, {{"ok", true}});
   }
 
   void route_upload(const std::string& body) {

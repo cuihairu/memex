@@ -230,6 +230,19 @@ bool ServerStore::ensure_schema() {
       "  created_ms INTEGER NOT NULL,"
       "  updated_ms INTEGER NOT NULL,"
       "  UNIQUE(author, report_date));"
+      // 二期·办公室位置图：抽象平面工位点（归一化坐标；一人一工位=
+      // 部分唯一索引；编辑权 org-admin 判权在路由层 az）
+      "CREATE TABLE IF NOT EXISTS office_seats ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  floor TEXT NOT NULL,"
+      "  label TEXT NOT NULL DEFAULT '',"
+      "  x REAL NOT NULL DEFAULT 0,"
+      "  y REAL NOT NULL DEFAULT 0,"
+      "  account TEXT NOT NULL DEFAULT '');"
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_office_seats_floor_label"
+      "  ON office_seats(floor, label);"
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_office_seats_account"
+      "  ON office_seats(account) WHERE account != '';"
       // T2.6 组织架构：部门树（parent_id 成树）＋成员资料
       //（直属上级为独立单列——每人至多一名，结构性约束）
       "CREATE TABLE IF NOT EXISTS departments ("
@@ -3845,6 +3858,116 @@ std::vector<std::string> ServerStore::direct_reports(
   while (sqlite3_step(st) == SQLITE_ROW) {
     out.emplace_back(
         reinterpret_cast<const char*>(sqlite3_column_text(st, 0)));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// —— 二期·办公室位置图（设计稿 docs/design/办公室位置图.md）——
+
+std::int64_t ServerStore::seat_upsert(const std::string& floor,
+                                      const std::string& label, double x,
+                                      double y, std::int64_t ts_ms) {
+  static_cast<void>(ts_ms); // 拖拽改位高频不高敏：不落操作留痕（设计口径）
+  if (floor.empty() || label.empty()) return 0;
+  const char* sql =
+      "INSERT INTO office_seats(floor, label, x, y) VALUES(?,?,?,?)"
+      " ON CONFLICT(floor, label) DO UPDATE SET x = excluded.x,"
+      " y = excluded.y;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, floor.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, label.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_double(st, 3, x);
+  sqlite3_bind_double(st, 4, y);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  if (!ok) return 0;
+  const char* q =
+      "SELECT id FROM office_seats WHERE floor = ? AND label = ?;";
+  st = nullptr;
+  std::int64_t id = 0;
+  if (sqlite3_prepare_v2(db_, q, -1, &st, nullptr) == SQLITE_OK) {
+    sqlite3_bind_text(st, 1, floor.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, label.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) id = sqlite3_column_int64(st, 0);
+  }
+  sqlite3_finalize(st);
+  return id;
+}
+
+bool ServerStore::seat_delete(std::int64_t id) {
+  const char* sql = "DELETE FROM office_seats WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::seat_bind(std::int64_t id, const std::string& account,
+                            std::int64_t ts_ms) {
+  if (!account.empty() && !find_account(account)) return false; // 幽灵拒
+  const char* sql = "UPDATE office_seats SET account = ? WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 2, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ServerStore::SeatRow> ServerStore::seats_on_floor(
+    const std::string& floor) {
+  std::vector<SeatRow> out;
+  const char* sql =
+      "SELECT id, floor, label, x, y, account FROM office_seats"
+      " WHERE floor = ? ORDER BY label;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, floor.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    SeatRow t;
+    t.id = sqlite3_column_int64(st, 0);
+    t.floor = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    t.label = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    t.x = sqlite3_column_double(st, 3);
+    t.y = sqlite3_column_double(st, 4);
+    t.account = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    out.push_back(std::move(t));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::optional<ServerStore::SeatRow> ServerStore::seat_of(
+    const std::string& account) {
+  const char* sql =
+      "SELECT id, floor, label, x, y, account FROM office_seats"
+      " WHERE account = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<SeatRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    SeatRow t;
+    t.id = sqlite3_column_int64(st, 0);
+    t.floor = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    t.label = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    t.x = sqlite3_column_double(st, 3);
+    t.y = sqlite3_column_double(st, 4);
+    t.account = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    out = std::move(t);
   }
   sqlite3_finalize(st);
   return out;
