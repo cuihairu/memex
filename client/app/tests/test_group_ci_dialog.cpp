@@ -159,11 +159,9 @@ int main(int argc, char** argv) {
         QStringLiteral("已开放成员触发"));
   }, 8000));
   CHECK(owner.trigger_selected());
-  CHECK(wait_until([&] {
-    return owner.status_text().contains(QStringLiteral("已触发")) &&
-           owner.status_text().contains(QStringLiteral("成功"));
-  }, 8000));
-  // 红绿灯翻绿＋run 历史落账（谁触发可回溯：actor=alice）
+  // 红绿灯翻绿＋run 历史落账（谁触发可回溯：actor=alice）——只等持久
+  // 面（列表/历史条目文），不等状态行：「已触发」提示会被刷新回包的
+  //「共 N 条流水线」覆盖（CI 慢回包下首拍即被冲掉＝5630f0b 的假红教训）
   CHECK(wait_until([&] {
     return owner.pipeline_list()->item(0) != nullptr &&
            owner.pipeline_list()->item(0)->text().contains(
@@ -181,10 +179,6 @@ int main(int argc, char** argv) {
     }
   }
   CHECK(owner.trigger_selected());
-  CHECK(wait_until([&] {
-    return owner.status_text().contains(QStringLiteral("已触发")) &&
-           owner.status_text().contains(QStringLiteral("失败"));
-  }, 8000));
   CHECK(wait_until([&] {
     return owner.pipeline_list()->item(0) != nullptr &&
            owner.runs_count() == 2 &&
@@ -207,13 +201,11 @@ int main(int argc, char** argv) {
   member.pipeline_list()->setCurrentRow(0);
   CHECK(member.trigger_selected());
   CHECK(wait_until([&] {
-    return member.status_text().contains(QStringLiteral("已触发")) &&
-           member.status_text().contains(QStringLiteral("成功"));
-  }, 8000));
-  CHECK(wait_until([&] {
     return member.runs_count() == 3 &&
            member.runs_list()->item(0)->text().contains(
-               QStringLiteral("bob"));
+               QStringLiteral("bob")) &&
+           member.runs_list()->item(0)->text().contains(
+               QStringLiteral("成功"));
   }, 8000));
 
   server.terminate();
