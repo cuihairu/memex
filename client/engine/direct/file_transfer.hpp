@@ -50,10 +50,12 @@ public:
   void set_secure(const DeviceIdentity* self, LocalStore* store);
 
   // 发起文件发送（异步）：返回传输 ID，失败为空。rel_path 为空取文件名；
-  // 目录传输由上层按相对路径逐文件调用。
+  // 目录传输由上层按相对路径逐文件调用。id 非空＝指定传输 ID（平台-10
+  // 授权门以关联号贯穿进度/终态/取消面），空＝自动生成。
   std::string send_file(const QHostAddress& target, quint16 target_port,
                         const std::string& peer_id, const QString& local_path,
-                        const QString& rel_path = {});
+                        const QString& rel_path = {},
+                        const std::string& id = {});
 
   // 中止发送。对端感知连接断开后保留 .memex-part，重发即续传。
   void cancel(const std::string& transfer_id);

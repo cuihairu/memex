@@ -36,6 +36,8 @@ enum MsgType {
   FAV_DATA = 46;     // 服务端 → 终端：常用联系人全量（T4.5）
   FAV_CMD = 47;      // 终端 → 服务端：常用联系人星标／最近上报（T4.5）
   NOTICE = 48;       // 通知消息（webhook 推送：标题／内容／紧急程度／可选跳转，T4.10）
+  FILE_AUTHZ = 49;         // 终端 → 服务端：直连文件旁路授权四问（平台-10）
+  FILE_AUTHZ_RESULT = 50;  // 服务端 → 终端：授权裁决（允许/拒绝＋依据＋可转发）
 }
 
 message Hello {
@@ -81,6 +83,23 @@ message FileDone {
   string error = 3;  // 失败原因（ok=false 时有效）
 }
 
+// 直连文件旁路授权查询（平台-10，蓝图§十九四问）：发送方持有效会话即第一问；
+// 收方存在、部门边界、再转发由服务端统一 AuthorizationService 裁决——
+// 文件不经服务器，判权必须经服务器。seq＝请求关联号，结果原样回带。
+message FileAuthz {
+  string to = 1;      // 接收方账号（直连发现宣告或选人而来）
+  uint64 size = 2;    // 文件字节数（目录作业＝合计）
+  string name = 3;    // 文件名（目录作业＝目录名；审计留痕）
+  string sha256 = 4;  // 内容指纹（可空——大文件避免预计算双读）
+  bool forward = 5;   // true＝本次为收到文件的再转发（策略可单独禁止）
+}
+
+message FileAuthzResult {
+  bool allowed = 1;     // 裁决
+  string reason = 2;    // 命中规则名（"allow:org-transfer"/"deny:cross-department"…）
+  bool forwardable = 3; // 发送方生效策略的再转发开关（第四问答复随单携带）
+}
+
 message Login {
   string account = 1;           // 账号
   string password = 2;          // 凭据（摘要由通道约定，T2.1 定）
@@ -123,6 +142,8 @@ message OrgPolicy {
   bool allow_anonymous = 2;       // 允许免登录（直连态）使用
   bool allow_cross_state = 3;     // 允许已登录端与未登录设备通信
   bool new_device_approval = 4;   // 新设备登录需审批
+  bool allow_cross_dept_file = 5; // 允许直连文件跨部门（平台-10，默认禁）
+  bool allow_forward_file = 6;    // 允许直连文件再转发（平台-10，默认允）
 }
 
 message OrgData {
@@ -265,5 +286,7 @@ message Envelope {
     FavData fav_data = 146;
     FavCmd fav_cmd = 147;
     Notice notice = 148;
+    FileAuthz file_authz = 149;
+    FileAuthzResult file_authz_result = 150;
   }
 }

@@ -366,6 +366,32 @@ void CollabEngine::query_presence() {
   send_frame(m);
 }
 
+// 平台-10 直连文件旁路授权查询：文件不经服务器，判权必须经服务器。
+// 未登录＝服务端不可达域，fail-closed 本地即拒（权限不能绕开服务器，
+// 与文本降级可用不同——文本是归档面，文件是权限面）。
+void CollabEngine::file_authz(quint64 req, const QString& to, quint64 size,
+                              const QString& name, const QString& sha256,
+                              bool forward) {
+  if (!logged_in_) {
+    emit file_authz_result(req, false,
+                           QStringLiteral("deny:server-unreachable"), false);
+    return;
+  }
+  Message m;
+  m.set_type(MsgType::FILE_AUTHZ);
+  m.set_seq(req); // 关联号原样回带
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* fa = m.mutable_file_authz();
+  fa->set_to(to.toStdString());
+  fa->set_size(size);
+  fa->set_name(name.toStdString());
+  fa->set_sha256(sha256.toStdString());
+  fa->set_forward(forward);
+  send_frame(m);
+}
+
 void CollabEngine::send_frame(const Message& msg) {
   const std::string frame = memex::protocol::encode(msg);
   socket_->write(QByteArray(frame.data(), static_cast<qsizetype>(frame.size())));
@@ -461,6 +487,15 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
   case MsgType::ACK:
     handle_ack(msg);
     break;
+  case MsgType::FILE_AUTHZ_RESULT: {
+    // 平台-10：授权裁决上抛，req 原样回带给发起面（直连引擎关单）
+    if (!msg.has_file_authz_result()) return;
+    const auto& r = msg.file_authz_result();
+    emit file_authz_result(static_cast<quint64>(msg.seq()), r.allowed(),
+                           QString::fromStdString(r.reason()),
+                           r.forwardable());
+    break;
+  }
   case MsgType::RECALL: {
     const std::string target = msg.has_recall() ? msg.recall().msg_id() : std::string{};
     if (!target.empty() && store_) {
@@ -504,7 +539,9 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
       j["policies"].push_back({{"department_path", p.department_path()},
                                {"allow_anonymous", p.allow_anonymous()},
                                {"allow_cross_state", p.allow_cross_state()},
-                               {"new_device_approval", p.new_device_approval()}});
+                               {"new_device_approval", p.new_device_approval()},
+                               {"allow_cross_dept_file", p.allow_cross_dept_file()},
+                               {"allow_forward_file", p.allow_forward_file()}});
     }
     emit org_received(QString::fromStdString(j.dump()));
     break;

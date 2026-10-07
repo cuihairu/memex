@@ -7,6 +7,7 @@
 #include <QString>
 
 #include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -21,6 +22,17 @@
 #include "secure_channel.hpp"
 
 namespace memex::client {
+
+// 平台-10 直连文件旁路授权查询（蓝图§十九四问的上行面）：文件不经服务
+// 器，判权必须经服务器——授权面由应用层接线（协作引擎 → 服务端统一
+// AuthorizationService），裁决经 file_authz_resolved 回流关单。
+struct FileAuthzRequest {
+  quint64 req{0};          // 关联号（进度/终态/取消全程以此 ID 贯穿）
+  std::string to_account;  // 接收方账号（直连发现宣告；空＝未登录对端）
+  quint64 size{0};         // 文件字节数（目录作业＝合计）
+  std::string name;        // 文件名（目录作业＝目录名）
+  bool forward{false};     // 本次为收到文件的再转发
+};
 
 class DirectEngine : public QObject {
   Q_OBJECT
@@ -76,6 +88,15 @@ public:
   // 跨态判定；空=未登录）。
   void set_collab_account(const std::string& account);
 
+  // —— 平台-10 文件旁路授权门 ——
+  // 接线授权面后，send_file／send_directory 先发查询（立即返回关联号），
+  // 裁决经 file_authz_resolved 关单：允→真正起传；拒→file_finished(false)。
+  // 未接线＝直通（现状；仅测试路径，生产主窗口必须接线）。
+  void set_file_authorizer(
+      std::function<void(const FileAuthzRequest&)> authorizer);
+  // 裁决回流：req＝FileAuthzRequest::req；reason 拒绝时随终态上抛。
+  void file_authz_resolved(quint64 req, bool allowed, const QString& reason);
+
 signals:
   void message_received(const QString& from_id, const QString& text, qint64 ts_ms);
   void text_delivered(quint64 seq, bool ok);
@@ -94,8 +115,20 @@ private:
     std::vector<std::pair<QString, QString>> files; // {本地路径, 相对路径}
     std::size_t index{0};
   };
+  // 授权待决发送（平台-10）：裁决允后据此真正起传
+  struct PendingAuthz {
+    Peer target;
+    bool is_dir{false};
+    QString path;      // 单文件本地路径
+    QString rel;       // 目录作业根目录
+    std::vector<std::pair<QString, QString>> files; // 目录扫描结果
+  };
 
   void send_next_dir_file(const QString& job_id);
+  // 目录作业注册与首发起（job_id＝对外作业 ID：未门控=根路径，门控=关联号）
+  bool start_dir_job(const QString& job_id, const Peer& target,
+                     const QString& root,
+                     std::vector<std::pair<QString, QString>> files);
 
   std::string device_id_;
   std::string device_name_;
@@ -110,7 +143,11 @@ private:
   std::unique_ptr<FileTransferService> file_service_;
   std::map<QString, DirJob> dir_jobs_;            // 作业 ID → 目录作业
   std::map<std::string, QString> transfer_job_;   // 在途传输 ID → 作业 ID
+  // 平台-10 授权门
+  std::function<void(const FileAuthzRequest&)> file_authorizer_;
+  std::map<quint64, PendingAuthz> pending_authz_;
   std::atomic<std::uint64_t> seq_counter_{0};
+  std::uint64_t authz_seq_{0};
   bool running_{false};
 };
 

@@ -1465,7 +1465,9 @@ int cmd_policy(int argc, char** argv, const std::string& db_path) {
   if (argc < 1) {
     std::cerr << "用法：memex_server policy set [--dept 路径] [--allow-anonymous"
                  " on|off] [--allow-cross-state on|off] [--new-device-approval"
-                 " on|off] | policy list | policy show <账号> [--db <库>]\n";
+                 " on|off] [--allow-cross-dept-file on|off] "
+                 "[--allow-forward-file on|off]"
+                 " | policy list | policy show <账号> [--db <库>]\n";
     return 2;
   }
   memex::server::ServerStore store;
@@ -1476,12 +1478,15 @@ int cmd_policy(int argc, char** argv, const std::string& db_path) {
   const std::string_view sub = argv[0];
 
   if (sub == "list") {
-    std::cout << "范围\t免登录使用\t与未登录设备通信\t新设备登录需审批\n";
+    std::cout << "范围\t免登录使用\t与未登录设备通信\t新设备登录需审批"
+                 "\t直连文件跨部门\t直连文件再转发\n";
     for (const auto& p : store.policy_list()) {
       std::cout << (p.department_path.empty() ? "（全局默认）" : p.department_path)
                 << '\t' << (p.allow_anonymous ? "允许" : "禁止") << '\t'
                 << (p.allow_cross_state ? "允许" : "禁止") << '\t'
-                << (p.new_device_approval ? "需审批" : "免审批") << '\n';
+                << (p.new_device_approval ? "需审批" : "免审批") << '\t'
+                << (p.allow_cross_dept_file ? "允许" : "禁止") << '\t'
+                << (p.allow_forward_file ? "允许" : "禁止") << '\n';
     }
     return 0;
   }
@@ -1496,7 +1501,11 @@ int cmd_policy(int argc, char** argv, const std::string& db_path) {
               << "\n免登录使用：" << (p.allow_anonymous ? "允许" : "禁止")
               << "\n与未登录设备通信：" << (p.allow_cross_state ? "允许" : "禁止")
               << "\n新设备登录需审批："
-              << (p.new_device_approval ? "需审批" : "免审批") << "\n";
+              << (p.new_device_approval ? "需审批" : "免审批")
+              << "\n直连文件跨部门："
+              << (p.allow_cross_dept_file ? "允许" : "禁止")
+              << "\n直连文件再转发："
+              << (p.allow_forward_file ? "允许" : "禁止") << "\n";
     return 0;
   }
   if (sub == "set") {
@@ -1523,6 +1532,18 @@ int cmd_policy(int argc, char** argv, const std::string& db_path) {
           row.allow_cross_state = value_on("--allow-cross-state") != 0;
         } else if (opt == "--new-device-approval") {
           row.new_device_approval = value_on("--new-device-approval") != 0;
+        } else if (opt == "--allow-cross-dept-file") {
+          row.allow_cross_dept_file = value_on("--allow-cross-dept-file") != 0;
+        } else if (opt == "--allow-forward-file") {
+          row.allow_forward_file = value_on("--allow-forward-file") != 0;
+        } else if (opt == "--dept") {
+          // 预扫描已取走路径值，此处跳过（T3.4 起 --dept 部门行路径
+          // 实际不可用——apply_flags 撞上即 exit(2)，本处顺修）
+          if (i + 1 >= argc) {
+            std::cerr << "--dept 缺路径\n";
+            std::exit(2);
+          }
+          ++i;
         } else {
           std::cerr << "未知选项：" << opt << "\n";
           std::exit(2);
@@ -1544,7 +1565,8 @@ int cmd_policy(int argc, char** argv, const std::string& db_path) {
     }
     apply_flags(1);
     if (!store.set_policy(dept, row.allow_anonymous, row.allow_cross_state,
-                          row.new_device_approval)) {
+                          row.new_device_approval, row.allow_cross_dept_file,
+                          row.allow_forward_file)) {
       std::cerr << "策略写入失败（部门路径不存在？）：" << dept << "\n";
       return 1;
     }
@@ -1552,7 +1574,10 @@ int cmd_policy(int argc, char** argv, const std::string& db_path) {
               << "（免登录 " << (row.allow_anonymous ? "允许" : "禁止")
               << "／跨态通信 " << (row.allow_cross_state ? "允许" : "禁止")
               << "／新设备 " << (row.new_device_approval ? "需审批" : "免审批")
-              << "）\n";
+              << "／直连文件跨部门 "
+              << (row.allow_cross_dept_file ? "允许" : "禁止")
+              << "／直连文件再转发 "
+              << (row.allow_forward_file ? "允许" : "禁止") << "）\n";
     return 0;
   }
   std::cerr << "未知 policy 子命令：" << sub << "\n";

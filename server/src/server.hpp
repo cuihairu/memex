@@ -12,6 +12,7 @@
 
 #include <asio.hpp>
 
+#include "authz.hpp"
 #include "store.hpp"
 
 namespace memex::server {
@@ -51,11 +52,18 @@ public:
 
   ServerStore& store() { return store_; }
 
+  // 平台-10 直连文件旁路判权（蓝图§十九四问）：文件不经服务器，判权必须
+  // 经服务器——规则在此注册，Session 的 FILE_AUTHZ 处理器调 authorize。
+  AuthorizationService& file_az() { return file_az_; }
+
 private:
   void do_accept();
 
+  void setup_file_rules();
+
   asio::io_context& io_;
   ServerStore& store_;
+  AuthorizationService file_az_;
   asio::ip::tcp::acceptor acceptor_;
   // account → 设备类型 → 会话（同类型单点在线，跨类型并存）
   std::map<std::string, std::map<std::string, std::shared_ptr<Session>>>

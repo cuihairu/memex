@@ -105,6 +105,11 @@ struct PolicyRow {
   bool allow_anonymous{true};
   bool allow_cross_state{true};
   bool new_device_approval{false};
+  // 平台-10 直连文件旁路（蓝图§十九四问的部门/转发两问）：
+  // 跨部门默认禁（白名单口径——一级部门不同即跨部门，未分配从严）；
+  // 再转发默认允（内网协作常态），禁了之后 forward=1 的发送即拒。
+  bool allow_cross_dept_file{false};
+  bool allow_forward_file{true};
 };
 
 // 通讯录可见性（T4.6）：一行配置管一个目标——scope="member"（key=账号）或
@@ -450,7 +455,9 @@ public:
   // —— T3.4 策略开关 ——
   // 配置一行策略（部门路径空=全局；部门不存在拒绝）。
   bool set_policy(const std::string& department_path, bool allow_anonymous,
-                  bool allow_cross_state, bool new_device_approval);
+                  bool allow_cross_state, bool new_device_approval,
+                  bool allow_cross_dept_file = false,
+                  bool allow_forward_file = true);
   // 全部已配置行（含全局行；部门行按路径字典序）
   std::vector<PolicyRow> policy_list();
   // 按账号解析生效策略：本人部门 → 逐级上级部门 → 全局 → 内置默认

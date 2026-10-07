@@ -72,6 +72,11 @@ public slots:
   void mark_read(const QString& msg_id);
   // 主动拉取在线账号表（登录/登出/互踢变更由服务端推送，无需轮询）。
   void query_presence();
+  // —— 直连文件旁路授权（平台-10，蓝图§十九四问）——
+  // 文件不经服务器，判权必须经服务器：发送前问统一 AuthorizationService。
+  // req＝调用方关联号（原样回带）；未登录即 fail-closed 本地拒（不发查询）。
+  void file_authz(quint64 req, const QString& to, quint64 size,
+                  const QString& name, const QString& sha256, bool forward);
 
 signals:
   void logged_in(const QString& account, const QString& display_name);
@@ -92,8 +97,13 @@ signals:
   // {"departments":[{"path":"公司/研发部"}],
   //  "members":[{"account","display_name","title","department_path","manager","role"}],
   //  "policies":[{"department_path":"","allow_anonymous":true,
-  //              "allow_cross_state":true,"new_device_approval":false}]}（T3.4）
+  //              "allow_cross_state":true,"new_device_approval":false,
+  //              "allow_cross_dept_file":false,"allow_forward_file":true}]}（T3.4）
   void org_received(const QString& org_json);
+  // 直连文件旁路授权裁决（平台-10）：req＝请求关联号、allowed、reason＝
+  // 命中规则名、forwardable＝发送方生效策略的再转发开关（第四问答复）。
+  void file_authz_result(quint64 req, bool allowed, const QString& reason,
+                         bool forwardable);
   // 常用联系人全量（T4.5）：JSON [{"peer","starred","last_ms"}]（已排序）
   void fav_received(const QString& fav_json);
   // 群命令回执（T4.1）：op（create/invite/leave/announce/announce_history）、

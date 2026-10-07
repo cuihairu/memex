@@ -91,7 +91,8 @@ std::string FileTransferService::send_file(const QHostAddress& target,
                                            quint16 target_port,
                                            const std::string& peer_id,
                                            const QString& local_path,
-                                           const QString& rel_path) {
+                                           const QString& rel_path,
+                                           const std::string& preferred_id) {
   if (!self_ || !store_) {
     // 平台-8：安全材料未注入即拒发（不退回明文）
     qWarning() << "[文件传输] 安全材料未就绪，拒发";
@@ -110,7 +111,9 @@ std::string FileTransferService::send_file(const QHostAddress& target,
   }
 
   Outgoing o;
-  o.id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
+  o.id = preferred_id.empty()
+             ? QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString()
+             : preferred_id;
   o.peer_id = peer_id;
   o.local_path = fi.absoluteFilePath();
   o.rel_path = rel_path.isEmpty() ? fi.fileName() : rel_path;

@@ -148,6 +148,8 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       op->set_allow_anonymous(p.allow_anonymous);
       op->set_allow_cross_state(p.allow_cross_state);
       op->set_new_device_approval(p.new_device_approval);
+      op->set_allow_cross_dept_file(p.allow_cross_dept_file);
+      op->set_allow_forward_file(p.allow_forward_file);
     }
     send(memex::protocol::encode(out));
     break;
@@ -487,6 +489,38 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       out.set_msg_id(target);
       s->deliver_frame(out.SerializeAsString());
     }
+    break;
+  }
+  case v1::FILE_AUTHZ: {
+    // 平台-10 直连文件旁路授权（蓝图§十九）：文件字节不经服务器，判权
+    // 必须经服务器——统一 AuthorizationService 四问裁决，seq 原样回带
+    // 供客户端关联本次请求。
+    if (!logged_in_ || !msg.has_file_authz()) break;
+    const auto& fa = msg.file_authz();
+    const std::string resource =
+        "direct-file:" + (fa.sha256().empty() ? fa.name() : fa.sha256());
+    const AuthzQuery q{
+        account_, "direct-file:send", resource,
+        "to=" + fa.to() + ";size=" + std::to_string(fa.size()) +
+            ";forward=" + (fa.forward() ? "1" : "0")};
+    const Decision d = server_.file_az().authorize(q);
+    // 第四问答复随单携带：发送方生效策略的再转发开关
+    const bool forwardable =
+        server_.store().resolve_policy(account_).allow_forward_file;
+    memex::protocol::Message out;
+    out.set_type(v1::FILE_AUTHZ_RESULT);
+    out.set_seq(msg.seq());
+    out.set_from("server");
+    out.set_to(account_);
+    out.set_ts_ms(now_ms());
+    auto* r = out.mutable_file_authz_result();
+    r->set_allowed(d.allowed);
+    r->set_reason(d.reason);
+    r->set_forwardable(forwardable);
+    log("文件旁路授权" + std::string(d.allowed ? "允许" : "拒绝") + "：" +
+        account_ + " → " + fa.to() + "（" + fa.name() + "，" + d.reason +
+        "）");
+    send(memex::protocol::encode(out));
     break;
   }
   default:

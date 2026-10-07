@@ -487,6 +487,22 @@ void MainWindow::wire_engines() {
                 QStringLiteral("[文件] 已接收：%1").arg(esc(path)));
             show_status(QStringLiteral("文件已接收：%1").arg(path));
           });
+
+  // 平台-10 文件旁路授权门（蓝图§十九）：文件不经服务器，判权必须经
+  // 服务器——发送前先问服务端统一 AuthorizationService（四问：可发/
+  // 可收/跨部门/再转发），裁决回流关单。协作未登录＝服务端不可达域，
+  // 协作引擎本地即拒（fail-closed：文本是归档面可降级，文件是权限面
+  // 不可绕权）。
+  direct_engine_.set_file_authorizer(
+      [this](const memex::client::FileAuthzRequest& r) {
+        collab_engine_.file_authz(r.req, QString::fromStdString(r.to_account),
+                                  r.size, QString::fromStdString(r.name),
+                                  QString(), r.forward);
+      });
+  connect(&collab_engine_, &CollabEngine::file_authz_result, this,
+          [this](quint64 req, bool allowed, const QString& reason, bool) {
+            direct_engine_.file_authz_resolved(req, allowed, reason);
+          });
 }
 
 // 协作信号接入界面（T2.4）：形态切换提示、降级提示、协作消息渲染。

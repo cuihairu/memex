@@ -173,6 +173,17 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # 平台-10 文件旁路授权：统一 AuthorizationService 四问（同部门/跨部门/
+  # 策略放行/再转发禁/收方未知/未登录 fail-closed）
+  add_executable(test_file_authz engine/collab/tests/test_file_authz.cpp)
+  target_link_libraries(test_file_authz PRIVATE memex_engine_collab)
+  target_compile_definitions(test_file_authz PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME file_authz COMMAND test_file_authz)
+  set_tests_properties(file_authz PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # T4.3 客户端半边验收：已读上报→发送方 message_read、在线表推送刷新、
   # 同账号第二台桌面登录互踢（桌面单点在线，T2.1 合并验收）
   add_executable(test_client_read_presence engine/collab/tests/test_read_presence.cpp)

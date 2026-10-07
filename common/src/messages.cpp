@@ -58,6 +58,8 @@ const char* msg_type_name(MsgType t) {
   case v1::FAV_DATA: return "fav_data";
   case v1::FAV_CMD: return "fav_cmd";
   case v1::NOTICE: return "notice";
+  case v1::FILE_AUTHZ: return "file_authz";
+  case v1::FILE_AUTHZ_RESULT: return "file_authz_result";
   case v1::MSG_TYPE_UNSPECIFIED: break;
   }
   return "unknown";

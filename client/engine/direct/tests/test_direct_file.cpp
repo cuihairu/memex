@@ -301,6 +301,76 @@ int main(int argc, char** argv) {
     CHECK(file_sha256(src) == file_sha256(dst));
   }
 
+  // —— 平台-10 文件旁路授权门（stub 授权面：裁决由测试驱动）——
+  // 进度/终态/取消全程以授权关联号贯穿；拒＝零字节零终态错误理由
+  {
+    CHECK(make_file(tmp.filePath(QStringLiteral("gate.bin")), 64 * 1024));
+    const QString gate_src = tmp.filePath(QStringLiteral("gate.bin"));
+    quint64 last_req = 0;
+    a.set_file_authorizer([&](const memex::client::FileAuthzRequest& r) {
+      last_req = r.req;
+    });
+
+    // ① 拒：终态 false 且接收侧零动静
+    fin_done = false;
+    const std::string deny_id = a.send_file("dev-B", gate_src);
+    CHECK(!deny_id.empty());
+    CHECK(deny_id == std::to_string(last_req)); // 返回值＝关联号
+    CHECK(!fin_done); // 裁决前不起传不终态
+    a.file_authz_resolved(last_req, false, "deny:cross-department");
+    CHECK(fin_done && !fin_ok);
+    CHECK(received_count == 6);
+
+    // ② 允：起传落地，关联号即传输 ID
+    fin_done = false;
+    const std::string allow_id = a.send_file("dev-B", gate_src);
+    CHECK(allow_id == std::to_string(last_req));
+    a.file_authz_resolved(last_req, true, {});
+    CHECK(wait_until([&] { return fin_done; }, 30000));
+    CHECK(fin_ok);
+    CHECK(got_path.endsWith(QStringLiteral("gate.bin")));
+    CHECK(file_sha256(gate_src) == file_sha256(got_path));
+
+    // ③ 待决撤单：裁决前取消即本地终态失败；迟到裁决不复活已撤单
+    fin_done = false;
+    const std::string cancel_id = a.send_file("dev-B", gate_src);
+    CHECK(!cancel_id.empty());
+    a.cancel_transfer(cancel_id);
+    CHECK(fin_done && !fin_ok);
+    fin_done = false;
+    a.file_authz_resolved(last_req, true, {}); // pending 已清，此单无效
+    CHECK(!fin_done);
+
+    // ④ 目录作业拒：directory_finished(false)，逐文件零发送
+    const QString gdir = tmp.filePath(QStringLiteral("gate-dir"));
+    QDir().mkpath(gdir);
+    CHECK(make_file(QDir(gdir).filePath(QStringLiteral("g1.bin")), 4096));
+    CHECK(make_file(QDir(gdir).filePath(QStringLiteral("g2.bin")), 8192));
+    received_count = 0;
+    dir_done = false;
+    dir_ok = true;
+    const QString gjid = a.send_directory("dev-B", gdir);
+    CHECK(gjid == QString::number(last_req));
+    a.file_authz_resolved(last_req, false, "deny:forward-forbidden");
+    CHECK(dir_done && !dir_ok);
+    CHECK(received_count == 0);
+
+    // ⑤ 目录作业允：关联号即作业 ID，逐文件串行落地
+    dir_done = false;
+    const QString gjid2 = a.send_directory("dev-B", gdir);
+    CHECK(gjid2 == QString::number(last_req));
+    a.file_authz_resolved(last_req, true, {});
+    CHECK(wait_until([&] { return dir_done; }, 60000));
+    CHECK(dir_ok);
+    CHECK(received_count == 2);
+    CHECK(file_sha256(QDir(gdir).filePath("g1.bin")) ==
+          file_sha256(QDir(dl_b).filePath("g1.bin")));
+    CHECK(file_sha256(QDir(gdir).filePath("g2.bin")) ==
+          file_sha256(QDir(dl_b).filePath("g2.bin")));
+
+    a.set_file_authorizer({}); // 摘除授权面（后续无腿）
+  }
+
   a.stop();
   b.stop();
 

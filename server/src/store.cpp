@@ -181,7 +181,9 @@ bool ServerStore::ensure_schema() {
       "  department_path TEXT PRIMARY KEY,"
       "  allow_anonymous INTEGER NOT NULL,"
       "  allow_cross_state INTEGER NOT NULL,"
-      "  new_device_approval INTEGER NOT NULL);"
+      "  new_device_approval INTEGER NOT NULL,"
+      "  allow_cross_dept_file INTEGER NOT NULL DEFAULT 0,"
+      "  allow_forward_file INTEGER NOT NULL DEFAULT 1);"
       // T4.1 群聊：群表＋成员表（群主退群=解散，成员记录清除、群号与归档保留）
       "CREATE TABLE IF NOT EXISTS groups ("
       "  group_id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -730,6 +732,13 @@ bool ServerStore::ensure_schema() {
   // 旧库迁移：群成员补组内角色列（权限模型：群主/管理员/成员；缺省=成员）
   sqlite3_exec(db_, "ALTER TABLE group_members ADD COLUMN"
                     " role TEXT NOT NULL DEFAULT 'member'",
+              nullptr, nullptr, nullptr);
+  // 旧库迁移：策略行补直连文件旁路两开关（平台-10；缺省=跨部门禁/转发允）
+  sqlite3_exec(db_, "ALTER TABLE policies ADD COLUMN"
+                    " allow_cross_dept_file INTEGER NOT NULL DEFAULT 0",
+              nullptr, nullptr, nullptr);
+  sqlite3_exec(db_, "ALTER TABLE policies ADD COLUMN"
+                    " allow_forward_file INTEGER NOT NULL DEFAULT 1",
               nullptr, nullptr, nullptr);
   return true;
 }
@@ -2496,7 +2505,9 @@ OrgImportResult ServerStore::import_members(
 
 bool ServerStore::set_policy(const std::string& department_path,
                              bool allow_anonymous, bool allow_cross_state,
-                             bool new_device_approval) {
+                             bool new_device_approval,
+                             bool allow_cross_dept_file,
+                             bool allow_forward_file) {
   if (!department_path.empty()) {
     // 部门行须挂已存在部门（防拼错挂空名；不顺手建部门）
     bool found = false;
@@ -2511,17 +2522,22 @@ bool ServerStore::set_policy(const std::string& department_path,
   }
   const char* sql =
       "INSERT INTO policies(department_path, allow_anonymous, allow_cross_state,"
-      " new_device_approval) VALUES(?, ?, ?, ?)"
+      " new_device_approval, allow_cross_dept_file, allow_forward_file)"
+      " VALUES(?, ?, ?, ?, ?, ?)"
       " ON CONFLICT(department_path) DO UPDATE SET"
       " allow_anonymous = excluded.allow_anonymous,"
       " allow_cross_state = excluded.allow_cross_state,"
-      " new_device_approval = excluded.new_device_approval;";
+      " new_device_approval = excluded.new_device_approval,"
+      " allow_cross_dept_file = excluded.allow_cross_dept_file,"
+      " allow_forward_file = excluded.allow_forward_file;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
   sqlite3_bind_text(st, 1, department_path.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_int(st, 2, allow_anonymous ? 1 : 0);
   sqlite3_bind_int(st, 3, allow_cross_state ? 1 : 0);
   sqlite3_bind_int(st, 4, new_device_approval ? 1 : 0);
+  sqlite3_bind_int(st, 5, allow_cross_dept_file ? 1 : 0);
+  sqlite3_bind_int(st, 6, allow_forward_file ? 1 : 0);
   const bool ok = sqlite3_step(st) == SQLITE_DONE;
   sqlite3_finalize(st);
   return ok;
@@ -2531,7 +2547,8 @@ std::vector<PolicyRow> ServerStore::policy_list() {
   std::vector<PolicyRow> out;
   const char* sql =
       "SELECT department_path, allow_anonymous, allow_cross_state,"
-      " new_device_approval FROM policies"
+      " new_device_approval, allow_cross_dept_file, allow_forward_file"
+      " FROM policies"
       " ORDER BY department_path = '' DESC, department_path ASC;"; // 全局行在前
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
@@ -2543,6 +2560,8 @@ std::vector<PolicyRow> ServerStore::policy_list() {
     p.allow_anonymous = sqlite3_column_int(st, 1) != 0;
     p.allow_cross_state = sqlite3_column_int(st, 2) != 0;
     p.new_device_approval = sqlite3_column_int(st, 3) != 0;
+    p.allow_cross_dept_file = sqlite3_column_int(st, 4) != 0;
+    p.allow_forward_file = sqlite3_column_int(st, 5) != 0;
     out.push_back(std::move(p));
   }
   sqlite3_finalize(st);

@@ -5,6 +5,8 @@
 #include <QDebug>
 #include <QDir>
 #include <QDirIterator>
+#include <QFile>
+#include <QFileInfo>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QSysInfo>
@@ -178,6 +180,7 @@ void DirectEngine::stop() {
   if (store_) store_->close();
   dir_jobs_.clear();
   transfer_job_.clear();
+  pending_authz_.clear();
   discovery_.reset();
   transport_.reset();
   file_service_.reset();
@@ -249,6 +252,26 @@ std::string DirectEngine::send_file(const std::string& peer_device_id,
                << QString::fromStdString(peer_device_id);
     return {};
   }
+  // 平台-10 授权门：接线即先问服务端四问（蓝图§十九），裁决回流才起传；
+  // 进度/终态/取消全程以关联号贯穿（file_finished(false)＝拒绝或失败）
+  if (file_authorizer_) {
+    const QFileInfo fi(local_path);
+    if (!fi.isFile()) return {};
+    const quint64 req = ++authz_seq_;
+    PendingAuthz p;
+    p.target = target;
+    p.is_dir = false;
+    p.path = fi.absoluteFilePath();
+    pending_authz_.emplace(req, std::move(p));
+    FileAuthzRequest r;
+    r.req = req;
+    r.to_account = target.account;
+    r.size = static_cast<quint64>(fi.size());
+    r.name = fi.fileName().toStdString();
+    r.forward = false; // 文件来源追踪未建，再转发声明面留后续（如实口径）
+    file_authorizer_(r);
+    return std::to_string(req);
+  }
   return file_service_->send_file(target.address, target.tcp_port,
                                   peer_device_id, local_path, {});
 }
@@ -266,21 +289,92 @@ QString DirectEngine::send_directory(const std::string& peer_device_id,
   if (!root.exists()) return {};
   const QString root_abs = root.absolutePath();
 
-  DirJob job;
-  job.peer_id = peer_device_id;
-  job.root = root_abs;
+  std::vector<std::pair<QString, QString>> files;
   QDirIterator it(root_abs, QDir::Files, QDirIterator::Subdirectories);
   while (it.hasNext()) {
     const QString local = it.next();
-    job.files.emplace_back(local, root.relativeFilePath(local));
+    files.emplace_back(local, root.relativeFilePath(local));
   }
-  if (job.files.empty()) return {};
-  std::sort(job.files.begin(), job.files.end(),
+  if (files.empty()) return {};
+  std::sort(files.begin(), files.end(),
             [](const auto& a, const auto& b) { return a.second < b.second; });
 
-  dir_jobs_.emplace(root_abs, std::move(job));
-  send_next_dir_file(root_abs);
+  // 平台-10 授权门：目录作业按作业级一次查询（合计尺寸；策略面不依赖
+  // 逐文件内容，逐文件查询同答多余）
+  if (file_authorizer_) {
+    const quint64 req = ++authz_seq_;
+    PendingAuthz p;
+    p.target = target;
+    p.is_dir = true;
+    p.rel = root_abs;
+    p.files = std::move(files);
+    quint64 total = 0;
+    for (const auto& [local, rel] : p.files) {
+      (void)rel;
+      total += static_cast<quint64>(QFileInfo(local).size());
+    }
+    pending_authz_.emplace(req, std::move(p));
+    FileAuthzRequest r;
+    r.req = req;
+    r.to_account = target.account;
+    r.size = total;
+    r.name = root.dirName().toStdString();
+    r.forward = false;
+    file_authorizer_(r);
+    return QString::number(req);
+  }
+
+  if (!start_dir_job(root_abs, target, root_abs, std::move(files))) return {};
   return root_abs;
+}
+
+// 平台-10 授权裁决回流：允＝真正起传（关联号贯穿为传输/作业 ID），
+// 拒＝终态失败（服务端理由随文上抛）
+void DirectEngine::file_authz_resolved(quint64 req, bool allowed,
+                                       const QString& reason) {
+  const auto it = pending_authz_.find(req);
+  if (it == pending_authz_.end()) return;
+  PendingAuthz p = std::move(it->second);
+  pending_authz_.erase(it);
+  const QString req_str = QString::number(req);
+  if (!allowed) {
+    if (p.is_dir) {
+      emit directory_finished(req_str, false);
+    }
+    emit file_finished(req_str, false,
+                       QStringLiteral("授权拒绝（服务端）：") + reason);
+    return;
+  }
+  if (p.is_dir) {
+    start_dir_job(req_str, p.target, p.rel, std::move(p.files));
+    return;
+  }
+  const std::string tid = file_service_->send_file(
+      p.target.address, p.target.tcp_port, p.target.device_id, p.path, {},
+      req_str.toStdString());
+  if (tid.empty()) {
+    emit file_finished(req_str, false, QStringLiteral("发送失败"));
+  }
+}
+
+void DirectEngine::set_file_authorizer(
+    std::function<void(const FileAuthzRequest&)> authorizer) {
+  file_authorizer_ = std::move(authorizer);
+}
+
+// 目录作业注册与首发起：job_id 即对外作业 ID（门控=授权关联号，
+// 未门控=根目录绝对路径——directory_finished 原样回报）
+bool DirectEngine::start_dir_job(const QString& job_id, const Peer& target,
+                                 const QString& root,
+                                 std::vector<std::pair<QString, QString>> files) {
+  DirJob job;
+  job.peer_id = target.device_id;
+  job.root = root;
+  job.files = std::move(files);
+  if (job.files.empty()) return false;
+  dir_jobs_.emplace(job_id, std::move(job));
+  send_next_dir_file(job_id);
+  return true;
 }
 
 void DirectEngine::send_next_dir_file(const QString& job_id) {
@@ -311,6 +405,20 @@ void DirectEngine::send_next_dir_file(const QString& job_id) {
 
 void DirectEngine::cancel_transfer(const std::string& transfer_id) {
   if (!file_service_) return;
+  // 平台-10：授权待决中的关联号亦可取消——撤单即终态失败，不再起传
+  //（transfer_id 也可能是 UUID／根路径，非纯数字则跳过此查）
+  {
+    quint64 req = 0;
+    if (!transfer_id.empty() &&
+        transfer_id.find_first_not_of("0123456789") == std::string::npos) {
+      req = std::stoull(transfer_id);
+    }
+    if (req > 0 && pending_authz_.erase(req) > 0) {
+      emit file_finished(QString::fromStdString(transfer_id), false,
+                         QStringLiteral("本地取消"));
+      return;
+    }
+  }
   // 作业 ID 亦可作取消目标：止其当前在途文件，失败链自动终止整作业
   const auto job_it = dir_jobs_.find(QString::fromStdString(transfer_id));
   if (job_it != dir_jobs_.end()) {
