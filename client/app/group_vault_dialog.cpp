@@ -127,8 +127,9 @@ GroupVaultDialog::GroupVaultDialog(QWidget* parent) : QDialog(parent) {
             if (reset_pending_) {
               // 重置箱全量重加密：计数每条落回；全部落回→覆盖包裹块收尾
               if (++reset_saved_ >= reset_total_) {
+                new_wrapped_ = vault::wrap_dek(new_kek_, new_dek_);
                 client_->rekey_group_vault(gid_, new_salt_, new_iters_,
-                                           vault::wrap_dek(new_kek_, new_dek_));
+                                           new_wrapped_);
               }
               return;
             }
@@ -227,6 +228,8 @@ GroupVaultDialog::GroupVaultDialog(QWidget* parent) : QDialog(parent) {
     kek_ = new_kek_;
     kdf_salt_ = new_salt_;
     kdf_iters_ = new_iters_;
+    wrapped_ = new_wrapped_; // 新包裹块落缓存（解锁验签面）
+    new_wrapped_.clear();
     unlocked_salt_ = new_salt_;
     if (reset_pending_) {
       reset_pending_ = false;
@@ -824,12 +827,12 @@ bool GroupVaultDialog::change_vault_password(const QString& old_pass,
   new_iters_ = kKdfIters;
   new_dek_ = dek_;
   new_kek_ = vault::derive_kek(new_pass, new_salt_, new_iters_);
-  const QString wrapped = vault::wrap_dek(new_kek_, new_dek_);
-  if (new_salt_.isEmpty() || wrapped.isEmpty()) {
+  new_wrapped_ = vault::wrap_dek(new_kek_, new_dek_);
+  if (new_salt_.isEmpty() || new_wrapped_.isEmpty()) {
     set_status(QStringLiteral("新材料生成失败"), true);
     return false;
   }
-  client_->rekey_group_vault(gid_, new_salt_, new_iters_, wrapped);
+  client_->rekey_group_vault(gid_, new_salt_, new_iters_, new_wrapped_);
   return true;
 }
 
@@ -865,8 +868,8 @@ bool GroupVaultDialog::reset_vault(const QString& old_pass,
   }
   if (ids.isEmpty()) {
     // 无条目：直接覆盖包裹块（无需重加密）
-    client_->rekey_group_vault(gid_, new_salt_, new_iters_,
-                               vault::wrap_dek(new_kek_, new_dek_));
+    new_wrapped_ = vault::wrap_dek(new_kek_, new_dek_);
+    client_->rekey_group_vault(gid_, new_salt_, new_iters_, new_wrapped_);
     return true;
   }
   reset_total_ = ids.size();

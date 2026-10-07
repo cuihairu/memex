@@ -269,7 +269,8 @@ int main(int argc, char** argv) {
                    [&](const QString&, const QString&) { ce_in = true; });
   QObject::connect(&ce, &CollabEngine::group_result, &ce,
                    [&](bool ok, const QString&, const QString& op, quint64 id) {
-                     if (ok && op == QStringLiteral("create"))
+                     // 只取首个群：后续 create（密码箱群）会再触发本信号
+                     if (ok && op == QStringLiteral("create") && gm_gid == 0)
                        gm_gid = id;
                    });
   ce.login(QStringLiteral("127.0.0.1"), collab_port, QStringLiteral("alice"),
@@ -395,7 +396,7 @@ int main(int argc, char** argv) {
   quint64 va_gid = 0;
   QObject::connect(&ce, &CollabEngine::group_result, &ce,
                    [&](bool ok, const QString&, const QString& op, quint64 id) {
-                     if (ok && op == QStringLiteral("create"))
+                     if (ok && op == QStringLiteral("create") && va_gid == 0)
                        va_gid = id;
                    });
   ce.create_group(QStringLiteral("密码箱测试群"), {QStringLiteral("bob")});
@@ -428,6 +429,9 @@ int main(int argc, char** argv) {
   QObject::connect(&cli, &FilesClient::group_vault_audit_listed, &cli,
                    [&](const QJsonArray& arr) { va_audit = arr; });
   QObject::connect(&cli, &FilesClient::group_vault_accessed, &cli,
+                   [&](const QJsonObject& e) { va_entry = e; });
+  // bob 的 reveal/copy 回包走 bob 自己的信号面
+  QObject::connect(&bob, &FilesClient::group_vault_accessed, &bob,
                    [&](const QJsonObject& e) { va_entry = e; });
   QObject::connect(&bob, &FilesClient::group_vault_listed, &bob,
                    [&](const QJsonArray& arr) { va_bob_list = arr; });

@@ -141,6 +141,7 @@ class GroupVaultDialog : public QDialog {
   int new_iters_{0};
   QByteArray new_dek_;
   QByteArray new_kek_;
+  QString new_wrapped_; // 新包裹块（rekey 回包后落 wrapped_，解锁验签用）
   // 审计子对话框列表（非模态存活期观察点；关闭置空）
   QListWidget* audit_list_{nullptr};
 };
