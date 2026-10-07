@@ -550,6 +550,95 @@ int main() {
     std::remove(out_path6.c_str());
   }
 
+  // —— 平台-11 远程协助 Security Domain 模型：consent 只属受控方／
+  //     audit 恒开／五粒度权限位（实批 ⊆ 申请）／部门开关默认禁
+  //     白名单口径、部门链上溯 ——
+  {
+    // 策略面：默认禁；部门行须已存在；部门行覆盖全局；链上溯命中父行
+    CHECK(!store.assist_policy_resolve("nobody-未建档"));
+    CHECK(!store.assist_policy_set(true, "不存在的部门", "admin1", 1));
+    CHECK(store.assist_policy_set(true, "", "admin1", 1)); // 全局放行
+    CHECK(store.assist_policy_resolve("alice")); // 未建档者吃全局行
+    CHECK(store.assist_policy_set(false, "公司/研发部", "admin1", 2));
+    CHECK(!store.assist_policy_resolve("bob")); // 客户端组上溯命中研发部禁行
+    CHECK(store.assist_policy_set(true, "公司/研发部/客户端组", "admin1", 3));
+    CHECK(store.assist_policy_resolve("bob"));
+    // 发起面四闸逐一验拒：自助／对端不存在／空权限／非法位
+    CHECK(store.assist_request("alice", "alice", store.kAssistView, 4).empty());
+    CHECK(store.assist_request("alice", "幽灵", store.kAssistView, 4).empty());
+    CHECK(store.assist_request("alice", "bob", 0, 4).empty());
+    CHECK(store.assist_request("alice", "bob", 32, 4).empty());
+    // 双方放行 → 成事；id 库内生成（ra-<hex32>）
+    const std::string ra_id =
+        store.assist_request("alice", "bob",
+                             store.kAssistView | store.kAssistClipboard, 5);
+    CHECK(ra_id.size() == 35 && ra_id.substr(0, 3) == "ra-");
+    // consent 红线：批准只属受控方本人；实批 ⊆ 申请（可缩不可扩）
+    CHECK(!store.assist_approve(ra_id, "alice", store.kAssistClipboard, 6));
+    CHECK(!store.assist_approve(ra_id, "bob", 32, 6));
+    CHECK(!store.assist_approve(ra_id, "bob",
+                                store.kAssistView | store.kAssistKeyboard,
+                                6)); // keyboard 未申请
+    CHECK(!store.assist_start(ra_id, "alice", 7)); // 未批先启
+    CHECK(store.assist_approve(ra_id, "bob", store.kAssistClipboard, 8));
+    const auto ra = store.assist_session(ra_id);
+    CHECK(ra && ra->status == "approved" &&
+          ra->granted_mask == store.kAssistClipboard && ra->approved_ms == 8);
+    CHECK(!store.assist_start(ra_id, "幽灵", 9)); // 非当事方
+    CHECK(store.assist_start(ra_id, "bob", 9)); // 受控方亦可启动
+    // 期间撤权：受控方 end 即时断（action 记 end(revoke)）；终态不可再动
+    CHECK(store.assist_end(ra_id, "bob", "撤回授权", 10));
+    CHECK(!store.assist_end(ra_id, "alice", "再结", 11));
+    const auto ra2 = store.assist_session(ra_id);
+    CHECK(ra2 && ra2->status == "closed" && ra2->end_actor == "bob" &&
+          ra2->end_reason == "撤回授权" && ra2->ended_ms == 10);
+    // deny 腿：第二会话受控方拒；发起方越权拒
+    const std::string ra_id2 =
+        store.assist_request("alice", "bob", store.kAssistView, 12);
+    CHECK(!ra_id2.empty());
+    CHECK(!store.assist_deny(ra_id2, "alice", 13));
+    CHECK(store.assist_deny(ra_id2, "bob", 13));
+    const auto ra3 = store.assist_session(ra_id2);
+    CHECK(ra3 && ra3->status == "denied" && ra3->ended_ms == 13);
+    // 清单与审计对账：单会话全链四条（request→approve→start→end(revoke)）
+    CHECK(store.assist_sessions("bob").size() >= 2);
+    const auto trail = store.assist_audits(ra_id);
+    CHECK(trail.size() == 4);
+    if (trail.size() == 4) {
+      CHECK(trail[0].action == "request" && trail[0].actor == "alice");
+      CHECK(trail[1].action == "approve" && trail[1].actor == "bob");
+      CHECK(trail[2].action == "start" && trail[2].actor == "bob");
+      CHECK(trail[3].action == "end(revoke)" && trail[3].actor == "bob" &&
+            trail[3].detail == "撤回授权");
+    }
+    bool pol_audited = false; // 策面变更留痕（session_id 空、部门随详情）
+    for (const auto& a : store.assist_audits(""))
+      if (a.action == "policy" && a.actor == "admin1" &&
+          a.session_id.empty())
+        pol_audited = true;
+    CHECK(pol_audited);
+    // CLI 面：policy set → request → approve(子集) → start → show 全链
+    CHECK(run_cli("assist policy set on --by admin1 --db " + db2)
+              .find("已配置") != std::string::npos);
+    const std::string cli_out =
+        run_cli("assist request alice bob --perms view,keyboard --db " + db2);
+    CHECK(cli_out.find("ra-") != std::string::npos);
+    const auto ra_pos = cli_out.find("ra-");
+    const std::string cli_id = cli_out.substr(ra_pos, 35);
+    CHECK(run_cli("assist approve " + cli_id + " --by bob --perms keyboard --db " +
+                  db2)
+              .find("已批准") != std::string::npos);
+    CHECK(run_cli("assist start " + cli_id + " --by alice --db " + db2)
+              .find("已开始") != std::string::npos);
+    const std::string shown = run_cli("assist show " + cli_id + " --db " + db2);
+    CHECK(shown.find("active") != std::string::npos &&
+          shown.find("keyboard") != std::string::npos);
+    CHECK(run_cli("assist policy show bob --db " + db2)
+              .find("放行") != std::string::npos);
+    CHECK(run_cli("assist end " + cli_id + " --by bob --reason 收工 --db " + db2)
+              .find("已结束") != std::string::npos);
+  }
+
   if (g_failures == 0) {
     std::cout << "archive tests: all passed\n";
     return 0;
