@@ -22,6 +22,7 @@
 
 #include "cred.hpp"
 #include "files_server.hpp"
+#include "model_gateway.hpp"
 #include "server.hpp"
 #include "storage.hpp"
 #include "store.hpp"
@@ -39,6 +40,9 @@ constexpr std::uint16_t kDefaultPort = 24360;
 // webhook 接入独立端口（T4.10）：与消息端口分离，HTTP 面不与长连接混线；
 // --webhook-port 0 可整体关闭接入（其余功能不受影响）。
 constexpr std::uint16_t kDefaultWebhookPort = 24361;
+// 模型网关（平台三期）默认关闭：须显式 --model-port 开启（上游端点未
+// 登记时网关空转无意义；安全默认=不暴露）。
+constexpr std::uint16_t kDefaultModelPort = 24362;
 constexpr const char* kDefaultDb = "memex-server.db";
 
 // R23-5 逗号分隔小写扩展名表（黑/白名单共用；空白项剔除）
@@ -56,6 +60,7 @@ std::vector<std::string> split_ext_list(const char* csv) {
 int cmd_serve(int argc, char** argv, const std::string& db_path) {
   std::uint16_t port = kDefaultPort;
   int webhook_port = kDefaultWebhookPort; // int 才能表达 0＝关闭
+  int model_port = 0; // 模型网关默认关闭：--model-port N 显式开启
   int files_port = 0; // 文件面默认关闭：须显式 --files-port 且给 S3 配置
   // 外网单向 uplink 面（R23-4）默认关闭：须显式 --uplink-port 开启
   //（安全默认：开启即明示暴露范围，见装配处日志）
@@ -79,6 +84,12 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
       webhook_port = std::atoi(argv[++i]);
       if (webhook_port < 0 || webhook_port > 65535) {
         std::cerr << "无效 webhook 端口（0＝关闭接入）\n";
+        return 2;
+      }
+    } else if (arg == "--model-port" && i + 1 < argc) {
+      model_port = std::atoi(argv[++i]);
+      if (model_port < 0 || model_port > 65535) {
+        std::cerr << "无效模型网关端口（0＝关闭网关）\n";
         return 2;
       }
     } else if (arg == "--files-port" && i + 1 < argc) {
@@ -263,6 +274,23 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
                   << e.what() << std::endl;
       }
     }
+    // 模型网关（平台三期）：独立端口独立线程——上游 LLM 调用为秒级阻塞，
+    // 不与消息面抢共享 io_context；自有库连接开同库（busy_timeout 兜写锁）。
+    // 绑定失败只降级为「网关未启用」并明示。
+    std::unique_ptr<memex::server::ModelGatewayServer> gateway;
+    std::thread gateway_thread;
+    if (model_port > 0) {
+      try {
+        gateway = std::make_unique<memex::server::ModelGatewayServer>(
+            static_cast<std::uint16_t>(model_port), db_path);
+        gateway->start_accept();
+        gateway_thread = std::thread([&gateway] { gateway->run(); });
+      } catch (const std::exception& e) {
+        gateway.reset();
+        std::cerr << "[MEMEX] 模型网关端口绑定失败，网关未启用（消息主通道"
+                     "不受影响）：" << e.what() << std::endl;
+      }
+    }
     asio::signal_set signals(io, SIGINT, SIGTERM);
     signals.async_wait([&](std::error_code, int sig) {
       std::cout << "[MEMEX] 收到信号 " << sig << "，退出" << std::endl;
@@ -273,6 +301,8 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
     if (files) files->start_accept();
     if (uplink) uplink->start_accept();
     io.run();
+    if (gateway) gateway->stop();
+    if (gateway_thread.joinable()) gateway_thread.join();
   } catch (const std::exception& e) {
     std::cerr << "服务端异常退出：" << e.what() << std::endl;
     return 1;
@@ -1990,6 +2020,174 @@ int cmd_bot(int argc, char** argv, const std::string& db_path) {
   return 2;
 }
 
+// 模型网关（平台三期）管理面：endpoint 登记（注册序=路由优先序，--local
+// 标记归档红线专用本地端点）／calls 调用审计台账（一次上游尝试一行）。
+// 调用面=POST /v1/chat/completions（OpenAI 兼容），Bearer 用 bot token。
+int cmd_model(int argc, char** argv, const std::string& db_path) {
+  if (argc < 1) {
+    std::cerr << "用法：memex_server model endpoint add <name> --url "
+                 "<http://host[:port][/prefix]> [--key <api_key>] "
+                 "[--model <上游模型名>] [--local] --by <账号> | endpoint "
+                 "list | endpoint remove <name> | endpoint enable|disable "
+                 "<name> | endpoint local <name> on|off | calls [N] "
+                 "[--db <库>]\n";
+    return 2;
+  }
+  const std::string_view sub = argv[0];
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+
+  if (sub == "endpoint") {
+    if (argc < 2) {
+      std::cerr << "用法：model endpoint add|list|remove|enable|disable|local…\n";
+      return 2;
+    }
+    const std::string_view es = argv[1];
+    if (es == "add") {
+      if (argc < 3) {
+        std::cerr << "用法：model endpoint add <name> --url <http://…> "
+                     "[--key <api_key>] [--model <上游模型名>] [--local] "
+                     "--by <账号>\n";
+        return 2;
+      }
+      const std::string name = argv[2];
+      memex::server::ModelEndpointRow ep;
+      ep.name = name;
+      std::string by;
+      bool have_local = false;
+      for (int i = 3; i < argc; ++i) {
+        const std::string_view arg = argv[i];
+        if (arg == "--url" && i + 1 < argc) ep.base_url = argv[++i];
+        else if (arg == "--key" && i + 1 < argc) ep.api_key = argv[++i];
+        else if (arg == "--model" && i + 1 < argc) ep.model = argv[++i];
+        else if (arg == "--local") { ep.is_local = true; have_local = true; }
+        else if (arg == "--by" && i + 1 < argc) by = argv[++i];
+        else {
+          std::cerr << "未知选项：" << argv[i] << "\n";
+          return 2;
+        }
+      }
+      if (ep.base_url.empty() || by.empty()) {
+        std::cerr << "缺 --url 或 --by（谁登记的须留痕）\n";
+        return 2;
+      }
+      if (name.find(':') != std::string::npos) {
+        std::cerr << "端点名不得含 ':'\n";
+        return 2;
+      }
+      if (ep.base_url.rfind("http://", 0) != 0) {
+        std::cerr << "base_url 须以 http:// 开头（内网口径）\n";
+        return 2;
+      }
+      if (!store.find_account(by)) {
+        std::cerr << "操作者账号不存在：" << by << "\n";
+        return 1;
+      }
+      ep.created_by = by;
+      ep.created_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::system_clock::now().time_since_epoch())
+                          .count();
+      const auto id = store.model_endpoint_add(ep);
+      if (id == 0) {
+        std::cerr << "端点登记失败（重名或参数非法）：" << name << "\n";
+        return 1;
+      }
+      std::cout << "已登记端点：" << name << " → " << ep.base_url
+                << (ep.is_local ? "（本地·可承接归档数据）"
+                                : "（外部·归档数据红线不路由）")
+                << "\n注册序即路由优先序（现第 " << id << " 位）；"
+                << "调用：POST /v1/chat/completions（Bearer 用 bot token，"
+                << "带 memex_archive_scope:true 只路由本地端点）\n";
+      return 0;
+    }
+    if (es == "list") {
+      const auto rows = store.model_endpoints_list();
+      std::cout << "序\t名称\tbase_url\t模型\t本地\t状态\t登记人\n";
+      int order = 0;
+      for (const auto& e : rows) {
+        std::cout << ++order << '\t' << e.name << '\t' << e.base_url << '\t'
+                  << (e.model.empty() ? "-" : e.model) << '\t'
+                  << (e.is_local ? "是" : "否") << '\t'
+                  << (e.enabled ? "启用" : "停用") << '\t' << e.created_by
+                  << '\n';
+      }
+      std::cout << "共 " << rows.size() << " 个（归档数据仅本地模型——"
+                   "规则写死在网关，不做成配置）\n";
+      return 0;
+    }
+    if (es == "remove" || es == "enable" || es == "disable") {
+      if (argc < 3) {
+        std::cerr << "用法：model endpoint " << es << " <name>\n";
+        return 2;
+      }
+      const std::string name = argv[2];
+      bool ok = false;
+      if (es == "remove") ok = store.model_endpoint_remove(name);
+      else if (es == "enable") ok = store.model_endpoint_set_enabled(name, true);
+      else ok = store.model_endpoint_set_enabled(name, false);
+      if (!ok) {
+        std::cerr << "无此端点：" << name << "\n";
+        return 1;
+      }
+      std::cout << "已" << (es == "remove" ? "删除" : es == "enable" ? "启用" : "停用")
+                << "端点：" << name << "\n";
+      return 0;
+    }
+    if (es == "local") {
+      if (argc < 4 ||
+          (std::string_view(argv[3]) != "on" &&
+           std::string_view(argv[3]) != "off")) {
+        std::cerr << "用法：model endpoint local <name> on|off\n";
+        return 2;
+      }
+      if (!store.model_endpoint_set_local(argv[2], std::string_view(argv[3]) == "on")) {
+        std::cerr << "无此端点：" << argv[2] << "\n";
+        return 1;
+      }
+      std::cout << "端点 " << argv[2] << " 本地标记 → "
+                << (std::string_view(argv[3]) == "on" ? "是（可承接归档数据）"
+                                                      : "否") << "\n";
+      return 0;
+    }
+    std::cerr << "未知 model endpoint 子命令：" << es << "\n";
+    return 2;
+  }
+
+  if (sub == "calls") {
+    int limit = 50;
+    for (int i = 1; i + 1 < argc; i += 2)
+      if (std::string_view(argv[i]) == "--limit")
+        limit = std::atoi(argv[i + 1]);
+    if (argc >= 2 && std::string_view(argv[1]).find_first_not_of("0123456789") ==
+                         std::string::npos) {
+      limit = std::atoi(argv[1]);
+    }
+    std::cout << "id\t调用方\t端点\t模型\t归档\t提示符数\t补全数\t状态\t时延ms\t时刻\n";
+    for (const auto& c : store.model_calls_list(limit)) {
+      std::time_t secs = static_cast<std::time_t>(c.created_ms / 1000);
+      std::tm tm{};
+      local_time(secs, &tm);
+      char when[24];
+      std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
+      std::cout << c.id << '\t' << c.caller << '\t'
+                << (c.endpoint.empty() ? "-" : c.endpoint) << '\t'
+                << (c.model.empty() ? "-" : c.model) << '\t'
+                << (c.archive_scope ? "是" : "否") << '\t' << c.prompt_chars
+                << '\t' << c.completion_chars << '\t' << c.status << '\t'
+                << c.latency_ms << '\t' << when << '\n';
+    }
+    return 0;
+  }
+
+  std::cerr << "未知 model 子命令：" << sub << "\n"
+            << "用法：model endpoint add|list|remove|enable|disable|local … | "
+               "calls [N]\n";
+  return 2;
+}
+
 // webhook 接入台账（T4.10）：create 建 token（明文仅此一次，库内存 sha256
 // 摘要）／list 一览／revoke 吊销。目标＝账号（个人）或 group:<群号>（按群独立）。
 int cmd_webhook(int argc, char** argv, const std::string& db_path) {
@@ -2344,16 +2542,20 @@ int main(int argc, char** argv) {
     if (cmd == "policy") return cmd_policy(sub_argc, sub_argv, db_path);
     if (cmd == "assist") return cmd_assist(sub_argc, sub_argv, db_path);
     if (cmd == "bot") return cmd_bot(sub_argc, sub_argv, db_path);
+    if (cmd == "model") return cmd_model(sub_argc, sub_argv, db_path);
     if (cmd == "webhook") return cmd_webhook(sub_argc, sub_argv, db_path);
     if (cmd == "storage") return cmd_storage(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
               << "用法：memex_server [serve [--port N] [--webhook-port N] "
+                 "[--model-port N] "
                  "[--db P]] | account add … | "
                  "logins [账号] [--device 指纹前缀] | device … | "
                  "messages [账号] [--keyword K] [--since T] "
                  "[--until T] [--limit N] [--export 文件] | audit [N] | "
                  "cross [N] | favs <账号> | org … | group list|set-role | "
                  "webhook create|list|revoke | "
+                 "bot add|list|remove|disable|enable|join|leave | "
+                 "model endpoint add|list|remove|enable|disable|local | calls | "
                  "assist policy|request|approve|deny|start|end|show|list|audit"
                  " | "
                  "storage compose|up|down|health | --version | --self-test\n";

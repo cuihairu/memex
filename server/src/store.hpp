@@ -189,6 +189,37 @@ struct BotRow {
   bool disabled{false};
 };
 
+// 模型端点（平台三期·模型网关）：上游 OpenAI 兼容服务登记项。注册序
+// 即路由优先序；is_local=归档数据红线专用（仅本地模型——规则写死在
+// 网关代码不做成配置）；api_key 库存原文（须可逆代发上游，与验自身
+// token 的摘要口径不同）。
+struct ModelEndpointRow {
+  std::int64_t id{0};
+  std::string name;    // 路由名（请求 model 字段命中即提优先）
+  std::string base_url; // http://host[:port][/prefix]（仅 http，内网口径）
+  std::string api_key; // 上游 Bearer（可空=上游不鉴权）
+  std::string model;   // 上游模型名（空=透传请求里的 model）
+  bool is_local{false};
+  bool enabled{true};
+  std::string created_by;
+  std::int64_t created_ms{0};
+};
+
+// 模型调用审计：一次上游尝试一行（降级即多行，可对账）。只记元数据
+// 不记 prompt/completion 正文（正文敏感；status 0=连接失败/超时）。
+struct ModelCallRow {
+  std::int64_t id{0};
+  std::string caller; // bot:<name>（网关 Bearer 主体）
+  std::string endpoint;
+  std::string model;
+  bool archive_scope{false};
+  int prompt_chars{0};
+  int completion_chars{0};
+  int status{0};
+  std::int64_t latency_ms{0};
+  std::int64_t created_ms{0};
+};
+
 class ServerStore {
 public:
   ServerStore() = default;
@@ -596,6 +627,19 @@ public:
   bool bot_join_group(const std::string& name, std::uint64_t group_id,
                       std::int64_t joined_ms);
   bool bot_leave_group(const std::string& name, std::uint64_t group_id);
+
+  // —— 模型网关（平台三期）：端点登记＋调用审计 ——
+  // 端点登记（重名返回 0）；注册序=路由优先序。
+  std::int64_t model_endpoint_add(const ModelEndpointRow& ep);
+  std::optional<ModelEndpointRow> model_endpoint_by_name(
+      const std::string& name);
+  std::vector<ModelEndpointRow> model_endpoints_list(); // 注册序（id 序）
+  bool model_endpoint_remove(const std::string& name);
+  bool model_endpoint_set_enabled(const std::string& name, bool enabled);
+  bool model_endpoint_set_local(const std::string& name, bool is_local);
+  // 调用审计：一次上游尝试一行；calls_list 按时间倒序取最近 limit 条。
+  std::int64_t model_call_add(const ModelCallRow& call);
+  std::vector<ModelCallRow> model_calls_list(int limit);
   // ORG_DATA 下发视图（按查看者过滤与脱敏，T4.6）：
   //  ① 被隐藏成员／隐藏部门（整树）对查看者不可见——管理员、白名单与
   //    部门内自己人豁免；② 查看者所在部门若限看本部门，则只见本部门子树；

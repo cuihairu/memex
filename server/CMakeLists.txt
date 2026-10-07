@@ -17,6 +17,7 @@ add_library(memex_server_core STATIC
   src/cred.cpp
   src/files_server.cpp
   src/webhook.cpp
+  src/model_gateway.cpp
   src/storage.cpp)
 target_include_directories(memex_server_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_features(memex_server_core PUBLIC cxx_std_17)
@@ -121,6 +122,9 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_bot tests/test_bot.cpp)
   target_link_libraries(test_bot PRIVATE memex_server_core)
   add_test(NAME bot COMMAND test_bot)
+  add_executable(test_model_gateway tests/test_model_gateway.cpp)
+  target_link_libraries(test_model_gateway PRIVATE memex_server_core)
+  add_test(NAME model_gateway COMMAND test_model_gateway)
   set_tests_properties(webhook PROPERTIES TIMEOUT 60)
 
   # R23-1 存储抽象层验收：文件元数据表、秒传哈希去重、群/人两级配额、
