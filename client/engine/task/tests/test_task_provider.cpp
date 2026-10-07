@@ -11,8 +11,10 @@ using memex::client::ExternalTask;
 using memex::client::kCapL1Jump;
 using memex::client::kCapL2Read;
 using memex::client::kCapL3Write;
+using memex::client::TaskListFn;
 using memex::client::TaskProvider;
 using memex::client::TaskProviderRegistry;
+using memex::client::TaskWriteFn;
 using memex::client::UrlTemplateProvider;
 
 namespace {
@@ -28,7 +30,7 @@ int g_failures = 0;
     }                                                                     \
   } while (false)
 
-// 双能力样例（L1+L2）：验声明位与便利判定
+// 双能力样例（L1+L2）：验声明位与便利判定；异步 list 同步回放
 class ReadJumpProvider : public UrlTemplateProvider {
  public:
   ReadJumpProvider()
@@ -37,13 +39,13 @@ class ReadJumpProvider : public UrlTemplateProvider {
                             QStringLiteral("https://ex.example/{key}"),
                             kCapL1Jump | kCapL2Read) {}
   // L2 形态：拉一条外部条目（detailUrl 必带）
-  QVector<ExternalTask> list() const override {
+  void list(const TaskListFn& done) const override {
     ExternalTask t;
     t.provider_id = QStringLiteral("readjump");
     t.key = QStringLiteral("7");
     t.title = QStringLiteral("外部条目");
     t.detail_url = detail_url(QStringLiteral("7"));
-    return {t};
+    done(true, {t}, QString());
   }
 };
 
@@ -94,13 +96,25 @@ int main(int argc, char** argv) {
   CHECK(pass.detail_url(QStringLiteral("org/repo#12")).isEmpty());
   CHECK(pass.detail_url(QString()).isEmpty());
 
-  // —— L2/L3 默认不支持（能力未开的级别调用即「不可用」）——
-  CHECK(pass.list().isEmpty());
-  CHECK(!pass.create(QStringLiteral("标题"), QStringLiteral("")));
-  CHECK(!pass.complete(QStringLiteral("1")));
+  // —— L2/L3 默认不支持（能力未开的级别调用即同步回「不可用」，不碰网）——
+  bool l2_ok = true;
+  pass.list([&](bool ok, const QVector<ExternalTask>&, const QString&) {
+    l2_ok = ok;
+  });
+  CHECK(!l2_ok);
+  bool w_ok = true;
+  pass.create(QStringLiteral("标题"), QStringLiteral(""),
+              [&](bool ok, const QString&, const QString&) { w_ok = ok; });
+  CHECK(!w_ok);
+  pass.complete(QStringLiteral("1"),
+                [&](bool ok, const QString&, const QString&) { w_ok = ok; });
+  CHECK(!w_ok);
 
   // —— L2 形态：拉到的条目 detailUrl 必带 ——
-  const QVector<ExternalTask> pulled = rj.list();
+  QVector<ExternalTask> pulled;
+  rj.list([&](bool ok, const QVector<ExternalTask>& items, const QString&) {
+    if (ok) pulled = items;
+  });
   CHECK(pulled.size() == 1);
   CHECK(!pulled.first().detail_url.isEmpty());
 

@@ -9,6 +9,8 @@
 #include <QString>
 #include <QVector>
 
+#include <functional>
+
 namespace memex::client {
 
 // 能力位（位或组合；capabilities() 返回 int 便于跨边界传递）
@@ -20,8 +22,8 @@ enum TaskProviderCaps {
 
 enum class TaskProviderAuth {
   kNone,  // 无凭据（L1 模板/直通链接）
-  kToken, // 令牌（PAT/tenant token 等；凭据走加密面，随 R27-3 实做）
-  kOAuth, // OAuth 授权流（随 R27-3 实做）
+  kToken, // 令牌（PAT/tenant token 等；凭据走加密面，随设置页实做）
+  kOAuth, // OAuth 授权流（随设置页实做）
 };
 
 // 外部任务条目（L2 拉取的形态；L1 手工登记同构）
@@ -31,7 +33,16 @@ struct ExternalTask {
   QString project;    // 可选前缀槽（仓库 org/repo、站点域名等）
   QString title;
   QString detail_url; // L1 必带
+  bool done{false};   // 外部现态（L2 只读展示；回写是 L3）
 };
+
+// —— R27-3 SPI 异步化：真 provider 走网络，回调收尾（repo 惯例信号
+// 驱动无 QEventLoop；能力未开的级别基类直接回不支持，不空转）——
+using TaskListFn =
+    std::function<void(bool ok, const QVector<ExternalTask>& items,
+                       const QString& error)>;
+using TaskWriteFn =
+    std::function<void(bool ok, const QString& key, const QString& error)>;
 
 class TaskProvider {
  public:
@@ -51,13 +62,18 @@ class TaskProvider {
   virtual QString detail_url(const QString& key,
                              const QString& project = QString()) const = 0;
 
-  // L2/L3 默认不支持：能力声明未开的级别，基类直接回「不可用」，
-  // 不抛异常不空转。
-  virtual QVector<ExternalTask> list() const { return {}; }
-  virtual bool create(const QString& /*title*/, const QString& /*note*/) {
-    return false;
+  // L2/L3 默认不支持：能力声明未开的级别，基类直接同步回「不可用」
+  //（不碰网络不空转）。
+  virtual void list(const TaskListFn& done) const {
+    done(false, {}, QStringLiteral("该 provider 未声明只读能力（L2）"));
   }
-  virtual bool complete(const QString& /*key*/) { return false; }
+  virtual void create(const QString& /*title*/, const QString& /*note*/,
+                      const TaskWriteFn& done) {
+    done(false, QString(), QStringLiteral("该 provider 未声明双向能力（L3）"));
+  }
+  virtual void complete(const QString& /*key*/, const TaskWriteFn& done) {
+    done(false, QString(), QStringLiteral("该 provider 未声明双向能力（L3）"));
+  }
 
   bool can_jump() const { return (capabilities() & kCapL1Jump) != 0; }
   bool can_read() const { return (capabilities() & kCapL2Read) != 0; }

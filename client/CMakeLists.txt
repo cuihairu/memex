@@ -50,6 +50,8 @@ qt_add_executable(memex_client
   app/file_assistant.hpp
   app/task_dialog.cpp
   engine/task/task_provider.cpp
+  engine/task/task_http.cpp
+  engine/task/github_provider.cpp
   app/task_dialog.hpp
   app/group_memo_dialog.cpp
   app/group_memo_dialog.hpp
@@ -322,6 +324,8 @@ if(MEMEX_BUILD_TESTS)
     app/tests/test_task_dialog.cpp
     app/task_dialog.cpp
     engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp)
   target_link_libraries(test_task_dialog PRIVATE
@@ -343,6 +347,8 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -376,6 +382,8 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -407,6 +415,8 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -460,6 +470,8 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -492,6 +504,8 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -522,6 +536,8 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -552,6 +568,8 @@ if(MEMEX_BUILD_TESTS)
     app/file_assistant.cpp
     app/task_dialog.cpp
     engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
     app/group_vault_dialog.cpp
@@ -576,7 +594,7 @@ if(MEMEX_BUILD_TESTS)
 
   # R27-2 外部任务 Provider SPI 验收：能力声明位（L1/L2/L3）、URL 模板
   # 槽替换（{project}/{key}，缺槽拒）、直通链接 http(s) 门、注册表
-  # 预设解析与未知 id、L1-only 调 L2/L3 默认不支持
+  # 预设解析与未知 id、L2/L3 默认不支持（异步 SPI 基类同步回不可用）
   add_executable(test_task_provider
     engine/task/tests/test_task_provider.cpp
     engine/task/task_provider.cpp)
@@ -585,6 +603,21 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_task_provider PRIVATE Qt6::Core)
   add_test(NAME task_provider COMMAND test_task_provider)
   set_tests_properties(task_provider PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 30)
+
+  # R27-3 GitHub Issues provider 验收（假传输回放不打外网）：L1 键校验、
+  # L2 拉列表解析滤 PR、L3 建单/关单、认证头与 API 形态断言、错误腿
+  add_executable(test_github_provider
+    engine/task/tests/test_github_provider.cpp
+    engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp)
+  target_include_directories(test_github_provider PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(test_github_provider PRIVATE Qt6::Core Qt6::Network)
+  add_test(NAME github_provider COMMAND test_github_provider)
+  set_tests_properties(github_provider PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 30)
 endif()
