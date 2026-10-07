@@ -192,6 +192,13 @@ class FilesClient : public QObject {
   // 团队聚合（直属上级=各直接下属的日报分组；判权服务端现裁）
   void fetch_team_reports();
 
+  // —— 会话审计（二期 /files/audit；持 auditor 有效角色，被拒也留痕）——
+  // 归档检索（条件全部可空=全量；每次检索服务端落查阅日志）
+  void audit_search(const QString& account, const QString& keyword,
+                    qint64 since_ms, qint64 until_ms);
+  // 查阅日志（台账自阅，同样持证）
+  void fetch_audit_reads();
+
  signals:
   void logged_in();
   void login_failed(const QString& reason);
@@ -253,6 +260,8 @@ class FilesClient : public QObject {
   void report_saved(qint64 id);
   void reports_listed(const QJsonArray& reports);
   void team_reports_listed(const QJsonArray& team); // author 分组＋reports
+  void audit_searched(const QJsonArray& messages);
+  void audit_reads_listed(const QJsonArray& reads);
   // 统一失败通道：op=操作名（"memo.create"/"inbox.upload"/…）、
   // status=HTTP 状态码（0=网络层失败）、error=服务端 error 字段或网络串
   void request_failed(const QString& op, int status, const QString& error);

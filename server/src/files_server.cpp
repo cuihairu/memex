@@ -14,6 +14,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <memex/protocol/messages.hpp>
+
 #include "cred.hpp"
 
 namespace memex::server {
@@ -307,6 +309,19 @@ struct FileServer::Impl {
                   if (author == q.subject) return true; // 自己看自己
                   const auto chain = store.manager_chain(author);
                   return !chain.empty() && chain.front() == q.subject;
+                });
+    // 显式允许：会话审计查阅（二期）——持 auditor 有效角色者（平台-6
+    // 口径：SecurityAuditor≠SystemAdmin，admin 有效角色不自动可读消息）；
+    // 被拒尝试在路由层落 audit.denied（与 CLI T3.2 同款，审计自身被拒
+    // 可对账）
+    az.add_rule(RuleEffect::ExplicitAllow, "audit-read",
+                [this](const AuthzQuery& q) {
+                  if (q.action != "audit:read") return false;
+                  const auto roles = store.effective_roles(q.subject, now_ms());
+                  for (const auto& r : roles) {
+                    if (r == "auditor") return true;
+                  }
+                  return false;
                 });
   }
 
@@ -810,6 +825,13 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/reports/team" && method_ == "GET") {
       return route_reports_team();
+    }
+    // 会话审计（二期）：在线检索＋查阅日志（持 auditor 有效角色）
+    if (path_ == "/files/audit/search" && method_ == "POST") {
+      return route_audit_search(body);
+    }
+    if (path_ == "/files/audit/reads" && method_ == "GET") {
+      return route_audit_reads();
     }
     // R24-2 群备忘录：群维度共享知识（管理员维护；开放编辑后成员可写，
     // 全部编辑逐笔留痕可回滚）。判权走 AuthorizationService 群规则。
@@ -1635,6 +1657,135 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       team.push_back({{"author", sub}, {"reports", std::move(rows)}});
     }
     respond_json(200, {{"ok", true}, {"team", std::move(team)}});
+  }
+
+  // —— 会话审计（二期）：CLI T3.2 查阅面同口径上移服务端——持 auditor
+  //    有效角色方可查（az audit:read；SecurityAuditor≠SystemAdmin）；
+  //    每次检索落查阅日志（谁/何时/条件摘要/命中几条）；被拒尝试也留痕
+  //   （audit.denied，审计自身被拒可对账）。查阅日志列表本身不落查阅
+  //    日志（台账自阅不自指，避免递归噪音）——
+  void route_audit_search(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j = json::object();
+    if (!body.empty()) {
+      try {
+        j = json::parse(body);
+      } catch (const std::exception&) {
+        respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+        return;
+      }
+    }
+    if (!j.is_object()) {
+      respond_json(400, {{"ok", false}, {"error", "请求体须为对象"}});
+      return;
+    }
+    const std::string target =
+        j.contains("account") && j["account"].is_string()
+            ? j["account"].get<std::string>()
+            : "";
+    const std::string keyword =
+        j.contains("keyword") && j["keyword"].is_string()
+            ? j["keyword"].get<std::string>()
+            : "";
+    const std::int64_t since_ms =
+        j.contains("since_ms") && j["since_ms"].is_number_integer()
+            ? j["since_ms"].get<std::int64_t>()
+            : 0;
+    const std::int64_t until_ms =
+        j.contains("until_ms") && j["until_ms"].is_number_integer()
+            ? j["until_ms"].get<std::int64_t>()
+            : 0;
+    int limit = j.contains("limit") && j["limit"].is_number_integer()
+                    ? static_cast<int>(j["limit"].get<std::int64_t>())
+                    : 200;
+    if (limit < 1) limit = 1;
+    if (limit > 1000) limit = 1000;
+    // 过滤条件摘要（进查阅日志；只记条件，不记消息内容——与 CLI 同款）
+    std::string filters;
+    const auto append_filter = [&filters](const std::string& kv) {
+      if (!filters.empty()) filters += " ";
+      filters += kv;
+    };
+    if (!target.empty()) append_filter("账号=" + target);
+    if (!keyword.empty()) append_filter("关键词=" + keyword);
+    if (since_ms > 0) append_filter("起=" + std::to_string(since_ms));
+    if (until_ms > 0) append_filter("止=" + std::to_string(until_ms));
+    const std::int64_t now = now_ms();
+    const Decision d = impl_.az.authorize(
+        {account, "audit:read", "audit", "owner=" + account});
+    if (!d.allowed) {
+      // 被拒尝试同样留痕（与 CLI --as 拒绝路径同口径）
+      AuditReadRow denied;
+      denied.op_account = account;
+      denied.action = "audit.denied";
+      denied.filters = filters;
+      denied.ts_ms = now;
+      impl_.store.add_audit_read(denied);
+      respond_json(403, {{"ok", false},
+                         {"error",
+                          "无 auditor 有效角色（SystemAdmin 不自动可读消息，"
+                          "须经授权授予 auditor）；被拒尝试已留痕"}});
+      return;
+    }
+    MessageSearch q;
+    q.account = target;
+    q.keyword = keyword;
+    q.since_ms = since_ms;
+    q.until_ms = until_ms;
+    q.limit = limit;
+    const auto rows = impl_.store.search_messages(q);
+    AuditReadRow rec;
+    rec.op_account = account;
+    rec.action = "audit.message.search";
+    rec.filters = filters;
+    rec.result_count = static_cast<int>(rows.size());
+    rec.ts_ms = now;
+    impl_.store.add_audit_read(rec);
+    std::cout << "[MEMEX] audit search account=" << account
+              << " hits=" << rows.size() << std::endl;
+    json arr = json::array();
+    for (const auto& m : rows) {
+      arr.push_back({{"msg_id", m.msg_id},
+                     {"from", m.from_account},
+                     {"to", m.to_account},
+                     {"type", memex::protocol::msg_type_name(
+                                  static_cast<memex::protocol::MsgType>(
+                                      m.type))},
+                     {"recalled", m.recalled},
+                     {"ts_ms", m.ts_ms},
+                     {"text", m.text}});
+    }
+    respond_json(200, {{"ok", true}, {"messages", std::move(arr)}});
+  }
+
+  void route_audit_reads() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    const Decision d = impl_.az.authorize(
+        {account, "audit:read", "audit", "owner=" + account});
+    if (!d.allowed) {
+      respond_json(403, {{"ok", false},
+                         {"error",
+                          "无 auditor 有效角色（查阅日志同样持证查阅）"}});
+      return;
+    }
+    int limit = 100;
+    const std::string lim = query_param(query_, "limit");
+    if (!lim.empty()) {
+      const int parsed = std::atoi(lim.c_str());
+      if (parsed > 0) limit = parsed > 500 ? 500 : parsed;
+    }
+    json arr = json::array();
+    for (const auto& r : impl_.store.audit_reads(limit)) {
+      arr.push_back({{"id", r.id},
+                     {"op_account", r.op_account},
+                     {"action", r.action},
+                     {"filters", r.filters},
+                     {"result_count", r.result_count},
+                     {"ts_ms", r.ts_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"reads", std::move(arr)}});
   }
 
   void route_upload(const std::string& body) {

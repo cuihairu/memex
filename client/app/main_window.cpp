@@ -32,6 +32,7 @@
 #include "task_dialog.hpp"
 #include "approval_dialog.hpp"
 #include "report_dialog.hpp"
+#include "audit_dialog.hpp"
 #include <QMessageBox>
 #include <QPainter>
 #include <QPixmap>
@@ -289,6 +290,17 @@ void MainWindow::build_ui() {
     report_dialog_->show();
     report_dialog_->raise();
     report_dialog_->activateWindow();
+  });
+  // 二期·会话审计：归档在线检索＋查阅日志（auditor 持证；被拒服务端留痕）
+  auto* act_audit = collab_menu->addAction(QStringLiteral("会话审计…"));
+  connect(act_audit, &QAction::triggered, this, [this] {
+    if (!audit_dialog_) {
+      audit_dialog_ = new AuditDialog(this);
+      audit_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    audit_dialog_->show();
+    audit_dialog_->raise();
+    audit_dialog_->activateWindow();
   });
 
   // —— 设置：开机启动（T4.7；勾选态与登记文件同步）＋主题（R19 · T4.9）——

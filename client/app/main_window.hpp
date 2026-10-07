@@ -37,6 +37,7 @@ class GroupServerDialog;
 class TaskDialog;
 class ApprovalDialog;
 class ReportDialog;
+class AuditDialog;
 
 class MainWindow : public QMainWindow {
 public:
@@ -247,6 +248,7 @@ private:
   QPointer<TaskDialog> task_dialog_; // R27-1 任务清单窗口（懒建）
   QPointer<ApprovalDialog> approval_dialog_; // 二期·审批窗口（懒建）
   QPointer<ReportDialog> report_dialog_; // 二期·日报周报窗口（懒建）
+  QPointer<AuditDialog> audit_dialog_; // 二期·会话审计窗口（懒建）
 
   QLabel* device_count_{nullptr};
   QLineEdit* search_box_{nullptr};

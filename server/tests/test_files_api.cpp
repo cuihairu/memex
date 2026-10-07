@@ -2095,6 +2095,56 @@ int main() {
                H("owner1"), "").status == 403);
   }
 
+  // —— 二期·会话审计：在线查阅（auditor 持证，admin 不自动可读）＋
+  //     查阅日志落库（谁/条件/命中几条）＋被拒尝试留痕（可对账）——
+  {
+    // 归档夹具：直插两条协作消息（T2.3 面；检索按关键词命中）
+    const std::int64_t t0 = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::system_clock::now()
+                                   .time_since_epoch())
+                               .count();
+    CHECK(store.store_message("audit-m1", "member1", "owner1", 1,
+                              "含审计暗号XYZ的正文", t0));
+    CHECK(store.store_message("audit-m2", "owner1", "member1", 1,
+                              "普通回复", t0 + 1));
+    // 未登录 401
+    CHECK(http(port, "POST", "/files/audit/search", {},
+               "{\"keyword\":\"审计暗号\"}").status == 401);
+    // 无 auditor 有效角色拒 403（被拒尝试已留痕——日志腿稍后对账）
+    const auto denied = http(port, "POST", "/files/audit/search",
+                             H("member1"), "{\"keyword\":\"审计暗号\"}");
+    CHECK(denied.status == 403);
+    CHECK(denied.body.find("被拒尝试已留痕") != std::string::npos);
+    // 查阅日志同样持证：无角色查日志 403
+    CHECK(http(port, "GET", "/files/audit/reads", H("member1"), "").status ==
+          403);
+    // 授 owner1 全局 auditor（时间窗多笔授权共存：平台段那笔已过期）
+    CHECK(store.role_grant("owner1", "auditor", "", 0, 0, "owner1", 1) > 0);
+    // 持证检索：关键词命中；admin/auditor 分立（member1 纵有 admin 也拒，
+    // owner1 持 auditor 过）
+    const auto hit = http(port, "POST", "/files/audit/search", H("owner1"),
+                          "{\"keyword\":\"审计暗号\"}");
+    CHECK(hit.status == 200);
+    CHECK(hit.body.find("audit-m1") != std::string::npos);
+    CHECK(hit.body.find("审计暗号XYZ") != std::string::npos);
+    CHECK(hit.body.find("audit-m2") == std::string::npos); // 条件 AND 命中面
+    // 空条件=全量；账号过滤收发双侧
+    const auto all = http(port, "POST", "/files/audit/search", H("owner1"),
+                          "{}");
+    CHECK(all.status == 200);
+    CHECK(all.body.find("audit-m1") != std::string::npos &&
+          all.body.find("audit-m2") != std::string::npos);
+    // 查阅日志（台账自阅）：member1 的被拒（audit.denied）与 owner1 的
+    // 检索（audit.message.search）都在、含条件摘要与命中数
+    const auto reads = http(port, "GET", "/files/audit/reads", H("owner1"),
+                            "");
+    CHECK(reads.status == 200);
+    CHECK(reads.body.find("audit.denied") != std::string::npos);
+    CHECK(reads.body.find("audit.message.search") != std::string::npos);
+    CHECK(reads.body.find("账号=member1") == std::string::npos); // 被拒无账号条件
+    CHECK(reads.body.find("关键词=审计暗号") != std::string::npos);
+  }
+
   // —— R27-2 外部任务登记：provider/ext_key 成对、个人登记不转派、
   //     列表回带引用（详情 URL 由客户端 SPI 解析，服务端只存引用）——
   {

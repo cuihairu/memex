@@ -843,6 +843,40 @@ void FilesClient::fetch_team_reports() {
             });
 }
 
+// —— 会话审计（二期）——
+
+void FilesClient::audit_search(const QString& account, const QString& keyword,
+                               qint64 since_ms, qint64 until_ms) {
+  QJsonObject body;
+  if (!account.isEmpty()) body.insert(QStringLiteral("account"), account);
+  if (!keyword.isEmpty()) body.insert(QStringLiteral("keyword"), keyword);
+  if (since_ms > 0) {
+    body.insert(QStringLiteral("since_ms"), static_cast<double>(since_ms));
+  }
+  if (until_ms > 0) {
+    body.insert(QStringLiteral("until_ms"), static_cast<double>(until_ms));
+  }
+  send_json(QStringLiteral("audit.search"), QStringLiteral("POST"),
+            QStringLiteral("/files/audit/search"), body,
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit audit_searched(
+                    resp.value(QStringLiteral("messages")).toArray());
+              }
+            });
+}
+
+void FilesClient::fetch_audit_reads() {
+  send_json(QStringLiteral("audit.reads"), QStringLiteral("GET"),
+            QStringLiteral("/files/audit/reads"), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit audit_reads_listed(
+                    resp.value(QStringLiteral("reads")).toArray());
+              }
+            });
+}
+
 void FilesClient::download_file(qint64 file_id, const QString& file_name,
                                 const QString& save_dir) {
   if (token_.isEmpty()) {
