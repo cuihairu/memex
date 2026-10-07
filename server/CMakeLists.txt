@@ -33,6 +33,15 @@ target_compile_features(memex_server PRIVATE cxx_std_17)
 target_link_libraries(memex_server PRIVATE memex_server_core)
 target_compile_definitions(memex_server PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
 
+# R26-1 memex agent：轻量常驻（Linux 起步）——注册令牌心跳上报本机负载；
+# 只读采样不开监听口不落盘（memex 只做「看+连」，操作类归 croupier）
+if(UNIX)
+  add_executable(memex_agent src/agent_main.cpp)
+  target_compile_features(memex_agent PRIVATE cxx_std_17)
+  target_link_libraries(memex_agent PRIVATE nlohmann_json::nlohmann_json
+                                            asio::asio)
+endif()
+
 if(MEMEX_BUILD_TESTS)
   add_test(NAME server_self_test COMMAND memex_server --self-test)
 
@@ -131,6 +140,18 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_files_api PRIVATE memex_server_core)
   add_test(NAME files_api COMMAND test_files_api)
   set_tests_properties(files_api PROPERTIES TIMEOUT 60)
+
+  # R26-1 agent 验收：真 agent 进程 × in-process FileServer（真 TCP）——
+  # 登记签发令牌→agent --once 一拍心跳 exit 0→列表绿灯＋指标落账＋令牌
+  # 不出现；错令牌/连不上一拍即败 exit 1；缺参 exit 2
+  if(UNIX)
+    add_executable(test_agent tests/test_agent.cpp)
+    target_link_libraries(test_agent PRIVATE memex_server_core)
+    target_compile_definitions(test_agent PRIVATE
+      MEMEX_AGENT_BIN="$<TARGET_FILE:memex_agent>")
+    add_test(NAME agent COMMAND test_agent)
+    set_tests_properties(agent PROPERTIES TIMEOUT 60)
+  endif()
 
   # R23-4 外网单向 uplink 走查：双实例真 TCP（内网面×uplink 面）——scope
   # 两道闸（内网令牌打 uplink 面 403／uplink 令牌打内网面 403）、唯一落点=
