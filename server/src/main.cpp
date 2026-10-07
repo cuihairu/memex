@@ -215,6 +215,14 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
         files = std::make_unique<memex::server::FileServer>(
             io, store, s3_storage, static_cast<std::uint16_t>(files_port),
             /*uplink_mode=*/false, file_sessions);
+        // 工具结果卡片回群（R25-2）：走 deliver_notice 同一投递面（NOTICE
+        // 信封＝离线入队＋归档＋在线扇出）；单 io_context 线程模型不加锁。
+        files->set_notice([&server](const std::string& target,
+                                    const std::string& title,
+                                    const std::string& content, int urgency) {
+          (void)memex::server::deliver_notice(server, target, title, content,
+                                              urgency, "");
+        });
       } catch (const std::exception& e) {
         std::cerr << "[MEMEX] 文件面端口绑定失败，文件面未启用"
                      "（消息主通道不受影响）：" << e.what() << std::endl;

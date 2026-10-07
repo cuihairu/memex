@@ -31,6 +31,7 @@ namespace memex::client {
 class FileAssistantDialog;
 class GroupMemoDialog;
 class GroupVaultDialog;
+class GroupCiDialog;
 
 class MainWindow : public QMainWindow {
 public:
@@ -228,6 +229,7 @@ private:
   QPointer<FileAssistantDialog> file_assistant_; // R23-3 文件助手窗口（懒建）
   QPointer<GroupMemoDialog> group_memo_; // R24-2 群备忘录窗口（懒建）
   QPointer<GroupVaultDialog> group_vault_; // R24-3 群密码箱窗口（懒建）
+  QPointer<GroupCiDialog> group_ci_; // R25-2 群 CI/CD 窗口（懒建）
 
   QLabel* device_count_{nullptr};
   QLineEdit* search_box_{nullptr};

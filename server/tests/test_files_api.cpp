@@ -949,6 +949,113 @@ int main() {
     CHECK(pos_status < pos_deploy); // id DESC：最新在前
   }
 
+  // —— R25-2 CI/CD 工具：流水线定义（memo:config）、红绿灯列表（成员）、
+  //     触发走 R25-1 白名单闸＋谁触发留痕＋结果卡片回群（注桩捕获） ——
+  {
+    const std::string gids = std::to_string(gid);
+    // 结果卡片回群面：注桩捕获（main 接线 deliver_notice，测试注桩验卡片）
+    std::vector<std::string> notices;
+    files.set_notice([&notices](const std::string& t, const std::string& ti,
+                                const std::string& c, int u) {
+      notices.push_back(t + "|" + ti + "|" + c + "|" + std::to_string(u));
+    });
+    // 流水线定义：未登录 401；成员 403；缺字段/name 空 400；管理员可建；
+    // 幽灵群 403（存在性不透）
+    CHECK(http(port, "POST", "/files/group-ci/pipeline", {},
+               "{\"gid\":" + gids + ",\"name\":\"dev\"}")
+              .status == 401);
+    CHECK(http(port, "POST", "/files/group-ci/pipeline", H("member1"),
+               "{\"gid\":" + gids + ",\"name\":\"dev\"}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-ci/pipeline", H("owner1"),
+               "{\"gid\":" + gids + "}").status == 400);
+    CHECK(http(port, "POST", "/files/group-ci/pipeline", H("owner1"),
+               "{\"gid\":" + gids + ",\"name\":\"\"}").status == 400);
+    CHECK(http(port, "POST", "/files/group-ci/pipeline", H("admin1"),
+               "{\"gid\":" + gids + ",\"name\":\"dev\","
+                             "\"description\":\"主构建\"}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-ci/pipeline", H("owner1"),
+               "{\"gid\":999999,\"name\":\"dev\"}").status == 403);
+    // 列表（红绿灯面）：非成员 403；成员见定义且未跑时无 last_status
+    CHECK(http(port, "GET", "/files/group-ci/list?gid=" + gids,
+               H("outsider"), "").status == 403);
+    const auto l0 = http(port, "GET",
+                         "/files/group-ci/list?gid=" + gids, H("member1"), "");
+    CHECK(l0.status == 200);
+    CHECK(l0.body.find("\"name\":\"dev\"") != std::string::npos);
+    CHECK(l0.body.find("last_status") == std::string::npos);
+    // 触发：白名单未开放 403（ci 工具尚未配置）；非成员 403；幽灵流水线
+    // 404（先开白名单）；stub 默认成功；params fail=true 出红
+    CHECK(http(port, "POST", "/files/group-ci/trigger", H("member1"),
+               "{\"gid\":" + gids + ",\"pipeline\":\"dev\"}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-tools/config", H("owner1"),
+               "{\"gid\":" + gids +
+                   ",\"tool\":\"ci\",\"actions\":[\"trigger\"]}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-ci/trigger", H("outsider"),
+               "{\"gid\":" + gids + ",\"pipeline\":\"dev\"}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-ci/trigger", H("member1"),
+               "{\"gid\":" + gids + ",\"pipeline\":\"ghost\"}")
+              .status == 404);
+    const auto t1 = http(port, "POST", "/files/group-ci/trigger",
+                         H("member1"),
+                         "{\"gid\":" + gids + ",\"pipeline\":\"dev\"}");
+    CHECK(t1.status == 200);
+    CHECK(t1.body.find("\"status\":\"success\"") != std::string::npos);
+    CHECK(t1.body.find("\"actor\":\"member1\"") != std::string::npos);
+    CHECK(jint(t1.body, "run_id") > 0);
+    const auto t2 = http(port, "POST", "/files/group-ci/trigger", H("owner1"),
+                         "{\"gid\":" + gids + ",\"pipeline\":\"dev\","
+                                              "\"params\":{\"fail\":true}}");
+    CHECK(t2.status == 200);
+    CHECK(t2.body.find("\"status\":\"failed\"") != std::string::npos);
+    // 红绿灯翻转：最近一笔失败→last_status=failed（绿翻红）
+    const auto l1 = http(port, "GET",
+                         "/files/group-ci/list?gid=" + gids, H("member1"), "");
+    CHECK(l1.body.find("\"last_status\":\"failed\"") != std::string::npos);
+    CHECK(l1.body.find("\"last_actor\":\"owner1\"") != std::string::npos);
+    // 结果卡片回群：两笔触发两卡片；后笔失败在标题（红绿灯语义）
+    CHECK(notices.size() == 2);
+    CHECK(notices[0].find("group:" + gids) != std::string::npos);
+    CHECK(notices[0].find("构建成功：dev") != std::string::npos);
+    CHECK(notices[1].find("构建失败：dev") != std::string::npos);
+    // run 历史：成员可读、id DESC（后触发的 failed 在前）、谁触发可回溯
+    const auto rs = http(port, "GET",
+                         "/files/group-ci/runs?gid=" + gids, H("member1"), "");
+    CHECK(rs.status == 200);
+    const auto pos_fail = rs.body.find("\"status\":\"failed\"");
+    const auto pos_ok = rs.body.find("\"status\":\"success\"");
+    CHECK(pos_fail != std::string::npos && pos_ok != std::string::npos);
+    CHECK(pos_fail < pos_ok);
+    CHECK(rs.body.find("\"actor\":\"member1\"") != std::string::npos);
+    // 过滤：?pipeline=ghost 空集；坏 gid 400
+    CHECK(http(port, "GET",
+               "/files/group-ci/runs?gid=" + gids + "&pipeline=ghost",
+               H("member1"), "").body.find("\"runs\":[]") !=
+            std::string::npos);
+    CHECK(http(port, "GET", "/files/group-ci/runs?gid=x", H("member1"), "")
+              .status == 400);
+    // 触发留痕进 R25-1 工具审计（tool=ci action=trigger 两行）
+    const auto ca = http(port, "GET",
+                         "/files/group-tools/audit?gid=" + gids, H("owner1"),
+                         "");
+    CHECK(ca.body.find("\"tool\":\"ci\"") != std::string::npos);
+    CHECK(ca.body.find("\"action\":\"trigger\"") != std::string::npos);
+    // 流水线删除：成员 403；管理员删 200；再触发 404
+    CHECK(http(port, "POST", "/files/group-ci/pipeline", H("member1"),
+               "{\"gid\":" + gids + ",\"name\":\"dev\",\"op\":\"delete\"}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-ci/pipeline", H("admin1"),
+               "{\"gid\":" + gids + ",\"name\":\"dev\",\"op\":\"delete\"}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-ci/trigger", H("member1"),
+               "{\"gid\":" + gids + ",\"pipeline\":\"dev\"}")
+              .status == 404);
+  }
+
   // —— 存储未配置：面在、字节面 503、元数据面照常 ——
   {
     memex::server::FileServer bare(io, store, nullptr, 0);

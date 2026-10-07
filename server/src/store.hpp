@@ -647,6 +647,44 @@ public:
   std::vector<GroupToolAudit> tool_audit_list(std::uint64_t group_id,
                                               int limit = 200);
 
+  // —— R25-2 CI/CD 工具（首个落在 R25-1 框架上的具体工具）——
+  // 流水线定义（群内按名唯一）；红绿灯=每流水线最近一笔 run 的 status
+  struct CiPipeline {
+    std::uint64_t group_id{0};
+    std::string name;
+    std::string description;
+    std::string updated_by;
+    std::int64_t updated_ms{0};
+  };
+  // 触发留痕：谁触发/何时/哪条流水线/结果（谁触发可回溯=设计点名）
+  struct CiRun {
+    std::int64_t id{0};
+    std::uint64_t group_id{0};
+    std::string pipeline;
+    std::string actor;
+    std::string status; // success/failed（stub 执行器即时出结果）
+    std::string params_json;
+    std::string result_json;
+    std::int64_t ts_ms{0};
+  };
+  // 流水线 upsert/删（群须存在=false；删=删到行才真）
+  bool ci_pipeline_upsert(std::uint64_t group_id, const std::string& name,
+                          const std::string& description,
+                          const std::string& updated_by, std::int64_t ts_ms);
+  bool ci_pipeline_delete(std::uint64_t group_id, const std::string& name);
+  std::vector<CiPipeline> ci_pipeline_list(std::uint64_t group_id);
+  // run 落账（status 即终态：stub 执行器同步完成）并回 run id
+  std::int64_t ci_run_add(std::uint64_t group_id, const std::string& pipeline,
+                          const std::string& actor, const std::string& status,
+                          const std::string& params_json,
+                          const std::string& result_json, std::int64_t ts_ms);
+  // run 历史 id DESC（pipeline 空=该群全部流水线）
+  std::vector<CiRun> ci_run_list(std::uint64_t group_id,
+                                 const std::string& pipeline = {},
+                                 int limit = 50);
+  // 红绿灯面：每条流水线最近一笔 run（无 run 的流水线不出现在此）
+  std::vector<CiRun> ci_status_list(std::uint64_t group_id);
+
 private:
   bool ensure_schema();
 

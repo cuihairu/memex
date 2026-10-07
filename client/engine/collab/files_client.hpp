@@ -82,6 +82,24 @@ class FilesClient : public QObject {
   // 访问审计（仅群主/管理员；倒序）
   void group_vault_audit(quint64 gid);
 
+  // —— 群工具白名单（R25-1 /files/group-tools/config；仅群主/管理员）——
+  // upsert 工具动作清单（CI/CD 等具体工具的「开放哪些动作」面）
+  void set_tool_actions(quint64 gid, const QString& tool,
+                        const QStringList& actions);
+
+  // —— 群 CI/CD 工具（R25-2 /files/group-ci，落在 R25-1 白名单框架上）——
+  // 流水线定义 upsert／删（remove=true 走 op=delete；仅群主/管理员）
+  void ci_set_pipeline(quint64 gid, const QString& name,
+                       const QString& description, bool remove = false);
+  // 红绿灯列表（成员；每流水线带 last_status/last_actor/last_ts_ms，
+  // 无键=未跑过）
+  void ci_list(quint64 gid);
+  // 触发（成员；须 ci/trigger 在 R25-1 工具白名单；params 可选）
+  void ci_trigger(quint64 gid, const QString& pipeline,
+                  const QJsonObject& params = {});
+  // run 历史（成员；id DESC；pipeline 空=该群全部流水线）
+  void ci_runs(quint64 gid, const QString& pipeline = QString());
+
   // —— 收件箱（R23-3 文件助手混排面）——
   // GET /files/list?target=inbox：备忘录+文件时间倒序混排条目
   void list_inbox();
@@ -116,6 +134,11 @@ class FilesClient : public QObject {
   void group_vault_entry_deleted(qint64 id);
   void group_vault_acl_set();
   void group_vault_audit_listed(const QJsonArray& rows);
+  void tool_actions_set();
+  void ci_pipeline_set();
+  void ci_listed(const QJsonArray& pipelines); // 红绿灯面（last_status 键）
+  void ci_triggered(qint64 run_id, const QString& status); // success|failed
+  void ci_runs_listed(const QJsonArray& runs);
   void inbox_listed(const QJsonArray& items); // type=memo|file 混排条目
   void upload_finished(qint64 file_id, bool second_transfer);
   void download_finished(const QString& save_path);

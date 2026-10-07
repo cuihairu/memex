@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -168,6 +169,8 @@ struct FileServer::Impl {
   // 会话令牌库：共享句柄（R23-4 双实例一面一份没意义，见 FileSessions
   // 注）。单 io_context 线程驱动（与消息面/webhook 同一线程模型），不加锁。
   std::shared_ptr<FileSessions> sessions;
+  // R25-2 工具结果卡片回群回调（缺省未设＝只落账不回群）
+  GroupNoticeFn notice;
 
   explicit Impl(ServerStore& s, std::shared_ptr<S3Storage> st,
                 bool uplink = false,
@@ -728,6 +731,18 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/group-tools/audit" && method_ == "GET") {
       return route_group_tools_audit();
+    }
+    if (path_ == "/files/group-ci/pipeline" && method_ == "POST") {
+      return route_group_ci_pipeline(body);
+    }
+    if (path_ == "/files/group-ci/list" && method_ == "GET") {
+      return route_group_ci_list();
+    }
+    if (path_ == "/files/group-ci/trigger" && method_ == "POST") {
+      return route_group_ci_trigger(body);
+    }
+    if (path_ == "/files/group-ci/runs" && method_ == "GET") {
+      return route_group_ci_runs();
     }
     respond_json(404, {{"ok", false}, {"error", "路径不存在"}});
   }
@@ -2337,6 +2352,225 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     respond_json(200, {{"ok", true}, {"gid", gid}, {"rows", arr}});
   }
 
+  // —— R25-2 CI/CD 工具（落在 R25-1 框架上的首个具体工具）——
+  // 触发判权：R25-1 框架的 call 同构（成员 file:read 群继承＋白名单
+  // 「trigger」开放）；流水线定义/删除=memo:config（owner/admin）。
+  // 执行器为 stub：同步完成即时出终态（真 CI 系统接入随 R25-4 凭据面）；
+  // params 可带 {"fail":true} 注入失败——stub 阶段供红绿灯/卡片失败腿
+  // 演练与测试，真执行器接入后由真实结果决定。
+  void route_group_ci_pipeline(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("name") ||
+        !j["name"].is_string()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：gid/name"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::string name = j["name"].get<std::string>();
+    const std::string desc =
+        j.contains("description") && j["description"].is_string()
+            ? j["description"].get<std::string>()
+            : std::string();
+    const std::string op =
+        j.contains("op") && j["op"].is_string() ? j["op"].get<std::string>()
+                                                : "upsert";
+    if (gid == 0 || name.empty()) {
+      respond_json(400,
+                   {{"ok", false}, {"error", "gid 须为正整数、name 非空"}});
+      return;
+    }
+    const Decision d = impl_.az.authorize(
+        {account, "memo:config", group_resource(gid), "owner=" + account});
+    if (!d.allowed) {
+      respond_json(
+          403, {{"ok", false}, {"error", "无权管理流水线（仅群主/管理员）"}});
+      return;
+    }
+    if (op == "delete") {
+      if (!impl_.store.ci_pipeline_delete(gid, name)) {
+        respond_json(404, {{"ok", false}, {"error", "流水线不存在"}});
+        return;
+      }
+      std::cout << "[MEMEX] files group-ci pipeline delete account="
+                << account << " gid=" << gid << " name=" << name << std::endl;
+      respond_json(200, {{"ok", true}, {"gid", gid}, {"name", name}});
+      return;
+    }
+    if (!impl_.store.ci_pipeline_upsert(gid, name, desc, account, now_ms())) {
+      respond_json(404, {{"ok", false}, {"error", "群不存在"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-ci pipeline account=" << account
+              << " gid=" << gid << " name=" << name << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"name", name}});
+  }
+
+  void route_group_ci_list() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
+      return;
+    }
+    // 红绿灯：定义全集＋每流水线最近一笔 run 的状态（无 run=灰，未跑过）
+    const auto runs = impl_.store.ci_status_list(gid);
+    std::map<std::string, const ServerStore::CiRun*> last;
+    for (const auto& r : runs) last[r.pipeline] = &r;
+    json arr = json::array();
+    for (const auto& p : impl_.store.ci_pipeline_list(gid)) {
+      json item = {{"name", p.name},
+                   {"description", p.description},
+                   {"updated_by", p.updated_by},
+                   {"updated_ms", p.updated_ms}};
+      const auto it = last.find(p.name);
+      if (it != last.end()) {
+        item["last_status"] = it->second->status;
+        item["last_actor"] = it->second->actor;
+        item["last_ts_ms"] = it->second->ts_ms;
+      }
+      arr.push_back(item);
+    }
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"pipelines", arr}});
+  }
+
+  void route_group_ci_trigger(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("pipeline") ||
+        !j["pipeline"].is_string() ||
+        (j.contains("params") && !j["params"].is_object())) {
+      respond_json(400,
+                   {{"ok", false}, {"error", "缺少字段：gid/pipeline（params 可选须对象）"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::string pipeline = j["pipeline"].get<std::string>();
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权触发（非群成员）"}});
+      return;
+    }
+    // 白名单闸：工具「ci」须配置且动作「trigger」开放（R25-1 框架面）
+    const auto cfg = impl_.store.tool_config(gid, "ci");
+    bool opened = false;
+    if (cfg.has_value()) {
+      try {
+        for (const auto& a : json::parse(cfg->actions_json)) {
+          if (a.is_string() && a.get<std::string>() == "trigger") {
+            opened = true;
+            break;
+          }
+        }
+      } catch (const std::exception&) {
+      }
+    }
+    if (!opened) {
+      respond_json(403, {{"ok", false},
+                         {"error", "触发未开放（ci/trigger 不在工具白名单）"}});
+      return;
+    }
+    bool exists = false;
+    for (const auto& p : impl_.store.ci_pipeline_list(gid)) {
+      if (p.name == pipeline) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) {
+      respond_json(404, {{"ok", false}, {"error", "流水线不存在"}});
+      return;
+    }
+    const json params =
+        j.contains("params") ? j["params"] : json::object();
+    const bool fail =
+        params.contains("fail") && params["fail"].is_boolean() &&
+        params["fail"].get<bool>();
+    const std::string status = fail ? "failed" : "success";
+    const json result = {{"stub", true}, {"status", status}};
+    const std::int64_t run_id = impl_.store.ci_run_add(
+        gid, pipeline, account, status, params.dump(), result.dump(),
+        now_ms());
+    // 动作留痕进 R25-1 工具审计（与群日志同源）
+    impl_.store.tool_audit_add(gid, "ci", "trigger", account, j.dump(),
+                               result.dump(), now_ms());
+    std::cout << "[MEMEX] files group-ci trigger account=" << account
+              << " gid=" << gid << " pipeline=" << pipeline
+              << " status=" << status << std::endl;
+    // 结果卡片回群（回调未设＝只落账不回群；标题即红绿灯语义）
+    if (impl_.notice) {
+      impl_.notice("group:" + std::to_string(gid),
+                   std::string(fail ? "构建失败：" : "构建成功：") + pipeline,
+                   account + " 触发流水线「" + pipeline + "」，结果：" +
+                       (fail ? "失败" : "成功") + "（stub 执行器）",
+                   1);
+    }
+    respond_json(200, {{"ok", true},
+                       {"gid", gid},
+                       {"run_id", run_id},
+                       {"pipeline", pipeline},
+                       {"actor", account},
+                       {"status", status}});
+  }
+
+  void route_group_ci_runs() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
+      return;
+    }
+    const std::string pipeline = query_param(query_, "pipeline");
+    json arr = json::array();
+    for (const auto& r : impl_.store.ci_run_list(gid, pipeline)) {
+      json params = json::object();
+      json result = json::object();
+      try {
+        params = json::parse(r.params_json);
+      } catch (const std::exception&) {
+      }
+      try {
+        result = json::parse(r.result_json);
+      } catch (const std::exception&) {
+      }
+      arr.push_back({{"id", r.id},
+                     {"pipeline", r.pipeline},
+                     {"actor", r.actor},
+                     {"status", r.status},
+                     {"params", params},
+                     {"result", result},
+                     {"ts_ms", r.ts_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"runs", arr}});
+  }
+
   void respond_json(int status, const json& body) {
     const std::string payload = body.dump();
     std::ostringstream head;
@@ -2399,6 +2633,8 @@ FileServer::~FileServer() = default;
 std::uint16_t FileServer::port() const {
   return acceptor_.local_endpoint().port();
 }
+
+void FileServer::set_notice(GroupNoticeFn fn) { impl_->notice = std::move(fn); }
 
 void FileServer::start_accept() {
   if (impl_->uplink_mode) {

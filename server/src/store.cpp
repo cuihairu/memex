@@ -347,7 +347,27 @@ bool ServerStore::ensure_schema() {
       "  result_json TEXT NOT NULL,"
       "  ts_ms INTEGER NOT NULL);"
       "CREATE INDEX IF NOT EXISTS idx_gta_gid"
-      " ON group_tool_audit(group_id);"; // 本段为 schema 字符串最后一段
+      " ON group_tool_audit(group_id);"
+      // —— R25-2 CI/CD 工具：流水线定义（gid+name 主键 upsert）＋触发
+      // 留痕（谁触发可回溯=设计点名；stub 执行器即时出终态）——
+      "CREATE TABLE IF NOT EXISTS group_ci_pipelines ("
+      "  group_id INTEGER NOT NULL,"
+      "  name TEXT NOT NULL,"
+      "  description TEXT NOT NULL DEFAULT '',"
+      "  updated_by TEXT NOT NULL,"
+      "  updated_ms INTEGER NOT NULL,"
+      "  PRIMARY KEY (group_id, name));"
+      "CREATE TABLE IF NOT EXISTS group_ci_runs ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  group_id INTEGER NOT NULL,"
+      "  pipeline TEXT NOT NULL,"
+      "  actor TEXT NOT NULL,"
+      "  status TEXT NOT NULL,"
+      "  params_json TEXT NOT NULL DEFAULT '{}',"
+      "  result_json TEXT NOT NULL DEFAULT '{}',"
+      "  ts_ms INTEGER NOT NULL);"
+      "CREATE INDEX IF NOT EXISTS idx_gcr_gid"
+      " ON group_ci_runs(group_id, pipeline, id);"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -3529,6 +3549,163 @@ std::vector<ServerStore::GroupToolAudit> ServerStore::tool_audit_list(
     a.result_json = rj ? rj : "";
     a.ts_ms = sqlite3_column_int64(st, 7);
     out.push_back(std::move(a));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// —— R25-2 CI/CD 工具 ——
+
+bool ServerStore::ci_pipeline_upsert(std::uint64_t group_id,
+                                     const std::string& name,
+                                     const std::string& description,
+                                     const std::string& updated_by,
+                                     std::int64_t ts_ms) {
+  if (!group_info(group_id).has_value()) return false;
+  const char* sql =
+      "INSERT INTO group_ci_pipelines(group_id, name, description,"
+      " updated_by, updated_ms) VALUES(?,?,?,?,?)"
+      " ON CONFLICT(group_id, name) DO UPDATE SET"
+      " description=excluded.description, updated_by=excluded.updated_by,"
+      " updated_ms=excluded.updated_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, description.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, updated_by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::ci_pipeline_delete(std::uint64_t group_id,
+                                     const std::string& name) {
+  const char* sql =
+      "DELETE FROM group_ci_pipelines WHERE group_id = ? AND name = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ServerStore::CiPipeline> ServerStore::ci_pipeline_list(
+    std::uint64_t group_id) {
+  std::vector<CiPipeline> out;
+  const char* sql =
+      "SELECT group_id, name, description, updated_by, updated_ms"
+      " FROM group_ci_pipelines WHERE group_id = ? ORDER BY name ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    CiPipeline p;
+    p.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
+    const char* n = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    const char* d = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* u = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    p.name = n ? n : "";
+    p.description = d ? d : "";
+    p.updated_by = u ? u : "";
+    p.updated_ms = sqlite3_column_int64(st, 4);
+    out.push_back(std::move(p));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::int64_t ServerStore::ci_run_add(std::uint64_t group_id,
+                                     const std::string& pipeline,
+                                     const std::string& actor,
+                                     const std::string& status,
+                                     const std::string& params_json,
+                                     const std::string& result_json,
+                                     std::int64_t ts_ms) {
+  const char* sql =
+      "INSERT INTO group_ci_runs(group_id, pipeline, actor, status,"
+      " params_json, result_json, ts_ms) VALUES(?,?,?,?,?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, pipeline.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, actor.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, status.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 5, params_json.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 6, result_json.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 7, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  const std::int64_t id = ok ? sqlite3_last_insert_rowid(db_) : 0;
+  sqlite3_finalize(st);
+  return id;
+}
+
+std::vector<ServerStore::CiRun> ServerStore::ci_run_list(
+    std::uint64_t group_id, const std::string& pipeline, int limit) {
+  std::vector<CiRun> out;
+  const char* sql =
+      "SELECT id, group_id, pipeline, actor, status, params_json,"
+      " result_json, ts_ms FROM group_ci_runs WHERE group_id = ?"
+      " AND (? = '' OR pipeline = ?) ORDER BY id DESC LIMIT ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, pipeline.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, pipeline.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 4, limit);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    CiRun r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    const char* s = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    const char* pj = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    const char* rj = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    r.pipeline = p ? p : "";
+    r.actor = a ? a : "";
+    r.status = s ? s : "";
+    r.params_json = pj ? pj : "";
+    r.result_json = rj ? rj : "";
+    r.ts_ms = sqlite3_column_int64(st, 7);
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::CiRun> ServerStore::ci_status_list(
+    std::uint64_t group_id) {
+  std::vector<CiRun> out;
+  // 每条流水线只取最近一笔（id 最大）——红绿灯面
+  const char* sql =
+      "SELECT id, group_id, pipeline, actor, status, params_json,"
+      " result_json, ts_ms FROM group_ci_runs WHERE id IN"
+      " (SELECT MAX(id) FROM group_ci_runs WHERE group_id = ?"
+      "  GROUP BY pipeline) ORDER BY pipeline ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    CiRun r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    const char* s = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    const char* pj = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    const char* rj = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    r.pipeline = p ? p : "";
+    r.actor = a ? a : "";
+    r.status = s ? s : "";
+    r.params_json = pj ? pj : "";
+    r.result_json = rj ? rj : "";
+    r.ts_ms = sqlite3_column_int64(st, 7);
+    out.push_back(std::move(r));
   }
   sqlite3_finalize(st);
   return out;

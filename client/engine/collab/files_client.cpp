@@ -351,6 +351,78 @@ void FilesClient::group_vault_audit(quint64 gid) {
             });
 }
 
+// —— R25-2 群 CI/CD 工具 ——
+
+void FilesClient::set_tool_actions(quint64 gid, const QString& tool,
+                                   const QStringList& actions) {
+  QJsonArray arr;
+  for (const QString& a : actions) arr.append(a);
+  send_json(QStringLiteral("group-tools.config"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-tools/config"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("tool"), tool},
+             {QStringLiteral("actions"), arr}},
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit tool_actions_set();
+            });
+}
+
+void FilesClient::ci_set_pipeline(quint64 gid, const QString& name,
+                                  const QString& description, bool remove) {
+  QJsonObject body;
+  body.insert(QStringLiteral("gid"), static_cast<double>(gid));
+  body.insert(QStringLiteral("name"), name);
+  if (remove) {
+    body.insert(QStringLiteral("op"), QStringLiteral("delete"));
+  } else {
+    body.insert(QStringLiteral("description"), description);
+  }
+  send_json(QStringLiteral("group-ci.pipeline"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-ci/pipeline"), body,
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit ci_pipeline_set();
+            });
+}
+
+void FilesClient::ci_list(quint64 gid) {
+  send_json(QStringLiteral("group-ci.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-ci/list?gid=%1").arg(gid), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit ci_listed(
+                  resp.value(QStringLiteral("pipelines")).toArray());
+            });
+}
+
+void FilesClient::ci_trigger(quint64 gid, const QString& pipeline,
+                             const QJsonObject& params) {
+  send_json(QStringLiteral("group-ci.trigger"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-ci/trigger"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("pipeline"), pipeline},
+             {QStringLiteral("params"), params}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit ci_triggered(
+                  static_cast<qint64>(
+                      resp.value(QStringLiteral("run_id")).toDouble()),
+                  resp.value(QStringLiteral("status")).toString());
+            });
+}
+
+void FilesClient::ci_runs(quint64 gid, const QString& pipeline) {
+  QString path = QStringLiteral("/files/group-ci/runs?gid=%1").arg(gid);
+  if (!pipeline.isEmpty()) {
+    path += QStringLiteral("&pipeline=") +
+            QString::fromUtf8(QUrl::toPercentEncoding(pipeline));
+  }
+  send_json(QStringLiteral("group-ci.runs"), QStringLiteral("GET"), path, {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit ci_runs_listed(resp.value(QStringLiteral("runs")).toArray());
+            });
+}
+
 void FilesClient::list_inbox() {
   send_json(QStringLiteral("inbox.list"), QStringLiteral("GET"),
             QStringLiteral("/files/list?target=inbox"), {},

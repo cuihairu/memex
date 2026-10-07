@@ -15,6 +15,7 @@
 #include <asio.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -25,6 +26,14 @@
 #include "store.hpp"
 
 namespace memex::server {
+
+// R25-2 工具结果卡片回群回调：FileServer 不持 CollabServer（两面各自
+// 独立端口），main 接线 deliver_notice（走 NOTICE 信封＝离线入队＋归档
+// ＋在线扇出同一投递面）；测试注桩。urgency 取 Notice::Urgency 数值。
+using GroupNoticeFn = std::function<void(const std::string& target,
+                                         const std::string& title,
+                                         const std::string& content,
+                                         int urgency)>;
 
 // 会话库前置声明（实体在 files_server.cpp；调用方只持句柄不 deref）：
 // 双实例部署两面共享一份，scope 闸才有实体。
@@ -73,6 +82,9 @@ class FileServer {
 
   std::uint16_t port() const;
   void start_accept();
+
+  // 工具结果卡片回群回调（R25-2；缺省未设＝只落账不回群，测试面用）
+  void set_notice(GroupNoticeFn fn);
 
   // 连接处理内部类（匿名空间）需触达：公开类型、私有成员不可触达
   struct Impl;
