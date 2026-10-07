@@ -98,8 +98,13 @@ void FilesClient::login(const QString& host, quint16 files_port,
 }
 
 void FilesClient::logout() {
-  // 服务端令牌不主动吊销（内网 v1 无 revoke 面）：本地清即可，
-  // 服务端 12h TTL 自然过期
+  // 平台-2：服务端登出（落 logout_reason＋令牌即刻失效）尽力而为——
+  // 网络失败也照常本地清（服务端 12h TTL 兜底）
+  if (!token_.isEmpty()) {
+    send_json(QStringLiteral("session.logout"), QStringLiteral("POST"),
+              QStringLiteral("/files/logout"), {},
+              [](bool, int, const QJsonObject&, const QString&) {});
+  }
   token_.clear();
 }
 

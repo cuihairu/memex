@@ -512,15 +512,18 @@ void Session::handle_login(const memex::protocol::Message& msg) {
   rec.version = in.client_version();
 
   const auto row = server_.store().find_account(account_);
+  // 平台-2：口令凭据独立（credentials 表为判登唯一来源；accounts 行内
+  // salt/digest 仅作老列兼容保留）
+  const auto cred = server_.store().find_credential(account_, "password");
   bool ok = false;
   std::string reason;
-  if (!row) {
+  if (!row || !cred) {
     reason = "账号不存在";
     rec.result = "no_account";
   } else {
     const std::string digest =
-        pbkdf2_sha256_hex(in.password(), row->salt_hex, 60000);
-    if (digest == row->digest_hex) {
+        pbkdf2_sha256_hex(in.password(), cred->salt_hex, 60000);
+    if (digest == cred->digest_hex) {
       // T3.3 设备台账：已停用设备拒绝登录（启停即时生效）
       const auto dev = server_.store().find_device(device_fingerprint_);
       if (dev && !dev->enabled) {

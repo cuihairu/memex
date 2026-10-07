@@ -278,6 +278,53 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
   return 0;
 }
 
+// 平台-2 身份绑定（IdentityBinding：外部身份↔本地账号；SSO 面未接前
+// 先立模型与维护口）：
+//   identity bind <issuer> <subject> <account>   绑定（issuer+subject 唯一）
+//   identity unbind <id>                          解绑
+//   identity list [账号]                          绑定一览（空=全部）
+int cmd_identity(int argc, char** argv, const std::string& db_path) {
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+  const auto ts =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count();
+  if (argc >= 4 && std::string_view(argv[0]) == "bind") {
+    const auto id = store.identity_bind(argv[3], argv[1], argv[2], ts);
+    if (id == 0) {
+      std::cerr << "绑定失败（账号不存在/已绑同源同主体）：" << argv[1]
+                << " → " << argv[3] << "\n";
+      return 1;
+    }
+    std::cout << "已绑定：" << argv[1] << "/" << argv[2] << " → " << argv[3]
+              << "（id " << id << "）\n";
+    return 0;
+  }
+  if (argc >= 2 && std::string_view(argv[0]) == "unbind") {
+    if (!store.identity_unbind(std::atoll(argv[1]))) {
+      std::cerr << "解绑失败（无此绑定 id）：" << argv[1] << "\n";
+      return 1;
+    }
+    std::cout << "已解绑 id " << argv[1] << "\n";
+    return 0;
+  }
+  if (argc >= 1 && std::string_view(argv[0]) == "list") {
+    const std::string account = argc >= 2 ? argv[1] : "";
+    for (const auto& b : store.identity_list(account)) {
+      std::cout << b.id << '\t' << b.account << '\t' << b.issuer << '/'
+                << b.subject << '\n';
+    }
+    return 0;
+  }
+  std::cerr << "用法：memex_server identity bind <issuer> <subject> <账号> | "
+               "unbind <id> | list [账号] [--db <库>]\n";
+  return 2;
+}
+
 int cmd_account(int argc, char** argv, const std::string& db_path) {
   // account add <账号> <口令> [--name 显示名] [--role admin|member]
   // account list：成员维护面（账号／展示名／角色）
@@ -1444,6 +1491,7 @@ int main(int argc, char** argv) {
 
     if (cmd == "serve") return cmd_serve(sub_argc, sub_argv, db_path);
     if (cmd == "account") return cmd_account(sub_argc, sub_argv, db_path);
+    if (cmd == "identity") return cmd_identity(sub_argc, sub_argv, db_path);
     if (cmd == "logins") return cmd_logins(sub_argc, sub_argv, db_path);
     if (cmd == "device") return cmd_device(sub_argc, sub_argv, db_path);
     if (cmd == "messages") return cmd_messages(sub_argc, sub_argv, db_path);

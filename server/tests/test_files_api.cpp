@@ -18,6 +18,9 @@
 #include <thread>
 #include <vector>
 
+#include <sqlite3.h>
+#include <unistd.h>
+
 #include "cred.hpp"
 #include "files_server.hpp"
 #include "storage.hpp"
@@ -1623,6 +1626,74 @@ int main() {
       CHECK(ls.body.find("\"id\":" + std::to_string(id_gone)) ==
             std::string::npos);
     }
+  }
+
+  // —— 平台-2 Identity 模型补全：Credential 独立判登、老库迁移、
+  //     Session 台账（签发落行/登出落理由/令牌即刻失效）、IdentityBinding ——
+  {
+    // 凭据独立：create_account 双写 credentials（判登唯一来源）
+    const auto cred = store.find_credential("owner1", "password");
+    CHECK(cred.has_value());
+    CHECK(!cred->disabled);
+    CHECK(!cred->salt_hex.empty() && !cred->digest_hex.empty());
+    CHECK(!store.find_credential("ghost", "password").has_value());
+    // Session 台账：签发落行（scope=internal、进行中）→登出落理由→
+    // 同令牌立即失效→再登出 401
+    const auto lg = http(port, "POST", "/files/session", {},
+                         "{\"account\":\"owner1\",\"password\":\"pw-owner1\"}");
+    CHECK(lg.status == 200);
+    const std::string lt = jstr(lg.body, "token");
+    const auto Hl = std::map<std::string, std::string>{
+        {"Authorization", "Bearer " + lt}};
+    const auto open_rows = store.session_list("owner1");
+    CHECK(!open_rows.empty());
+    CHECK(open_rows.front().logged_out_ms == 0);
+    CHECK(open_rows.front().logout_reason.empty());
+    CHECK(open_rows.front().scope == "internal");
+    CHECK(http(port, "POST", "/files/logout", Hl, "").status == 200);
+    CHECK(http(port, "GET", "/files/list?target=me", Hl, "").status == 401);
+    CHECK(http(port, "POST", "/files/logout", Hl, "").status == 401);
+    const auto closed = store.session_list("owner1");
+    CHECK(!closed.empty());
+    CHECK(closed.front().logout_reason == "user_logout");
+    CHECK(closed.front().logged_out_ms > 0);
+    // 老库迁移：accounts 内联口令 → credentials（open 幂等迁、字段原样）
+    const std::string legacy_db =
+        "memex_test_legacy_" + std::to_string(::getpid()) + ".db";
+    std::remove(legacy_db.c_str());
+    sqlite3* raw = nullptr;
+    CHECK(sqlite3_open(legacy_db.c_str(), &raw) == SQLITE_OK);
+    char* err = nullptr;
+    sqlite3_exec(
+        raw,
+        "CREATE TABLE accounts (account TEXT PRIMARY KEY,"
+        " display_name TEXT NOT NULL, salt TEXT NOT NULL,"
+        " digest TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member',"
+        " created_ms INTEGER NOT NULL);"
+        "INSERT INTO accounts VALUES('legacy1','老号','saltyhex',"
+        "'deadbeef','member',1700000000000);",
+        nullptr, nullptr, &err);
+    CHECK(err == nullptr);
+    sqlite3_close(raw);
+    memex::server::ServerStore lst;
+    CHECK(lst.open(legacy_db)); // ensure_schema 跑迁移
+    const auto lc = lst.find_credential("legacy1", "password");
+    CHECK(lc.has_value());
+    CHECK(lc->salt_hex == "saltyhex" && lc->digest_hex == "deadbeef");
+    CHECK(lst.identity_list().empty());
+    std::remove(legacy_db.c_str());
+    // IdentityBinding（store 面）：幽灵账号拒；绑定→查→唯一→列→解绑→无
+    CHECK(store.identity_bind("ghost", "corp-sso", "u1", 1) == 0);
+    const auto bid = store.identity_bind("owner1", "corp-sso", "alice@corp", 2);
+    CHECK(bid > 0);
+    const auto bf = store.identity_find("corp-sso", "alice@corp");
+    CHECK(bf.has_value());
+    CHECK(bf->account == "owner1");
+    CHECK(store.identity_bind("member1", "corp-sso", "alice@corp", 3) == 0);
+    CHECK(store.identity_list("owner1").size() == 1);
+    CHECK(store.identity_unbind(bid));
+    CHECK(!store.identity_find("corp-sso", "alice@corp").has_value());
+    CHECK(!store.identity_unbind(bid));
   }
 
   // —— 存储未配置：面在、字节面 503、元数据面照常 ——

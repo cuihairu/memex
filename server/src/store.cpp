@@ -430,7 +430,45 @@ bool ServerStore::ensure_schema() {
       "  server_id INTEGER PRIMARY KEY,"
       "  sealed_hex TEXT NOT NULL,"
       "  updated_by TEXT NOT NULL,"
-      "  updated_ms INTEGER NOT NULL);"; // 本段为 schema 字符串最后一段
+      "  updated_ms INTEGER NOT NULL);"
+      // —— 平台-2 Identity 模型补全：Credential 独立（口令迁出 accounts
+      // 行；type 枚举预留 token/certificate/sso/device）＋IdentityBinding
+      // （外部身份↔本地账号，issuer+subject 唯一）＋Session 持久面
+      // （签发落行、登出落理由，热路径裁决仍在内存）——
+      "CREATE TABLE IF NOT EXISTS credentials ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  account TEXT NOT NULL,"
+      "  type TEXT NOT NULL DEFAULT 'password',"
+      "  salt TEXT NOT NULL DEFAULT '',"
+      "  digest TEXT NOT NULL,"
+      "  created_ms INTEGER NOT NULL,"
+      "  disabled INTEGER NOT NULL DEFAULT 0,"
+      "  UNIQUE(account, type, digest));"
+      "CREATE INDEX IF NOT EXISTS idx_credentials_account"
+      " ON credentials(account, type);"
+      "CREATE TABLE IF NOT EXISTS identity_bindings ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  account TEXT NOT NULL,"
+      "  issuer TEXT NOT NULL,"
+      "  subject TEXT NOT NULL,"
+      "  created_ms INTEGER NOT NULL,"
+      "  UNIQUE(issuer, subject));"
+      "CREATE TABLE IF NOT EXISTS sessions ("
+      "  token_hash TEXT PRIMARY KEY,"
+      "  account TEXT NOT NULL,"
+      "  scope TEXT NOT NULL DEFAULT 'internal',"
+      "  device_id TEXT NOT NULL DEFAULT '',"
+      "  created_ms INTEGER NOT NULL,"
+      "  expires_ms INTEGER NOT NULL,"
+      "  logged_out_ms INTEGER NOT NULL DEFAULT 0,"
+      "  logout_reason TEXT NOT NULL DEFAULT '');"
+      "CREATE INDEX IF NOT EXISTS idx_sessions_account"
+      " ON sessions(account, created_ms);"
+      // 老库迁移：accounts 内联口令 → credentials（幂等：已有行不重迁）
+      "INSERT INTO credentials(account, type, salt, digest, created_ms)"
+      " SELECT account, 'password', salt, digest, created_ms FROM accounts"
+      " WHERE NOT EXISTS (SELECT 1 FROM credentials c"
+      " WHERE c.account = accounts.account AND c.type = 'password');"; // 本段为 schema 字符串最后一段
   char* err = nullptr;
   if (sqlite3_exec(db_, sql, nullptr, nullptr, &err) != SQLITE_OK) {
     sqlite3_free(err);
@@ -656,7 +694,220 @@ bool ServerStore::create_account(const std::string& account,
   sqlite3_bind_int64(st, 6, now_ms());
   const bool ok = sqlite3_step(st) == SQLITE_DONE;
   sqlite3_finalize(st);
-  return ok; // 唯一键冲突（账号已存在）→ DONE 之外 → false
+  if (!ok) return false; // 唯一键冲突（账号已存在）→ false
+  // 平台-2：口令凭据独立落 credentials（判登唯一来源；accounts 行内
+  // salt/digest 仅作老列兼容保留，不再参与判登）
+  return credential_insert(account, "password", salt, digest, now_ms());
+}
+
+// 凭据行插入（create_account 与未来面共用；UNIQUE 冲突=false）
+bool ServerStore::credential_insert(const std::string& account,
+                                    const std::string& type,
+                                    const std::string& salt_hex,
+                                    const std::string& digest_hex,
+                                    std::int64_t ts_ms) {
+  const char* sql =
+      "INSERT INTO credentials(account, type, salt, digest, created_ms)"
+      " VALUES(?,?,?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, type.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, salt_hex.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, digest_hex.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+// —— 平台-2 Identity 模型补全 ——
+
+std::optional<ServerStore::CredentialRow> ServerStore::find_credential(
+    const std::string& account, const std::string& type) {
+  const char* sql =
+      "SELECT id, account, type, salt, digest, created_ms, disabled"
+      " FROM credentials WHERE account = ? AND type = ? AND disabled = 0"
+      " ORDER BY id DESC LIMIT 1;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, type.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<CredentialRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    CredentialRow r;
+    r.id = sqlite3_column_int64(st, 0);
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    const char* t = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* s = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    const char* d = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    r.account = a ? a : "";
+    r.type = t ? t : "";
+    r.salt_hex = s ? s : "";
+    r.digest_hex = d ? d : "";
+    r.created_ms = sqlite3_column_int64(st, 5);
+    r.disabled = sqlite3_column_int(st, 6) != 0;
+    out = std::move(r);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::int64_t ServerStore::identity_bind(const std::string& account,
+                                        const std::string& issuer,
+                                        const std::string& subject,
+                                        std::int64_t ts_ms) {
+  if (!find_account(account).has_value()) return 0;
+  if (issuer.empty() || subject.empty()) return 0;
+  const char* sql =
+      "INSERT INTO identity_bindings(account, issuer, subject, created_ms)"
+      " VALUES(?,?,?,?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, issuer.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, subject.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok ? sqlite3_last_insert_rowid(db_) : 0; // 唯一冲突（已绑）→ 0
+}
+
+bool ServerStore::identity_unbind(std::int64_t id) {
+  const char* sql = "DELETE FROM identity_bindings WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::optional<ServerStore::IdentityBinding> ServerStore::identity_find(
+    const std::string& issuer, const std::string& subject) {
+  const char* sql =
+      "SELECT id, account, issuer, subject, created_ms"
+      " FROM identity_bindings WHERE issuer = ? AND subject = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_text(st, 1, issuer.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, subject.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<IdentityBinding> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    IdentityBinding r;
+    r.id = sqlite3_column_int64(st, 0);
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    const char* i = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* s = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    r.account = a ? a : "";
+    r.issuer = i ? i : "";
+    r.subject = s ? s : "";
+    r.created_ms = sqlite3_column_int64(st, 4);
+    out = std::move(r);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::IdentityBinding> ServerStore::identity_list(
+    const std::string& account) {
+  std::vector<IdentityBinding> out;
+  const char* sql =
+      "SELECT id, account, issuer, subject, created_ms"
+      " FROM identity_bindings WHERE (? = '' OR account = ?)"
+      " ORDER BY id ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, account.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    IdentityBinding r;
+    r.id = sqlite3_column_int64(st, 0);
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    const char* i = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* s = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    r.account = a ? a : "";
+    r.issuer = i ? i : "";
+    r.subject = s ? s : "";
+    r.created_ms = sqlite3_column_int64(st, 4);
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::session_insert(const SessionRecord& rec) {
+  const char* sql =
+      "INSERT OR REPLACE INTO sessions(token_hash, account, scope, device_id,"
+      " created_ms, expires_ms, logged_out_ms, logout_reason)"
+      " VALUES(?,?,?,?,?,?,0,'');";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, rec.token_hash.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, rec.account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, rec.scope.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, rec.device_id.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, rec.created_ms);
+  sqlite3_bind_int64(st, 6, rec.expires_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::session_close(const std::string& token_hash,
+                                const std::string& reason,
+                                std::int64_t ts_ms) {
+  const char* sql =
+      "UPDATE sessions SET logged_out_ms = ?, logout_reason = ?"
+      " WHERE token_hash = ? AND logged_out_ms = 0;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, ts_ms);
+  sqlite3_bind_text(st, 2, reason.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, token_hash.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE &&
+                  sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ServerStore::SessionRecord> ServerStore::session_list(
+    const std::string& account, int limit) {
+  std::vector<SessionRecord> out;
+  const char* sql =
+      "SELECT token_hash, account, scope, device_id, created_ms, expires_ms,"
+      " logged_out_ms, logout_reason FROM sessions"
+      " WHERE (? = '' OR account = ?) ORDER BY created_ms DESC LIMIT ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 3, limit > 0 ? limit : 100);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    SessionRecord r;
+    const char* h = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    const char* s = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    const char* d = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    r.token_hash = h ? h : "";
+    r.account = a ? a : "";
+    r.scope = s ? s : "";
+    r.device_id = d ? d : "";
+    r.created_ms = sqlite3_column_int64(st, 4);
+    r.expires_ms = sqlite3_column_int64(st, 5);
+    r.logged_out_ms = sqlite3_column_int64(st, 6);
+    const char* lr =
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 7));
+    r.logout_reason = lr ? lr : "";
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
 }
 
 std::optional<AccountRow> ServerStore::find_account(const std::string& account) {

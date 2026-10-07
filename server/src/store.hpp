@@ -204,6 +204,65 @@ public:
                                          const std::string& fp_prefix = "",
                                          int limit = 200);
 
+  // —— 平台-2 Identity 模型补全 ——
+  // Credential 独立：口令凭据迁出 accounts 行（建号双写、老库 open 时
+  // 幂等迁移）；token/certificate/sso/device 类型随 schema 预留，当前
+  // 只有 password 参与判登。
+  struct CredentialRow {
+    std::int64_t id{0};
+    std::string account;
+    std::string type; // password／token／certificate／sso／device
+    std::string salt_hex;
+    std::string digest_hex;
+    std::int64_t created_ms{0};
+    bool disabled{false};
+  };
+  std::optional<CredentialRow> find_credential(const std::string& account,
+                                               const std::string& type);
+  // IdentityBinding：外部身份（issuer+subject 唯一）↔ 本地账号。SSO 面
+  // 未接前先立模型与 CLI 维护口（identity bind/unbind/list）。
+  struct IdentityBinding {
+    std::int64_t id{0};
+    std::string account;
+    std::string issuer;
+    std::string subject;
+    std::int64_t created_ms{0};
+  };
+  // 绑定（账号须存在；issuer+subject 已绑=0）
+  std::int64_t identity_bind(const std::string& account,
+                             const std::string& issuer,
+                             const std::string& subject, std::int64_t ts_ms);
+  bool identity_unbind(std::int64_t id);
+  std::optional<IdentityBinding> identity_find(const std::string& issuer,
+                                               const std::string& subject);
+  std::vector<IdentityBinding> identity_list(const std::string& account = "");
+  // Session 持久面：file 面令牌签发落行（device_id 预留空）、登出落
+  // 理由；热路径裁决仍在内存（行随 expires_ms 过去自然失效，不过期
+  // 不删——历史留痕面）。
+  struct SessionRecord {
+    std::string token_hash;
+    std::string account;
+    std::string scope; // internal／uplink
+    std::string device_id;
+    std::int64_t created_ms{0};
+    std::int64_t expires_ms{0};
+    std::int64_t logged_out_ms{0}; // 0=进行中
+    std::string logout_reason;     // user_logout／…
+  };
+  bool session_insert(const SessionRecord& rec);
+  bool session_close(const std::string& token_hash, const std::string& reason,
+                     std::int64_t ts_ms);
+  std::vector<SessionRecord> session_list(const std::string& account,
+                                          int limit = 100);
+
+ private:
+  // 凭据行插入（create_account 内部腿）
+  bool credential_insert(const std::string& account, const std::string& type,
+                         const std::string& salt_hex,
+                         const std::string& digest_hex, std::int64_t ts_ms);
+
+ public:
+
   // —— T3.3 设备台账 ——
   // 首次成功登录建档、再次登录刷新 last_seen（台账随使用自动生长）。
   bool upsert_device(const std::string& fingerprint, const std::string& kind,

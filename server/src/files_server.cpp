@@ -275,8 +275,16 @@ struct FileServer::Impl {
     prune_sessions();
     const std::string token = random_salt_hex(); // 16B 熵 → 32 hex
     if (token.empty()) return "";
-    sessions->map[sha256_hex(token)] =
-        FileSession{account, now_ms() + kSessionTtlMs, uplink};
+    const std::int64_t now = now_ms();
+    const std::string hash = sha256_hex(token);
+    sessions->map[hash] = FileSession{account, now + kSessionTtlMs, uplink};
+    // 平台-2 会话台账：签发落行（device_id 预留空；尽力落、裁决仍在内存）
+    store.session_insert(ServerStore::SessionRecord{hash, account,
+                                                    uplink ? "uplink"
+                                                           : "internal",
+                                                    "", now,
+                                                    now + kSessionTtlMs, 0,
+                                                    ""});
     return token;
   }
   // 有效回会话；无效/过期回空。scope 判定走它（R23-4 两道闸之一）。
@@ -647,6 +655,9 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (path_ == "/files/session") {
       return route_session(body);
     }
+    if (path_ == "/files/logout" && method_ == "POST") {
+      return route_logout();
+    }
     if (path_ == "/files/upload" && method_ == "POST") {
       return route_upload(body);
     }
@@ -845,13 +856,13 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         return;
       }
     }
-    // 与消息面同源口令校验（store 摘要 + PBKDF2）；token 只存哈希
-    const auto row = impl_.store.find_account(account);
+    // 与消息面同源口令校验（credentials 表判登，平台-2；token 只存哈希）
+    const auto cred = impl_.store.find_credential(account, "password");
     std::string token;
-    if (row.has_value()) {
+    if (cred.has_value()) {
       // 摘要比对用常量时间思路不引入（内网面 v1 与消息面同口径）
-      token = pbkdf2_sha256_hex(password, row->salt_hex, 60000) ==
-                      row->digest_hex
+      token = pbkdf2_sha256_hex(password, cred->salt_hex, 60000) ==
+                      cred->digest_hex
                   ? impl_.mint_session(account, uplink)
                   : "";
     }
@@ -864,6 +875,25 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                   {"token", token},
                   {"expires_in", kSessionTtlMs / 1000},
                   {"scope", uplink ? "uplink" : "internal"}});
+  }
+
+  // 登出（平台-2 Session 模型收尾）：台账落 logout_reason＋内存即刻
+  // 失效——令牌登出后立即不可再用（不等 12h TTL）。
+  void route_logout() {
+    static constexpr const char* kPrefix = "Bearer ";
+    const auto s = impl_.auth_session_full(authorization_);
+    if (!s.has_value() ||
+        authorization_.rfind(kPrefix, 0) != 0) {
+      respond_json(401, {{"ok", false},
+                         {"error", "会话无效或过期（先 POST /files/session）"}});
+      return;
+    }
+    const std::string hash =
+        sha256_hex(authorization_.substr(std::strlen(kPrefix)));
+    impl_.store.session_close(hash, "user_logout", now_ms());
+    impl_.sessions->map.erase(hash);
+    std::cout << "[MEMEX] files logout account=" << s->account << std::endl;
+    respond_json(200, {{"ok", true}});
   }
 
   // —— R23-4 外网单向 uplink：铁律=外网会话只有「写入」权限，永远没有
