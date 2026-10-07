@@ -134,12 +134,11 @@ final class FilesClientTests: XCTestCase {
                 .queryItems?.first(where: { $0.name == "target" })?.value, "inbox")
             return (200, ["Content-Type": "application/json"],
                     """
-                {"ok":true,"items":[
-                 {"type":"memo","id":7,"content":"备忘","created_ms":111,"updated_ms":222},
-                 {"type":"file","id":9,"file_name":"a.txt","file_size":3,"file_hash":"h1",
-                  "pin":1,"status":2,"upload_ts":333}
-                ]}
-                """.data(using: .utf8)!)
+{"ok":true,"items":[
+ {"type":"memo","id":7,"content":"备忘","created_ms":111,"updated_ms":222},
+ {"type":"file","id":9,"file_name":"a.txt","file_size":3,"file_hash":"h1",
+  "pin":1,"status":2,"upload_ts":333]}
+""".data(using: .utf8)!)
         }
         let items = try client.listInbox(limit: 50, offset: 10)
         XCTAssertEqual(items.count, 2)
@@ -156,11 +155,10 @@ final class FilesClientTests: XCTestCase {
         StubFilesProtocol.handler = { _ in
             (200, ["Content-Type": "application/json"],
              """
-            {"ok":true,"files":[
-             {"id":5,"file_name":"b.bin","file_size":9,"file_hash":"h2",
-              "pin":0,"status":0,"upload_ts":444}
-            ]}
-            """.data(using: .utf8)!)
+{"ok":true,"files":[
+ {"id":5,"file_name":"b.bin","file_size":9,"file_hash":"h2",
+  "pin":0,"status":0,"upload_ts":444]}
+""".data(using: .utf8)!)
         }
         let items = try client.listPersonal()
         XCTAssertEqual(items.count, 1)
