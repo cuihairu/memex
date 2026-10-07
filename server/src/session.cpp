@@ -243,11 +243,22 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     std::string reason;
     std::uint64_t gid = cmd.group_id();
     if (cmd.op() == "create") {
-      std::vector<std::string> members(cmd.members().begin(),
-                                       cmd.members().end());
-      gid = server_.store().create_group(cmd.name(), account_, members);
-      ok = gid > 0;
-      if (!ok) reason = "建群失败（群名空或成员账号不存在）";
+      // 平台-12 建群需特权（权限模型「建群需授权」=groupadd 需特权）：
+      // 统一判权服务裁决——追加角色 group_creator（org role grant，平台-3
+      // 时间窗机制）或基础 admin 放行；未授权默认拒（白名单口径）
+      const auto d = server_.group_az().authorize(
+          {account_, "group:create", "group", ""});
+      if (!d.allowed) {
+        ok = false;
+        reason = "建群失败（" + d.reason +
+                 "：建群是特权动作，须组织管理员授予 group_creator）";
+      } else {
+        std::vector<std::string> members(cmd.members().begin(),
+                                         cmd.members().end());
+        gid = server_.store().create_group(cmd.name(), account_, members);
+        ok = gid > 0;
+        if (!ok) reason = "建群失败（群名空或成员账号不存在）";
+      }
     } else if (cmd.op() == "invite") {
       // 拉人者须为本群成员（防外部账号凭群号塞人）
       if (!server_.store().is_group_member(cmd.group_id(), account_)) {
@@ -267,9 +278,18 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       ok = server_.store().group_leave(cmd.group_id(), account_);
       if (!ok) reason = "退群失败（群不存在或不在群里）";
     } else if (cmd.op() == "announce") {
-      ok = server_.store().group_announce(cmd.group_id(), account_,
-                                          cmd.announcement());
-      if (!ok) reason = "公告设置失败（仅群主/管理员可设）";
+      // 平台-12 群能力开关（权限模型「群能力管理员配全」）：公告能力被
+      // 管理员停用即拒（未配置=现行允许；配置权在群主/管理员，CLI 面把守）
+      if (!server_.store().group_capability_enabled(cmd.group_id(),
+                                                    "notice")) {
+        ok = false;
+        reason = "公告设置失败（deny:capability-notice：群公告能力已被"
+                 "管理员停用）";
+      } else {
+        ok = server_.store().group_announce(cmd.group_id(), account_,
+                                            cmd.announcement());
+        if (!ok) reason = "公告设置失败（仅群主/管理员可设）";
+      }
       if (ok && !cmd.announcement().empty()) {
         // R24-1 联动三级推送：公告=重要强提醒，全员（含设置者）收 NOTICE
         //（清除公告不推——管理动作非新信息，全员强提醒是骚扰）。

@@ -87,6 +87,15 @@ int main(int argc, char** argv) {
                              row.first, row.second, QStringLiteral("--db"), db}) == 0);
   }
 
+  // 平台-12 建群需特权（权限模型「建群需授权」）：alice 授 group_creator
+  CHECK(QProcess::execute(
+            server_bin,
+            {QStringLiteral("org"), QStringLiteral("role"),
+             QStringLiteral("grant"), QStringLiteral("alice"),
+             QStringLiteral("group_creator"), QStringLiteral("--by"),
+             QStringLiteral("alice"), QStringLiteral("--db"),
+             db}) == 0);
+
   const quint16 port = free_port();
   const QStringList server_args = {QStringLiteral("serve"), QStringLiteral("--db"), db,
                                    QStringLiteral("--port"), QString::number(port)};

@@ -182,6 +182,14 @@ bool ServerStore::ensure_schema() {
       "  action TEXT NOT NULL,"
       "  detail TEXT NOT NULL DEFAULT '',"
       "  ts_ms INTEGER NOT NULL);"
+      // 平台-12 群能力开关（权限模型「群能力管理员配全」；未配置=允许）
+      "CREATE TABLE IF NOT EXISTS group_capabilities ("
+      "  gid INTEGER NOT NULL,"
+      "  capability TEXT NOT NULL,"
+      "  enabled INTEGER NOT NULL,"
+      "  updated_by TEXT NOT NULL DEFAULT '',"
+      "  updated_ms INTEGER NOT NULL,"
+      "  PRIMARY KEY(gid, capability));"
       // T2.6 组织架构：部门树（parent_id 成树）＋成员资料
       //（直属上级为独立单列——每人至多一名，结构性约束）
       "CREATE TABLE IF NOT EXISTS departments ("
@@ -3314,6 +3322,105 @@ std::vector<std::string> ServerStore::group_members(std::uint64_t group_id) {
   while (sqlite3_step(st) == SQLITE_ROW) {
     const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
     if (p) out.emplace_back(p);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// —— 平台-12 群能力开关（权限模型「群能力管理员配全」）——
+
+const std::vector<std::string>& ServerStore::group_capability_names() {
+  static const std::vector<std::string> names = {
+      "notice",       // 群公告
+      "memo",         // 群备忘录
+      "vault",        // 群密码箱
+      "tools",        // 群工具（R25：打包/CI）
+      "server_tools", // 群服务器工具（R26）
+      "files",        // 群文件
+      "uplink",       // 外网上传收件箱
+  };
+  return names;
+}
+
+bool ServerStore::group_capability_set(std::uint64_t gid,
+                                       const std::string& capability,
+                                       bool enabled, const std::string& by,
+                                       std::int64_t ts_ms) {
+  if (!group_info(gid).has_value()) return false;
+  bool known = false;
+  for (const auto& n : group_capability_names())
+    if (n == capability) {
+      known = true;
+      break;
+    }
+  if (!known) return false;
+  const char* sql =
+      "INSERT INTO group_capabilities(gid, capability, enabled, updated_by,"
+      " updated_ms) VALUES(?,?,?,?,?) ON CONFLICT(gid, capability) DO UPDATE"
+      " SET enabled = excluded.enabled, updated_by = excluded.updated_by,"
+      " updated_ms = excluded.updated_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(gid));
+  sqlite3_bind_text(st, 2, capability.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 3, enabled ? 1 : 0);
+  sqlite3_bind_text(st, 4, by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  if (ok) {
+    // 权限模型「全程留痕」：能力开关变更落查阅台账（谁/何时/改了什么）
+    AuditReadRow rec;
+    rec.op_account = by;
+    rec.action = "group.capability";
+    rec.filters = "gid=" + std::to_string(gid) + " capability=" + capability +
+                  " enabled=" + (enabled ? "on" : "off");
+    rec.result_count = 0;
+    rec.ts_ms = ts_ms;
+    add_audit_read(rec);
+  }
+  return ok;
+}
+
+bool ServerStore::group_capability_enabled(std::uint64_t gid,
+                                           const std::string& capability) {
+  bool known = false;
+  for (const auto& n : group_capability_names())
+    if (n == capability) {
+      known = true;
+      break;
+    }
+  if (!known) return false; // 非法能力名不因为「没配置」而放行
+  const char* sql =
+      "SELECT enabled FROM group_capabilities WHERE gid = ? AND"
+      " capability = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return true;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(gid));
+  sqlite3_bind_text(st, 2, capability.c_str(), -1, SQLITE_TRANSIENT);
+  bool enabled = true; // 未配置=现行口径（允许）
+  if (sqlite3_step(st) == SQLITE_ROW) enabled = sqlite3_column_int(st, 0) != 0;
+  sqlite3_finalize(st);
+  return enabled;
+}
+
+std::vector<ServerStore::GroupCapability> ServerStore::group_capabilities_list(
+    std::uint64_t gid) {
+  std::vector<GroupCapability> out;
+  const char* sql =
+      "SELECT gid, capability, enabled, updated_by, updated_ms"
+      " FROM group_capabilities WHERE gid = ? ORDER BY capability ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(gid));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    GroupCapability c;
+    c.gid = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
+    c.capability = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    c.enabled = sqlite3_column_int(st, 2) != 0;
+    c.updated_by = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    c.updated_ms = sqlite3_column_int64(st, 4);
+    out.push_back(std::move(c));
   }
   sqlite3_finalize(st);
   return out;

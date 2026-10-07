@@ -112,6 +112,15 @@ int main(int argc, char** argv) {
                row.second, QStringLiteral("--db"), db}) == 0);
   }
 
+  // 平台-12 建群需特权（权限模型「建群需授权」）：alice 授 group_creator
+  CHECK(QProcess::execute(
+            server_bin,
+            {QStringLiteral("org"), QStringLiteral("role"),
+             QStringLiteral("grant"), QStringLiteral("alice"),
+             QStringLiteral("group_creator"), QStringLiteral("--by"),
+             QStringLiteral("alice"), QStringLiteral("--db"),
+             db}) == 0);
+
   const quint16 collab_port = free_port();
   const quint16 files_port = free_port();
   QProcess server;

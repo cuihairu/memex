@@ -609,6 +609,30 @@ public:
   // 群成员账号列表（群不存在返回空）
   std::vector<std::string> group_members(std::uint64_t group_id);
 
+  // —— 平台-12 群能力开关（权限模型「群能力管理员配全」，蓝图§五）——
+  //     词汇表固定七项，对应既有能力面（群公告/备忘录/密码箱/群工具/
+  //     群服务器工具/群文件/外网上传收件箱）。口径：未配置=现行（允许），
+  //     配置为禁即拒——首段收紧步进（存量部署不破），全面 deny-by-default
+  //     留后续（如实注明）。配置权=群主/管理员（调用方把守），变更落
+  //     查阅台账（action=group.capability，权限模型「全程留痕」）。
+  static const std::vector<std::string>& group_capability_names();
+  struct GroupCapability {
+    std::uint64_t gid{0};
+    std::string capability;
+    bool enabled{true};
+    std::string updated_by;
+    std::int64_t updated_ms{0};
+  };
+  // 群须存在、能力名须在词汇表；UPSERT 一行（gid+capability 唯一）
+  bool group_capability_set(std::uint64_t gid, const std::string& capability,
+                            bool enabled, const std::string& by,
+                            std::int64_t ts_ms);
+  // 生效口径：无配置行=允许；能力名不在词汇表=拒（false）
+  bool group_capability_enabled(std::uint64_t gid,
+                                const std::string& capability);
+  // 某群的配置行（含禁与重新允的历史现值，按能力名字典序）
+  std::vector<GroupCapability> group_capabilities_list(std::uint64_t gid);
+
   // —— T4.2 跨态会话 ——
   // 建立（start）：插入一行进行中记录（同会话重复 start 只记首条）。
   bool cross_log_start(const std::string& account,

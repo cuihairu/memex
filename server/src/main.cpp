@@ -2020,8 +2020,57 @@ int cmd_group(int argc, char** argv, const std::string& db_path) {
               << role << "\n";
     return 0;
   }
+  // 平台-12 群能力开关（权限模型「群能力管理员配全」）：每个能力可独立
+  // 停/启；未配置=现行（允许）。配置变更落查阅台账（谁/何时/改了什么）。
+  if (argc >= 1 && std::string_view(argv[0]) == "capability") {
+    const std::int64_t now = std::chrono::duration_cast<
+        std::chrono::milliseconds>(std::chrono::system_clock::now()
+                                       .time_since_epoch())
+        .count();
+    if (argc >= 5 && std::string_view(argv[1]) == "set") {
+      const std::uint64_t gid = std::strtoull(argv[2], nullptr, 10);
+      const std::string name = argv[3];
+      const std::string_view onoff = argv[4];
+      if (onoff != "on" && onoff != "off") {
+        std::cerr << "用法：group capability set <gid> <名> on|off --by 账号"
+                     "（名须在词汇表内）\n";
+        return 2;
+      }
+      std::string by;
+      for (int i = 5; i + 1 < argc; i += 2)
+        if (std::string_view(argv[i]) == "--by") by = argv[i + 1];
+      if (by.empty()) {
+        std::cerr << "缺 --by 账号（谁配置的须留痕）\n";
+        return 2;
+      }
+      if (!store.group_capability_set(gid, name, onoff == "on", by, now)) {
+        std::cerr << "写入失败（群须存在；能力名须在词汇表：";
+        for (const auto& n : memex::server::ServerStore::group_capability_names())
+          std::cerr << n << ' ';
+        std::cerr << "）\n";
+        return 1;
+      }
+      std::cout << "已配置群 " << gid << " 能力 " << name << " → "
+                << (onoff == "on" ? "启用" : "停用") << "（by " << by
+                << "）\n";
+      return 0;
+    }
+    if (argc >= 3 && std::string_view(argv[1]) == "list") {
+      const std::uint64_t gid = std::strtoull(argv[2], nullptr, 10);
+      std::cout << "能力\t生效\t配置人\t配置时刻\n";
+      for (const auto& c : store.group_capabilities_list(gid)) {
+        std::cout << c.capability << '\t' << (c.enabled ? "启用" : "停用")
+                  << '\t' << c.updated_by << '\t' << c.updated_ms << '\n';
+      }
+      std::cout << "（未列出的能力＝未配置＝现行允许）\n";
+      return 0;
+    }
+    std::cerr << "用法：group capability set <gid> <名> on|off --by 账号 | "
+                 "capability list <gid>\n";
+    return 2;
+  }
   std::cerr << "用法：group list [--gid N] | set-role <gid> <账号> "
-               "<member|admin>\n";
+               "<member|admin> | capability set|list …\n";
   return 2;
 }
 

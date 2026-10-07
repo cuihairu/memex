@@ -84,6 +84,15 @@ int main(int argc, char** argv) {
              QStringLiteral("--db"), db}) == 0);
 
   // 起服务端：文件面给端口、S3 不给＝存储未配置（元数据面照常）
+  // 平台-12 建群需特权（权限模型「建群需授权」）：alice 授 group_creator
+  CHECK(QProcess::execute(
+            server_bin,
+            {QStringLiteral("org"), QStringLiteral("role"),
+             QStringLiteral("grant"), QStringLiteral("alice"),
+             QStringLiteral("group_creator"), QStringLiteral("--by"),
+             QStringLiteral("alice"), QStringLiteral("--db"),
+             db}) == 0);
+
   const quint16 collab_port = free_port();
   const quint16 files_port = free_port();
   QProcess server;

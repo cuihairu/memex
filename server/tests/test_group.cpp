@@ -198,6 +198,27 @@ int main() {
     CHECK(s.groups_of("alice").size() == 1);
     CHECK(s.groups_of("ghost").empty());
 
+    // —— 平台-12 群能力开关（权限模型「群能力管理员配全」）——
+    // 校验闸：非法能力名拒、幽灵群拒；未配置=现行允许；非法名不因未配置放行
+    CHECK(!s.group_capability_set(gid, "不存在的", false, "alice", 1));
+    CHECK(!s.group_capability_set(99999, "notice", false, "alice", 1));
+    CHECK(s.group_capability_enabled(gid, "vault"));
+    CHECK(!s.group_capability_enabled(gid, "不存在的"));
+    CHECK(s.group_capability_set(gid, "vault", false, "alice", 2));
+    CHECK(!s.group_capability_enabled(gid, "vault"));
+    CHECK(s.group_capability_set(gid, "vault", true, "alice", 3)); // 重启恢复
+    CHECK(s.group_capability_enabled(gid, "vault"));
+    const auto caps = s.group_capabilities_list(gid);
+    CHECK(caps.size() == 1 && caps[0].capability == "vault" &&
+          caps[0].enabled && caps[0].updated_by == "alice");
+    // 权限模型「全程留痕」：变更落查阅台账（action=group.capability）
+    bool cap_audited = false;
+    for (const auto& a : s.audit_reads(10))
+      if (a.action == "group.capability" && a.op_account == "alice" &&
+          a.filters.find("capability=vault") != std::string::npos)
+        cap_audited = true;
+    CHECK(cap_audited);
+
     // 退群：普通成员退出；群主退群＝解散（成员表清空，群号与归档保留）
     CHECK(s.group_leave(gid, "carol"));
     CHECK(!s.is_group_member(gid, "carol"));
@@ -229,11 +250,38 @@ int main() {
     b.account_ = "bob";
     b.login("bob", "pc-b");
 
-    // 建群（alice 建，成员 bob）
+    // —— 平台-12 建群需特权（权限模型「建群需授权」=groupadd 需特权）：
+    //     未授权默认拒（白名单口径）；admin 基础角色／group_creator 追加
+    //     角色两路放行，现查现裁（授予即时生效）——
+    const auto denied = b.group_cmd("create", 0, {}, "未授权群");
+    CHECK(!denied.group_result().ok());
+    CHECK(denied.group_result().reason().find("default-deny") !=
+          std::string::npos);
+    CHECK(s.role_grant("alice", "admin", "", 0, 0, "alice", 1) > 0);
+
+    // 建群（alice=admin 路径，成员 bob）
     const auto created = a.group_cmd("create", 0, {"bob"}, "项目群");
     CHECK(created.group_result().ok());
     const auto gid = created.group_result().group_id();
     CHECK(gid > 0);
+
+    // group_creator 追加角色放行 bob（平台-3 时间窗机制授予）
+    CHECK(s.role_grant("bob", "group_creator", "", 0, 0, "alice", 2) > 0);
+    const auto bcreated = b.group_cmd("create", 0, {"alice"}, "bob的群");
+    CHECK(bcreated.group_result().ok());
+    // 群主退群＝解散：不留尾巴（后续「解散后群列表为空」腿按 bob 视角断言）
+    CHECK(b.group_cmd("leave", bcreated.group_result().group_id())
+              .group_result()
+              .ok());
+
+    // —— 平台-12 群能力开关（协议腿）：公告停用即拒，重新启用即恢复 ——
+    CHECK(s.group_capability_set(gid, "notice", false, "alice", 3));
+    const auto ann_denied =
+        a.group_cmd("announce", gid, {}, "", "被停用的公告");
+    CHECK(!ann_denied.group_result().ok());
+    CHECK(ann_denied.group_result().reason().find("capability-notice") !=
+          std::string::npos);
+    CHECK(s.group_capability_set(gid, "notice", true, "alice", 4));
 
     // 群消息：alice 发，bob 收（to=group:N）；归档恰好一条（to=群标识）
     memex::protocol::Message t;

@@ -56,14 +56,24 @@ public:
   // 经服务器——规则在此注册，Session 的 FILE_AUTHZ 处理器调 authorize。
   AuthorizationService& file_az() { return file_az_; }
 
+  // 平台-12 建群需特权（权限模型「建群需授权」=groupadd 需特权）：规则在
+  // 此注册，Session 的 GROUP_CMD create 处理器调 authorize。
+  AuthorizationService& group_az() { return group_az_; }
+
 private:
   void do_accept();
 
   void setup_file_rules();
 
+  void setup_group_rules();
+
+  // 生效角色含判（基础∪窗内授权，平台-3）——建群规则的共用底座
+  bool role_has(const std::string& account, const std::string& role);
+
   asio::io_context& io_;
   ServerStore& store_;
   AuthorizationService file_az_;
+  AuthorizationService group_az_;
   asio::ip::tcp::acceptor acceptor_;
   // account → 设备类型 → 会话（同类型单点在线，跨类型并存）
   std::map<std::string, std::map<std::string, std::shared_ptr<Session>>>

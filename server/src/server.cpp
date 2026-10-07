@@ -1,6 +1,7 @@
 #include "server.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <iostream>
 
 #include <memex/protocol/messages.hpp>
@@ -35,6 +36,7 @@ CollabServer::CollabServer(asio::io_context& io, ServerStore& store,
     : io_(io), store_(store),
       acceptor_(io, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port)) {
   setup_file_rules();
+  setup_group_rules();
 }
 
 // 平台-10 直连文件旁路四问（蓝图§十九）：①A 可发？——发送方持有效登录
@@ -68,6 +70,30 @@ void CollabServer::setup_file_rules() {
   // 其余情形（同部门、或跨部门已被策略放行）：允许
   file_az_.add_rule(RuleEffect::ExplicitAllow, "org-transfer",
                     [](const AuthzQuery&) { return true; });
+}
+
+// 平台-12 建群需特权（权限模型「建群需授权」，Linux 类比 groupadd 需特权）：
+// 组织管理员授予追加角色 group_creator（org role grant，平台-3 时间窗机制），
+// 或持基础 admin 角色；未授权默认拒（白名单口径）。授予/撤销即时生效
+//（effective_roles 现查现裁）。
+void CollabServer::setup_group_rules() {
+  group_az_.add_rule(RuleEffect::ExplicitAllow, "org-admin",
+                     [this](const AuthzQuery& q) {
+                       return role_has(q.subject, "admin");
+                     });
+  group_az_.add_rule(RuleEffect::ExplicitAllow, "group-creator-grant",
+                     [this](const AuthzQuery& q) {
+                       return role_has(q.subject, "group_creator");
+                     });
+}
+
+bool CollabServer::role_has(const std::string& account,
+                            const std::string& role) {
+  const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::system_clock::now().time_since_epoch())
+                       .count();
+  const auto roles = store_.effective_roles(account, now);
+  return std::find(roles.begin(), roles.end(), role) != roles.end();
 }
 
 std::uint16_t CollabServer::port() const {
