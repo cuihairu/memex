@@ -54,7 +54,16 @@ jobs:
           else
             want="sha-${{ github.event.workflow_run.head_sha || github.sha }}"
           fi
-          docker pull "$IMAGE:$want" # 拉不动即失败，不做半套部署
+          # ghcr 写节点→读副本有分钟级传播窗（私有包新 tag 未及副本时回
+          # denied 而非 404，2026-10-07 三连败实证），有界重试跨窗；
+          # 重试耗尽仍拒即真失败，不做半套部署
+          ok=""
+          for i in $(seq 1 12); do
+            if docker pull "$IMAGE:$want"; then ok=1; break; fi
+            echo "pull 未中（$i/12，多为 ghcr 传播延迟），30s 后重试"
+            sleep 30
+          done
+          [ -n "$ok" ]
           echo "tag=$want" >> "$GITHUB_OUTPUT"
 
       - name: 部署 + 健康轮询 + 失败自动回滚
