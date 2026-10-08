@@ -2,8 +2,10 @@
 // 离屏点击真按钮，按可观测后果断言：无会话时守卫把原因写进状态栏（截图
 // 遮罩拖拽链路另由 test_screenshot 端到端覆盖）；表情走全链——面板弹出→
 // 点内置表情→落地输入框→面板自关（顺带暴露面板 lambda 悬垂引用类缺陷）。
+#include <QAction>
 #include <QApplication>
 #include <QContextMenuEvent>
+#include <QMenuBar>
 #include <QDateTime>
 #include <QDialog>
 #include <QDir>
@@ -14,6 +16,7 @@
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMenu>
+#include <QSettings>
 #include <QPushButton>
 #include <QTemporaryDir>
 #include <QTextBlock>
@@ -357,6 +360,70 @@ int main(int argc, char** argv) {
         }, 3000));
       }
     }
+  }
+
+  // —— 需求批⑦ 消息回执：气泡旁状态可见（✓ 送达/✓✓ 已读、只升不降）
+  //     ＋已读回执开关（全局缺省＋会话级覆盖）与设置菜单接线 ——
+  {
+    // QSettings 持久化残留清场（重跑幂等——上次运行留下的开关值会使
+    // 缺省断言假红），段尾同样还原缺省态
+    QSettings s(QCoreApplication::organizationName(),
+                QCoreApplication::applicationName());
+    s.remove(QStringLiteral("receipts/send_read"));
+    s.remove(QStringLiteral("receipts/peer/peer-x"));
+    s.remove(QStringLiteral("receipts/peer/peer-y"));
+    // 开关裁决链：全局默认开 → 全局关 → 会话级显式覆盖全局
+    CHECK(window.read_receipts_enabled(QStringLiteral("peer-x")));
+    window.set_read_receipts_enabled(QString(), false);
+    CHECK(!window.read_receipts_enabled(QStringLiteral("peer-y")));
+    window.set_read_receipts_enabled(QStringLiteral("peer-x"), true);
+    CHECK(window.read_receipts_enabled(QStringLiteral("peer-x"))); // 覆盖全局关
+    CHECK(!window.read_receipts_enabled(QStringLiteral("peer-y")));
+    window.set_read_receipts_enabled(QStringLiteral("peer-x"), false);
+    CHECK(!window.read_receipts_enabled(QStringLiteral("peer-x")));
+    window.set_read_receipts_enabled(QString(), true); // 还原全局默认开
+    CHECK(window.read_receipts_enabled(QStringLiteral("peer-y")));
+
+    // 设置菜单全局开关接线（勾选态即 QSettings 值）
+    QAction* gact = nullptr;
+    for (QMenu* m : window.menuBar()->findChildren<QMenu*>()) {
+      for (QAction* a : m->actions()) {
+        if (a->text() == QStringLiteral("发送已读回执")) gact = a;
+      }
+    }
+    CHECK(gact != nullptr);
+    if (gact) {
+      CHECK(gact->isCheckable());
+      const bool before = gact->isChecked();
+      gact->setChecked(!before);
+      CHECK(window.read_receipts_enabled(QString()) == !before);
+      gact->setChecked(before); // 还原
+    }
+
+    // 气泡旁回执标注：delivered=✓ 已送达 → read=✓✓ 已读（升）；
+    // 乱序后到的 delivered 不倒退已读终态
+    window.open_direct_peer(QStringLiteral("dev-C7"));
+    CHECK(window.chat_panel_visible());
+    window.inject_message(QStringLiteral("dev-C7"),
+                          QStringLiteral("回执标注验收"), true,
+                          QStringLiteral("msg-rc1"));
+    CHECK(!window.chat_html().contains(QStringLiteral("已送达")));
+    window.apply_message_receipt(QStringLiteral("msg-rc1"),
+                                 QStringLiteral("delivered"));
+    CHECK(window.chat_html().contains(QStringLiteral("✓ 已送达")));
+    window.apply_message_receipt(QStringLiteral("msg-rc1"),
+                                 QStringLiteral("read"));
+    CHECK(window.chat_html().contains(QStringLiteral("✓✓ 已读")));
+    CHECK(!window.chat_html().contains(QStringLiteral("✓ 已送达")));
+    // 乱序回退：后到的 delivered 通知不倒退 read
+    window.apply_message_receipt(QStringLiteral("msg-rc1"),
+                                 QStringLiteral("delivered"));
+    CHECK(window.chat_html().contains(QStringLiteral("✓✓ 已读")));
+
+    // 还原缺省态（不留开关残留——QSettings 落盘，残留会污染重跑）
+    s.remove(QStringLiteral("receipts/send_read"));
+    s.remove(QStringLiteral("receipts/peer/peer-x"));
+    s.remove(QStringLiteral("receipts/peer/peer-y"));
   }
 
   if (g_failures == 0) {

@@ -384,6 +384,10 @@ public:
                             const std::string& payload, std::int64_t ts_ms);
   // 某消息的事件序列（按发生序）；msg_id 空=全部事件（重投演练用）
   std::vector<MessageEvent> message_events(const std::string& msg_id);
+  // 送达回执幂等判据（需求批⑦）：该 msg_id 是否已记过 by_account 的
+  // delivered 事件——重复 ACK 只记一次、只推一次 DELIVER_NOTICE。
+  bool delivered_recorded(const std::string& msg_id,
+                          const std::string& by_account);
   // 重放事件重建当前态（created 建 行、recalled 置标记、edited 替正文）
   std::vector<ArchivedMessage> rebuild_messages_from_events();
 

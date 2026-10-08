@@ -58,6 +58,8 @@ public:
   // T4.3 在线推送（PRESENCE_DATA）与本文件验收特性无关，自动跳过——
   // 在线表语义由 test_read_presence 显式验收。此处跳过可防他人上线／
   // 下线推送串扰后续帧断言（登录回执／群回执／PONG 探测都不含推送）。
+  // 需求批⑦：成员 ACK(msg_id) 触发的 DELIVER_NOTICE 同理跳过（送达级
+  // 回执链路由 test_read_presence 显式验收）。
   memex::protocol::Message read() {
     for (;;) {
       std::array<char, 4> head{};
@@ -69,7 +71,10 @@ public:
       std::string payload(len, '\0');
       asio::read(*socket_, asio::buffer(payload));
       auto msg = memex::protocol::decode_payload(payload);
-      if (msg.type() != memex::protocol::v1::PRESENCE_DATA && msg.type() != memex::protocol::v1::FAV_DATA) return msg;
+      if (msg.type() != memex::protocol::v1::PRESENCE_DATA &&
+          msg.type() != memex::protocol::v1::FAV_DATA &&
+          msg.type() != memex::protocol::v1::DELIVER_NOTICE)
+        return msg;
     }
   }
   // 同步点：PING/PONG 往返后，服务端已处理完此前发来的全部帧

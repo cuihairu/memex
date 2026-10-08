@@ -396,12 +396,31 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     break;
   }
   case v1::ACK:
-    // 接收方回执：消息已收取，清离线队列；平台-4 落 delivered 事件
-    //（ack 清队成功才记——重 ACK 不重记）
+    // 接收方回执：消息已收取，清离线队列；平台-4 落 delivered 事件。
+    // 需求批⑦ 送达级：在线即投与离线补投同走此口——首个该账号的
+    // delivered 事件才记才推（重复 ACK 幂等），发送方在线即收
+    // DELIVER_NOTICE（离线则仅留痕，回执态可经 RECEIPT_QUERY 补查）。
     if (logged_in_ && msg.has_ack() && !msg.ack().msg_id().empty()) {
-      if (server_.store().ack_offline(msg.ack().msg_id(), account_)) {
-        server_.store().append_message_event(msg.ack().msg_id(), "delivered",
-                                             account_, "", now_ms());
+      const std::string target = msg.ack().msg_id();
+      server_.store().ack_offline(target, account_); // 清离线队列（幂等）
+      const std::string original_from = server_.store().message_from(target);
+      if (original_from.empty()) break; // 非归档消息（伪造 msg_id）不留痕
+      if (server_.store().delivered_recorded(target, account_)) break;
+      const std::int64_t dms = now_ms(); // 留痕与通知共用同一时刻
+      server_.store().append_message_event(target, "delivered", account_, "",
+                                           dms);
+      memex::protocol::Message out;
+      out.set_type(v1::DELIVER_NOTICE);
+      out.set_from("server");
+      out.set_ts_ms(dms);
+      auto* n = out.mutable_deliver_notice();
+      n->set_msg_id(target);
+      n->set_delivered_to(account_);
+      n->set_delivered_ms(dms);
+      // deliver_frame 入参为纯 Envelope 字节（其内部加长度前缀）
+      const std::string blob = out.SerializeAsString();
+      for (const auto& s : server_.online_sessions(original_from)) {
+        s->deliver_frame(blob);
       }
     }
     break;
@@ -437,6 +456,32 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     for (const auto& s : server_.online_sessions(original_from)) {
       s->deliver_frame(blob);
     }
+    break;
+  }
+  case v1::RECEIPT_QUERY: {
+    // 回执态查询（需求批⑦ 归档扩）：发送方补查自己消息的送达/已读
+    // 名单——离线期错过的 DELIVER_NOTICE/READ_NOTICE 经此回看。
+    // 仅 message_from == 请求者的条目回包，他人消息的回执不泄露。
+    if (!logged_in_ || !msg.has_receipt_query()) break;
+    memex::protocol::Message out;
+    out.set_type(v1::RECEIPT_DATA);
+    out.set_from("server");
+    out.set_ts_ms(now_ms());
+    auto* data = out.mutable_receipt_data();
+    const int n = msg.receipt_query().msg_ids_size();
+    for (int i = 0; i < n && i < 100; ++i) { // 上限 100（防滥用）
+      const std::string& id = msg.receipt_query().msg_ids(i);
+      if (server_.store().message_from(id) != account_) continue;
+      auto* e = data->add_entries();
+      e->set_msg_id(id);
+      for (const auto& ev : server_.store().message_events(id)) {
+        if (ev.event == "delivered") e->add_delivered_to(ev.by_account);
+      }
+      for (const auto& r : server_.store().readers_for(id)) {
+        e->add_readers(r.reader);
+      }
+    }
+    send(memex::protocol::encode(out));
     break;
   }
   case v1::PRESENCE_QUERY: {

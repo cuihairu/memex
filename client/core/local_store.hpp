@@ -34,6 +34,9 @@ struct StoredMessage {
   // 落库即此值——唯一入口是服务端投递）/ FAILED（终态失败，不再补传）。
   // 空串＝历史行（状态机启用前的旧数据），不参与恢复补传。
   std::string sync_state;
+  // 回执态（需求批⑦，仅我发出的协作消息有意义）：''=无 / delivered=
+  // 已送达对方客户端 / read=已读。接收方向与直连域恒空。
+  std::string receipt;
 };
 
 // —— R23-5 杀毒扫描白名单（本地侧）——
@@ -76,6 +79,14 @@ public:
   bool set_sync_state(const std::string& from_id, std::uint64_t seq,
                       const std::string& state);
   QList<StoredMessage> pending_sync(const std::string& from_id) const;
+
+  // —— 需求批⑦ 消息回执 ——
+  // 发出消息回填服务端标识（sha256(account:seq) 本地推定，只补空位）。
+  bool set_msg_id(const std::string& from_id, std::uint64_t seq,
+                  const std::string& msg_id);
+  // 我发出消息的回执态（receipt 列）：state=delivered/read，只升不降
+  //（已读终态不被乱序送达通知倒退）。非我发出或未知 msg_id 返回 false。
+  bool set_receipt(const std::string& msg_id, const std::string& state);
 
   // 某对端的本地历史：取最近 limit 条，按时间正序返回。
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;

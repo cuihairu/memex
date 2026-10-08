@@ -155,6 +155,60 @@ int main(int argc, char** argv) {
   CHECK(a_reads[0].msg_id == b_last_msg);
   CHECK(a_reads[0].reader == QStringLiteral("bob"));
 
+  // —— 需求批⑦：送达级回执＋回执态补查＋本地库 receipt ——
+  // 消息一的 msg_id 固定捕获（b_last_msg 是「最后一条到达」回执，
+  // 下一条消息到达即被覆盖——此前后引用会串条）
+  const QString mid1 = b_last_msg;
+  // 上一条消息（已读链路）引擎已自动落库：receipt=read 终态
+  {
+    const auto hist = store_a.history(QStringLiteral("bob"));
+    bool saw_read = false;
+    for (const auto& m : hist) {
+      if (m.msg_id == mid1.toStdString() && m.receipt == "read")
+        saw_read = true;
+    }
+    CHECK(saw_read);
+  }
+  struct DeliverNote {
+    QString msg_id, to;
+  };
+  std::vector<DeliverNote> a_delivered;
+  QObject::connect(&a, &CollabEngine::message_delivered, &a,
+                   [&](const QString& msg_id, const QString& to, qint64) {
+                     a_delivered.push_back({msg_id, to});
+                   });
+  QString a_receipts_json;
+  QObject::connect(&a, &CollabEngine::receipts_received, &a,
+                   [&](const QString& json) { a_receipts_json = json; });
+
+  // 第二条消息：接收引擎收 TEXT 即回 ACK（既有机制）→ 发送方收
+  // DELIVER_NOTICE；msg_id 与本地派生式（与服务端同式）一致
+  const quint64 seq2 =
+      a.send_text(QStringLiteral("bob"), QStringLiteral("送达验收"));
+  CHECK(seq2 != 0);
+  const QString mid2 = CollabEngine::msg_id_for(QStringLiteral("alice"), seq2);
+  CHECK(wait_until([&] { return a_delivered.size() == 1; }, 8000));
+  CHECK(a_delivered[0].msg_id == mid2);
+  CHECK(a_delivered[0].to == QStringLiteral("bob"));
+  {
+    // 本地库：发出的消息带 msg_id（发出即回填）＋ receipt=delivered
+    const auto hist = store_a.history(QStringLiteral("bob"));
+    bool saw_delivered = false;
+    for (const auto& m : hist) {
+      if (m.msg_id == mid2.toStdString() && m.receipt == "delivered")
+        saw_delivered = true;
+    }
+    CHECK(saw_delivered);
+  }
+
+  // 回执态补查（归档扩）：两条一起查 → JSON 对齐（msg1 已读/msg2 送达）
+  a.query_receipts({mid2, mid1});
+  CHECK(wait_until([&] { return !a_receipts_json.isEmpty(); }, 8000));
+  CHECK(a_receipts_json.contains(mid2));
+  CHECK(a_receipts_json.contains(mid1));
+  CHECK(a_receipts_json.contains(QStringLiteral("\"delivered_to\":[\"bob\"]")));
+  CHECK(a_receipts_json.contains(QStringLiteral("\"readers\":[\"bob\"]")));
+
   // bob 登出 → alice 收到变更推送（bob 消失，alice 仍在）
   b.logout();
   CHECK(wait_until([&] { return !b.is_logged_in(); }, 5000));

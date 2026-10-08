@@ -225,7 +225,7 @@ int main(int argc, char** argv) {
     int copies = 0;
     for (const auto& m : store_b.history(QStringLiteral("alice"))) {
       if (m.text == "离线也送达") ++copies;
-      CHECK(m.msg_id.empty() == (m.from == "bob")); // 协作态收到的都有 msg_id
+      CHECK(!m.msg_id.empty()); // 协作态收发都有 msg_id（发出＝本地派生、收到＝服务端分配）
     }
     CHECK(copies == 1);
   }

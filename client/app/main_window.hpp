@@ -152,15 +152,24 @@ public:
   void set_autostart(bool on);    // 登记／撤销开机启动（freedesktop .desktop）
   // —— 需求批①（验收面）——
   // 注入一条消息走气泡渲染（测试缝：生产路径＝引擎信号驱动 append_message，
-  // 纯 UI 测试无对端时经此面断言 colorize 渲染）
+  // 纯 UI 测试无对端时经此面断言 colorize 渲染；msg_id/receipt＝需求批⑦
+  // 回执标注验收用）
   void inject_message(const QString& from_id, const QString& text,
-                      bool outgoing);
+                      bool outgoing, const QString& msg_id = QString(),
+                      const QString& receipt = QString());
   // 注入一条图片消息走气泡渲染（需求批②验收缝：右键「收藏到表情包」
   // 需图片气泡在场；生产路径＝引擎文件回执驱动 append_image_message）
   void inject_image(const QString& from_id, const QString& image_path,
                     bool outgoing);
   // 聊天区控件（验收缝：右键菜单/cursorRect 定位）
   QTextBrowser* chat_widget() { return chat_view_; }
+  // —— 需求批⑦ 消息回执（验收面）——
+  // 已读回执上报开关（会话级覆盖全局；全局默认开，QSettings 持久化）
+  bool read_receipts_enabled(const QString& peer) const;
+  void set_read_receipts_enabled(const QString& peer, bool enabled); // 空 peer=全局
+  // 回执态落行重渲（测试缝：生产路径＝引擎 message_delivered/
+  // message_read/receipts_received 信号驱动同款；state=delivered/read）
+  void apply_message_receipt(const QString& msg_id, const QString& state);
   // —— 需求批⑪ 个性签名（验收面）——
   // 直接发送签名设置（带参＝测试直调不弹框；须登录协作态，回执异步）
   void apply_signature(const QString& signature);
@@ -186,7 +195,9 @@ private:
   // 对话面板只在 open_chat 后展开；再点当前好友／点标题栏 ✕ 同此路）
   void close_chat();
   void append_message(const QString& from_id, const QString& text,
-                      qint64 ts_ms, bool outgoing, const QString& source);
+                      qint64 ts_ms, bool outgoing, const QString& source,
+                      const QString& msg_id = QString(),
+                      const QString& receipt = QString());
   // 图片消息气泡（需求批④）：气泡内直接渲染图片（<img>，非文件系统行）
   void append_image_message(const QString& from_id, const QString& image_path,
                             qint64 ts_ms, bool outgoing, const QString& source);
@@ -213,6 +224,8 @@ private:
     bool outgoing{false};
     bool at_mode{false}; // 群聊：@账号 高亮
     QString image;      // 非空＝图片消息（需求批④：text 存文件路径，气泡渲染 <img>）
+    QString msg_id;     // 协作态消息标识（回执通知按它命中本行；直连恒空）
+    QString receipt;    // 我发出消息的回执态（''/delivered/read，需求批⑦）
   };
   void show_status(const QString& text);
   // 新消息闪烁提醒（用户令 2026-10-05）：仅窗口非激活时；同窗多条合并；

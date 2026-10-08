@@ -147,6 +147,20 @@ void CollabEngine::logout() {
   socket_->disconnectFromHost();
 }
 
+namespace {
+// 服务端 msg_id 派生式（session.cpp 同式）：sha256_hex(from + ":" + seq)。
+// 发出即回填本地行，回执通知（DELIVER_NOTICE/READ_NOTICE）按它命中。
+QString derive_msg_id(const QString& account, quint64 seq) {
+  return CollabEngine::msg_id_for(account, seq);
+}
+} // namespace
+
+QString CollabEngine::msg_id_for(const QString& account, quint64 seq) {
+  return QString::fromUtf8(QCryptographicHash::hash(
+      (account + QStringLiteral(":") + QString::number(seq)).toUtf8(),
+      QCryptographicHash::Sha256).toHex());
+}
+
 quint64 CollabEngine::send_text(const QString& to, const QString& text) {
   if (to.isEmpty()) return 0;
   const quint64 seq = next_seq_++;
@@ -186,6 +200,9 @@ quint64 CollabEngine::send_text(const QString& to, const QString& text) {
     sm.ts_ms = p.ts_ms;
     sm.text = p.text;
     sm.source = "collab";
+    // 需求批⑦：发出即回填 msg_id（与服务端同式派生 sha256(account:seq)，
+    // 受理回执与重投去重键一致）——送达/已读通知按它命中本地行
+    sm.msg_id = derive_msg_id(account_, seq).toStdString();
     // 平台-9 Sync State：入发送管线即记状态（在线直发=SENDING，
     // 断线暂存=PENDING）；受理/放弃由回执与 teardown 推移
     sm.sync_state = logged_in_ ? "SENDING" : "PENDING";
@@ -412,6 +429,21 @@ void CollabEngine::mark_read(const QString& msg_id) {
   m.set_to("server");
   m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
   m.mutable_read()->set_msg_id(msg_id.toStdString());
+  send_frame(m);
+}
+
+void CollabEngine::query_receipts(const QStringList& msg_ids) {
+  if (!logged_in_ || msg_ids.isEmpty()) return;
+  Message m;
+  m.set_type(MsgType::RECEIPT_QUERY);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* q = m.mutable_receipt_query();
+  for (const QString& id : msg_ids) {
+    if (id.isEmpty()) continue;
+    q->add_msg_ids(id.toStdString());
+  }
   send_frame(m);
 }
 
@@ -696,8 +728,41 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
     // 我发出的协作消息被已读（T4.3）：发送方视角的「对方已读」
     if (!msg.has_read_notice()) return;
     const auto& n = msg.read_notice();
+    if (store_) store_->set_receipt(n.msg_id(), "read"); // 终态（只升不降）
     emit message_read(QString::fromStdString(n.msg_id()),
                       QString::fromStdString(n.reader()), n.read_ms());
+    break;
+  }
+  case MsgType::DELIVER_NOTICE: {
+    // 我发出的协作消息已送达对方客户端（需求批⑦ 送达级）
+    if (!msg.has_deliver_notice()) return;
+    const auto& n = msg.deliver_notice();
+    if (store_) store_->set_receipt(n.msg_id(), "delivered");
+    emit message_delivered(QString::fromStdString(n.msg_id()),
+                           QString::fromStdString(n.delivered_to()),
+                           n.delivered_ms());
+    break;
+  }
+  case MsgType::RECEIPT_DATA: {
+    // 回执态补查回包（需求批⑦）：打开会话时对齐离线期错过的通知
+    if (!msg.has_receipt_data()) return;
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& e : msg.receipt_data().entries()) {
+      nlohmann::json o;
+      o["msg_id"] = e.msg_id();
+      o["delivered_to"] = nlohmann::json::array();
+      for (const auto& d : e.delivered_to()) o["delivered_to"].push_back(d);
+      o["readers"] = nlohmann::json::array();
+      for (const auto& r : e.readers()) o["readers"].push_back(r);
+      arr.push_back(std::move(o));
+      // 台账对齐落本地（与实时通知同口径：已读压过送达；两项皆空不动）
+      if (store_ && e.readers_size() > 0) {
+        store_->set_receipt(e.msg_id(), "read");
+      } else if (store_ && e.delivered_to_size() > 0) {
+        store_->set_receipt(e.msg_id(), "delivered");
+      }
+    }
+    emit receipts_received(QString::fromStdString(arr.dump()));
     break;
   }
   case MsgType::PRESENCE_DATA: {

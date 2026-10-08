@@ -279,6 +279,144 @@ int main() {
     s.close();
   }
 
+  // —— 协议级：送达级回执（DELIVER_NOTICE）＋回执态查询（需求批⑦）——
+  {
+    memex::server::ServerStore s;
+    CHECK(s.open(":memory:"));
+    for (const char* acct : {"alice", "bob"}) {
+      CHECK(s.create_account(acct, "pw", acct));
+    }
+    asio::io_context io;
+    memex::server::CollabServer server(io, s, 0);
+    server.start_accept();
+    std::thread io_thread([&] { io.run(); });
+
+    TestClient a(io, server.port());
+    {
+      TestClient b(io, server.port());
+      a.login("alice", "pc-a2");
+      b.login("bob", "pc-b2");
+      // b 上线推送：a 先读掉
+      {
+        const auto r = a.read();
+        CHECK(r.type() == v1::PRESENCE_DATA);
+        CHECK(TestClient::has_account(r, "bob"));
+      }
+
+      // alice→bob 一条归档消息
+      memex::protocol::Message t;
+      t.set_type(v1::TEXT);
+      t.set_seq(1);
+      t.set_from("alice");
+      t.set_to("bob");
+      t.set_ts_ms(now_ms());
+      t.mutable_text()->set_text("送达回执验收");
+      a.send(t);
+      CHECK(a.read().type() == v1::ACK); // 受理回执
+      const auto incoming = b.read();
+      CHECK(incoming.type() == v1::TEXT);
+      const std::string mid = incoming.msg_id();
+      CHECK(!mid.empty());
+
+      // bob ACK(msg_id) → alice 在线即收 DELIVER_NOTICE（送达级）
+      memex::protocol::Message ack;
+      ack.set_type(v1::ACK);
+      ack.set_from("bob");
+      ack.set_to("server");
+      ack.set_ts_ms(now_ms());
+      ack.mutable_ack()->set_msg_id(mid);
+      b.send(ack);
+      b.sync();
+      {
+        memex::protocol::Message n;
+        bool saw = false;
+        for (int i = 0; i < 8 && !saw; ++i) {
+          n = a.read();
+          if (n.type() == v1::DELIVER_NOTICE) saw = true;
+        }
+        CHECK(saw);
+        CHECK(n.deliver_notice().msg_id() == mid);
+        CHECK(n.deliver_notice().delivered_to() == "bob");
+        CHECK(n.deliver_notice().delivered_ms() > 0);
+      }
+      // 台账：delivered 事件恰一条（bob）
+      {
+        int count = 0;
+        for (const auto& e : s.message_events(mid)) {
+          if (e.event == "delivered" && e.by_account == "bob") ++count;
+        }
+        CHECK(count == 1);
+      }
+      CHECK(s.delivered_recorded(mid, "bob"));
+      CHECK(!s.delivered_recorded(mid, "alice"));
+      CHECK(!s.delivered_recorded("forged-msg-id", "bob"));
+
+      // 重复 ACK 幂等：alice 队列干净——PING 后第一帧即 PONG（无插队）
+      b.send(ack);
+      b.sync();
+      {
+        memex::protocol::Message ping;
+        ping.set_type(v1::PING);
+        ping.set_from("alice");
+        ping.set_to("server");
+        ping.set_ts_ms(now_ms());
+        a.send(ping);
+        CHECK(a.read().type() == v1::PONG);
+      }
+
+      // bob 已读 → alice 收 READ_NOTICE（终态）
+      b.read_msg(mid);
+      b.sync();
+      {
+        memex::protocol::Message n;
+        bool saw = false;
+        for (int i = 0; i < 8 && !saw; ++i) {
+          n = a.read();
+          if (n.type() == v1::READ_NOTICE) saw = true;
+        }
+        CHECK(saw);
+        CHECK(n.read_notice().reader() == "bob");
+      }
+
+      // alice 补查回执态：自己消息一条（送达+已读双名单）；伪造 id 不回
+      memex::protocol::Message q;
+      q.set_type(v1::RECEIPT_QUERY);
+      q.set_from("alice");
+      q.set_to("server");
+      q.set_ts_ms(now_ms());
+      q.mutable_receipt_query()->add_msg_ids(mid);
+      q.mutable_receipt_query()->add_msg_ids("forged-msg-id");
+      a.send(q);
+      {
+        const auto r = a.read();
+        CHECK(r.type() == v1::RECEIPT_DATA);
+        CHECK(r.receipt_data().entries_size() == 1);
+        const auto& e = r.receipt_data().entries(0);
+        CHECK(e.msg_id() == mid);
+        CHECK(e.delivered_to_size() == 1);
+        CHECK(e.delivered_to(0) == "bob");
+        CHECK(e.readers_size() == 1);
+        CHECK(e.readers(0) == "bob");
+      }
+      // bob 查 alice 的消息回执 → 无条目（他人回执不泄露）
+      memex::protocol::Message q2;
+      q2.set_type(v1::RECEIPT_QUERY);
+      q2.set_from("bob");
+      q2.set_to("server");
+      q2.set_ts_ms(now_ms());
+      q2.mutable_receipt_query()->add_msg_ids(mid);
+      b.send(q2);
+      {
+        const auto r = b.read();
+        CHECK(r.type() == v1::RECEIPT_DATA);
+        CHECK(r.receipt_data().entries_size() == 0);
+      }
+    } // b 析构断开
+    io.stop();
+    io_thread.join();
+    s.close();
+  }
+
   if (g_failures == 0) {
     std::cout << "read_presence tests: all passed\n";
     return 0;

@@ -74,8 +74,15 @@ public slots:
   void cross_log(const QString& op, const QString& peer_device,
                  const QString& peer_name, qint64 started_ms, qint64 ended_ms);
   // —— 已读回执与在线状态（T4.3）——
+  // 服务端 msg_id 派生式（session.cpp 同式 sha256(from:seq)）：发出即回填
+  // 本地行（send_text），送达/已读回执通知按它命中；界面层同式取用。
+  static QString msg_id_for(const QString& account, quint64 seq);
   // 上报某条收到的协作消息已读（服务端留痕＋通知发送方）；须登录态。
+  // 是否上报（隐私开关）由界面层裁决——引擎只管机制。
   void mark_read(const QString& msg_id);
+  // 批量查询自己发出消息的回执态（需求批⑦ 归档扩：离线期错过的
+  // 送达/已读通知经服务端台账补查）；回包经 receipts_received。
+  void query_receipts(const QStringList& msg_ids);
   // 主动拉取在线账号表（登录/登出/互踢变更由服务端推送，无需轮询）。
   void query_presence();
   // —— 直连文件旁路授权（平台-10，蓝图§十九四问）——
@@ -132,6 +139,13 @@ signals:
                               const QString& msg_id);
   // 已读回执（T4.3）：我发出的协作消息被接收方已读——msg_id、已读方、已读时刻
   void message_read(const QString& msg_id, const QString& reader, qint64 read_ms);
+  // 送达回执（需求批⑦）：我发出的协作消息已被接收方客户端收取——
+  // msg_id、送达方账号、送达时刻（群消息＝逐成员各一条）
+  void message_delivered(const QString& msg_id, const QString& delivered_to,
+                         qint64 delivered_ms);
+  // 回执态查询回包（需求批⑦）：JSON [{"msg_id","delivered_to":[…],
+  // "readers":[…]}]——仅自己发出消息的条目（服务端裁决）
+  void receipts_received(const QString& receipts_json);
   // 在线账号表（T4.3）：登录/登出/互踢/断开变更即推送，含自己
   void presence_changed(const QStringList& online_accounts);
   // 收到通知（T4.10，webhook 推入）：from（＝"通知"）、标题、正文、紧急程度

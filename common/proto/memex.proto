@@ -42,6 +42,11 @@ enum MsgType {
   PROFILE_RESULT = 52; // 服务端 → 终端：资料命令回执
   NUDGE = 53;          // 振屏消息（需求批⑥：窗口抖动提醒——实时信号，
                        // 服务端归档留痕但不进离线补投）
+  DELIVER_NOTICE = 54; // 服务端 → 发送方：某条消息已送达接收方客户端
+                       //（需求批⑦ 送达级回执，与 READ_NOTICE 同构）
+  RECEIPT_QUERY = 55;  // 终端 → 服务端：批量查询自己发出消息的回执态
+                       //（需求批⑦ 归档扩：离线期错过的通知重查面）
+  RECEIPT_DATA = 56;   // 服务端 → 终端：回执态回包（逐条送达/已读名单）
 }
 
 message Hello {
@@ -230,6 +235,30 @@ message ReadNotice {
   int64 read_ms = 3; // 已读时刻（服务端受理时刻）
 }
 
+// —— 需求批⑦ 消息回执（送达+已读两级）——
+
+// 送达级回执（服务端 → 发送方）：接收方客户端已 ACK 收取。与
+// READ_NOTICE 同构；接收方不在线改由离线补投触发，同样走这里。
+message DeliverNotice {
+  string msg_id = 1;       // 被送达的消息
+  string delivered_to = 2; // 送达方账号（群消息＝逐成员各一条）
+  int64 delivered_ms = 3;  // 送达时刻（服务端受理 ACK 时刻）
+}
+
+// 回执态查询（发送方视角）：批量查自己发出消息的送达/已读名单。仅
+// message_from == 查询者的条目回包（他人消息的回执不泄露）。
+message ReceiptQuery {
+  repeated string msg_ids = 1; // 自己发出消息的服务端标识（上限 100）
+}
+message ReceiptEntry {
+  string msg_id = 1;            // 查询的消息
+  repeated string delivered_to = 2; // 已送达账号名单（事件台账现算）
+  repeated string readers = 3;  // 已读账号名单（readers_for 同源）
+}
+message ReceiptData {
+  repeated ReceiptEntry entries = 1; // 非本人消息不出现在回包里
+}
+
 // 在线账号表：查询回执与变更推送共用。推送点=登录成功／登出／互踢／
 // 意外断开（服务端在线表变化即广播，在线者都收到，含自己）。
 message PresenceData {
@@ -321,5 +350,8 @@ message Envelope {
     ProfileCmd profile_cmd = 151;
     ProfileResult profile_result = 152;
     Nudge nudge = 153;
+    DeliverNotice deliver_notice = 154;
+    ReceiptQuery receipt_query = 155;
+    ReceiptData receipt_data = 156;
   }
 }

@@ -1628,6 +1628,22 @@ bool ServerStore::append_message_event(const std::string& msg_id,
   return ok;
 }
 
+bool ServerStore::delivered_recorded(const std::string& msg_id,
+                                     const std::string& by_account) {
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT 1 FROM message_events"
+                         " WHERE msg_id = ? AND event = 'delivered'"
+                         "   AND by_account = ? LIMIT 1",
+                         -1, &st, nullptr) != SQLITE_OK)
+    return false;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, by_account.c_str(), -1, SQLITE_TRANSIENT);
+  const bool found = sqlite3_step(st) == SQLITE_ROW;
+  sqlite3_finalize(st);
+  return found;
+}
+
 std::vector<ServerStore::MessageEvent> ServerStore::message_events(
     const std::string& msg_id) {
   std::vector<MessageEvent> out;

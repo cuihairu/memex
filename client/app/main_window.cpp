@@ -162,13 +162,23 @@ QString colorize(const QString& content) {
 
 // 气泡行：外出＝品牌橙靠右，来访＝浅灰靠左（QTextBrowser 富文本子集，不用圆角）。
 // at_mode=true（群聊）：@账号 标记整体包品牌橙加粗。
+// receipt 非空＝我发出消息的回执态标注（需求批⑦）：delivered=✓ 已送达、
+// read=✓✓ 已读——挂在 meta 行尾，历史重载与实时更新同构。
 QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
                     bool outgoing, bool at_mode = false,
-                    const QString& image = {}) {
+                    const QString& image = {},
+                    const QString& receipt = {}) {
   const ThemeTokens& t = tk();
+  QString receipt_tag;
+  if (outgoing && receipt == QStringLiteral("delivered")) {
+    receipt_tag = QStringLiteral(" ✓ 已送达");
+  } else if (outgoing && receipt == QStringLiteral("read")) {
+    receipt_tag = QStringLiteral(" ✓✓ 已读");
+  }
   const QString meta = QStringLiteral(
-                           "<span style=\"color:%1; font-size:small;\">%2 %3</span>")
-                           .arg(t.text_muted.name(), esc(name), hhmm(ts_ms));
+                           "<span style=\"color:%1; font-size:small;\">%2 %3%4</span>")
+                           .arg(t.text_muted.name(), esc(name), hhmm(ts_ms),
+                                esc(receipt_tag));
   // 图片消息（需求批④）：气泡内容＝内嵌图片（本机保留路径，file:// 直载）；
   // 普通消息照旧转义文本。
   QString content =
@@ -427,6 +437,14 @@ void MainWindow::build_ui() {
   auto* act_notify = opt_menu->addAction(QStringLiteral("通知偏好…"));
   connect(act_notify, &QAction::triggered, this, [] {
     NotificationCenter::instance().show_settings();
+  });
+  // —— 已读回执全局开关（需求批⑦）：勾选态即全局缺省；会话级覆盖走
+  //     会话右键菜单——空 peer=全局写 QSettings receipts/send_read
+  auto* act_receipts = opt_menu->addAction(QStringLiteral("发送已读回执"));
+  act_receipts->setCheckable(true);
+  act_receipts->setChecked(read_receipts_enabled(QString()));
+  connect(act_receipts, &QAction::toggled, this, [this](bool on) {
+    set_read_receipts_enabled(QString(), on);
   });
   act_theme_ = opt_menu->addAction(QStringLiteral("主题…"));
   act_theme_->setMenuRole(QAction::PreferencesRole); // macOS 走应用菜单偏好项
@@ -1035,8 +1053,10 @@ void MainWindow::wire_collab() {
               // 本地库已由引擎落库（同库），这里只做界面渲染
               append_message(from, text, ts_ms, false,
                              QStringLiteral("collab"));
-              // T4.3：当前会话开着=已读，立即上报（发送方收 READ_NOTICE）
-              if (!msg_id.isEmpty()) collab_engine_.mark_read(msg_id);
+              // T4.3：当前会话开着=已读，立即上报（发送方收 READ_NOTICE）；
+              // 需求批⑦：是否上报受会话/全局已读回执开关裁决
+              if (!msg_id.isEmpty() && read_receipts_enabled(from))
+                collab_engine_.mark_read(msg_id);
             } else {
               show_status(QStringLiteral("来自 %1 的协作消息").arg(from));
             }
@@ -1132,8 +1152,10 @@ void MainWindow::wire_collab() {
                 group_key == current_peer_) {
               append_message(sender, text, ts_ms, false,
                              QStringLiteral("collab"));
-              // T4.3：群会话开着=已读（发送方按读者逐条收 READ_NOTICE）
-              if (!msg_id.isEmpty()) collab_engine_.mark_read(msg_id);
+              // T4.3：群会话开着=已读（发送方按读者逐条收 READ_NOTICE）；
+              // 需求批⑦：开关裁决同单聊
+              if (!msg_id.isEmpty() && read_receipts_enabled(group_key))
+                collab_engine_.mark_read(msg_id);
             } else {
               const QString gname = groups_.value(group_key.mid(6).toULongLong())
                                         .name;
@@ -1174,11 +1196,42 @@ void MainWindow::wire_collab() {
 
   // —— T4.3 已读回执与在线状态 ——
   connect(&collab_engine_, &CollabEngine::message_read, this,
-          [this](const QString& /*msg_id*/, const QString& reader,
+          [this](const QString& msg_id, const QString& reader,
                  qint64 /*read_ms*/) {
             // READ_NOTICE 只发给原发送方：在此处即「对方已读我发出的消息」
             set_delivery_state(
                 QStringLiteral("对方已读 ✓✓（%1）").arg(reader));
+            // 需求批⑦：消息旁状态可见——落行重渲（引擎已落本地库，
+            // 历史重载同构）
+            apply_message_receipt(msg_id, QStringLiteral("read"));
+          });
+  // —— 需求批⑦ 送达级回执：状态行＋消息旁 ✓ ——
+  connect(&collab_engine_, &CollabEngine::message_delivered, this,
+          [this](const QString& msg_id, const QString& delivered_to,
+                 qint64 /*delivered_ms*/) {
+            set_delivery_state(
+                QStringLiteral("已送达对方 ✓（%1）").arg(delivered_to));
+            apply_message_receipt(msg_id, QStringLiteral("delivered"));
+          });
+  // —— 需求批⑦ 回执态补查回包：逐条对齐当前会话的行 ——
+  connect(&collab_engine_, &CollabEngine::receipts_received, this,
+          [this](const QString& receipts_json) {
+            const QJsonDocument doc = QJsonDocument::fromJson(
+                receipts_json.toUtf8());
+            if (!doc.isArray()) return;
+            for (const QJsonValue& v : doc.array()) {
+              const QJsonObject e = v.toObject();
+              const QString mid = e.value(QStringLiteral("msg_id")).toString();
+              if (mid.isEmpty()) continue;
+              const bool read = e.value(QStringLiteral("readers"))
+                                    .toArray().isEmpty() == false;
+              const bool delivered = e.value(QStringLiteral("delivered_to"))
+                                         .toArray().isEmpty() == false;
+              if (!read && !delivered) continue; // 未送达不标注
+              apply_message_receipt(
+                  mid, read ? QStringLiteral("read")
+                            : QStringLiteral("delivered"));
+            }
           });
   connect(&collab_engine_, &CollabEngine::presence_changed, this,
           [this](const QStringList& accounts) {
@@ -1246,9 +1299,12 @@ bool MainWindow::send_in_current_chat(const QString& text) {
           "发送失败：协作态未登录（可先登录协作态；当前消息不进归档）"));
       return false;
     }
+    // 需求批⑦：发出即带 msg_id（与服务端同式派生）——送达/已读回执
+    // 通知按它命中本行更新气泡旁状态
     append_message(collab_engine_.account(), text,
                    QDateTime::currentMSecsSinceEpoch(), true,
-                   QStringLiteral("collab"));
+                   QStringLiteral("collab"),
+                   CollabEngine::msg_id_for(collab_engine_.account(), seq));
     set_delivery_state(QStringLiteral("发送中…（seq %1）").arg(seq));
     return true;
   }
@@ -1442,9 +1498,10 @@ void MainWindow::show_emoji_panel() {
 
 // —— 需求批① 文字颜色 ——
 void MainWindow::inject_message(const QString& from_id, const QString& text,
-                                bool outgoing) {
+                                bool outgoing, const QString& msg_id,
+                                const QString& receipt) {
   append_message(from_id, text, QDateTime::currentMSecsSinceEpoch(), outgoing,
-                 QStringLiteral("direct"));
+                 QStringLiteral("direct"), msg_id, receipt);
 }
 
 void MainWindow::inject_image(const QString& from_id, const QString& image_path,
@@ -2090,6 +2147,13 @@ void MainWindow::show_group_menu(const QPoint& pos) {
                                      : QStringLiteral("star"),
                              id);
     });
+    // 需求批⑦：会话级已读回执开关（显式 true/false 覆盖全局缺省）
+    auto* act_receipt =
+        menu.addAction(QStringLiteral("发送已读回执（本会话）"));
+    act_receipt->setCheckable(true);
+    act_receipt->setChecked(read_receipts_enabled(id));
+    connect(act_receipt, &QAction::toggled, this,
+            [this, id](bool on) { set_read_receipts_enabled(id, on); });
     menu.addSeparator();
   }
   if (kind == QStringLiteral("group")) {
@@ -2501,6 +2565,54 @@ QStringList MainWindow::online_accounts() const {
 void MainWindow::set_delivery_state(const QString& text) {
   delivery_text_ = text;
   show_status(text); // 状态栏同步（最近一条发出消息的状态常驻可查）
+}
+
+// —— 需求批⑦ 消息回执：开关与消息旁状态 ——
+
+bool MainWindow::read_receipts_enabled(const QString& peer) const {
+  // 全局默认开；会话级显式设置（true/false）覆盖全局（QSettings 持久化）
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  if (!peer.isEmpty() &&
+      settings.contains(QStringLiteral("receipts/peer/%1").arg(peer))) {
+    return settings.value(QStringLiteral("receipts/peer/%1").arg(peer))
+        .toBool();
+  }
+  return settings
+      .value(QStringLiteral("receipts/send_read"), true)
+      .toBool();
+}
+
+void MainWindow::set_read_receipts_enabled(const QString& peer, bool enabled) {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  if (peer.isEmpty()) {
+    settings.setValue(QStringLiteral("receipts/send_read"), enabled);
+    show_status(enabled ? QStringLiteral("已读回执：全局开启（新收消息将上报已读）")
+                        : QStringLiteral("已读回执：全局关闭（不再上报已读）"));
+    return;
+  }
+  settings.setValue(QStringLiteral("receipts/peer/%1").arg(peer), enabled);
+  show_status(enabled ? QStringLiteral("已读回执（本会话 %1）：开启").arg(peer)
+                      : QStringLiteral("已读回执（本会话 %1）：关闭").arg(peer));
+}
+
+void MainWindow::apply_message_receipt(const QString& msg_id,
+                                       const QString& state) {
+  if (msg_id.isEmpty() || state.isEmpty()) return;
+  bool changed = false;
+  for (ChatRow& row : chat_rows_) {
+    if (!row.system && !row.msg_id.isEmpty() && row.msg_id == msg_id &&
+        row.receipt != state) {
+      // 只升不降（与本地库同口径）：已读不被乱序送达通知倒退
+      if (row.receipt == QStringLiteral("read") &&
+          state == QStringLiteral("delivered"))
+        continue;
+      row.receipt = state;
+      changed = true;
+    }
+  }
+  if (changed) rerender_chat();
 }
 
 // —— T4.7 系统集成 ——
@@ -3169,11 +3281,14 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
     append_message(QString::fromStdString(m.from),
                    QString::fromStdString(m.text), m.ts_ms,
                    m.from == my_id.toStdString(),
-                   QString::fromStdString(m.source));
+                   QString::fromStdString(m.source),
+                   QString::fromStdString(m.msg_id),
+                   QString::fromStdString(m.receipt));
   }
   // T4.3：打开协作单聊=已读历史——对最近一条收到的协作消息上报已读
   //（打开前到达的消息此前未上报；逐条全报是噪音，只报最新一条）。
-  if (collab) {
+  // 需求批⑦：是否上报受会话/全局已读回执开关裁决。
+  if (collab && read_receipts_enabled(id)) {
     for (auto it = hist.crbegin(); it != hist.crend(); ++it) {
       if (it->from == id.toStdString() && !it->msg_id.empty()) {
         collab_engine_.mark_read(QString::fromStdString(it->msg_id));
@@ -3181,11 +3296,23 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
       }
     }
   }
+  // 需求批⑦ 归档扩：打开会话即补查自己消息的回执态——离线期错过的
+  // DELIVER_NOTICE/READ_NOTICE 经服务端台账对齐（最近 50 条封顶防滥用）。
+  if ((collab || group) && collab_engine_.is_logged_in()) {
+    QStringList mine;
+    for (auto it = hist.crbegin(); it != hist.crend() && mine.size() < 50;
+         ++it) {
+      if (it->from == my_id.toStdString() && !it->msg_id.empty())
+        mine.push_back(QString::fromStdString(it->msg_id));
+    }
+    collab_engine_.query_receipts(mine);
+  }
 }
 
 void MainWindow::append_message(const QString& from_id, const QString& text,
                                 qint64 ts_ms, bool outgoing,
-                                const QString& source) {
+                                const QString& source, const QString& msg_id,
+                                const QString& receipt) {
   QString name = from_id;
   if (!outgoing) {
     if (current_kind_ == QStringLiteral("collab") ||
@@ -3222,9 +3349,11 @@ void MainWindow::append_message(const QString& from_id, const QString& text,
   row.ts_ms = ts_ms;
   row.outgoing = outgoing;
   row.at_mode = at_mode;
+  row.msg_id = msg_id;
+  row.receipt = receipt;
   chat_rows_.append(row);
   chat_view_->append(bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
-                                 row.at_mode));
+                                 row.at_mode, QString(), row.receipt));
   auto* bar = chat_view_->verticalScrollBar();
   bar->setValue(bar->maximum());
 }
@@ -3387,7 +3516,7 @@ void MainWindow::rerender_chat() {
       chat_view_->append(system_line_html(row.text));
     } else {
       chat_view_->append(bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
-                                     row.at_mode, row.image));
+                                     row.at_mode, row.image, row.receipt));
     }
   }
   if (at_bottom) {

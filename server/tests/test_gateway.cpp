@@ -260,6 +260,13 @@ void test_multidevice(ServerStore& store) {
   bob_m.send(make_ack(to_mobile.msg_id()));
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   CHECK(store.offline_count("bob") == 0);
+  // 需求批⑦：手机端 ACK 触发送达通知推给发送方 alice——先读掉再续帧序断言
+  {
+    const auto n = a.read();
+    CHECK(n.type() == memex::protocol::v1::DELIVER_NOTICE);
+    CHECK(n.deliver_notice().msg_id() == to_mobile.msg_id());
+    CHECK(n.deliver_notice().delivered_to() == "bob");
+  }
 
   // 第二台桌面登录：只踢第一台桌面，手机不动
   TestClient bob_d2(io, port);

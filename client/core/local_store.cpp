@@ -80,6 +80,9 @@ bool LocalStore::ensure_schema() {
   q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN recalled INTEGER NOT NULL DEFAULT 0"));
   // 平台-9：补 sync_state 列（蓝图§二十三 Sync State；空=历史行不参与恢复）
   q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN sync_state TEXT NOT NULL DEFAULT ''"));
+  // 需求批⑦：补 receipt 列（我发出消息的回执态：''/delivered/read；
+  // 空=未启用或非我发出——接收方向没有回执概念）
+  q.exec(QStringLiteral("ALTER TABLE messages ADD COLUMN receipt TEXT NOT NULL DEFAULT ''"));
   // msg_id 去重索引（部分索引：直连消息 msg_id 为空不参与）
   if (!q.exec(QStringLiteral("CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_msg_id "
                              "ON messages(msg_id) WHERE msg_id != ''"))) {
@@ -183,7 +186,7 @@ QList<StoredMessage> LocalStore::history(const QString& peer, int limit) const {
   // limit 取最近 N 条，整体按时间正序返回（聊天窗渲染方向）
   q.prepare(QStringLiteral(
       "SELECT id, peer, from_id, to_id, seq, ts_ms, text, source, msg_id,"
-      " recalled, sync_state FROM ("
+      " recalled, sync_state, receipt FROM ("
       " SELECT * FROM messages WHERE peer = ?"
       " ORDER BY ts_ms DESC, id DESC LIMIT ?)"
       " ORDER BY ts_ms ASC, id ASC"));
@@ -206,6 +209,7 @@ QList<StoredMessage> LocalStore::history(const QString& peer, int limit) const {
     m.msg_id = q.value(8).toString().toStdString();
     m.recalled = q.value(9).toInt() != 0;
     m.sync_state = q.value(10).toString().toStdString();
+    m.receipt = q.value(11).toString().toStdString();
     out.push_back(std::move(m));
   }
   return out;
@@ -260,6 +264,43 @@ bool LocalStore::set_sync_state(const std::string& from_id, std::uint64_t seq,
   q.addBindValue(static_cast<qint64>(seq));
   if (!q.exec()) {
     qWarning() << "[本地库] 同步状态推移失败：" << q.lastError().text();
+    return false;
+  }
+  return q.numRowsAffected() > 0;
+}
+
+// —— 需求批⑦ 消息回执 ——
+
+bool LocalStore::set_msg_id(const std::string& from_id, std::uint64_t seq,
+                            const std::string& msg_id) {
+  // 发出消息落服务端标识（受理前即按 sha256(account:seq) 本地推定写入，
+  // 服务端同式派生——两侧一致；只补空位不覆盖既有值）
+  if (!open_ || from_id.empty() || msg_id.empty()) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "UPDATE messages SET msg_id = ? WHERE from_id = ? AND seq = ?"
+      " AND msg_id = ''"));
+  q.addBindValue(QString::fromStdString(msg_id));
+  q.addBindValue(QString::fromStdString(from_id));
+  q.addBindValue(static_cast<qint64>(seq));
+  if (!q.exec()) {
+    qWarning() << "[本地库] msg_id 回填失败：" << q.lastError().text();
+    return false;
+  }
+  return q.numRowsAffected() > 0;
+}
+
+bool LocalStore::set_receipt(const std::string& msg_id,
+                             const std::string& state) {
+  // 回执态只升不降：已读是终态，乱序后到的 delivered 通知不倒退展示
+  if (!open_ || msg_id.empty()) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "UPDATE messages SET receipt = ? WHERE msg_id = ? AND receipt != 'read'"));
+  q.addBindValue(QString::fromStdString(state));
+  q.addBindValue(QString::fromStdString(msg_id));
+  if (!q.exec()) {
+    qWarning() << "[本地库] 回执态写入失败：" << q.lastError().text();
     return false;
   }
   return q.numRowsAffected() > 0;
