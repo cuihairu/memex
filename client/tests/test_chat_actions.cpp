@@ -104,6 +104,17 @@ int main(int argc, char** argv) {
     }, 3000));
   }
 
+  // —— 需求批⑤ 发文件夹：入口在场；无会话点击守卫（与发文件同口径）——
+  QPushButton* folder = find_button(window, QStringLiteral("发文件夹"));
+  CHECK(folder != nullptr);
+  if (folder) {
+    folder->click();
+    CHECK(wait_until([&] {
+      return window.status_text().contains(
+          QStringLiteral("先选择设备再发送文件夹"));
+    }, 3000));
+  }
+
   // —— BUG-003 表情：点击弹面板（锚定可见）→ 点 😀 落输入框 → 面板自关 ——
   QLineEdit* input = find_input(window);
   CHECK(input != nullptr);

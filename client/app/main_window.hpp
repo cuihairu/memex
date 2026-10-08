@@ -101,8 +101,15 @@ public:
   // 截图发送流（需求批④，与截图确认回调同一路径；测试缝）：持久拷贝＋
   // 走直连文件通道＋本端图片气泡；返回 false＝未发出（状态行明示原因）
   bool send_shot_to_current_chat(const QString& path);
+  // 文件夹发送流（需求批⑤，与「发文件夹」按钮同一路径；测试缝）：递归
+  // 遍历走直连文件通道＋作业聚合状态。返回作业 id，空＝未发出（守卫拦/
+  // 目录空/对端不可达，状态行明示原因）
+  QString send_folder_to_current_chat(const QString& dir);
   // 文件接收验收面（需求批④调试缝）：「from|path」（未收＝空）
   QString last_received_file() const { return last_received_file_; }
+  // 最近一次文件传输终态错误（授权链修复·验收面）：空=无失败；含
+  // deny:server-unreachable＝未登录 fail-closed 本地拒
+  QString last_file_error() const { return last_file_error_; }
   // 布局验收面：会话面板当前是否展开（列表态＝false）
   bool chat_panel_visible() const {
     return chat_panel_ && chat_panel_->isVisible();
@@ -213,6 +220,9 @@ private:
   void apply_policy(const QString& org_json); // 解析本人生效策略（T3.4）
   // 直连发送是否被策略放行：免登录使用／跨态通信两项开关（T3.4）
   bool direct_send_allowed();
+  // 文件夹发送守卫（需求批⑤，按钮与发送缝单源）：无会话/群会话/策略闸门；
+  // false＝已给状态文案
+  bool folder_send_allowed();
   // 截图确认后发送（PNG 临时文件走既有文件通道；与「发文件」同口径）
   void on_screenshot_confirmed(const QString& path);
 
@@ -283,6 +293,14 @@ private:
   QHash<QString, QStringList> dgroup_members_; // 临时群 id → 成员设备（本机视图）
   int next_dgroup_{1};                // 临时群序号（标题与 id 用）
   QHash<QString, QString> shot_paths_; // 截图传输 id → PNG 路径（发送完成后清理）
+  // 文件夹作业状态（需求批⑤）：job_id → {显示名, 已发完数, 总文件数}
+  //（directory_progress 刷新计数，directory_finished 出表）
+  struct FolderJobState {
+    QString name;
+    quint64 done{0};
+    quint64 total{0};
+  };
+  QHash<QString, FolderJobState> folder_jobs_;
 
   ScreenshotTool screenshot_tool_;
 
@@ -340,6 +358,7 @@ private:
   QPushButton* send_btn_{nullptr};
   QAction* act_collab_logout_{nullptr};
   QString last_received_file_; // 文件接收验收面（「from|path」）
+  QString last_file_error_;    // 最近一次文件传输终态错误（验收面；空=无失败）
   QShortcut* shot_sc_{nullptr}; // 截图快捷键（键可改：apply_screenshot_shortcut）
   // 离开锁屏（用户令 2026-10-08 ④）：无操作计时器＋锁屏遮罩（只显未读数）
   QTimer* idle_timer_{nullptr};
@@ -354,6 +373,7 @@ private:
   QWidget* head_{nullptr};
   QWidget* input_row_{nullptr};
   QPushButton* file_btn_{nullptr};
+  QPushButton* folder_btn_{nullptr};
   QPushButton* shot_btn_{nullptr};
   QPushButton* emoji_btn_{nullptr};
   QPushButton* color_btn_{nullptr};

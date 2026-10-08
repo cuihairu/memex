@@ -580,6 +580,12 @@ void MainWindow::build_ui() {
   input_layout->setContentsMargins(10, 8, 10, 8);
   auto* file_btn = new QPushButton(QStringLiteral("发文件"), input_row);
   file_btn_ = file_btn;
+  // 需求批⑤ 发文件夹：递归整目录（含子目录）走既有文件通道，对端按相对
+  // 路径重建结构；进度按「第 x/N 个文件」聚合（引擎逐文件串行发）。
+  auto* folder_btn = new QPushButton(QStringLiteral("发文件夹"), input_row);
+  folder_btn_ = folder_btn;
+  folder_btn->setToolTip(
+      QStringLiteral("递归发送整个文件夹（含子目录，对端按相对路径重建）"));
   // T4.4 截图与标注：按钮＋ Ctrl+Alt+A 快捷键（与「发文件」同发送口径）
   auto* shot_btn = new QPushButton(QStringLiteral("截图"), input_row);
   shot_btn_ = shot_btn;
@@ -605,6 +611,7 @@ void MainWindow::build_ui() {
           [this] { request_input_color(); });
   input_layout->addWidget(shot_btn);
   input_layout->addWidget(file_btn);
+  input_layout->addWidget(folder_btn);
   input_layout->addWidget(emoji_btn);
   input_layout->addWidget(color_btn);
   input_box_ = new QLineEdit(input_row);
@@ -713,6 +720,15 @@ void MainWindow::build_ui() {
     append_system_line(QStringLiteral("[文件] %1 开始发送").arg(esc(name)));
     show_status(QStringLiteral("文件发送中：%1").arg(name));
   });
+  // 需求批⑤ 发文件夹：点击＝守卫先行（无会话等场景不应弹目录选择框），
+  // 目录选定后走发送缝（与测试同一路径）
+  connect(folder_btn, &QPushButton::clicked, this, [this] {
+    if (!folder_send_allowed()) return;
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, QStringLiteral("选择要发送的文件夹"));
+    if (dir.isEmpty()) return;
+    send_folder_to_current_chat(dir);
+  });
 }
 
 void MainWindow::wire_engines() {
@@ -763,6 +779,7 @@ void MainWindow::wire_engines() {
           });
   connect(&direct_engine_, &DirectEngine::file_finished, this,
           [this](const QString& id, bool ok, const QString& error) {
+            last_file_error_ = error; // 授权回执验收面（失败原因留存可断言）
             show_status(ok ? QStringLiteral("文件已送达")
                            : QStringLiteral("文件传输中断：%1").arg(error));
             // 文件传输成功→弹通知窗（事件开关组；默认关＝成功是常态）
@@ -776,6 +793,33 @@ void MainWindow::wire_engines() {
             if (shot != shot_paths_.cend()) {
               QFile::remove(shot.value());
               shot_paths_.erase(shot);
+            }
+          });
+  // 需求批⑤ 文件夹作业聚合：文件粒度计数刷状态（引擎逐文件串行）
+  connect(&direct_engine_, &DirectEngine::directory_progress, this,
+          [this](const QString& job_id, quint64 done, quint64 total) {
+            const auto it = folder_jobs_.find(job_id);
+            if (it == folder_jobs_.end()) return;
+            it->done = done;
+            it->total = total;
+            show_status(QStringLiteral("文件夹传输：%1（第 %2/%3 个文件）")
+                            .arg(it->name, QString::number(done + 1),
+                                 QString::number(total)));
+          });
+  connect(&direct_engine_, &DirectEngine::directory_finished, this,
+          [this](const QString& job_id, bool ok) {
+            const auto it = folder_jobs_.find(job_id);
+            const QString name = it == folder_jobs_.end() ? job_id : it->name;
+            folder_jobs_.remove(job_id);
+            if (ok) {
+              append_system_line(
+                  QStringLiteral("[文件夹] %1 发送完成").arg(esc(name)));
+              show_status(QStringLiteral("文件夹发送完成：%1").arg(name));
+            } else {
+              show_status(
+                  QStringLiteral(
+                      "文件夹发送失败：%1（已传部分保留，重发自动续传）")
+                      .arg(name));
             }
           });
   connect(&direct_engine_, &DirectEngine::file_received, this,
@@ -1555,6 +1599,45 @@ QString MainWindow::direct_peer_target() const {
   return QString();
 }
 
+// —— 需求批⑤ 文件夹发送：守卫与发送缝（按钮点击与测试同一路径）——
+// 守卫（单源）：无会话／群会话／策略闸门；false＝已给状态文案
+bool MainWindow::folder_send_allowed() {
+  if (current_peer_.isEmpty()) {
+    show_status(QStringLiteral("先选择设备再发送文件夹"));
+    return false;
+  }
+  if (current_kind_ == QStringLiteral("group") ||
+      current_kind_ == QStringLiteral("dgroup")) {
+    show_status(QStringLiteral("群会话暂不支持文件夹发送（走单聊点对点）"));
+    return false;
+  }
+  if (current_kind_ != QStringLiteral("collab") && !direct_send_allowed()) {
+    return false; // T3.4 策略闸门（与发文件同口径，拒绝文案策略面已给）
+  }
+  return true;
+}
+
+// 发送缝：递归遍历走直连文件通道＋作业聚合状态入表。返回作业 id，
+// 空＝未发出（守卫拦／目录空／对端不可达，状态文案已给）。
+QString MainWindow::send_folder_to_current_chat(const QString& dir) {
+  if (!folder_send_allowed()) return {};
+  if (!QFileInfo(dir).isDir()) return {};
+  const QString job =
+      direct_engine_.send_directory(current_peer_.toStdString(), dir);
+  if (job.isEmpty()) {
+    show_status(
+        QStringLiteral("文件夹发送失败（目录为空、对端不可达或未授权）"));
+    return {};
+  }
+  FolderJobState st;
+  st.name = QDir(dir).dirName();
+  folder_jobs_.insert(job, st);
+  append_system_line(
+      QStringLiteral("[文件夹] %1 开始发送（递归含子目录）").arg(esc(st.name)));
+  show_status(QStringLiteral("文件夹发送中：%1").arg(st.name));
+  return job;
+}
+
 // 截图发送流（需求批④）：持久拷贝（图片消息本机保留——传输完成后临时
 // 件清理不裂图）→直连文件通道→本端图片气泡（图片消息，非系统行）。
 bool MainWindow::send_shot_to_current_chat(const QString& path) {
@@ -1590,7 +1673,9 @@ bool MainWindow::send_shot_to_current_chat(const QString& path) {
   const bool copied = QFile::copy(path, persist);
   const std::string tid = direct_engine_.send_file(target.toStdString(), path);
   if (tid.empty()) {
-    show_status(QStringLiteral("截图发送失败"));
+    // 授权链修复：同步拒（未授权 fail-closed）或通道即败＝立刻失败，
+    // 不再乐观上屏（此前被拒仍显示「已发送」气泡）
+    show_status(QStringLiteral("截图发送失败（未授权或通道不可用）"));
     return false;
   }
   shot_paths_.insert(QString::fromStdString(tid), path);
@@ -3112,7 +3197,7 @@ void MainWindow::apply_theme_styles() {
       "QPushButton:hover { background:%4; }")
       .arg(t.surface_raised.name(), t.brand_text.name(), t.brand.name(),
            t.brand_wash.name());
-  for (QPushButton* btn : {file_btn_, shot_btn_, emoji_btn_, color_btn_}) {
+  for (QPushButton* btn : {file_btn_, folder_btn_, shot_btn_, emoji_btn_, color_btn_}) {
     if (btn) btn->setStyleSheet(outline);
   }
   if (send_btn_) {

@@ -113,6 +113,11 @@ signals:
   void file_received(const QString& transfer_id, const QString& peer_id,
                      const QString& final_path);
   void directory_finished(const QString& job_id, bool ok);
+  // 文件夹作业粒度进度（需求批⑤聚合面）：每个文件起传时回报——
+  // files_done＝已发完数、files_total＝作业总文件数（job_id＝
+  // send_directory 返回值，与 directory_finished 同键）
+  void directory_progress(const QString& job_id, quint64 files_done,
+                          quint64 files_total);
 
 private:
   struct DirJob {
@@ -122,6 +127,10 @@ private:
     std::size_t index{0};
   };
   // 授权待决发送（平台-10）：裁决允后据此真正起传
+  // 同步拒标记（授权链修复）：file_authz_resolved 在 authorizer 回调内
+  // 同步到回（未登录 fail-closed 即拒）时置位——send_file/send_directory
+  // 据此返回空 id，调用方不再把「被拒」误当「已发出」乐观上屏
+  bool authz_sync_denied_{false};
   struct PendingAuthz {
     Peer target;
     bool is_dir{false};

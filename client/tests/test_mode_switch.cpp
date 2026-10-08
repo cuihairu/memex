@@ -146,12 +146,61 @@ int main(int argc, char** argv) {
                    [&](const QString&, const QString&, qint64) { ++db_received; });
   QObject::connect(&da, &DirectEngine::text_delivered, &da,
                    [&](quint64, bool ok) { da_delivered = ok; });
+  // 需求批⑤：db 接收目录隔离到临时目录（须 start 前设置）——文件夹腿
+  // 按「目录结构重建是否原样」断言（与窗口/db 共用的默认下载目录分开）
+  db.set_download_dir(tmp.filePath(QStringLiteral("b-files")));
   CHECK(da.start());
   CHECK(db.start());
   CHECK(wait_until([&] { return da.has_peer("dev-B2") && db.has_peer("dev-A2"); },
                    8000));
   CHECK(da.send_text("dev-B2", "直连基线（服务端在场）") != 0);
   CHECK(wait_until([&] { return db_received == 1 && da_delivered; }, 6000));
+
+  // —— 需求批⑤ 发文件夹（引擎级）：递归遍历＋相对路径重建＋聚合进度 ——
+  {
+    const QString src_root = tmp.filePath(QStringLiteral("dir-src"));
+    CHECK(QDir().mkpath(src_root + QStringLiteral("/sub")));
+    {
+      QFile f(src_root + QStringLiteral("/a.txt"));
+      CHECK(f.open(QIODevice::WriteOnly));
+      f.write("A");
+    }
+    {
+      QFile f(src_root + QStringLiteral("/sub/b.txt"));
+      CHECK(f.open(QIODevice::WriteOnly));
+      f.write("B");
+    }
+    bool dir_done = false, dir_ok = false;
+    quint64 prog_done = 0, prog_total = 0;
+    QObject::connect(&da, &DirectEngine::directory_finished, &da,
+                     [&](const QString&, bool ok) {
+                       dir_done = true;
+                       dir_ok = ok;
+                     });
+    QObject::connect(&da, &DirectEngine::directory_progress, &da,
+                     [&](const QString&, quint64 d, quint64 t) {
+                       prog_done = qMax(prog_done, d);
+                       prog_total = qMax(prog_total, t);
+                     });
+    const QString job = da.send_directory("dev-B2", src_root);
+    CHECK(!job.isEmpty());
+    CHECK(wait_until([&] { return dir_done; }, 10000));
+    CHECK(dir_ok);
+    CHECK(prog_total == 2); // 聚合面：作业总文件数＝2
+    CHECK(prog_done + 1 == prog_total); // 末次回报＝第 2/2 个文件起传
+    const QString dst_root = tmp.filePath(QStringLiteral("b-files"));
+    CHECK(QFile::exists(dst_root + QStringLiteral("/a.txt")));
+    CHECK(QFile::exists(dst_root + QStringLiteral("/sub/b.txt"))); // 结构重建
+    {
+      QFile f(dst_root + QStringLiteral("/sub/b.txt"));
+      CHECK(f.open(QIODevice::ReadOnly));
+      CHECK(f.readAll() == QByteArray("B")); // 内容一致
+    }
+    // 空目录不起作业（目录须存在但无文件＝空集拒绝）
+    const QString empty_dir = tmp.filePath(QStringLiteral("dir-empty"));
+    CHECK(QDir().mkpath(empty_dir));
+    CHECK(da.send_directory("dev-B2", empty_dir).isEmpty());
+  }
 
   // —— 主窗：初始直连态，常驻「消息不进归档」提示 ——
   MainWindow window;
@@ -416,6 +465,103 @@ int main(int argc, char** argv) {
            out.contains(QStringLiteral("进行中"));
   }, 8000));
 
+  // —— 需求批④ 截图发送＝图片消息（气泡内直接渲染图片，非系统行）——
+  // 授权链修复（用户令 2026-10-09）：发送腿须落在「服务端可达＋已登录」
+  // 区——此前排在停服务端降级区，文件授权 fail-closed 必拒、气泡乐观上屏
+  // 掩盖未达（靠收方来图侥幸过断言）。可达态：截图/文件夹真送达。
+  {
+    window.open_direct_peer(QStringLiteral("dev-B2"));
+    // 可达态 allow 全链：对端须有真实协作账号（授权四问第二问「收方须为
+    // 真实账号」）——db 临时宣告 bob 账号（立即补一轮宣告），块尾还原。
+    // 授权裁决四问：alice→bob 同部门（双方均未建档＝空路径相等）→允许。
+    db.set_collab_account("bob");
+    CHECK(wait_until([&] {
+      return !window.banner_text().contains(QStringLiteral("跨态"));
+    }, 5000)); // 对端宣告落地（跨态判定解除）＝peer 表已带出账号
+    // 本端发送流：真 PNG 走 send_shot_to_current_chat（截图确认回调同一路径）
+    const QString shot = tmp.filePath(QStringLiteral("shot-msg.png"));
+    {
+      QPixmap pm(96, 60);
+      pm.fill(Qt::red);
+      CHECK(pm.save(shot, "PNG"));
+    }
+    // 可达态授权回执：截图真送达对端（db 侧文件落地，非仅本端气泡）
+    QString shot_recv;
+    QObject::connect(&db, &DirectEngine::file_received, &db,
+                     [&](const QString&, const QString&, const QString& p) {
+                       if (p.endsWith(QStringLiteral("shot-msg.png")))
+                         shot_recv = p;
+                     });
+    CHECK(window.send_shot_to_current_chat(shot));
+    CHECK(wait_until([&] {
+      return window.chat_html().contains(QStringLiteral("<img"));
+    }, 8000));
+    CHECK(wait_until([&] { return !shot_recv.isEmpty(); }, 15000));
+    CHECK(window.last_file_error().isEmpty()); // 无失败终态
+    CHECK(window.chat_html().contains(QStringLiteral("图片消息")));
+    CHECK(!window.chat_html().contains(QStringLiteral("[截图] 开始发送")));
+    // 收方渲染腿：db 发真 PNG 给窗口（窗口正开着 dev-B2 会话）→
+    // file_received 图片且会话匹配＝气泡追加（非文件系统行）。
+    // 文件名带随机段：同进程窗口与 db 共用 AppData 下载目录，基线腿
+    // 落过同名文件会撞幂等重发直达终态（收不到 FILE_RESUME 数据面）
+    const QString recv_png = tmp.filePath(QStringLiteral("recv-msg-%1.png")
+                                              .arg(QRandomGenerator::global()
+                                                       ->generate()));
+    {
+      QPixmap pm(80, 50);
+      pm.fill(Qt::blue);
+      CHECK(pm.save(recv_png, "PNG"));
+    }
+    const int imgs_before = window.chat_html().count(
+        QStringLiteral("<img"));
+    const QString win_id =
+        QSettings().value(QStringLiteral("direct/device_id")).toString();
+    // 对照基线：裸引擎对文件通道（da→db，test_screenshot 已验窗口发方向）
+    QString db_recv;
+    QObject::connect(&db, &DirectEngine::file_received, &db,
+                     [&](const QString&, const QString&, const QString& path) {
+                       db_recv = path;
+                     });
+    CHECK(!da.send_file("dev-B2", recv_png).empty());
+    CHECK(wait_until([&] { return !db_recv.isEmpty(); }, 15000));
+    // 探针：窗口 file_received 是否到达（验收面分离传输层 vs 渲染层）
+    CHECK(!db.send_file(win_id.toStdString(), recv_png).empty());
+    CHECK(wait_until([&] {
+      return window.last_received_file().startsWith(
+          QStringLiteral("dev-B2|"));
+    }, 15000));
+    CHECK(wait_until([&] {
+      return window.chat_html().count(QStringLiteral("<img")) ==
+             imgs_before + 1;
+    }, 5000));
+    // 验收截图：图片消息气泡（本端发送+收方接收两条）
+    {
+      const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+      CHECK(QDir().mkpath(dir));
+      CHECK(window.grab().save(dir + QStringLiteral("/image-message.png")));
+    }
+
+    // —— 需求批⑤ 发文件夹（主窗验收缝）：会话开着 dev-B2 → 真发整目录，
+    //    等系统行（持久面）明示完成；落盘结构一并断言 ——
+    CHECK(window.has_direct_peer(QStringLiteral("dev-B2")));
+    const QString win_src = tmp.filePath(QStringLiteral("win-dir"));
+    CHECK(QDir().mkpath(win_src + QStringLiteral("/nested")));
+    {
+      QFile f(win_src + QStringLiteral("/t.txt"));
+      CHECK(f.open(QIODevice::WriteOnly));
+      f.write("T");
+    }
+    const QString win_job = window.send_folder_to_current_chat(win_src);
+    CHECK(!win_job.isEmpty());
+    CHECK(wait_until([&] {
+      return window.chat_html().contains(
+          QStringLiteral("[文件夹] win-dir 发送完成"));
+    }, 10000));
+    CHECK(QFile::exists(
+        tmp.filePath(QStringLiteral("b-files/t.txt")))); // rel 相对作业根
+    db.set_collab_account(""); // 还原匿名宣告（后文降级态跨态判定不受扰）
+  }
+
   // 同库注入一条直连历史（peer 同为 bob）：合并展示按来源标注
   {
     const QString win_db = tmp.filePath(
@@ -487,62 +633,34 @@ int main(int argc, char** argv) {
   CHECK(da.send_text("dev-B2", "服务端已停，直连仍可用") != 0);
   CHECK(wait_until([&] { return db_received == 1 && da_delivered; }, 6000));
 
-  // —— 需求批④ 截图发送＝图片消息（气泡内直接渲染图片，非系统行）——
+  // —— 授权链回归（用户令 2026-10-09）：服务端不可达态＝未登录，
+  //    fail-closed 本地拒（权限面不可绕开服务器，设计口径）——
+  //    截图/文件夹缝同步返回失败、不乐观上屏，回执 deny:server-unreachable
   {
     window.open_direct_peer(QStringLiteral("dev-B2"));
-    // 本端发送流：真 PNG 走 send_shot_to_current_chat（截图确认回调同一路径）
-    const QString shot = tmp.filePath(QStringLiteral("shot-msg.png"));
+    const QString shot_deny = tmp.filePath(QStringLiteral("shot-deny.png"));
     {
-      QPixmap pm(96, 60);
-      pm.fill(Qt::red);
-      CHECK(pm.save(shot, "PNG"));
+      QPixmap pm(60, 40);
+      pm.fill(Qt::green);
+      CHECK(pm.save(shot_deny, "PNG"));
     }
-    CHECK(window.send_shot_to_current_chat(shot));
-    CHECK(wait_until([&] {
-      return window.chat_html().contains(QStringLiteral("<img"));
-    }, 8000));
-    CHECK(window.chat_html().contains(QStringLiteral("图片消息")));
-    CHECK(!window.chat_html().contains(QStringLiteral("[截图] 开始发送")));
-    // 收方渲染腿：db 发真 PNG 给窗口（窗口正开着 dev-B2 会话）→
-    // file_received 图片且会话匹配＝气泡追加（非文件系统行）。
-    // 文件名带随机段：同进程窗口与 db 共用 AppData 下载目录，基线腿
-    // 落过同名文件会撞幂等重发直达终态（收不到 FILE_RESUME 数据面）
-    const QString recv_png = tmp.filePath(QStringLiteral("recv-msg-%1.png")
-                                              .arg(QRandomGenerator::global()
-                                                       ->generate()));
+    const int imgs_before_deny =
+        window.chat_html().count(QStringLiteral("<img"));
+    CHECK(!window.send_shot_to_current_chat(shot_deny)); // 拒＝false
+    CHECK(window.chat_html().count(QStringLiteral("<img")) ==
+          imgs_before_deny); // 无假「已发送」气泡
+    CHECK(window.last_file_error().contains(
+        QStringLiteral("deny:server-unreachable")));
+    const QString deny_dir = tmp.filePath(QStringLiteral("deny-dir"));
+    CHECK(QDir().mkpath(deny_dir));
     {
-      QPixmap pm(80, 50);
-      pm.fill(Qt::blue);
-      CHECK(pm.save(recv_png, "PNG"));
+      QFile f(deny_dir + QStringLiteral("/d.txt"));
+      CHECK(f.open(QIODevice::WriteOnly));
+      f.write("D");
     }
-    const int imgs_before = window.chat_html().count(
-        QStringLiteral("<img"));
-    const QString win_id =
-        QSettings().value(QStringLiteral("direct/device_id")).toString();
-    // 对照基线：裸引擎对文件通道（da→db，test_screenshot 已验窗口发方向）
-    QString db_recv;
-    QObject::connect(&db, &DirectEngine::file_received, &db,
-                     [&](const QString&, const QString&, const QString& path) {
-                       db_recv = path;
-                     });
-    CHECK(!da.send_file("dev-B2", recv_png).empty());
-    CHECK(wait_until([&] { return !db_recv.isEmpty(); }, 15000));
-    // 探针：窗口 file_received 是否到达（验收面分离传输层 vs 渲染层）
-    CHECK(!db.send_file(win_id.toStdString(), recv_png).empty());
-    CHECK(wait_until([&] {
-      return window.last_received_file().startsWith(
-          QStringLiteral("dev-B2|"));
-    }, 15000));
-    CHECK(wait_until([&] {
-      return window.chat_html().count(QStringLiteral("<img")) ==
-             imgs_before + 1;
-    }, 5000));
-    // 验收截图：图片消息气泡（本端发送+收方接收两条）
-    {
-      const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
-      CHECK(QDir().mkpath(dir));
-      CHECK(window.grab().save(dir + QStringLiteral("/image-message.png")));
-    }
+    CHECK(window.send_folder_to_current_chat(deny_dir).isEmpty()); // 拒＝空
+    CHECK(window.last_file_error().contains(
+        QStringLiteral("deny:server-unreachable")));
   }
 
   // —— 离开锁屏（用户令 2026-10-08 ④）：无操作超时→锁屏只显未读数不显

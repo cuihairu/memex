@@ -241,7 +241,7 @@
   - [x] ⑪ 个性签名（资料页设置、字数上限；会话列表悬浮可见——存储与服务端资料面扩列）（2026-10-09 收：proto 面 6f2e9d8 先行；链路——member_profiles.signature 列＋ALTER 迁移＋set_signature upsert、session PROFILE_CMD 回执（120 字按码点计）＋ORG_QUERY 带出、引擎 set_signature/profile_result、主窗「设置→个人资料…」对话框＋会话列表悬浮 tooltip＋保存后重拉 org；test_org 库级+协议级腿、mode_switch 登录面+登出门腿）
   - [x] ⑨ 查找联系人（搜索框按昵称/账号/备注，模糊+精确）（2026-10-09 收：可检索字段扩到隐藏列昵称/账号/设备id/IP/群名/群成员，contains 模糊（精确=超集）；分组头随组内可见性折叠；备注面如实留待资料件）
 - [ ] 批次 B（消息面中件，3 件）
-  - [ ] ⑤ 发文件/整个文件夹（文件夹=遍历逐个发+进度聚合；文件面已有）
+  - [x] ⑤ 发文件/整个文件夹（文件夹=遍历逐个发+进度聚合；文件面已有）（2026-10-09 收：主窗「发文件夹」按钮（单聊守卫「先选择设备再发送文件夹」＋群会话拒＋无授权闸门即拒）、send_folder_to_current_chat 缝、directory_progress 作业粒度聚合「第 x/y 个文件」；**授权链同步拒修复**——DirectEngine 未登录 fail-closed 本地拒（deny:server-unreachable）经 authz_sync_denied_ 让 send_file/send_directory 返回空 id，杜绝同步拒仍返回在途 id 被乐观上屏「已发送」（图片腿测试假绿根源）；last_file_error 验收面＋发送失败状态如实化。测试两态矩阵：可达态 db.set_collab_account 宣告打通 allow:org-transfer 全链（截图＋文件夹真送达断言，服务器日志「文件旁路授权允许」走查实证）/不可达态拒绝腿（shot 与文件夹均拒、无乐观上屏）；chat_actions 守卫腿；引擎目录传输（递归重建/进度/空目录拒）首次测试覆盖）
   - [ ] ⑥ 振屏消息（协议新类型+窗口抖动+提示音+防刷限频）
   - [ ] ② 表情包（收藏/自定义上传 GIF；服务端素材存储+面板管理）
 - [ ] 批次 C（协议/存储大件，4 件）

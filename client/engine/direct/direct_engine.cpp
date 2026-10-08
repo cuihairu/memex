@@ -273,7 +273,9 @@ std::string DirectEngine::send_file(const std::string& peer_device_id,
     r.size = static_cast<quint64>(fi.size());
     r.name = fi.fileName().toStdString();
     r.forward = false; // 文件来源追踪未建，再转发声明面留后续（如实口径）
+    authz_sync_denied_ = false;
     file_authorizer_(r);
+    if (authz_sync_denied_) return {}; // 同步拒＝即刻终态失败，不再返回在途 id
     return std::to_string(req);
   }
   return file_service_->send_file(target.address, target.tcp_port,
@@ -324,7 +326,9 @@ QString DirectEngine::send_directory(const std::string& peer_device_id,
     r.size = total;
     r.name = root.dirName().toStdString();
     r.forward = false;
+    authz_sync_denied_ = false;
     file_authorizer_(r);
+    if (authz_sync_denied_) return {}; // 同步拒＝作业未起（终态已广播）
     return QString::number(req);
   }
 
@@ -342,6 +346,7 @@ void DirectEngine::file_authz_resolved(quint64 req, bool allowed,
   pending_authz_.erase(it);
   const QString req_str = QString::number(req);
   if (!allowed) {
+    authz_sync_denied_ = true; // 同步到回（回调栈内）时 send_file/…据此返回空
     if (p.is_dir) {
       emit directory_finished(req_str, false);
     }
@@ -405,6 +410,9 @@ void DirectEngine::send_next_dir_file(const QString& job_id) {
     return;
   }
   transfer_job_[tid] = job_id;
+  // 需求批⑤聚合面：每个文件起传回报（index＝已发完数，files.size()＝总数）
+  emit directory_progress(job_id, static_cast<quint64>(job.index),
+                          static_cast<quint64>(job.files.size()));
 }
 
 void DirectEngine::cancel_transfer(const std::string& transfer_id) {
