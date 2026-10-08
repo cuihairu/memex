@@ -2,6 +2,7 @@
 
 #include <QAction>
 #include <QCloseEvent>
+#include <QApplication>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDialog>
@@ -62,6 +63,7 @@
 #include <core/local_store.hpp>
 
 #include "notify_center.hpp"
+#include "notify_prefs.hpp"
 #include "brand_kit.hpp"
 
 #ifndef MEMEX_VERSION // 测试目标未传版本定义时兜底（与 main.cpp 同款）
@@ -605,8 +607,9 @@ void MainWindow::wire_engines() {
   connect(&direct_engine_, &DirectEngine::message_received, this,
           [this](const QString& from, const QString& text, qint64) {
             if (!isActiveWindow()) {
-              tray_notify(QStringLiteral("新消息"),
-                          QStringLiteral("来自 %1：%2").arg(from, text));
+              event_notify(NotifyPrefs::load().popup_message,
+                           SoundEvent::Message, QStringLiteral("新消息"),
+                           QStringLiteral("来自 %1：%2").arg(from, text));
               alert_attention(); // 任务栏/窗口闪烁（开关与合并窗在实现内）
             }
           });
@@ -631,6 +634,12 @@ void MainWindow::wire_engines() {
           [this](const QString& id, bool ok, const QString& error) {
             show_status(ok ? QStringLiteral("文件已送达")
                            : QStringLiteral("文件传输中断：%1").arg(error));
+            // 文件传输成功→弹通知窗（事件开关组；默认关＝成功是常态）
+            if (ok) {
+              event_notify(NotifyPrefs::load().popup_transfer_done,
+                           SoundEvent::File, QStringLiteral("文件传输成功"),
+                           id.right(8));
+            }
             // T4.4：截图临时文件在传输结束后清理（成功／失败均清）
             const auto shot = shot_paths_.constFind(id);
             if (shot != shot_paths_.cend()) {
@@ -643,6 +652,12 @@ void MainWindow::wire_engines() {
             append_system_line(
                 QStringLiteral("[文件] 已接收：%1").arg(esc(path)));
             show_status(QStringLiteral("文件已接收：%1").arg(path));
+            // 收到文件→弹通知窗（与消息同款激活门：激活中不打扰）
+            if (!isActiveWindow()) {
+              event_notify(NotifyPrefs::load().popup_file_arrive,
+                           SoundEvent::File, QStringLiteral("收到文件"),
+                           QFileInfo(path).fileName());
+            }
           });
 
   // 平台-10 文件旁路授权门（蓝图§十九）：文件不经服务器，判权必须经
@@ -791,8 +806,9 @@ void MainWindow::wire_collab() {
               return;
             }
             if (!isActiveWindow()) {
-              tray_notify(QStringLiteral("新消息"),
-                          QStringLiteral("来自 %1 的协作消息").arg(from));
+              event_notify(NotifyPrefs::load().popup_message,
+                           SoundEvent::Message, QStringLiteral("新消息"),
+                           QStringLiteral("来自 %1 的协作消息").arg(from));
               alert_attention();
             }
           });
@@ -859,9 +875,11 @@ void MainWindow::wire_collab() {
             if (!isActiveWindow()) {
               const QString gname =
                   groups_.value(group_key.mid(6).toULongLong()).name;
-              tray_notify(QStringLiteral("新消息"),
-                          QStringLiteral("来自群「%1」%2 的消息")
-                              .arg(gname.isEmpty() ? group_key : gname, sender));
+              event_notify(NotifyPrefs::load().popup_message,
+                           SoundEvent::Message, QStringLiteral("新消息"),
+                           QStringLiteral("来自群「%1」%2 的消息")
+                               .arg(gname.isEmpty() ? group_key : gname,
+                                    sender));
               alert_attention();
             }
           });
@@ -885,9 +903,20 @@ void MainWindow::wire_collab() {
           });
   connect(&collab_engine_, &CollabEngine::presence_changed, this,
           [this](const QStringList& accounts) {
+            // 联系人上线通知（用户令 2026-10-08）：推送前对比新增账号，
+            // 逐个按开关弹（自己也在广播里，排除）
+            const QStringList joined =
+                presence_joined(online_accounts_.values(), accounts);
             // 逐个插入（不依赖 QSet 区间构造的可移植性）
             online_accounts_.clear();
             for (const QString& a : accounts) online_accounts_.insert(a);
+            const QString me = collab_engine_.account();
+            const NotifyPrefs p = NotifyPrefs::load();
+            for (const QString& a : joined) {
+              if (a == me) continue;
+              event_notify(p.popup_peer_online, SoundEvent::Online,
+                           QStringLiteral("联系人上线"), a);
+            }
             refresh_devices(); // 协作会话行在线标识随推送刷新
           });
 }
@@ -2024,6 +2053,18 @@ void MainWindow::tray_notify(const QString& title, const QString& text) {
   last_notify_ = title + QStringLiteral("：") + text; // 无托盘也记录（断言面）
   if (tray_ && QSystemTrayIcon::supportsMessages()) {
     tray_->showMessage(title, text, QSystemTrayIcon::Information, 5000);
+  }
+}
+
+void MainWindow::event_notify(bool enabled, SoundEvent ev,
+                              const QString& title, const QString& text) {
+  const NotifyPrefs p = NotifyPrefs::load();
+  if (enabled) tray_notify(title, text); // 弹窗受事件开关裁决
+  // 提示音三档独立裁决（弹窗关了声音仍可按档播）；beep 兜底＝无
+  // Multimedia 依赖（真音频文件走 Qt Multimedia 另批，文档注明）
+  if (sound_should_play(p.sound_mode, p.sound_msg, p.sound_file,
+                        p.sound_online, ev)) {
+    QApplication::beep();
   }
 }
 

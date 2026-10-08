@@ -220,6 +220,73 @@ void NotificationCenter::show_settings() {
   cmb_fs->setCurrentIndex(prefs.fullscreen_allow ? 1 : 0);
   lay->addWidget(cmb_fs);
 
+  // —— 事件通知开关组（用户令 2026-10-08：每项独立开关）——
+  auto* ev_title = new QLabel(QStringLiteral("事件通知"), &dlg);
+  ev_title->setObjectName(QStringLiteral("lbl_events"));
+  ev_title->setFont(bf);
+  lay->addWidget(ev_title);
+  auto* cb_peer_online = new QCheckBox(
+      QStringLiteral("联系人上线→弹通知窗（我上线会出现在对方在线列表，"
+                     "弹不弹由对方此开关决定）"), &dlg);
+  cb_peer_online->setObjectName(QStringLiteral("chk_peer_online"));
+  cb_peer_online->setChecked(prefs.popup_peer_online);
+  lay->addWidget(cb_peer_online);
+  auto* cb_message = new QCheckBox(
+      QStringLiteral("收到消息→弹通知窗（窗口非激活时；显示会话名＋摘要）"),
+      &dlg);
+  cb_message->setObjectName(QStringLiteral("chk_popup_message"));
+  cb_message->setChecked(prefs.popup_message);
+  lay->addWidget(cb_message);
+  auto* cb_file_arrive = new QCheckBox(
+      QStringLiteral("收到文件→弹通知窗"), &dlg);
+  cb_file_arrive->setObjectName(QStringLiteral("chk_popup_file"));
+  cb_file_arrive->setChecked(prefs.popup_file_arrive);
+  lay->addWidget(cb_file_arrive);
+  auto* cb_transfer_done = new QCheckBox(
+      QStringLiteral("文件传输成功→弹通知窗（默认关＝成功是常态不逐次打扰）"),
+      &dlg);
+  cb_transfer_done->setObjectName(QStringLiteral("chk_popup_transfer"));
+  cb_transfer_done->setChecked(prefs.popup_transfer_done);
+  lay->addWidget(cb_transfer_done);
+
+  // —— 提示音三档（用户令 2026-10-08，设置项单列）——
+  auto* sound_title = new QLabel(QStringLiteral("提示音"), &dlg);
+  sound_title->setObjectName(QStringLiteral("lbl_sound"));
+  sound_title->setFont(bf);
+  lay->addWidget(sound_title);
+  auto* cmb_sound = new QComboBox(&dlg);
+  cmb_sound->setObjectName(QStringLiteral("cmb_sound_mode"));
+  cmb_sound->addItem(QStringLiteral("全部关闭"));
+  cmb_sound->addItem(QStringLiteral("每条都播"));
+  cmb_sound->addItem(QStringLiteral("按事件类型"));
+  cmb_sound->setCurrentIndex(prefs.sound_mode);
+  lay->addWidget(cmb_sound);
+  auto* snd_row = new QHBoxLayout;
+  auto* cb_sound_msg = new QCheckBox(QStringLiteral("消息"), &dlg);
+  cb_sound_msg->setObjectName(QStringLiteral("chk_sound_msg"));
+  auto* cb_sound_file = new QCheckBox(QStringLiteral("文件"), &dlg);
+  cb_sound_file->setObjectName(QStringLiteral("chk_sound_file"));
+  auto* cb_sound_online = new QCheckBox(QStringLiteral("上线"), &dlg);
+  cb_sound_online->setObjectName(QStringLiteral("chk_sound_online"));
+  for (auto* cb : {cb_sound_msg, cb_sound_file, cb_sound_online}) {
+    snd_row->addWidget(cb);
+  }
+  snd_row->addStretch(1);
+  lay->addLayout(snd_row);
+  const auto sync_sound_row = [cmb_sound, cb_sound_msg, cb_sound_file,
+                               cb_sound_online] {
+    const bool on = cmb_sound->currentIndex() == 2;
+    cb_sound_msg->setEnabled(on);
+    cb_sound_file->setEnabled(on);
+    cb_sound_online->setEnabled(on);
+  };
+  cb_sound_msg->setChecked(prefs.sound_msg);
+  cb_sound_file->setChecked(prefs.sound_file);
+  cb_sound_online->setChecked(prefs.sound_online);
+  sync_sound_row();
+  connect(cmb_sound, &QComboBox::currentIndexChanged, &dlg,
+          [sync_sound_row] { sync_sound_row(); });
+
   auto* note = new QLabel(
       QStringLiteral("免打扰时段支持跨零点（如 22:00–08:00）；"
                      "紧急通知不受免打扰影响，必须确认收悉。闪烁开关只管"
@@ -248,6 +315,14 @@ void NotificationCenter::show_settings() {
     out.dnd_end = t_end->time().toString(QStringLiteral("HH:mm"));
     out.fullscreen_allow = cmb_fs->currentIndex() == 1;
     out.flash_alert = cb_flash->isChecked();
+    out.popup_peer_online = cb_peer_online->isChecked();
+    out.popup_message = cb_message->isChecked();
+    out.popup_file_arrive = cb_file_arrive->isChecked();
+    out.popup_transfer_done = cb_transfer_done->isChecked();
+    out.sound_mode = cmb_sound->currentIndex();
+    out.sound_msg = cb_sound_msg->isChecked();
+    out.sound_file = cb_sound_file->isChecked();
+    out.sound_online = cb_sound_online->isChecked();
     out.save();
   });
   dlg.exec();

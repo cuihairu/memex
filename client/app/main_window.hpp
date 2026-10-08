@@ -21,6 +21,7 @@
 #include <engine/collab/collab_engine.hpp>
 
 #include <app/screenshot_tool.hpp>
+#include <app/notify_prefs.hpp>
 
 class QAction;
 class QCloseEvent;
@@ -140,6 +141,11 @@ private:
   // 新消息闪烁提醒（用户令 2026-10-05）：仅窗口非激活时；同窗多条合并；
   // 设置「通知偏好→新消息闪烁提醒」可关（默认开）。
   void alert_attention();
+  // 事件通知统一出口（用户令 2026-10-08）：弹窗受事件开关裁决，提示音
+  // 三档独立裁决（声音单列＝弹窗关了声音仍可按档播；beep 兜底无
+  // Multimedia 依赖，真音频另批）。
+  void event_notify(bool enabled, SoundEvent ev, const QString& title,
+                    const QString& text);
   void update_banner();          // 按当前形态切换归档提示条
   void seed_collab_peers();      // 登录后从本地库补入历史协作会话
   void show_collab_login_dialog();

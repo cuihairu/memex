@@ -9,6 +9,7 @@
 //    建群＋群 webhook 双引擎扇出，本地库与服务端同源 compose 对账。
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -52,9 +53,12 @@ using memex::client::NoticeLevel;
 using memex::client::NotificationCenter;
 using memex::client::NotifyPrefs;
 using memex::client::PopupAction;
+using memex::client::SoundEvent;
 using memex::client::decide;
 using memex::client::dnd_active;
 using memex::client::level_from_urgency;
+using memex::client::presence_joined;
+using memex::client::sound_should_play;
 
 #ifndef MEMEX_SERVER_BIN
 #error "MEMEX_SERVER_BIN 未定义（应传入 $<TARGET_FILE:memex_server>）"
@@ -248,6 +252,15 @@ void test_prefs_roundtrip() {
   p.dnd_start = QStringLiteral("21:30");
   p.dnd_end = QStringLiteral("07:45");
   p.fullscreen_allow = true;
+  // 事件通知开关组＋提示音三档（用户令 2026-10-08）
+  p.popup_peer_online = false;
+  p.popup_message = false;
+  p.popup_file_arrive = false;
+  p.popup_transfer_done = true;
+  p.sound_mode = 2;
+  p.sound_msg = false;
+  p.sound_file = true;
+  p.sound_online = false;
   p.save();
 
   const NotifyPrefs q = NotifyPrefs::load();
@@ -258,6 +271,14 @@ void test_prefs_roundtrip() {
   CHECK(q.dnd_start == QStringLiteral("21:30"));
   CHECK(q.dnd_end == QStringLiteral("07:45"));
   CHECK(q.fullscreen_allow);
+  CHECK(!q.popup_peer_online);
+  CHECK(!q.popup_message);
+  CHECK(!q.popup_file_arrive);
+  CHECK(q.popup_transfer_done);
+  CHECK(q.sound_mode == 2);
+  CHECK(!q.sound_msg);
+  CHECK(q.sound_file);
+  CHECK(!q.sound_online);
 
   // 还原默认（后续执行体断言都按默认偏好走）
   QSettings(QCoreApplication::organizationName(),
@@ -269,6 +290,48 @@ void test_prefs_roundtrip() {
   CHECK(d.popup_urgent);
   CHECK(!d.dnd);
   CHECK(!d.fullscreen_allow);
+  CHECK(d.popup_peer_online);
+  CHECK(d.popup_message);
+  CHECK(d.popup_file_arrive);
+  CHECK(!d.popup_transfer_done);
+  CHECK(d.sound_mode == 0); // 全部关闭（默认档）
+}
+
+// —— ②b 提示音三档穷举＋presence 对比（纯函数）——
+void test_sound_and_presence() {
+  // mode 0＝全部关闭：任何事件任何位都不播
+  for (const auto ev : {SoundEvent::Message, SoundEvent::File,
+                        SoundEvent::Online}) {
+    CHECK(!sound_should_play(0, true, true, true, ev));
+  }
+  // mode 1＝每条都播：任何事件任何位都播
+  for (const auto ev : {SoundEvent::Message, SoundEvent::File,
+                        SoundEvent::Online}) {
+    CHECK(sound_should_play(1, false, false, false, ev));
+  }
+  // mode 2＝按事件类型：对应位裁决
+  CHECK(sound_should_play(2, true, false, false, SoundEvent::Message));
+  CHECK(!sound_should_play(2, true, false, false, SoundEvent::File));
+  CHECK(sound_should_play(2, false, true, false, SoundEvent::File));
+  CHECK(!sound_should_play(2, false, true, false, SoundEvent::Online));
+  CHECK(sound_should_play(2, false, false, true, SoundEvent::Online));
+  // 未知 mode 值按全关（坏值不放大成噪声）
+  CHECK(!sound_should_play(7, true, true, true, SoundEvent::Message));
+
+  // presence 前后对比：新增保序／重复去重／无新增空表
+  const QStringList joined = presence_joined(
+      {QStringLiteral("alice"), QStringLiteral("bob")},
+      {QStringLiteral("bob"), QStringLiteral("carol"),
+       QStringLiteral("alice"), QStringLiteral("dave"),
+       QStringLiteral("carol")});
+  CHECK(joined.size() == 2);
+  CHECK(joined.at(0) == QStringLiteral("carol"));
+  CHECK(joined.at(1) == QStringLiteral("dave"));
+  CHECK(presence_joined({QStringLiteral("alice")},
+                        {QStringLiteral("alice")})
+            .isEmpty());
+  CHECK(presence_joined({}, {QStringLiteral("alice")})
+            .size() == 1); // 首次推送＝全员「新增」（自己由调用方排除）
 }
 
 // —— ③ 通知中心：普通不弹、重要托盘信号、紧急弹窗抓图＋确认 ——
@@ -402,6 +465,19 @@ void test_settings_dialog() {
     auto* chk = dlg->findChild<QCheckBox*>(QStringLiteral("chk_normal"));
     CHECK(chk != nullptr);
     if (chk) chk->setChecked(true);
+    // 事件通知开关组＋提示音三档往返（用户令 2026-10-08）
+    auto* transfer =
+        dlg->findChild<QCheckBox*>(QStringLiteral("chk_popup_transfer"));
+    CHECK(transfer != nullptr);
+    if (transfer) transfer->setChecked(true);
+    auto* sound_mode =
+        dlg->findChild<QComboBox*>(QStringLiteral("cmb_sound_mode"));
+    CHECK(sound_mode != nullptr);
+    if (sound_mode) sound_mode->setCurrentIndex(2);
+    auto* snd_msg = dlg->findChild<QCheckBox*>(QStringLiteral("chk_sound_msg"));
+    CHECK(snd_msg != nullptr);
+    CHECK(snd_msg && snd_msg->isEnabled()); // mode=2 联动启用
+    if (snd_msg) snd_msg->setChecked(false);
     auto* box =
         dlg->findChild<QDialogButtonBox*>(QStringLiteral("btn_settings"));
     CHECK(box != nullptr);
@@ -416,6 +492,10 @@ void test_settings_dialog() {
   CHECK(q.popup_normal); // 交互结果落盘
   CHECK(q.popup_important);
   CHECK(q.popup_urgent);
+  CHECK(q.popup_transfer_done);
+  CHECK(q.sound_mode == 2);
+  CHECK(!q.sound_msg); // mode=2 位裁决落盘
+  CHECK(q.sound_file);
 
   QSettings(QCoreApplication::organizationName(),
             QCoreApplication::applicationName())
@@ -683,6 +763,8 @@ int main(int argc, char** argv) {
   test_decide_matrix();
   PHASE("prefs-roundtrip");
   test_prefs_roundtrip();
+  PHASE("sound-and-presence");
+  test_sound_and_presence();
   PHASE("center-execution");
   test_center_execution();
   PHASE("fullscreen-defer");
