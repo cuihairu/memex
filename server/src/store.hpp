@@ -63,6 +63,7 @@ struct MemberProfile {
   std::string title;           // 职务
   std::string manager;         // 直属上级账号（空=无）
   std::string role;            // admin／member（T3.1 角色分级）
+  std::string signature;       // 个性签名（需求批⑪；空=未设）
 };
 
 // 批量导入行（CSV 解析后）与结果（错误行校验拒绝并报告行号）
@@ -519,6 +520,9 @@ public:
   // 直属上级链路逐级上溯（不含本人，最近上级在前）；含环防御，遇环即止
   //（平台-3 起沿权威表 org_reporting_lines 走，档案行有无不影响链路）
   std::vector<std::string> manager_chain(const std::string& account);
+  // 个性签名设置/清除（需求批⑪）：签名即档案面单值，upsert（空串=清除；
+  // 长度门 120 字由会话层把关）；账号不存在返回 false
+  bool set_signature(const std::string& account, const std::string& signature);
 
   // 批量导入：逐行校验（账号存在、非自身、不成环），坏行拒绝并报告行号，
   // 好行入库（单事务，坏行逐行回滚不影响好行）。

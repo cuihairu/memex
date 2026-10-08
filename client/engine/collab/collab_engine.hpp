@@ -55,6 +55,9 @@ public slots:
   // 常用联系人（T4.5）：登录后自动拉取；star/unstar/touch 都触发全量重推
   void fav_query();
   void fav_cmd(const QString& op, const QString& peer);
+  // 个性签名设置/清除（需求批⑪）：op=set_signature，空串=清除；回执经
+  // profile_result（服务端受理回执，长度门 120 字）
+  void set_signature(const QString& signature);
   // —— 群聊（T4.1）：命令走 GROUP_CMD，回执经 group_result；群列表 query_groups ——
   void create_group(const QString& name, const QStringList& members);
   void invite_group(quint64 group_id, const QStringList& members);
@@ -106,6 +109,8 @@ signals:
                          bool forwardable);
   // 常用联系人全量（T4.5）：JSON [{"peer","starred","last_ms"}]（已排序）
   void fav_received(const QString& fav_json);
+  // 资料命令回执（需求批⑪）：op 原样回带、ok=受理结果、reason=失败原因
+  void profile_result(bool ok, const QString& reason, const QString& op);
   // 群命令回执（T4.1）：op（create/invite/leave/announce/announce_history）、
   // ok、reason、群号
   void group_result(bool ok, const QString& reason, const QString& op,

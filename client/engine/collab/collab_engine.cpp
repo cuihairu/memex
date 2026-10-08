@@ -242,6 +242,20 @@ void CollabEngine::fav_cmd(const QString& op, const QString& peer) {
   send_frame(m);
 }
 
+// 个性签名设置/清除（需求批⑪）：服务端受理后 PROFILE_RESULT 回执
+void CollabEngine::set_signature(const QString& signature) {
+  if (!logged_in_) return;
+  Message m;
+  m.set_type(MsgType::PROFILE_CMD);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* c = m.mutable_profile_cmd();
+  c->set_op("set_signature");
+  c->set_signature(signature.toStdString());
+  send_frame(m);
+}
+
 // —— T4.1 群聊 ——
 
 void CollabEngine::create_group(const QString& name, const QStringList& members) {
@@ -517,6 +531,14 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
     emit fav_received(QString::fromStdString(j.dump()));
     break;
   }
+  case MsgType::PROFILE_RESULT: {
+    // 资料命令回执（需求批⑪）：交界面层提示（保存成功/失败原因）
+    if (!msg.has_profile_result()) return;
+    const auto& r = msg.profile_result();
+    emit profile_result(r.ok(), QString::fromStdString(r.reason()),
+                        QString::fromStdString(r.op()));
+    break;
+  }
   case MsgType::ORG_DATA: {
     // 组织架构下发 → JSON 交给界面层（T3.1：管理端维护，客户端生效展示）
     if (!msg.has_org_data()) return;
@@ -532,7 +554,8 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
                               {"title", m.title()},
                               {"department_path", m.department_path()},
                               {"manager", m.manager()},
-                              {"role", m.role()}});
+                              {"role", m.role()},
+                              {"signature", m.signature()}});
     }
     j["policies"] = nlohmann::json::array();
     for (const auto& p : msg.org_data().policies()) {

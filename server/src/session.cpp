@@ -16,6 +16,16 @@ std::int64_t now_ms() {
              std::chrono::system_clock::now().time_since_epoch())
       .count();
 }
+
+// UTF-8 码点计数（需求批⑪签名「120 字」门：按字数不按字节——
+// 一个汉字 3 字节，字节口径会把 40 字汉字签名误判超限）
+std::size_t utf8_len(const std::string& s) {
+  std::size_t n = 0;
+  for (const unsigned char ch : s) {
+    if ((ch & 0xC0) != 0x80) ++n; // 非续字节＝一个码点起点
+  }
+  return n;
+}
 } // namespace
 
 Session::Session(asio::ip::tcp::socket socket, CollabServer& server)
@@ -140,6 +150,7 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       om->set_department_path(m.department_path);
       om->set_manager(m.manager);
       om->set_role(m.role);
+      om->set_signature(m.signature);
     }
     // T3.4 策略开关随组织架构一并下发（客户端按本人部门解析生效行）
     for (const auto& p : server_.store().policy_list()) {
@@ -487,6 +498,33 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       e->set_peer(f.peer);
       e->set_starred(f.starred);
       e->set_last_ms(f.last_ms);
+    }
+    send(memex::protocol::encode(out));
+    break;
+  }
+  case v1::PROFILE_CMD: {
+    // 个人资料设置（需求批⑪）：目前仅个性签名（op=set_signature，空串=清除）。
+    // 登录门＋长度门（120 字，proto 注释同口径）＋保存回执（ok/reason）。
+    if (!logged_in_ || !msg.has_profile_cmd()) break;
+    const auto& c = msg.profile_cmd();
+    memex::protocol::Message out;
+    out.set_type(v1::PROFILE_RESULT);
+    out.set_from("server");
+    out.set_to(account_);
+    out.set_ts_ms(now_ms());
+    auto* r = out.mutable_profile_result();
+    r->set_op(c.op());
+    if (c.op() != "set_signature") {
+      r->set_ok(false);
+      r->set_reason("unknown op");
+    } else if (utf8_len(c.signature()) > 120) {
+      r->set_ok(false);
+      r->set_reason("签名过长（上限 120 字）");
+    } else {
+      r->set_ok(server_.store().set_signature(account_, c.signature()));
+      if (!r->ok()) r->set_reason("保存失败");
+      log(c.signature().empty() ? "清除个性签名" : "设置个性签名（" +
+          std::to_string(utf8_len(c.signature())) + " 字）");
     }
     send(memex::protocol::encode(out));
     break;

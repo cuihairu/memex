@@ -143,6 +143,11 @@ public:
   // 纯 UI 测试无对端时经此面断言 colorize 渲染）
   void inject_message(const QString& from_id, const QString& text,
                       bool outgoing);
+  // —— 需求批⑪ 个性签名（验收面）——
+  // 直接发送签名设置（带参＝测试直调不弹框；须登录协作态，回执异步）
+  void apply_signature(const QString& signature);
+  // 本人当前签名（org 数据缓存；空=未设/未登录）
+  QString own_signature() const;
   // —— BUG-004 托盘激活（验收面）——
   // 单击/双击托盘 → 激活主界面（右键 Context 留给菜单，不接线）；
   // 测试用裸 QSystemTrayIcon 复用生产接线（发 activated 信号即走同一路径）。
@@ -177,6 +182,9 @@ private:
   // 聊天区富文本重渲：气泡/@高亮/系统行的颜色是内联的，随主题重放记录。
   void rerender_chat();
   void show_theme_settings();  // 「设置 → 主题…」入口
+  // 「设置 → 个人资料…」（需求批⑪）：签名编辑对话框（登录门；保存走
+  // apply_signature，回执后重拉 org 即时刷新悬浮）
+  void show_profile_dialog();
   // 聊天区一行（消息或系统行）的结构化记录——主题切换时据此重渲，
   // 不必重查本地库（重查会丢掉尚未落库的即时提示）。
   struct ChatRow {
@@ -254,6 +262,9 @@ private:
   // 随后的登录失败就无从判「曾归档」）；仅登录恢复／显式登出清零。
   bool collab_degraded_{false};
   QString last_org_json_;     // 最近一次组织架构数据（T3.1）
+  // 成员签名缓存（需求批⑪）：账号 → 个性签名（org 数据到达即刷新；
+  // 会话列表悬浮 tooltip 数据源，空=未设）
+  QHash<QString, QString> member_signatures_;
   bool org_dialog_pending_{false}; // 已请求组织架构、等待弹窗
   bool anonymous_allowed_{true};   // T3.4 生效策略：允许免登录使用（默认宽松）
   bool cross_state_allowed_{true}; // T3.4 生效策略：允许与未登录设备通信

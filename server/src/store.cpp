@@ -271,7 +271,8 @@ bool ServerStore::ensure_schema() {
       "  department_id INTEGER,"
       "  title TEXT NOT NULL DEFAULT '',"
       "  manager TEXT NOT NULL DEFAULT '',"
-      "  updated_ms INTEGER NOT NULL);"
+      "  updated_ms INTEGER NOT NULL,"
+      "  signature TEXT NOT NULL DEFAULT '');"
       // T3.2 查阅日志：检索／导出动作逐次落一条（只附加，不删改）
       "CREATE TABLE IF NOT EXISTS audit_reads ("
       "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -756,6 +757,10 @@ bool ServerStore::ensure_schema() {
               nullptr, nullptr, nullptr);
   sqlite3_exec(db_, "ALTER TABLE group_polls ADD COLUMN"
                     " multi INTEGER NOT NULL DEFAULT 0",
+              nullptr, nullptr, nullptr);
+  // 旧库迁移（需求批⑪）：成员档案补个性签名列（默认空=未设）
+  sqlite3_exec(db_, "ALTER TABLE member_profiles ADD COLUMN"
+                    " signature TEXT NOT NULL DEFAULT ''",
               nullptr, nullptr, nullptr);
   // 旧库迁移（T4.1）：offline_messages 单列 UNIQUE(msg_id) →
   // 复合 UNIQUE(msg_id, to_account)。旧表不重建则群扇出 INSERT OR IGNORE
@@ -2623,7 +2628,7 @@ std::optional<MemberProfile> ServerStore::member_profile(
     const std::string& account) {
   const char* sql =
       "SELECT p.title, p.manager, p.department_id,"
-      " a.display_name, a.role FROM member_profiles p"
+      " a.display_name, a.role, p.signature FROM member_profiles p"
       " JOIN accounts a ON a.account = p.account WHERE p.account = ?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
@@ -2641,6 +2646,7 @@ std::optional<MemberProfile> ServerStore::member_profile(
     }
     m.display_name = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
     m.role = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    m.signature = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
     out = m;
   }
   sqlite3_finalize(st);
@@ -2651,7 +2657,7 @@ std::vector<MemberProfile> ServerStore::member_list() {
   std::vector<MemberProfile> out;
   const char* sql =
       "SELECT a.account, a.display_name, a.role, p.title, p.manager,"
-      " p.department_id FROM accounts a"
+      " p.department_id, p.signature FROM accounts a"
       " LEFT JOIN member_profiles p ON p.account = a.account"
       " ORDER BY a.account;";
   sqlite3_stmt* st = nullptr;
@@ -2670,10 +2676,33 @@ std::vector<MemberProfile> ServerStore::member_list() {
     if (sqlite3_column_type(st, 5) != SQLITE_NULL) {
       m.department_path = department_path(sqlite3_column_int(st, 5));
     }
+    if (sqlite3_column_type(st, 6) != SQLITE_NULL) {
+      m.signature = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    }
     out.push_back(std::move(m));
   }
   sqlite3_finalize(st);
   return out;
+}
+
+// 个性签名设置/清除（需求批⑪）：档案行可能不存在（create_account 不建档），
+// upsert 兜底建行；空串=清除。长度门 120 字由会话层把关。
+bool ServerStore::set_signature(const std::string& account,
+                                const std::string& signature) {
+  if (!find_account(account)) return false;
+  const char* sql =
+      "INSERT INTO member_profiles(account, signature, updated_ms)"
+      " VALUES(?, ?, ?)"
+      " ON CONFLICT(account) DO UPDATE SET"
+      " signature = excluded.signature, updated_ms = excluded.updated_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, signature.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, now_ms());
+  bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
 }
 
 std::vector<std::string> ServerStore::manager_chain(

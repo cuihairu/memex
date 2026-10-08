@@ -416,6 +416,10 @@ void MainWindow::build_ui() {
 
   // —— 设置：开机启动（T4.7；勾选态与登记文件同步）＋主题（R19 · T4.9）——
   auto* opt_menu = menuBar()->addMenu(QStringLiteral("设置"));
+  // —— 个人资料（需求批⑪）：个性签名设置（登录门在对话框入口）——
+  auto* act_profile = opt_menu->addAction(QStringLiteral("个人资料…"));
+  connect(act_profile, &QAction::triggered, this,
+          &MainWindow::show_profile_dialog);
   auto* act_notify = opt_menu->addAction(QStringLiteral("通知偏好…"));
   connect(act_notify, &QAction::triggered, this, [] {
     NotificationCenter::instance().show_settings();
@@ -984,7 +988,23 @@ void MainWindow::wire_collab() {
   connect(&collab_engine_, &CollabEngine::org_received, this,
           [this](const QString& org_json) {
             last_org_json_ = org_json;
+            // 需求批⑪：成员签名入缓存（会话列表悬浮 tooltip 数据源）
+            member_signatures_.clear();
+            const nlohmann::json j = nlohmann::json::parse(
+                org_json.toStdString(), nullptr, false);
+            if (!j.is_discarded() && j.contains("members")) {
+              for (const auto& m : j["members"]) {
+                const QString a = QString::fromStdString(
+                    m.value("account", std::string{}));
+                if (!a.isEmpty()) {
+                  member_signatures_.insert(
+                      a, QString::fromStdString(
+                             m.value("signature", std::string{})));
+                }
+              }
+            }
             apply_policy(org_json);
+            refresh_devices(); // 签名 tooltip 随数据到达即时刷新
             if (org_dialog_pending_) {
               org_dialog_pending_ = false;
               build_org_tree(org_json);
@@ -994,6 +1014,16 @@ void MainWindow::wire_collab() {
           });
   connect(&collab_engine_, &CollabEngine::fav_received, this,
           [this](const QString& fav_json) { apply_favs(fav_json); });
+  // 需求批⑪：签名回执——成功即重拉组织架构（缓存与悬浮 tooltip 刷新）
+  connect(&collab_engine_, &CollabEngine::profile_result, this,
+          [this](bool ok, const QString& reason, const QString&) {
+            if (ok) {
+              collab_engine_.query_org();
+              show_status(QStringLiteral("个性签名已保存"));
+            } else {
+              show_status(QStringLiteral("签名设置失败（%1）").arg(reason));
+            }
+          });
   // —— T4.1 群聊 ——
   connect(&collab_engine_, &CollabEngine::group_result, this,
           [this](bool ok, const QString& reason, const QString& op,
@@ -2710,6 +2740,11 @@ void MainWindow::refresh_devices() {
       item->setData(Qt::UserRole + 6,
                     QStringList{account, star.trimmed()}.join(
                         QLatin1Char('\n'))); // ⑨：账号精确/模糊皆命中
+      // 需求批⑪：签名悬浮可见（空=未设不显）
+      const QString sig = member_signatures_.value(account);
+      if (!sig.isEmpty()) {
+        item->setToolTip(QStringLiteral("个性签名：%1").arg(sig));
+      }
     }
   }
 
@@ -3144,6 +3179,49 @@ void MainWindow::show_status(const QString& text) {
           QString::fromStdString(collab_engine_.status_text()) +
           QStringLiteral("　|　") + status_hint_,
       0);
+}
+
+// —— 需求批⑪ 个性签名：设置对话框（设置菜单入口；登录门＝签名存服务端档案）——
+void MainWindow::show_profile_dialog() {
+  if (!collab_engine_.is_logged_in()) {
+    show_status(QStringLiteral("个人资料需登录协作态（签名存服务端档案）"));
+    return;
+  }
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("个人资料 · 个性签名"));
+  auto* layout = new QVBoxLayout(&dlg);
+  auto* hint = new QLabel(
+      QStringLiteral("签名在会话列表悬浮可见；留空保存＝清除。"), &dlg);
+  layout->addWidget(hint);
+  auto* edit = new QLineEdit(&dlg);
+  edit->setMaxLength(120); // 服务端同口径长度门
+  edit->setText(member_signatures_.value(collab_engine_.account()));
+  edit->setPlaceholderText(QStringLiteral("写一句个性签名（上限 120 字）"));
+  layout->addWidget(edit);
+  auto* buttons =
+      new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel,
+                           &dlg);
+  connect(buttons, &QDialogButtonBox::accepted, &dlg, [this, &dlg, edit] {
+    apply_signature(edit->text().trimmed());
+    dlg.accept();
+  });
+  connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  layout->addWidget(buttons);
+  dlg.exec();
+}
+
+// 发送签名设置（带参＝测试直调不弹框；回执经 profile_result 异步到）
+void MainWindow::apply_signature(const QString& signature) {
+  if (!collab_engine_.is_logged_in()) {
+    show_status(QStringLiteral("设置签名需登录协作态"));
+    return;
+  }
+  collab_engine_.set_signature(signature);
+  show_status(QStringLiteral("签名设置请求已发送"));
+}
+
+QString MainWindow::own_signature() const {
+  return member_signatures_.value(collab_engine_.account());
 }
 
 } // namespace memex::client

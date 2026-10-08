@@ -150,6 +150,21 @@ int main() {
   CHECK(!store.set_member_profile("alice", -1, "总经理", "dave")); // 环
   CHECK(store.manager_chain("alice").empty()); // 被拒后链路不变
 
+  // —— 库级：个性签名（需求批⑪）——upsert（无档案行兜底建行）、
+  // 清除（空串）、坏账号拒绝；member_list 带出
+  CHECK(store.set_signature("alice", "专注交付"));
+  CHECK(store.member_profile("alice")->signature == "专注交付");
+  CHECK(store.set_signature("eve", "测试签")); // eve 尚无档案行 → upsert 建行
+  CHECK(store.member_profile("eve")->signature == "测试签");
+  CHECK(store.set_signature("alice", "")); // 空串=清除
+  CHECK(store.member_profile("alice")->signature.empty());
+  CHECK(!store.set_signature("ghost", "x")); // 账号不存在
+  bool sig_in_list = false;
+  for (const auto& m : store.member_list()) {
+    if (m.account == "eve") sig_in_list = m.signature == "测试签";
+  }
+  CHECK(sig_in_list);
+
   // —— 库级：批量导入（错误行校验拒绝）——
   std::vector<memex::server::OrgImportRow> rows;
   auto make_row = [&](int line_no, const std::string& a, const std::string& dept,
@@ -292,6 +307,43 @@ int main() {
       }
     }
     CHECK(has_org_group);
+
+    // —— 需求批⑪：个性签名协议级——PROFILE_CMD 受理回执、超长拒绝、
+    // ORG_QUERY 重查带出 ——
+    const auto profile_cmd = [&](const std::string& text) {
+      memex::protocol::Message m;
+      m.set_type(memex::protocol::v1::PROFILE_CMD);
+      m.set_from("alice");
+      m.set_to("server");
+      m.set_ts_ms(now_ms());
+      auto* pc = m.mutable_profile_cmd();
+      pc->set_op("set_signature");
+      pc->set_signature(text);
+      return m;
+    };
+    c.send(profile_cmd("今天也要专注交付"));
+    const auto sr = c.read();
+    CHECK(sr.type() == memex::protocol::v1::PROFILE_RESULT);
+    CHECK(sr.has_profile_result());
+    CHECK(sr.profile_result().ok());
+    CHECK(sr.profile_result().op() == "set_signature");
+    std::string over;
+    for (int i = 0; i < 121; ++i) over += "签"; // 121 字（码点口径）
+    c.send(profile_cmd(over));
+    const auto lr = c.read();
+    CHECK(lr.type() == memex::protocol::v1::PROFILE_RESULT);
+    CHECK(!lr.profile_result().ok());
+    CHECK(lr.profile_result().reason().find("上限") != std::string::npos);
+    c.send(q); // 重查组织架构：本人签名随 ORG_DATA 带出
+    const auto data2 = c.read();
+    CHECK(data2.type() == memex::protocol::v1::ORG_DATA);
+    bool sig_out = false;
+    for (const auto& m : data2.org_data().members()) {
+      if (m.account() == "alice") {
+        sig_out = m.signature() == "今天也要专注交付";
+      }
+    }
+    CHECK(sig_out);
 
     io.stop();
     io_thread.join();

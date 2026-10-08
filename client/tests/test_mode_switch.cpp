@@ -239,6 +239,14 @@ int main(int argc, char** argv) {
   window.request_org();
   CHECK(wait_until([&] { return window.org_json().contains("bob"); }, 8000));
 
+  // —— 需求批⑪ 个性签名：发送面（验收缝 apply_signature）→ 服务端受理
+  //    回执 → 重拉 org → own_signature 生效（持久面断言；回执状态行是
+  //    瞬态提示，不等它）——
+  window.apply_signature(QStringLiteral("今天也要专注交付"));
+  CHECK(wait_until([&] {
+    return window.own_signature() == QStringLiteral("今天也要专注交付");
+  }, 8000));
+
   // —— 协作会话：提示条切换为归档口径 ——
   window.open_collab_peer(QStringLiteral("bob"));
   CHECK(window.banner_text().contains(QStringLiteral("全量归档")));
@@ -282,6 +290,9 @@ int main(int argc, char** argv) {
   window.logout_collab();
   CHECK(wait_until([&] { return !window.collab_logged_in(); }, 5000));
   CHECK(window.banner_text().contains(QStringLiteral("消息不进归档")));
+  // 需求批⑪：登出后签名设置被登录门拦（同步状态行断言＝同轮取值无竞态）
+  window.apply_signature(QStringLiteral("不应生效"));
+  CHECK(window.status_text().contains(QStringLiteral("设置签名需登录协作态")));
   window.login_collab(QStringLiteral("127.0.0.1"), port,
                       QStringLiteral("alice"), QStringLiteral("pass-a"));
   CHECK(wait_until([&] { return window.collab_logged_in(); }, 8000));
