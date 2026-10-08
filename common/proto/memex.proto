@@ -38,6 +38,8 @@ enum MsgType {
   NOTICE = 48;       // 通知消息（webhook 推送：标题／内容／紧急程度／可选跳转，T4.10）
   FILE_AUTHZ = 49;         // 终端 → 服务端：直连文件旁路授权四问（平台-10）
   FILE_AUTHZ_RESULT = 50;  // 服务端 → 终端：授权裁决（允许/拒绝＋依据＋可转发）
+  PROFILE_CMD = 51;    // 终端 → 服务端：个人资料设置（个性签名，需求批⑪）
+  PROFILE_RESULT = 52; // 服务端 → 终端：资料命令回执
 }
 
 message Hello {
@@ -134,6 +136,7 @@ message OrgMember {
   string department_path = 4; // 部门全路径（空=未分配）
   string manager = 5;         // 直属上级账号（空=无；每人至多一名）
   string role = 6;            // 角色（admin／member）
+  string signature = 7;       // 个性签名（需求批⑪；空=未设，上限 120 字）
 }
 
 // 策略开关（T3.4）：按部门配置、全局兜底（department_path 空=全局默认）。
@@ -248,6 +251,17 @@ message FavCmd {
   int64 ts_ms = 3;     // touch 时的联系时刻（客户端取当前时刻）
 }
 
+// —— 个人资料（需求批⑪）——
+message ProfileCmd {
+  string op = 1;         // set_signature（本人设置个性签名；空串=清除）
+  string signature = 2;  // 签名内容（≤120 字，超限服务端拒）
+}
+message ProfileResult {
+  bool ok = 1;
+  string reason = 2; // 失败原因（未登录／签名过长…）
+  string op = 3;     // 回执对应的命令
+}
+
 // 通知（T4.10）：webhook 接入推送的站内通知——紧急程度三级驱动客户端分级
 // 推送（普通＝站内会话消息、重要＝桌面通知强提醒、紧急＝置顶弹窗需确认收悉）。
 message Notice {
@@ -297,5 +311,7 @@ message Envelope {
     Notice notice = 148;
     FileAuthz file_authz = 149;
     FileAuthzResult file_authz_result = 150;
+    ProfileCmd profile_cmd = 151;
+    ProfileResult profile_result = 152;
   }
 }
