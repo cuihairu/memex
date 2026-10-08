@@ -12,6 +12,7 @@
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QShortcut>
 #include <QUdpSocket>
 
 #include <cstdlib>
@@ -394,6 +395,33 @@ int main(int argc, char** argv) {
 
   da.stop();
   db.stop();
+
+  // —— 截图快捷键改键＋冲突检测（用户令 2026-10-08 ③；设置页
+  // ShortcutSettingsDialog 走同一路径 apply_screenshot_shortcut）——
+  {
+    // 造一个占用键的既有快捷键＝冲突检测的比对对象
+    auto* other = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+K")),
+                                &window);
+    other->setObjectName(QStringLiteral("other_sc"));
+    // 冲突：不改现状、返回冲突文案
+    const QString conflict = window.apply_screenshot_shortcut(
+        QKeySequence(QStringLiteral("Ctrl+Shift+K")));
+    CHECK(conflict.contains(QStringLiteral("冲突")));
+    CHECK(MainWindow::screenshot_shortcut() ==
+          QStringLiteral("Ctrl+Alt+A")); // 落盘未动
+    // 合法键：重绑＋落盘＋回读
+    CHECK(window.apply_screenshot_shortcut(
+              QKeySequence(QStringLiteral("Ctrl+Alt+S")))
+              .isEmpty());
+    CHECK(MainWindow::screenshot_shortcut() ==
+          QStringLiteral("Ctrl+Alt+S"));
+    // 还原默认（不污染后续执行体；QSettings 面 XDG_CONFIG_HOME 已隔离）
+    CHECK(window.apply_screenshot_shortcut(
+              QKeySequence(QStringLiteral("Ctrl+Alt+A")))
+              .isEmpty());
+    delete other;
+  }
+
   window.close();
 
   if (g_failures == 0) {

@@ -11,6 +11,7 @@
 #include <QListWidget>
 #include <QMainWindow>
 #include <QMap>
+#include <QKeySequence>
 #include <QPushButton>
 #include <QSet>
 #include <QStringList>
@@ -25,6 +26,7 @@
 
 class QAction;
 class QCloseEvent;
+class QShortcut;
 class QSystemTrayIcon;
 
 namespace memex::client {
@@ -43,6 +45,7 @@ class OfficeMapDialog;
 class AssistDialog;
 class GroupToolsDialog;
 class BrandSettingsDialog;
+class ShortcutSettingsDialog;
 
 class MainWindow : public QMainWindow {
 public:
@@ -79,7 +82,12 @@ public:
   // —— T4.4 截图与标注 ——
   // 截图工具（区域选择→标注→确认即发送；测试缝见 ScreenshotTool 注释）。
   ScreenshotTool* screenshot_tool() { return &screenshot_tool_; }
-  void start_screenshot(); // 按钮与 Ctrl+Alt+A 快捷键入口
+  void start_screenshot(); // 按钮与截图快捷键入口（键可改，见下）
+  // 截图快捷键当前值（QSettings shortcuts/screenshot；默认 Ctrl+Alt+A）
+  static QString screenshot_shortcut();
+  // 改键（设置页与测试共用）：冲突检测（应用内其他 QShortcut/QAction
+  // 键序列）→无冲突＝重绑＋落盘，返回空串；有冲突＝返回冲突文案不改现状。
+  QString apply_screenshot_shortcut(const QKeySequence& seq);
   void show_emoji_panel(); // T4.5：表情面板（内置按频次＋自定义导入）
   // 自定义表情导入（测试缝：面板「导入」按钮即此函数；同名覆盖、失败回 false）
   bool import_emoji(const QString& src);
@@ -263,6 +271,7 @@ private:
   QPointer<AssistDialog> assist_dialog_; // 二期·远程协助窗口（懒建）
   QPointer<GroupToolsDialog> group_tools_dialog_; // 二期·群工具三件窗口（懒建）
   QPointer<BrandSettingsDialog> brand_settings_dialog_; // 二期·品牌物料设置页（懒建）
+  QPointer<ShortcutSettingsDialog> shortcut_dialog_; // 二期·快捷键设置页（懒建）
 
   QLabel* device_count_{nullptr};
   QLineEdit* search_box_{nullptr};
@@ -274,6 +283,7 @@ private:
   QLineEdit* input_box_{nullptr};
   QPushButton* send_btn_{nullptr};
   QAction* act_collab_logout_{nullptr};
+  QShortcut* shot_sc_{nullptr}; // 截图快捷键（键可改：apply_screenshot_shortcut）
   QAction* act_theme_{nullptr}; // 「设置 → 主题…」菜单项
 
   // 参与 apply_theme_styles 的控件（构造期为局部变量，主题重刷需长期持有）

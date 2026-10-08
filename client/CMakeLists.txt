@@ -45,6 +45,7 @@ qt_add_executable(memex_client
   app/brand_kit.cpp
   app/brand_kit.hpp
   app/brand_settings_page.cpp
+  app/shortcut_settings.cpp
   app/theme.cpp
   app/theme.hpp
   app/theme_settings_page.cpp
@@ -450,6 +451,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_brand_settings
     app/tests/test_brand_settings.cpp
     app/brand_settings_page.cpp
+    app/shortcut_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
     app/file_assistant.cpp
@@ -552,6 +554,7 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
+    app/shortcut_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -598,6 +601,7 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
+    app/shortcut_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -642,6 +646,7 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
+    app/shortcut_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -708,6 +713,7 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
+    app/shortcut_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -753,6 +759,7 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
+    app/shortcut_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -796,6 +803,7 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
+    app/shortcut_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -839,6 +847,7 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
+    app/shortcut_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp

@@ -35,6 +35,7 @@
 #include "report_dialog.hpp"
 #include "group_tools_dialog.hpp"
 #include "brand_settings_page.hpp"
+#include "shortcut_settings.hpp"
 #include "assist_dialog.hpp"
 #include "audit_dialog.hpp"
 #include "office_map_dialog.hpp"
@@ -391,6 +392,17 @@ void MainWindow::build_ui() {
     brand_settings_dialog_->raise();
     brand_settings_dialog_->activateWindow();
   });
+  // —— 快捷键设置（用户令 2026-10-08 ③：截图键可改＋冲突检测）——
+  auto* act_shortcut = opt_menu->addAction(QStringLiteral("快捷键…"));
+  connect(act_shortcut, &QAction::triggered, this, [this] {
+    if (!shortcut_dialog_) {
+      shortcut_dialog_ = new ShortcutSettingsDialog(this, this);
+      shortcut_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    shortcut_dialog_->show();
+    shortcut_dialog_->raise();
+    shortcut_dialog_->activateWindow();
+  });
   opt_menu->addSeparator();
   act_autostart_ =
       opt_menu->addAction(QStringLiteral("开机启动（登录后自动运行）"));
@@ -494,11 +506,15 @@ void MainWindow::build_ui() {
   // T4.4 截图与标注：按钮＋ Ctrl+Alt+A 快捷键（与「发文件」同发送口径）
   auto* shot_btn = new QPushButton(QStringLiteral("截图"), input_row);
   shot_btn_ = shot_btn;
-  shot_btn->setToolTip(QStringLiteral("截图并标注（Ctrl+Alt+A）"));
-  auto* shot_sc = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+A")), this);
-  shot_sc->setContext(Qt::WindowShortcut);
+  shot_btn->setToolTip(
+      QStringLiteral("截图并标注（%1）").arg(screenshot_shortcut()));
+  // 截图快捷键（用户令 2026-10-08：可在设置改键——QSettings
+  // shortcuts/screenshot，默认 Ctrl+Alt+A；冲突检测见 apply_…）
+  shot_sc_ = new QShortcut(QKeySequence(screenshot_shortcut()), this);
+  shot_sc_->setContext(Qt::WindowShortcut);
   connect(shot_btn, &QPushButton::clicked, this, [this] { start_screenshot(); });
-  connect(shot_sc, &QShortcut::activated, this, [this] { start_screenshot(); });
+  connect(shot_sc_, &QShortcut::activated, this,
+          [this] { start_screenshot(); });
   // T4.5 表情：内置（按频次排序）＋自定义表情包导入（走文件通道发送）
   auto* emoji_btn = new QPushButton(QStringLiteral("表情"), input_row);
   emoji_btn_ = emoji_btn;
@@ -1245,6 +1261,37 @@ bool MainWindow::direct_send_allowed() {
 // 落点校验移到发送端：无会话、群会话（文件通道本期仅单聊/协作）才在
 // 确认后拦，策略闸门（免登录／跨态）与「发文件」同口径。
 void MainWindow::start_screenshot() { screenshot_tool_.start(); }
+
+QString MainWindow::screenshot_shortcut() {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  const QString v = settings.value(QStringLiteral("shortcuts/screenshot"),
+                                   QStringLiteral("Ctrl+Alt+A"))
+                        .toString();
+  return v.isEmpty() ? QStringLiteral("Ctrl+Alt+A") : v;
+}
+
+QString MainWindow::apply_screenshot_shortcut(const QKeySequence& seq) {
+  if (seq.isEmpty()) return QStringLiteral("键序列为空");
+  // 冲突检测：应用内其他 QShortcut／带键 QAction（系统级占用测不到——
+  // 全局钩子按平台能力另批，文档注明）
+  const auto shorts = findChildren<QShortcut*>();
+  for (const QShortcut* sc : shorts) {
+    if (sc != shot_sc_ && !sc->key().isEmpty() && sc->key() == seq) {
+      return QStringLiteral("与已有快捷键冲突（%1）").arg(seq.toString());
+    }
+  }
+  for (const QAction* act : findChildren<QAction*>()) {
+    if (act->shortcuts().contains(seq)) {
+      return QStringLiteral("与菜单快捷键冲突（%1）").arg(seq.toString());
+    }
+  }
+  if (shot_sc_) shot_sc_->setKey(seq);
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  settings.setValue(QStringLiteral("shortcuts/screenshot"), seq.toString());
+  return {};
+}
 
 // 截图确认后发送到当前会话：PNG 临时文件走既有文件通道（与「发文件」同路径）。
 void MainWindow::on_screenshot_confirmed(const QString& path) {
