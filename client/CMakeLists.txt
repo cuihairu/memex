@@ -4,6 +4,10 @@ qt_standard_project_setup()
 # R24-3 密码箱客户端面：PBKDF2/AES-256-GCM 本地解锁派生（与服务端同 libcrypto）
 find_package(OpenSSL CONFIG REQUIRED)
 
+# 崩溃采集（Crashpad）：vcpkg manifest client feature（静态 client 库 + 独立
+# crashpad_handler，config 导出 crashpad::crashpad 界面库）
+find_package(crashpad CONFIG REQUIRED)
+
 # 共享内核：本地库、会话、联系人（T1.2 起：LocalStore）
 add_library(memex_core STATIC
   core/local_store.cpp)
@@ -35,6 +39,8 @@ qt_add_executable(memex_client
   app/main.cpp
   app/main_window.cpp
   app/main_window.hpp
+  app/crash_report.cpp
+  app/crash_report.hpp
   app/icons/icons.qrc
   app/notify_center.cpp
   app/notify_center.hpp
@@ -86,12 +92,33 @@ qt_add_executable(memex_client
   app/group_vault_dialog.hpp)
 target_include_directories(memex_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_compile_definitions(memex_client PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
+# 崩溃采集符号面：客户端目标恒带 -g——dump_syms/minidump_stackwalk 还原调用栈
+# 的前提（简档「build 留 g 分离符号」；发布产物后续 objcopy 分离瘦身另批）
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(memex_client PRIVATE -g)
+endif()
 target_link_libraries(memex_client PRIVATE
   memex_engine_direct
   memex_engine_collab
   Qt6::Widgets
   Qt6::Sql
-  OpenSSL::Crypto)
+  OpenSSL::Crypto
+  crashpad::crashpad)
+
+# 崩溃采集（Crashpad）：crashpad_handler 独立可执行随包——构建后拷到
+# memex_client 同目录（分发体口径，运行时按「可执行同目录→PATH」探寻）。
+find_program(CRASHPAD_HANDLER_EXE crashpad_handler
+  PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/tools/crashpad_handler")
+if(CRASHPAD_HANDLER_EXE)
+  add_custom_command(TARGET memex_client POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${CRASHPAD_HANDLER_EXE}"
+      "$<TARGET_FILE_DIR:memex_client>/crashpad_handler"
+    COMMENT "Staging crashpad_handler next to memex_client")
+else()
+  message(WARNING "crashpad_handler not found — 崩溃采集 handler 将不在产物旁"
+                  "（运行时仅 PATH 兜底）")
+endif()
 
 # 分发体属性：Windows GUI 子系统（双击启动不弹控制台；--version 等控制台面经
 # 句柄重定向仍可用）；macOS .app bundle（dmg 分发体，Info.plist 由 CMake 生成）。
@@ -1027,4 +1054,16 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(feishu_provider PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 30)
+
+  # 崩溃采集验收（Crashpad 真链路）：真客户端 MEMEX_CRASH_TEST=1 故意崩溃 →
+  # handler 接管 → XDG 隔离目录落 .dmp（dump_syms/minidump_stackwalk 符号化
+  # 为开发机侧手工步骤，见 docs/src/guide/crash-reporting.md 实现段）
+  add_executable(test_crash tests/test_crash.cpp)
+  target_compile_definitions(test_crash PRIVATE
+    MEMEX_CLIENT_BIN="$<TARGET_FILE:memex_client>")
+  target_link_libraries(test_crash PRIVATE Qt6::Core)
+  add_test(NAME crash COMMAND test_crash)
+  set_tests_properties(crash PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
 endif()

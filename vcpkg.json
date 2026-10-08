@@ -44,6 +44,10 @@
             "xkb",
             "xkbcommon-x11"
           ]
+        },
+        {
+          "name": "crashpad",
+          "$comment": "崩溃采集（Apache-2.0）：静态 client 库 + 独立 crashpad_handler 随产物；dump 只本地落盘（上报 URL 空＝不外发）"
         }
       ]
     }

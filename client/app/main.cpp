@@ -7,6 +7,7 @@
 #include <iostream>
 #include <string_view>
 
+#include "crash_report.hpp"
 #include "main_window.hpp"
 #include "theme.hpp"
 
@@ -34,6 +35,20 @@ int main(int argc, char** argv) {
   QApplication app(argc, argv);
   QApplication::setApplicationName("Memex");
   QApplication::setOrganizationName("memex");
+
+  // 崩溃采集（Crashpad）：QApplication 构造后、业务引擎/窗口构造前接管
+  // 异常路径——启动早期崩溃也能落 dump；只本地落盘不外发（简档
+  // docs/src/guide/crash-reporting.md）。
+  memex::client::init_crash_reporting();
+
+  // 故意崩溃验收开关（简档是唯一入口，不进任何菜单）：MEMEX_CRASH_TEST=1
+  // 时 2s 后空指针写入，验证 handler 接管与 dump 落盘；默认零影响。
+  if (qEnvironmentVariable("MEMEX_CRASH_TEST") == QLatin1String("1")) {
+    QTimer::singleShot(2000, &app, [] {
+      qWarning("[崩溃采集] MEMEX_CRASH_TEST=1 触发故意崩溃（空指针写入）");
+      *static_cast<volatile int*>(nullptr) = 0;
+    });
+  }
 
   // 主题（R19）：起窗前应用令牌化调色板与全局 QSS；跟随系统时系统亮暗变化
   // 由 ThemeManager 自动重应用。窗口内控件各自设的样式优先级更高，
