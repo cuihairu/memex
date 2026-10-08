@@ -236,6 +236,37 @@ class FilesClient : public QObject {
   // 受控方取走输入事件（FIFO 取走即清）
   void fetch_assist_input(const QString& id);
 
+  // —— 群工具三件（二期·投票/接龙/群任务，原生互动不走 R25 代理）——
+  // 判权与身份约束全在服务端（file:read 群继承、发起人或群主/管理员），
+  // 客户端只提交与展示
+  // 建投票（topic 非空、options 2~10；deadline_ms 0=不设截止）
+  void create_poll(quint64 gid, const QString& topic,
+                   const QStringList& options, qint64 deadline_ms);
+  // 投票列表（含 counts 票数统计与 votes 记名台账）
+  void list_polls(quint64 gid);
+  // 投/改票（choice=选项序号 1 起；改票=覆盖）
+  void vote_poll(quint64 gid, qint64 poll_id, int choice);
+  // 关票（发起人或群主/管理员；已关 409）
+  void close_poll(quint64 gid, qint64 poll_id);
+  // 建接龙（title 非空；format_hint 可空）
+  void create_chain(quint64 gid, const QString& title,
+                    const QString& format_hint);
+  // 接龙列表（条目 ts ASC）
+  void list_chains(quint64 gid);
+  // 加入/更新自己条目（一人一条 upsert）
+  void join_chain(quint64 gid, qint64 chain_id, const QString& content);
+  // 关接龙（同关票口径）
+  void close_chain(quint64 gid, qint64 chain_id);
+  // 建群任务（assignee 可空=待认领；非空须群成员否则 404）
+  void create_group_task(quint64 gid, const QString& title,
+                         const QString& assignee);
+  // 群任务列表（status/done_by/claimed_ms 留痕可见）
+  void list_group_tasks(quint64 gid);
+  // 认领（todo 且无人认领；已占 409）
+  void claim_group_task(quint64 gid, qint64 task_id);
+  // 完成（负责人/创建者/群主/管理员；非 todo 409）
+  void done_group_task(quint64 gid, qint64 task_id);
+
  signals:
   void logged_in();
   void login_failed(const QString& reason);
@@ -313,6 +344,19 @@ class FilesClient : public QObject {
   void assist_frame_pulled(qint64 seq, const QString& jpeg_b64);
   void assist_input_sent();
   void assist_inputs_listed(const QJsonArray& events);
+  // —— 群工具三件 ——
+  void poll_created(qint64 id);
+  void polls_listed(const QJsonArray& polls); // 含 counts/votes 记名台账
+  void poll_voted(qint64 id);
+  void poll_closed(qint64 id);
+  void chain_created(qint64 id);
+  void chains_listed(const QJsonArray& chains); // 含 entries ts ASC
+  void chain_joined(qint64 id);
+  void chain_closed(qint64 id);
+  void group_task_created(qint64 id);
+  void group_tasks_listed(const QJsonArray& tasks);
+  void group_task_claimed(qint64 id);
+  void group_task_done(qint64 id);
   // 统一失败通道：op=操作名（"memo.create"/"inbox.upload"/…）、
   // status=HTTP 状态码（0=网络层失败）、error=服务端 error 字段或网络串
   void request_failed(const QString& op, int status, const QString& error);

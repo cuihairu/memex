@@ -51,6 +51,7 @@ qt_add_executable(memex_client
   app/task_dialog.cpp
   app/approval_dialog.cpp
   app/report_dialog.cpp
+  app/group_tools_dialog.cpp
   app/audit_dialog.cpp
   app/office_map_dialog.cpp
   app/assist_dialog.cpp
@@ -335,6 +336,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
+    app/group_tools_dialog.cpp
     app/audit_dialog.cpp
     app/office_map_dialog.cpp
     app/assist_dialog.cpp
@@ -390,6 +392,25 @@ if(MEMEX_BUILD_TESTS)
     MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
   add_test(NAME report_dialog COMMAND test_report_dialog)
   set_tests_properties(report_dialog PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
+  # 二期·群工具三件窗口冒烟：真服务端进程 × 离屏 QDialog——连接→建投票
+  # （选项越界 400 状态行明示）→投票改票覆盖 counts 变化→无关者关票 403→
+  # 关后投票 409→接龙加入（upsert 自己条目）→关后加入 409→建任务幽灵
+  # 负责人 404→认领重复 409→完成留痕 done_by。判权矩阵细分走 test_files_api
+  # 协议腿，不在此重复
+  add_executable(test_group_tools_dialog
+    app/tests/test_group_tools_dialog.cpp
+    app/group_tools_dialog.cpp)
+  target_link_libraries(test_group_tools_dialog PRIVATE
+    memex_engine_collab Qt6::Widgets)
+  target_include_directories(test_group_tools_dialog PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_group_tools_dialog PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME group_tools_dialog COMMAND test_group_tools_dialog)
+  set_tests_properties(group_tools_dialog PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
@@ -456,6 +477,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
+    app/group_tools_dialog.cpp
     app/audit_dialog.cpp
     app/office_map_dialog.cpp
     app/assist_dialog.cpp
@@ -498,6 +520,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
+    app/group_tools_dialog.cpp
     app/audit_dialog.cpp
     app/office_map_dialog.cpp
     app/assist_dialog.cpp
@@ -538,6 +561,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
+    app/group_tools_dialog.cpp
     app/audit_dialog.cpp
     app/office_map_dialog.cpp
     app/assist_dialog.cpp
@@ -600,6 +624,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
+    app/group_tools_dialog.cpp
     app/audit_dialog.cpp
     app/office_map_dialog.cpp
     app/assist_dialog.cpp
@@ -641,6 +666,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
+    app/group_tools_dialog.cpp
     app/audit_dialog.cpp
     app/office_map_dialog.cpp
     app/assist_dialog.cpp
@@ -680,6 +706,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
+    app/group_tools_dialog.cpp
     app/audit_dialog.cpp
     app/office_map_dialog.cpp
     app/assist_dialog.cpp
@@ -719,6 +746,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
+    app/group_tools_dialog.cpp
     app/audit_dialog.cpp
     app/office_map_dialog.cpp
     app/assist_dialog.cpp

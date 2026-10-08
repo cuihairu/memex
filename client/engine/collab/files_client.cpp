@@ -1059,6 +1059,163 @@ void FilesClient::fetch_assist_input(const QString& id) {
             });
 }
 
+// —— 群工具三件（二期·投票/接龙/群任务）——
+
+void FilesClient::create_poll(quint64 gid, const QString& topic,
+                              const QStringList& options,
+                              qint64 deadline_ms) {
+  QJsonArray arr;
+  for (const QString& o : options) arr.append(o);
+  send_json(QStringLiteral("group-poll.create"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-polls"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("topic"), topic},
+             {QStringLiteral("options"), arr},
+             {QStringLiteral("deadline_ms"), static_cast<double>(deadline_ms)}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit poll_created(static_cast<qint64>(
+                    resp.value(QStringLiteral("poll_id")).toDouble()));
+              }
+            });
+}
+
+void FilesClient::list_polls(quint64 gid) {
+  send_json(QStringLiteral("group-poll.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-polls?gid=%1").arg(gid), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit polls_listed(
+                    resp.value(QStringLiteral("polls")).toArray());
+              }
+            });
+}
+
+void FilesClient::vote_poll(quint64 gid, qint64 poll_id, int choice) {
+  send_json(QStringLiteral("group-poll.vote"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-polls/vote"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("poll_id"), static_cast<double>(poll_id)},
+             {QStringLiteral("choice"), choice}},
+            [this, poll_id](bool ok, int, const QJsonObject&,
+                            const QString&) {
+              if (ok) emit poll_voted(poll_id);
+            });
+}
+
+void FilesClient::close_poll(quint64 gid, qint64 poll_id) {
+  send_json(QStringLiteral("group-poll.close"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-polls/close"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("poll_id"), static_cast<double>(poll_id)}},
+            [this, poll_id](bool ok, int, const QJsonObject&,
+                            const QString&) {
+              if (ok) emit poll_closed(poll_id);
+            });
+}
+
+void FilesClient::create_chain(quint64 gid, const QString& title,
+                               const QString& format_hint) {
+  QJsonObject body{{QStringLiteral("gid"), static_cast<double>(gid)},
+                   {QStringLiteral("title"), title}};
+  if (!format_hint.isEmpty()) {
+    body.insert(QStringLiteral("format_hint"), format_hint);
+  }
+  send_json(QStringLiteral("group-chain.create"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-chains"), body,
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit chain_created(static_cast<qint64>(
+                    resp.value(QStringLiteral("chain_id")).toDouble()));
+              }
+            });
+}
+
+void FilesClient::list_chains(quint64 gid) {
+  send_json(QStringLiteral("group-chain.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-chains?gid=%1").arg(gid), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit chains_listed(
+                    resp.value(QStringLiteral("chains")).toArray());
+              }
+            });
+}
+
+void FilesClient::join_chain(quint64 gid, qint64 chain_id,
+                             const QString& content) {
+  send_json(QStringLiteral("group-chain.join"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-chains/join"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("chain_id"), static_cast<double>(chain_id)},
+             {QStringLiteral("content"), content}},
+            [this, chain_id](bool ok, int, const QJsonObject&,
+                             const QString&) {
+              if (ok) emit chain_joined(chain_id);
+            });
+}
+
+void FilesClient::close_chain(quint64 gid, qint64 chain_id) {
+  send_json(QStringLiteral("group-chain.close"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-chains/close"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("chain_id"), static_cast<double>(chain_id)}},
+            [this, chain_id](bool ok, int, const QJsonObject&,
+                             const QString&) {
+              if (ok) emit chain_closed(chain_id);
+            });
+}
+
+void FilesClient::create_group_task(quint64 gid, const QString& title,
+                                    const QString& assignee) {
+  QJsonObject body{{QStringLiteral("gid"), static_cast<double>(gid)},
+                   {QStringLiteral("title"), title}};
+  if (!assignee.isEmpty()) {
+    body.insert(QStringLiteral("assignee"), assignee);
+  }
+  send_json(QStringLiteral("group-task.create"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-tasks"), body,
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit group_task_created(static_cast<qint64>(
+                    resp.value(QStringLiteral("task_id")).toDouble()));
+              }
+            });
+}
+
+void FilesClient::list_group_tasks(quint64 gid) {
+  send_json(QStringLiteral("group-task.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/group-tasks?gid=%1").arg(gid), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit group_tasks_listed(
+                    resp.value(QStringLiteral("tasks")).toArray());
+              }
+            });
+}
+
+void FilesClient::claim_group_task(quint64 gid, qint64 task_id) {
+  send_json(QStringLiteral("group-task.claim"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-tasks/claim"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("task_id"), static_cast<double>(task_id)}},
+            [this, task_id](bool ok, int, const QJsonObject&,
+                            const QString&) {
+              if (ok) emit group_task_claimed(task_id);
+            });
+}
+
+void FilesClient::done_group_task(quint64 gid, qint64 task_id) {
+  send_json(QStringLiteral("group-task.done"), QStringLiteral("POST"),
+            QStringLiteral("/files/group-tasks/done"),
+            {{QStringLiteral("gid"), static_cast<double>(gid)},
+             {QStringLiteral("task_id"), static_cast<double>(task_id)}},
+            [this, task_id](bool ok, int, const QJsonObject&,
+                            const QString&) {
+              if (ok) emit group_task_done(task_id);
+            });
+}
+
 void FilesClient::download_file(qint64 file_id, const QString& file_name,
                                 const QString& save_dir) {
   if (token_.isEmpty()) {

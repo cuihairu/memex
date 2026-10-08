@@ -32,6 +32,7 @@
 #include "task_dialog.hpp"
 #include "approval_dialog.hpp"
 #include "report_dialog.hpp"
+#include "group_tools_dialog.hpp"
 #include "assist_dialog.hpp"
 #include "audit_dialog.hpp"
 #include "office_map_dialog.hpp"
@@ -292,6 +293,17 @@ void MainWindow::build_ui() {
     report_dialog_->show();
     report_dialog_->raise();
     report_dialog_->activateWindow();
+  });
+  // 二期·群工具三件（投票/接龙/群任务）：判权全在服务端，窗口只提交与展示
+  auto* act_group_tools = task_menu->addAction(QStringLiteral("群工具…"));
+  connect(act_group_tools, &QAction::triggered, this, [this] {
+    if (!group_tools_dialog_) {
+      group_tools_dialog_ = new GroupToolsDialog(this);
+      group_tools_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    group_tools_dialog_->show();
+    group_tools_dialog_->raise();
+    group_tools_dialog_->activateWindow();
   });
   // 二期·会话审计：归档在线检索＋查阅日志（auditor 持证；被拒服务端留痕）
   auto* act_audit = collab_menu->addAction(QStringLiteral("会话审计…"));
