@@ -39,6 +39,9 @@ class AssistDialog : public QDialog {
                       const QStringList& perms = {});
   // 批/拒最早的待批请求（perms 空=按实批勾选；服务端仍校验 ⊆ 申请集）
   void approve_pending(bool allow, const QStringList& perms);
+  // 远程控制配对密码门（用户令 2026-10-08 ⑤）：remote_control 开启时
+  // 批准须先过密码；返回空=已执行批准，否则返回拒因（测试与按钮同源）。
+  QString try_approve(const QString& pwd, const QStringList& perms);
   // 启动/结束选中会话（发起方侧）
   void start_selected();
   void end_selected(bool with_reason = true);

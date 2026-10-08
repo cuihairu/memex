@@ -37,6 +37,8 @@
 #include "brand_settings_page.hpp"
 #include "shortcut_settings.hpp"
 #include "away_settings.hpp"
+#include "net_remote_settings.hpp"
+#include "net_guard.hpp"
 #include "assist_dialog.hpp"
 #include "audit_dialog.hpp"
 #include "office_map_dialog.hpp"
@@ -216,6 +218,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
           &MainWindow::maybe_lock_screen);
   qApp->installEventFilter(this);
   apply_away_lock_settings();
+  apply_net_settings(); // 网段黑名单（QSettings 缺省=关=不拦）
 
   refresh_devices();
   show_status(QStringLiteral("就绪"));
@@ -422,6 +425,17 @@ void MainWindow::build_ui() {
     away_dialog_->show();
     away_dialog_->raise();
     away_dialog_->activateWindow();
+  });
+  // —— 网络与远程设置（用户令 2026-10-08 ⑤：网段黑名单＋远程控制密码）——
+  auto* act_net = opt_menu->addAction(QStringLiteral("网络与远程…"));
+  connect(act_net, &QAction::triggered, this, [this] {
+    if (!net_dialog_) {
+      net_dialog_ = new NetRemoteSettingsDialog(this, this);
+      net_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    net_dialog_->show();
+    net_dialog_->raise();
+    net_dialog_->activateWindow();
   });
   opt_menu->addSeparator();
   act_autostart_ =
@@ -2167,6 +2181,21 @@ void MainWindow::apply_away_lock_settings() {
   } else {
     idle_timer_->stop();
   }
+}
+
+// 重读 net_blacklist：开关关＝不装过滤器（全放行）；开＝段表转谓词注入
+// 直连引擎（发现包 sender 与 TCP 入站 peerAddress 两处同一谓词）。
+// CIDR 匹配只在 net_guard 内实现，这里只拼装不重复实现。
+void MainWindow::apply_net_settings() {
+  if (!net_blacklist::enabled()) {
+    direct_engine_.set_address_filter({});
+    return;
+  }
+  const QStringList cidrs = net_blacklist::entries();
+  direct_engine_.set_address_filter(
+      [cidrs](const QHostAddress& addr) {
+        return !net_guard::blocked(cidrs, addr); // 谓词=放行；黑名单命中=false 拒
+      });
 }
 
 void MainWindow::maybe_lock_screen() {

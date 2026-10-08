@@ -47,6 +47,8 @@ qt_add_executable(memex_client
   app/brand_settings_page.cpp
   app/shortcut_settings.cpp
   app/lock_screen.cpp
+  app/net_guard.cpp
+  app/net_remote_settings.cpp
   app/away_settings.cpp
   app/theme.cpp
   app/theme.hpp
@@ -338,6 +340,7 @@ if(MEMEX_BUILD_TESTS)
   # 到期提醒（通知中心触发＋服务端回执只提醒一次）。判权矩阵走
   # test_files_api 协议腿，不在此重复
   add_executable(test_task_dialog
+    app/net_guard.cpp
     app/tests/test_task_dialog.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -441,6 +444,21 @@ if(MEMEX_BUILD_TESTS)
   target_compile_definitions(test_brand_kit PRIVATE
     MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
   add_test(NAME brand_kit COMMAND test_brand_kit)
+  # 网段黑名单守卫（用户令 2026-10-08 ⑤）：net_guard 纯函数穷举＋引擎过滤
+  # 真腿（发现不响应/入连接拒/关=放行）＋落盘面往返（轻 target：不编主窗）
+  add_executable(test_net_guard
+    tests/test_net_guard.cpp
+    app/net_guard.cpp)
+  target_link_libraries(test_net_guard PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
+  target_include_directories(test_net_guard PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  add_test(NAME net_guard COMMAND test_net_guard)
+  set_tests_properties(net_guard PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
+
   set_tests_properties(brand_kit PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
@@ -455,8 +473,12 @@ if(MEMEX_BUILD_TESTS)
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
   app/lock_screen.cpp
+  app/net_guard.cpp
+  app/net_remote_settings.cpp
   app/away_settings.cpp
     app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
     app/away_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
@@ -539,6 +561,7 @@ if(MEMEX_BUILD_TESTS)
   # 回环渲染→点画面发输入→受控方收到→结束撤权→台账终态＋审计链。判权
   # 协议腿（默认禁/consent/权限位门）走 test_files_api 协议段
   add_executable(test_assist_dialog
+    app/net_guard.cpp
     app/tests/test_assist_dialog.cpp
     app/assist_dialog.cpp)
   target_link_libraries(test_assist_dialog PRIVATE
@@ -562,8 +585,12 @@ if(MEMEX_BUILD_TESTS)
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
   app/lock_screen.cpp
+  app/net_guard.cpp
+  app/net_remote_settings.cpp
   app/away_settings.cpp
     app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
@@ -614,8 +641,12 @@ if(MEMEX_BUILD_TESTS)
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
   app/lock_screen.cpp
+  app/net_guard.cpp
+  app/net_remote_settings.cpp
   app/away_settings.cpp
     app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
@@ -663,8 +694,12 @@ if(MEMEX_BUILD_TESTS)
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
   app/lock_screen.cpp
+  app/net_guard.cpp
+  app/net_remote_settings.cpp
   app/away_settings.cpp
     app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
@@ -734,8 +769,12 @@ if(MEMEX_BUILD_TESTS)
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
   app/lock_screen.cpp
+  app/net_guard.cpp
+  app/net_remote_settings.cpp
   app/away_settings.cpp
     app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
@@ -784,8 +823,12 @@ if(MEMEX_BUILD_TESTS)
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
   app/lock_screen.cpp
+  app/net_guard.cpp
+  app/net_remote_settings.cpp
   app/away_settings.cpp
     app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
@@ -832,8 +875,12 @@ if(MEMEX_BUILD_TESTS)
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
   app/lock_screen.cpp
+  app/net_guard.cpp
+  app/net_remote_settings.cpp
   app/away_settings.cpp
     app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
@@ -880,8 +927,12 @@ if(MEMEX_BUILD_TESTS)
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
   app/lock_screen.cpp
+  app/net_guard.cpp
+  app/net_remote_settings.cpp
   app/away_settings.cpp
     app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp

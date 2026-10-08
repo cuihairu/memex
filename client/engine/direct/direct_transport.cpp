@@ -56,9 +56,19 @@ void DirectTransport::stop() {
   server_.close();
 }
 
+void DirectTransport::set_filter(std::function<bool(const QHostAddress&)> f) {
+  filter_ = std::move(f);
+}
+
 void DirectTransport::on_new_connection() {
   while (server_.hasPendingConnections()) {
     QTcpSocket* socket = server_.nextPendingConnection();
+    // 黑名单段命中＝当场断开（用户令 2026-10-08 ⑤：段+掩码匹配拒连）
+    if (filter_ && !filter_(socket->peerAddress())) {
+      socket->abort();
+      socket->deleteLater();
+      continue;
+    }
     // 平台-8：每入站连接一个安全信道（响应方）；未注入身份即信道失效，
     // 连接收到首字节即断（fail-closed，无明文回退）。
     inbound_channels_[socket] = std::make_shared<SecureChannel>(

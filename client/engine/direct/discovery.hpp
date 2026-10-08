@@ -9,6 +9,7 @@
 #include <QUdpSocket>
 
 #include <map>
+#include <functional>
 #include <string>
 
 namespace memex::client {
@@ -56,6 +57,10 @@ public:
   // 仅作对端显示与跨态判定，不参与路由。
   void set_account(const std::string& account);
 
+  // 地址黑名单过滤（用户令 2026-10-08 ⑤）：sender 被拒的发现包直接丢弃
+  // ＝「匹配不响应」；空过滤器＝不拦。
+  void set_filter(std::function<bool(const QHostAddress&)> f);
+
   QList<Peer> peers() const;
   quint16 listen_port() const { return opts_.port; }
 
@@ -71,6 +76,7 @@ private slots:
   void sweep();
 
 private:
+  std::function<bool(const QHostAddress&)> filter_; // 发现包地址过滤
   std::string device_id_;
   std::string device_name_;
   std::string account_; // 本端协作账号（空=未登录）

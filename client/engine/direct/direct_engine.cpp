@@ -69,6 +69,7 @@ bool DirectEngine::start() {
   transport_ = std::make_unique<DirectTransport>();
   transport_->set_device_id(device_id_);
   transport_->set_secure(&identity_, store_.get());
+  if (address_filter_) transport_->set_filter(address_filter_);
   if (!transport_->listen()) {
     qWarning() << "[直连引擎] TCP 监听失败";
     transport_.reset();
@@ -85,6 +86,7 @@ bool DirectEngine::start() {
 
   discovery_ = std::make_unique<DiscoveryService>(device_id_, device_name_);
   discovery_->set_tcp_port(transport_->port());
+  if (address_filter_) discovery_->set_filter(address_filter_);
   // 测试钩子：并发测试进程各占独立 UDP 口互不串扰（默认仍为协议端口 2425）
   DiscoveryOptions dopts;
   const int discovery_port = qEnvironmentVariableIntValue("MEMEX_TEST_DISCOVERY_PORT");
@@ -435,6 +437,13 @@ void DirectEngine::cancel_transfer(const std::string& transfer_id) {
 
 void DirectEngine::set_download_dir(const QString& dir) {
   download_dir_ = dir;
+}
+
+void DirectEngine::set_address_filter(
+    std::function<bool(const QHostAddress&)> f) {
+  address_filter_ = std::move(f); // 子件未建成时先存，start() 里装配
+  if (transport_) transport_->set_filter(address_filter_);
+  if (discovery_) discovery_->set_filter(address_filter_);
 }
 
 std::string DirectEngine::status_text() const {

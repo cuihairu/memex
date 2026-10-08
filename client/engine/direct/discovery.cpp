@@ -87,10 +87,17 @@ void DiscoveryService::announce() {
   socket_.writeDatagram(datagram, QHostAddress::Broadcast, opts_.port);
 }
 
+void DiscoveryService::set_filter(std::function<bool(const QHostAddress&)> f) {
+  filter_ = std::move(f);
+}
+
 void DiscoveryService::on_ready_read() {
   while (socket_.hasPendingDatagrams()) {
     const QNetworkDatagram dgram = socket_.receiveDatagram();
     const QByteArray data = dgram.data();
+
+    // 黑名单段命中＝不响应（用户令 2026-10-08 ⑤：段+掩码匹配拒连）
+    if (filter_ && !filter_(dgram.senderAddress())) continue;
 
     // 畸形防御：长度与 JSON 校验失败直接丢弃
     if (data.isEmpty() || data.size() > 2048) continue;

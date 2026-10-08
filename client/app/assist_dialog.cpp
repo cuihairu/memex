@@ -4,6 +4,7 @@
 // 渲染＋点画面发鼠标事件；受控方拉输入事件（鼠标移动应用 QCursor 这
 // 一可移植原语，深度注入属平台层留后续）。
 #include "assist_dialog.hpp"
+#include <app/net_guard.hpp>
 
 #include <QApplication>
 #include <QBuffer>
@@ -16,6 +17,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -358,6 +360,19 @@ void AssistDialog::build_ui() {
   connect(btn_refresh_, &QPushButton::clicked, this,
           [this] { client_->fetch_assist_sessions(); });
   connect(btn_approve_, &QPushButton::clicked, this, [this] {
+    // 远程控制配对密码门（用户令 2026-10-08 ⑤）：设置里开了远程＝批准
+    // 前须输对配对密码；拒绝与取消不走此门（密码关着时直批同旧路径）。
+    if (remote_control::enabled()) {
+      bool ok = false;
+      const QString pwd = QInputDialog::getText(
+          this, QStringLiteral("远程控制配对密码"),
+          QStringLiteral("批准前请输入配对密码"), QLineEdit::Password,
+          QString(), &ok);
+      if (!ok) return; // 取消＝不动（请求保持待批）
+      const QString err = try_approve(pwd, grant_checks());
+      if (!err.isEmpty()) set_status(err, true);
+      return;
+    }
     approve_pending(true, grant_checks());
   });
   connect(btn_deny_, &QPushButton::clicked, this,
@@ -458,6 +473,14 @@ void AssistDialog::request_assist(const QString& target,
     return;
   }
   client_->assist_request(target, use);
+}
+
+QString AssistDialog::try_approve(const QString& pwd,
+                                 const QStringList& perms) {
+  if (remote_control::enabled() && !remote_control::verify_password(pwd))
+    return QStringLiteral("配对密码不对");
+  approve_pending(true, perms);
+  return QString();
 }
 
 void AssistDialog::approve_pending(bool allow, const QStringList& perms) {

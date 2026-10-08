@@ -8,6 +8,9 @@
 #include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
+#include <QCheckBox>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QProcess>
 #include <QSettings>
 #include <QTcpServer>
@@ -20,15 +23,20 @@
 #include <functional>
 
 #include <app/main_window.hpp>
+#include <app/net_guard.hpp>
+#include <app/net_remote_settings.hpp>
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
 #include <engine/direct/direct_engine.hpp>
 
 namespace away_lock = memex::client::away_lock; // 离开锁屏设置面（C++17 无 using-ns）
+namespace net_blacklist = memex::client::net_blacklist;
+namespace remote_control = memex::client::remote_control;
 using memex::client::CollabEngine;
 using memex::client::DirectEngine;
 using memex::client::LocalStore;
 using memex::client::MainWindow;
+using memex::client::NetRemoteSettingsDialog;
 using memex::client::StoredMessage;
 
 #ifndef MEMEX_SERVER_BIN
@@ -437,6 +445,49 @@ int main(int argc, char** argv) {
     away_lock::set_enabled(false);
     window.apply_away_lock_settings();
     window.show();
+  }
+
+  // —— 网络与远程设置页（用户令 2026-10-08 ⑤）：坏段本地门、开关与
+  //     配对密码落盘、保存即时生效（apply_net_settings 同源调用）——
+  {
+    NetRemoteSettingsDialog dlg(&window);
+    // 坏段本地拒不入表（段输入过 validate_cidr 门）
+    CHECK(!dlg.add_entry(QStringLiteral("10.0.0/8")).isEmpty());
+    CHECK(dlg.add_entry(QStringLiteral("172.16.0.0/12")).isEmpty());
+    CHECK(dlg.add_entry(QStringLiteral("172.16.0.0/12")).isEmpty() ==
+          false); // 重复不双录
+    // 远程控制开且未设密码＝保存拒（先设配对密码门）
+    auto* chk_net = dlg.findChild<QCheckBox*>("chk_blacklist");
+    auto* chk_remote = dlg.findChild<QCheckBox*>("chk_remote");
+    auto* edit_pwd = dlg.findChild<QLineEdit*>("edit_pwd");
+    auto* edit_confirm = dlg.findChild<QLineEdit*>("edit_confirm");
+    auto* list_entries = dlg.findChild<QListWidget*>("list_entries");
+    CHECK(chk_net && chk_remote && edit_pwd && edit_confirm && list_entries);
+    chk_net->setChecked(true);
+    chk_remote->setChecked(true);
+    CHECK(dlg.save_settings().contains(QStringLiteral("配对密码")));
+    // 密码两次不一致拒
+    edit_pwd->setText(QStringLiteral("pair-1"));
+    edit_confirm->setText(QStringLiteral("pair-2"));
+    CHECK(dlg.save_settings().contains(QStringLiteral("不一致")));
+    // 合法保存：段表+两开关+密码落盘
+    edit_confirm->setText(QStringLiteral("pair-1"));
+    CHECK(dlg.save_settings().isEmpty());
+    CHECK(net_blacklist::enabled());
+    CHECK(net_blacklist::entries() ==
+          QStringList{QStringLiteral("172.16.0.0/12")});
+    CHECK(remote_control::enabled());
+    CHECK(remote_control::verify_password(QStringLiteral("pair-1")));
+    CHECK(!remote_control::verify_password(QStringLiteral("pair-2")));
+    // 删段：选中入表段删除→保存=段表清空
+    list_entries->setCurrentRow(0);
+    dlg.del_entry();
+    CHECK(dlg.save_settings().isEmpty());
+    CHECK(net_blacklist::entries().isEmpty());
+    // 还原（保重复执行可重跑；XDG_CONFIG_HOME 面已隔离）
+    net_blacklist::set_enabled(false);
+    remote_control::set_enabled(false);
+    window.apply_net_settings();
   }
 
   da.stop();

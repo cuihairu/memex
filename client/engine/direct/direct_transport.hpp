@@ -13,6 +13,7 @@
 #include <QTcpSocket>
 #include <QTimer>
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -40,6 +41,10 @@ public:
   // （fail-closed，不会退回明文）。
   void set_secure(const DeviceIdentity* self, LocalStore* store);
 
+  // 地址黑名单过滤（用户令 2026-10-08 ⑤）：入站 peer 命中即当场断开
+  // ＝「匹配拒连」；空过滤器＝不拦。
+  void set_filter(std::function<bool(const QHostAddress&)> f);
+
   // 从 preferred 起扫描端口段直到绑定成功；全部占用返回 false。
   bool listen(quint16 preferred = kDirectTcpPortBegin);
   void stop();
@@ -64,6 +69,7 @@ signals:
                      std::shared_ptr<SecureChannel> ch);
 
 private:
+  std::function<bool(const QHostAddress&)> filter_; // 入站地址过滤
   struct Pending {
     QTcpSocket* socket{nullptr};
     QTimer* timer{nullptr};

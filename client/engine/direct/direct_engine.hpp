@@ -71,6 +71,11 @@ public:
   // 接收落地目录（默认 应用数据目录/files，可启动前覆盖）
   void set_download_dir(const QString& dir);
 
+  // 地址黑名单过滤（用户令 2026-10-08 ⑤）：发现包 sender 与 TCP 入站
+  // peerAddress 命中即不响应/当场断开。start 前后调都行（成员先存，
+  // 子件建成即装配）。空过滤器＝不拦。
+  void set_address_filter(std::function<bool(const QHostAddress&)> f);
+
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;
 
   // 本地库（start() 后有效）。双态共用同一份本地库：协作引擎挂接同一库，
@@ -134,6 +139,7 @@ private:
   std::string device_name_;
   QString db_path_;
   QString download_dir_;
+  std::function<bool(const QHostAddress&)> address_filter_; // 网段黑名单
   std::unique_ptr<LocalStore> store_;
   // 设备身份（Ed25519）：成员序在 transport_/file_service_ 之前析构在后，
   // 信道持有指针随它们先亡（声明序＝逆析构序）

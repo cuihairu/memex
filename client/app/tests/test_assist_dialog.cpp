@@ -19,8 +19,10 @@
 #include <iostream>
 
 #include <app/assist_dialog.hpp>
+#include <app/net_guard.hpp>
 
 using memex::client::AssistDialog;
+namespace remote_control = memex::client::remote_control;
 
 #ifndef MEMEX_SERVER_BIN
 #error "MEMEX_SERVER_BIN 未定义（应传入 $<TARGET_FILE:memex_server>）"
@@ -71,9 +73,13 @@ QString make_frame_b64() {
 } // namespace
 
 int main(int argc, char** argv) {
-  QApplication app(argc, argv);
   QTemporaryDir tmp;
   CHECK(tmp.isValid());
+  // remote_control 落盘面（配对密码盐＋哈希）隔离到临时目录
+  qputenv("XDG_CONFIG_HOME", tmp.filePath(QStringLiteral("xdg-config")).toUtf8());
+  QApplication app(argc, argv);
+  QCoreApplication::setOrganizationName(QStringLiteral("memex-test"));
+  QCoreApplication::setApplicationName(QStringLiteral("assist-dialog-test"));
   const QString db = tmp.filePath(QStringLiteral("srv.db"));
   const QString server_bin = QStringLiteral(MEMEX_SERVER_BIN);
 
@@ -154,9 +160,21 @@ int main(int argc, char** argv) {
   // 受控方待批行（consent 只属受控方）
   CHECK(wait_until([&] { return subject.pending_count() == 1; }, 8000));
 
-  // 批准缩权：只给 view+mouse（实批 ⊆ 申请，keyboard 不给）
-  subject.approve_pending(true,
-                          {QStringLiteral("view"), QStringLiteral("mouse")});
+  // 批准缩权走配对密码门同源（用户令 2026-10-08 ⑤）：remote 开＝先验
+  // 密码（错拒、对批），关＝直批；批准集仍 view+mouse（实批 ⊆ 申请）。
+  {
+    remote_control::set_enabled(true);
+    CHECK(remote_control::set_password(QStringLiteral("pair-1")));
+    const QString wrong = subject.try_approve(
+        QStringLiteral("wrong-pwd"),
+        {QStringLiteral("view"), QStringLiteral("mouse")});
+    CHECK(wrong.contains(QStringLiteral("配对密码不对")));
+    CHECK(subject.try_approve(
+              QStringLiteral("pair-1"),
+              {QStringLiteral("view"), QStringLiteral("mouse")})
+              .isEmpty());
+    remote_control::set_enabled(false); // 还原（后续腿按关口径走）
+  }
   CHECK(wait_until(
       [&] {
         return helper.session_text(0).contains(QStringLiteral("已批待启动"));

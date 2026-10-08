@@ -49,6 +49,7 @@ class GroupToolsDialog;
 class BrandSettingsDialog;
 class ShortcutSettingsDialog;
 class AwayLockSettingsDialog;
+class NetRemoteSettingsDialog;
 
 class MainWindow : public QMainWindow {
 public:
@@ -94,6 +95,9 @@ public:
   // —— 离开锁屏（用户令 2026-10-08 ④；验收面与设置页共用）——
   // 重读 away_lock 设置：重启无操作计时器（设置对话框关闭即调＝即时生效）
   void apply_away_lock_settings();
+  // 重读 net_blacklist/remote_control：黑名单开关+段表转过滤器注入直连
+  // 引擎（运行中改即按新表判；开关关=不装过滤器全放行）
+  void apply_net_settings();
   bool lock_screen_visible() const; // 锁屏遮罩当前是否在屏
   int lock_unread_count() const;    // 锁屏期间新到消息条数（未锁＝0）
   QString lock_screen_text() const; // 锁屏面未读行文案（断言只含数量不含内容）
@@ -286,6 +290,7 @@ private:
   QPointer<BrandSettingsDialog> brand_settings_dialog_; // 二期·品牌物料设置页（懒建）
   QPointer<ShortcutSettingsDialog> shortcut_dialog_; // 二期·快捷键设置页（懒建）
   QPointer<AwayLockSettingsDialog> away_dialog_; // 二期·离开锁屏设置页（懒建）
+  QPointer<NetRemoteSettingsDialog> net_dialog_; // 二期·网络与远程设置页（懒建）
 
   QLabel* device_count_{nullptr};
   QLineEdit* search_box_{nullptr};
