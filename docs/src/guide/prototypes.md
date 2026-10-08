@@ -8,7 +8,7 @@
 
 | 屏幕 | 说明 |
 | --- | --- |
-| 未登录直连态 | 零配置：UDP 广播自动发现同网段终端；会话标注「仅存本机 · 不入归档」 |
+| 未登录直连态 | 零配置：UDP 广播自动发现同网段终端；会话标注「仅存本机 · 不入归档」；无对话＝列表态长方形面板（不摆聊天面板），点好友展开对话 |
 | 登录协作态 | 长连接在线、全量归档；服务端不可达时状态徽标显式回落提示 |
 | 单聊 | 归档起点「归档自 X 时刻」、跨态会话「未归档」不可关闭、撤回仅显示层（原文留存） |
 | 群聊 | 公告、@提醒、成员管理；群消息同样全量归档 |
@@ -18,10 +18,14 @@
 
 ### 未登录直连态
 
-实况截图：双实例同机互发现（UDP 2425），未选择会话的零配置引导态。
+实况截图：双实例同机互发现（UDP 2425）。**布局令（2026-10-08）**：无对话＝
+「左菜单＋好友列表」长方形列表态，**不摆聊天面板**——启动/关会话即此态；
+点好友后右侧展开对话（点好友或点标题栏 ✕ 回列表态），展开态实况见下方
+第二张（真实客户端窗口，`test_mode_switch` 布局腿程序化抓取）。
 
-![桌面端未登录直连态（浅色·实况）](/screenshots/live-direct-light.png)
-![桌面端未登录直连态（深色·实况）](/screenshots/live-direct-dark.png)
+![桌面端未登录直连态·列表态（浅色·实况）](/screenshots/live-direct-light.png)
+![桌面端未登录直连态·列表态（深色·实况）](/screenshots/live-direct-dark.png)
+![桌面端直连会话展开态·点好友后（浅色·实况）](/screenshots/layout-chat.png)
 
 ### 登录协作态
 
@@ -104,7 +108,7 @@
 
 原型为纯 HTML＋CSS（无框架依赖），浏览器直接打开即可交互查看：
 
-- 桌面端：[desktop-direct](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct.html) · [desktop-collab](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-collab.html) · [desktop-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-chat.html) · [desktop-group](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-group.html) · [desktop-org](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-org.html) · [desktop-files](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-files.html) · [desktop-search](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-search.html)
+- 桌面端：[desktop-direct](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct.html)（列表态：无对话不摆聊天面板）· [desktop-direct-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct-chat.html)（点好友后对话展开）· [desktop-collab](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-collab.html) · [desktop-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-chat.html) · [desktop-group](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-group.html) · [desktop-org](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-org.html) · [desktop-files](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-files.html) · [desktop-search](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-search.html)
 - 手机端：[mobile-init](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-init.html) · [mobile-sessions](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-sessions.html) · [mobile-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-chat.html) · [mobile-me](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-me.html)
 
-功能实现后，本页截图将逐步替换为客户端实况截图。当前进度：桌面端七屏已全部替换为实况截图（浅／深各一，真实客户端在 Xvfb 下拍摄，逐张目检非原型稿）；手机端初始化向导与登录成功主界面已替换为 Android 实况截图（T6.3 模拟器走查，与 `apps/android/docs/walkthrough-0*.png` 同源，浅色单张；深色待 Android 深色主题走查补摄），会话列表与聊天屏的 Android 实况截图随下一轮走查补摄（界面已随 T6.3 第二、三块落地），「我」屏 Android 未建、iOS 代码-only——暂仍为原型稿并如实标注。鸿蒙端（T6.2 桌面矩阵项，工具链/证书/真机未备受阻；鸿蒙手机版 T6.6 代码-only＋CI，编译腿待 OHOS 工具链）不为其承诺实况截图。
+功能实现后，本页截图将逐步替换为客户端实况截图。当前进度：桌面端七屏已全部替换为实况截图（浅／深各一，真实客户端在 Xvfb 下拍摄，逐张目检非原型稿）；未登录直连态已随布局令（2026-10-08）重摄为「列表态」实况（浅／深各一，Xvfb 双实例互发现拍摄），并补「会话展开态」实况一张（点好友后，`test_mode_switch` 布局腿程序化抓取；深色随下一轮走查补摄）；手机端初始化向导与登录成功主界面已替换为 Android 实况截图（T6.3 模拟器走查，与 `apps/android/docs/walkthrough-0*.png` 同源，浅色单张；深色待 Android 深色主题走查补摄），会话列表与聊天屏的 Android 实况截图随下一轮走查补摄（界面已随 T6.3 第二、三块落地），「我」屏 Android 未建、iOS 代码-only——暂仍为原型稿并如实标注。鸿蒙端（T6.2 桌面矩阵项，工具链/证书/真机未备受阻；鸿蒙手机版 T6.6 代码-only＋CI，编译腿待 OHOS 工具链）不为其承诺实况截图。
