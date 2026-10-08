@@ -2693,27 +2693,51 @@ int main() {
     CHECK(cc.status == 200);
     const std::int64_t chain1 = jint(cc.body, "chain_id");
     CHECK(chain1 > 0);
+    // 格式校验（hint「姓名+几点」=2 段）：单段/三段 400 文案明示
+    {
+      const auto cj = http(port, "POST", "/files/group-chains/join",
+                           H("admin1"),
+                           "{\"gid\":" + gids +
+                               ",\"chain_id\":" + std::to_string(chain1) +
+                               ",\"content\":\"只有一段\"}");
+      CHECK(cj.status == 400);
+      CHECK(cj.body.find("分 2 段") != std::string::npos);
+    }
     CHECK(http(port, "POST", "/files/group-chains/join", H("admin1"),
                "{\"gid\":" + gids + ",\"chain_id\":" + std::to_string(chain1) +
-                   ",\"content\":\"admin1 19点\"}")
+                   ",\"content\":\"a+b+c\"}")
+              .status == 400); // 三段≠2 段
+    CHECK(http(port, "POST", "/files/group-chains/join", H("admin1"),
+               "{\"gid\":" + gids + ",\"chain_id\":" + std::to_string(chain1) +
+                   ",\"content\":\"admin1+19点\"}")
               .status == 200);
     CHECK(http(port, "POST", "/files/group-chains/join", H("member1"),
                "{\"gid\":" + gids + ",\"chain_id\":" + std::to_string(chain1) +
-                   ",\"content\":\"member1 18点半\"}")
+                   ",\"content\":\"member1+18点半\"}")
               .status == 200);
     CHECK(http(port, "POST", "/files/group-chains/join", H("admin1"),
                "{\"gid\":" + gids + ",\"chain_id\":" + std::to_string(chain1) +
-                   ",\"content\":\"admin1 改 20点\"}")
+                   ",\"content\":\"admin1+改 20点\"}")
               .status == 200);
     const auto cl =
         http(port, "GET", "/files/group-chains?gid=" + gids, H("member1"), "");
     CHECK(cl.status == 200);
-    CHECK(cl.body.find("\"account\":\"admin1\",\"content\":\"admin1 改 20点\"") !=
+    CHECK(cl.body.find("\"account\":\"admin1\",\"content\":\"admin1+改 20点\"") !=
           std::string::npos);
-    CHECK(cl.body.find("admin1 19点") == std::string::npos); // 旧条目被覆盖
-    CHECK(cl.body.find("\"account\":\"member1\",\"content\":\"member1 18点半\"") !=
+    CHECK(cl.body.find("admin1+19点") == std::string::npos); // 旧条目被覆盖
+    CHECK(cl.body.find("\"account\":\"member1\",\"content\":\"member1+18点半\"") !=
           std::string::npos);
     CHECK(cl.body.find("晚饭接龙") != std::string::npos);
+    CHECK(cl.body.find("只有一段") == std::string::npos); // 格式拒，未落地
+    // 无 hint 接龙：自由文本不做段数校验（向后兼容）
+    const auto cc2 = http(port, "POST", "/files/group-chains", H("admin1"),
+                          "{\"gid\":" + gids + ",\"title\":\"自由接龙\"}");
+    CHECK(cc2.status == 200);
+    CHECK(http(port, "POST", "/files/group-chains/join", H("admin1"),
+               "{\"gid\":" + gids +
+                   ",\"chain_id\":" + std::to_string(jint(cc2.body, "chain_id")) +
+                   ",\"content\":\"自由格式一条\"}")
+              .status == 200);
     // 群主关（非发起人仍可关=群主/管理员口径）；关后加入 409；重复关 409
     CHECK(http(port, "POST", "/files/group-chains/close", H("owner1"),
                "{\"gid\":" + gids +

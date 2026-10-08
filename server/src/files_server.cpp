@@ -4782,6 +4782,34 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "content 不可空"}});
       return;
     }
+    // 格式校验：format_hint 含「+」时条目段数须一致（自由文本不强校验
+    // 段内容语义，只校验结构段数——「姓名+几点」=2 段；空段不计数）
+    const auto segments = [](const std::string& s) {
+      int n = 0;
+      bool in = false;
+      for (char ch : s) {
+        if (ch != '+' && !in) {
+          ++n;
+          in = true;
+        } else if (ch == '+') {
+          in = false;
+        }
+      }
+      return n;
+    };
+    if (c->format_hint.find('+') != std::string::npos) {
+      const int want = segments(c->format_hint);
+      const int got = segments(content);
+      if (got != want) {
+        respond_json(400,
+                     {{"ok", false},
+                      {"error", "条目须按格式提示「" + c->format_hint +
+                                    "」分 " + std::to_string(want) +
+                                    " 段（用 + 分隔），现 " +
+                                    std::to_string(got) + " 段"}});
+        return;
+      }
+    }
     if (!impl_.store.chain_join(chain_id, account, content, now_ms())) {
       respond_json(409, {{"ok", false}, {"error", "接龙失败"}});
       return;

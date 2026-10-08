@@ -337,24 +337,29 @@ int main(int argc, char** argv) {
   dlg_bob.refresh();
   CHECK(wait_until(
       [&] { return dlg_bob.chain_list()->count() == 1; }, 8000));
+  // 格式本地门：hint「姓名+菜」=2 段，单段本地拒（不发网，条目不落地）
   CHECK(select_row_containing(dlg_bob.chain_list(),
                               QStringLiteral("周五聚餐")));
-  CHECK(dlg_bob.join_selected(QStringLiteral("水煮鱼")));
+  CHECK(!dlg_bob.join_selected(QStringLiteral("水煮鱼")));
+  CHECK(dlg_bob.status_text().contains(QStringLiteral("分 2 段")));
+  CHECK(dlg_bob.chain_list()->count() == 1);
+  // 合规两段 200
+  CHECK(dlg_bob.join_selected(QStringLiteral("本人+水煮鱼")));
   CHECK(wait_until([&] {
     return dlg_bob.chain_list()->count() == 2 &&
            row_text(dlg_bob.chain_list(), 1).contains(
-               QStringLiteral("bob：水煮鱼"));
+               QStringLiteral("bob：本人+水煮鱼"));
   }, 8000));
 
   // 重复提交=upsert 自己条目：仍一人一条，内容更新
   CHECK(select_row_containing(dlg_bob.chain_list(),
                               QStringLiteral("周五聚餐")));
-  CHECK(dlg_bob.join_selected(QStringLiteral("烤鸭")));
+  CHECK(dlg_bob.join_selected(QStringLiteral("本人+烤鸭")));
   CHECK(wait_until([&] {
     const auto text = row_text(dlg_bob.chain_list(), 1);
     return dlg_bob.chain_list()->count() == 2 &&
-           text.contains(QStringLiteral("bob：烤鸭")) &&
-           !text.contains(QStringLiteral("水煮鱼"));
+           text.contains(QStringLiteral("bob：本人+烤鸭")) &&
+           !text.contains(QStringLiteral("本人+水煮鱼"));
   }, 8000));
 
   // 发起人关接龙 200；关后加入 409
@@ -365,7 +370,8 @@ int main(int argc, char** argv) {
   }, 8000));
   CHECK(select_row_containing(dlg_bob.chain_list(),
                               QStringLiteral("周五聚餐")));
-  CHECK(dlg_bob.join_selected(QStringLiteral("火锅")));
+  // 两段合规内容过本地门，服务端关后 409 兜底
+  CHECK(dlg_bob.join_selected(QStringLiteral("本人+火锅")));
   CHECK(wait_until(
       [&] { return dlg_bob.status_text().contains(QStringLiteral("409")); },
       8000));

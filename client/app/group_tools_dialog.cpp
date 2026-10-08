@@ -55,6 +55,21 @@ QString votes_text(const QJsonArray& votes, bool multi) {
   }
   return parts.join(QStringLiteral(", "));
 }
+
+// 「+」分段段数（非空段计数，连续空段不计）——与服务端格式校验同口径
+int chain_segment_count(const QString& s) {
+  int n = 0;
+  bool in = false;
+  for (const QChar ch : s) {
+    if (ch != QLatin1Char('+') && !in) {
+      ++n;
+      in = true;
+    } else if (ch == QLatin1Char('+')) {
+      in = false;
+    }
+  }
+  return n;
+}
 } // namespace
 
 GroupToolsDialog::GroupToolsDialog(QWidget* parent) : QDialog(parent) {
@@ -436,6 +451,28 @@ bool GroupToolsDialog::join_selected(const QString& content) {
     set_status(QStringLiteral("接龙内容不能为空"), true);
     return false;
   }
+  // 格式本地门：与选中接龙的格式提示同口径校验段数（「+」分段、空段
+  // 不计数），只挡明显误操作——服务端同款裁决兜底
+  QString hint;
+  for (int i = 0; i < chain_list_->count(); ++i) {
+    const auto* it = chain_list_->item(i);
+    if ((it->flags() & Qt::ItemIsSelectable) &&
+        it->data(Qt::UserRole).toLongLong() == id) {
+      hint = it->data(Qt::UserRole + 1).toString();
+      break;
+    }
+  }
+  if (hint.contains(QLatin1Char('+'))) {
+    const int want = chain_segment_count(hint);
+    const int got = chain_segment_count(content);
+    if (got != want) {
+      set_status(QStringLiteral("条目须按格式提示「%1」分 %2 段（用 + 分隔）")
+                     .arg(hint)
+                     .arg(want),
+                 true);
+      return false;
+    }
+  }
   if (!require_connected()) return false;
   client_->join_chain(gid_box_->text().toULongLong(), id, content);
   return true;
@@ -539,6 +576,8 @@ void GroupToolsDialog::populate_chains(const QJsonArray& chains) {
     // 接龙条目平铺在主题行下（服务端已按 ts ASC 排序）
     auto* head = new QListWidgetItem(QString(), chain_list_);
     head->setData(Qt::UserRole, c.value(QStringLiteral("id")).toDouble());
+    head->setData(Qt::UserRole + 1,
+                  c.value(QStringLiteral("format_hint")).toString());
     head->setText(QStringLiteral("%1#%2 %3%4 ｜发起人 %5")
                       .arg(closed ? QStringLiteral("[已截止] ")
                                   : QStringLiteral("[进行中] "),
