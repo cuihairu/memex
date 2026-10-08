@@ -363,6 +363,17 @@ struct FileServer::Impl {
                   }
                   return false;
                 });
+    // 显式允许：品牌物料管理（设计稿 docs/design/品牌物料.md）——同
+    // office-manage 口径：组织级面归 org-admin；未命中 default-deny
+    az.add_rule(RuleEffect::ExplicitAllow, "branding-manage",
+                [this](const AuthzQuery& q) {
+                  if (q.action != "branding:manage") return false;
+                  const auto roles = store.effective_roles(q.subject, now_ms());
+                  for (const auto& r : roles) {
+                    if (r == "org-admin") return true;
+                  }
+                  return false;
+                });
   }
 
   // 资源串约定："group:{gid}[/file:{id}]"、"user:{uid}[/file:{id}]"
@@ -728,7 +739,9 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       return false;
     }
     // 路由感知上限：upload 收大字节，其余路由只收小 JSON/空 body；
-    // uplink 面可配独立上限（R23-5，0=沿用全局）
+    // uplink 面可配独立上限（R23-5，0=沿用全局）；品牌素材路由放行
+    // 512KiB＋小余量（素材上限校验在路由层做——读全 body 才能回语义化
+    // 413 文案；带外的荒谬大包仍撞 cap 层）
     if (path_ == "/files/upload") {
       body_cap_ = kMaxUpload;
     } else if (path_ == "/uplink/upload") {
@@ -736,6 +749,9 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                       ? static_cast<std::size_t>(
                             impl_.uplink_policy.max_upload_bytes)
                       : kMaxUpload;
+    } else if (path_ == "/files/branding/logo" ||
+               path_ == "/files/branding/splash") {
+      body_cap_ = kBrandAssetMax + 64 * 1024;
     } else {
       body_cap_ = kMaxJsonBody;
     }
@@ -883,6 +899,25 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/office-map/bind" && method_ == "POST") {
       return route_office_bind(body);
+    }
+    // 品牌物料（读三免鉴权＝不调 account_or_respond；写三判权在路由内）
+    if (path_ == "/files/branding" && method_ == "GET") {
+      return route_branding_get();
+    }
+    if (path_ == "/files/branding/logo" && method_ == "GET") {
+      return route_branding_asset("logo", /*logo=*/true);
+    }
+    if (path_ == "/files/branding/splash" && method_ == "GET") {
+      return route_branding_asset("splash", /*logo=*/false);
+    }
+    if (path_ == "/files/branding" && method_ == "POST") {
+      return route_branding_set(body);
+    }
+    if (path_ == "/files/branding/logo" && method_ == "POST") {
+      return route_branding_asset_upload(body, /*logo=*/true);
+    }
+    if (path_ == "/files/branding/splash" && method_ == "POST") {
+      return route_branding_asset_upload(body, /*logo=*/false);
     }
     // 远程协助（二期）：生命周期＋台账＋媒体中继（模型层平台-11 在 store）
     if (path_ == "/files/assist/request" && method_ == "POST") {
@@ -1926,6 +1961,13 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     return d.allowed;
   }
 
+  // 品牌物料管理判权（同 office 口径：组织级面归 org-admin）
+  bool branding_can_manage(const std::string& account) {
+    const Decision d = impl_.az.authorize(
+        {account, "branding:manage", "branding", "owner=" + account});
+    return d.allowed;
+  }
+
   void route_office_map() {
     const std::string account = account_or_respond();
     if (account.empty()) return;
@@ -2037,6 +2079,176 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
               << (target.empty() ? "" : " account=" + target)
               << " by=" << account << std::endl;
     respond_json(200, {{"ok", true}});
+  }
+
+  // —— 品牌物料（设计稿 docs/design/品牌物料.md）：读三免鉴权（登录窗
+  // 要在鉴权前显示，物料非敏感）；写三判权 branding-manage（org-admin）——
+  static constexpr std::size_t kBrandAssetMax = 512 * 1024; // 512KiB
+
+  // PNG 校验：magic 8 字节＋大小 ≤512KiB＋IHDR 尺寸 ≤2048²。回空串=过，
+  // 否则回 {status, error}
+  static std::pair<int, std::string> png_asset_check(
+      const std::string& bytes) {
+    static const unsigned char kPngMagic[8] = {0x89, 0x50, 0x4E, 0x47,
+                                               0x0D, 0x0A, 0x1A, 0x0A};
+    if (bytes.size() < 8 ||
+        std::memcmp(bytes.data(), kPngMagic, 8) != 0) {
+      return {415, "素材须为 PNG 格式"};
+    }
+    if (bytes.size() > kBrandAssetMax) {
+      return {413, "素材超大小上限（512KiB）"};
+    }
+    if (bytes.size() >= 24) {
+      const auto be32 = [&](std::size_t off) {
+        return (static_cast<std::uint32_t>(
+                    static_cast<unsigned char>(bytes[off])) << 24) |
+               (static_cast<std::uint32_t>(
+                    static_cast<unsigned char>(bytes[off + 1])) << 16) |
+               (static_cast<std::uint32_t>(
+                    static_cast<unsigned char>(bytes[off + 2])) << 8) |
+               static_cast<std::uint32_t>(
+                   static_cast<unsigned char>(bytes[off + 3]));
+      };
+      // IHHR 尺寸在固定偏移 16..24（大端宽、高各 4 字节）
+      const std::uint32_t w = be32(16);
+      const std::uint32_t h = be32(20);
+      if (w == 0 || h == 0 || w > 2048 || h > 2048) {
+        return {413, "素材尺寸超限（≤2048×2048）"};
+      }
+    }
+    return {0, ""};
+  }
+
+  void respond_png(int status, const std::vector<unsigned char>& bytes) {
+    std::ostringstream head;
+    head << "HTTP/1.1 " << status
+         << (status == 200 ? " OK" : " Not Found") << "\r\n"
+         << "Content-Type: image/png\r\n"
+         << "Content-Length: " << bytes.size() << "\r\n"
+         << "Cache-Control: no-cache\r\n"
+         << "Connection: close\r\n\r\n";
+    const std::string body(bytes.begin(), bytes.end());
+    write_raw(std::make_shared<const std::string>(head.str()), false,
+              [this, body](std::error_code ec) {
+                if (ec) return;
+                write_raw(
+                    std::make_shared<const std::string>(body), true,
+                    [](std::error_code) {});
+              });
+  }
+
+  void route_branding_get() {
+    const auto b = impl_.store.branding_get();
+    respond_json(200, {{"ok", true},
+                       {"company_name", b.company_name},
+                       {"accent", b.accent},
+                       {"slogan", b.slogan},
+                       {"has_logo", !b.logo.empty()},
+                       {"has_splash", !b.splash.empty()},
+                       {"version", b.version}});
+  }
+
+  void route_branding_asset(const char* /*name*/, bool logo) {
+    const auto b = impl_.store.branding_get();
+    const auto& bytes = logo ? b.logo : b.splash;
+    if (bytes.empty()) {
+      respond_json(404, {{"ok", false}, {"error", "素材未配置"}});
+      return;
+    }
+    respond_png(200, bytes);
+  }
+
+  void route_branding_set(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    if (!branding_can_manage(account)) {
+      respond_json(403, {{"ok", false}, {"error", "品牌设置归 org-admin"}});
+      return;
+    }
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object()) {
+      respond_json(400, {{"ok", false}, {"error", "请求体须为对象"}});
+      return;
+    }
+    if (j.contains("company_name") && !j["company_name"].is_string()) {
+      respond_json(400, {{"ok", false}, {"error", "company_name 须为字符串"}});
+      return;
+    }
+    if (j.contains("accent") && !j["accent"].is_string()) {
+      respond_json(400, {{"ok", false}, {"error", "accent 须为字符串"}});
+      return;
+    }
+    if (j.contains("slogan") && !j["slogan"].is_string()) {
+      respond_json(400, {{"ok", false}, {"error", "slogan 须为字符串"}});
+      return;
+    }
+    // 字段缺省=nullopt（不动）；显式空串=清空
+    const auto pick = [&](const char* key) -> std::optional<std::string> {
+      if (!j.contains(key)) return std::nullopt;
+      return j[key].get<std::string>();
+    };
+    const std::optional<std::string> name = pick("company_name");
+    const std::optional<std::string> accent = pick("accent");
+    const std::optional<std::string> slogan = pick("slogan");
+    // accent 形态门：#rrggbb（显式空串=清空放行）
+    if (accent.has_value() && !accent->empty()) {
+      bool ok = accent->size() == 7 && (*accent)[0] == '#';
+      for (std::size_t i = 1; ok && i < 7; ++i) {
+        const char c = (*accent)[i];
+        ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+             (c >= 'A' && c <= 'F');
+      }
+      if (!ok) {
+        respond_json(400,
+                     {{"ok", false}, {"error", "accent 须为 #rrggbb 形态"}});
+        return;
+      }
+    }
+    const std::int64_t version = impl_.store.branding_set(
+        name, accent, slogan, now_ms());
+    if (version < 0) {
+      respond_json(500, {{"ok", false}, {"error", "品牌配置写入失败"}});
+      return;
+    }
+    std::cout << "[MEMEX] files branding set by=" << account
+              << " version=" << version << std::endl;
+    respond_json(200, {{"ok", true}, {"version", version}});
+  }
+
+  void route_branding_asset_upload(const std::string& body, bool logo) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    if (!branding_can_manage(account)) {
+      respond_json(403, {{"ok", false}, {"error", "品牌设置归 org-admin"}});
+      return;
+    }
+    if (body.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "素材字节不可空"}});
+      return;
+    }
+    const auto [status, err] = png_asset_check(body);
+    if (status != 0) {
+      respond_json(status, {{"ok", false}, {"error", err}});
+      return;
+    }
+    const std::vector<unsigned char> bytes(body.begin(), body.end());
+    const std::int64_t version =
+        logo ? impl_.store.branding_set_logo(bytes, now_ms())
+             : impl_.store.branding_set_splash(bytes, now_ms());
+    if (version < 0) {
+      respond_json(500, {{"ok", false}, {"error", "素材写入失败"}});
+      return;
+    }
+    std::cout << "[MEMEX] files branding " << (logo ? "logo" : "splash")
+              << " upload by=" << account << " bytes=" << body.size()
+              << " version=" << version << std::endl;
+    respond_json(200, {{"ok", true}, {"version", version}});
   }
 
   // —— 远程协助（二期）：协议面＋媒体中继。模型层（平台-11）在 store：

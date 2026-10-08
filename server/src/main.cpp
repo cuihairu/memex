@@ -9,6 +9,7 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <optional>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -890,6 +891,145 @@ int cmd_audit(int argc, char** argv, const std::string& db_path) {
 //   org fields <账号> --hide title,manager[,role] | --clear  敏感字段脱敏
 //   org allow/disallow <查看者> --see <账号|部门路径>         白名单例外
 //   org visibility list            已配置行与白名单一览
+// 品牌物料（设计稿 docs/design/品牌物料.md）：运维兜底面（store 直写，
+// 不经 HTTP）；PNG 校验与路由层同口径（magic/512KiB/IHDR≤2048²）
+int cmd_branding(int argc, char** argv, const std::string& db_path) {
+  if (argc < 1) {
+    std::cerr << "用法：memex_server branding show --db <库>\n"
+              << "      memex_server branding set --db <库> [--company 名称]"
+                 " [--accent '#rrggbb'] [--slogan 文案] [--logo FILE.png]"
+                 " [--splash FILE.png] [--clear-logo] [--clear-splash]\n";
+    return 2;
+  }
+  const std::string_view sub = argv[0];
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "本地库打开失败：" << db_path << "\n";
+    return 1;
+  }
+  const auto now =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count();
+  if (sub == "show") {
+    const auto b = store.branding_get();
+    std::cout << "company_name: " << (b.company_name.empty() ? "（未配）"
+                                                             : b.company_name)
+              << "\n"
+              << "accent: " << (b.accent.empty() ? "（未配）" : b.accent)
+              << "\n"
+              << "slogan: " << (b.slogan.empty() ? "（未配）" : b.slogan)
+              << "\n"
+              << "logo: " << (b.logo.empty() ? "（未配）"
+                                             : std::to_string(b.logo.size()) +
+                                                   " 字节")
+              << "\n"
+              << "splash: " << (b.splash.empty() ? "（未配）"
+                                                 : std::to_string(b.splash.size()) +
+                                                       " 字节")
+              << "\n"
+              << "version: " << b.version << "\n";
+    return 0;
+  }
+  if (sub != "set") {
+    std::cerr << "未知子命令：" << sub << "（show | set）\n";
+    return 2;
+  }
+  std::optional<std::string> company, accent, slogan;
+  bool clear_logo = false, clear_splash = false;
+  std::string logo_path, splash_path;
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view opt = argv[i];
+    if (opt == "--company") company = argv[++i];
+    else if (opt == "--accent") accent = argv[++i];
+    else if (opt == "--slogan") slogan = argv[++i];
+    else if (opt == "--logo") logo_path = argv[++i];
+    else if (opt == "--splash") splash_path = argv[++i];
+    else if (opt == "--clear-logo") clear_logo = true;
+    else if (opt == "--clear-splash") clear_splash = true;
+    else {
+      std::cerr << "未知选项：" << opt << "\n";
+      return 2;
+    }
+  }
+  if (accent.has_value() && !accent->empty()) {
+    bool ok = accent->size() == 7 && (*accent)[0] == '#';
+    for (std::size_t i = 1; ok && i < 7; ++i) {
+      const char c = (*accent)[i];
+      ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+           (c >= 'A' && c <= 'F');
+    }
+    if (!ok) {
+      std::cerr << "accent 须为 #rrggbb 形态\n";
+      return 1;
+    }
+  }
+  // PNG 读入＋校验（与路由层同口径；CLI 失败非零退出明示原因）
+  const auto read_png = [](const std::string& path,
+                           std::vector<unsigned char>* out) -> std::string {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return "素材文件打不开：" + path;
+    std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(f)),
+                                     std::istreambuf_iterator<char>());
+    static const unsigned char kPngMagic[8] = {0x89, 0x50, 0x4E, 0x47,
+                                               0x0D, 0x0A, 0x1A, 0x0A};
+    if (bytes.size() < 8 ||
+        std::memcmp(bytes.data(), kPngMagic, 8) != 0) {
+      return "素材须为 PNG 格式：" + path;
+    }
+    if (bytes.size() > 512 * 1024) return "素材超大小上限（512KiB）：" + path;
+    if (bytes.size() >= 24) {
+      const auto be32 = [&](std::size_t off) {
+        return (static_cast<std::uint32_t>(bytes[off]) << 24) |
+               (static_cast<std::uint32_t>(bytes[off + 1]) << 16) |
+               (static_cast<std::uint32_t>(bytes[off + 2]) << 8) |
+               static_cast<std::uint32_t>(bytes[off + 3]);
+      };
+      if (be32(16) == 0 || be32(20) == 0 || be32(16) > 2048 ||
+          be32(20) > 2048) {
+        return "素材尺寸超限（≤2048×2048）：" + path;
+      }
+    }
+    *out = std::move(bytes);
+    return "";
+  };
+  if (!logo_path.empty()) {
+    std::vector<unsigned char> bytes;
+    if (const std::string err = read_png(logo_path, &bytes); !err.empty()) {
+      std::cerr << err << "\n";
+      return 1;
+    }
+    store.branding_set_logo(bytes, now);
+    std::cout << "logo 已更新\n";
+  }
+  if (!splash_path.empty()) {
+    std::vector<unsigned char> bytes;
+    if (const std::string err = read_png(splash_path, &bytes); !err.empty()) {
+      std::cerr << err << "\n";
+      return 1;
+    }
+    store.branding_set_splash(bytes, now);
+    std::cout << "splash 已更新\n";
+  }
+  if (clear_logo) {
+    store.branding_clear_logo();
+    std::cout << "logo 已清除\n";
+  }
+  if (clear_splash) {
+    store.branding_clear_splash();
+    std::cout << "splash 已清除\n";
+  }
+  if (company.has_value() || accent.has_value() || slogan.has_value()) {
+    const std::int64_t v = store.branding_set(company, accent, slogan, now);
+    if (v < 0) {
+      std::cerr << "品牌配置写入失败\n";
+      return 1;
+    }
+    std::cout << "品牌文本已更新（version " << v << "）\n";
+  }
+  return 0;
+}
+
 int cmd_org(int argc, char** argv, const std::string& db_path) {
   if (argc < 1) {
     std::cerr << "用法：memex_server org dept add <路径> | dept list | "
@@ -2604,6 +2744,7 @@ int main(int argc, char** argv) {
     if (cmd == "model") return cmd_model(sub_argc, sub_argv, db_path);
     if (cmd == "webhook") return cmd_webhook(sub_argc, sub_argv, db_path);
     if (cmd == "storage") return cmd_storage(sub_argc, sub_argv, db_path);
+    if (cmd == "branding") return cmd_branding(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
               << "用法：memex_server [serve [--port N] [--webhook-port N] "
                  "[--model-port N] [--assistant <bot名> "

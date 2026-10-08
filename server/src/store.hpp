@@ -802,6 +802,30 @@ public:
   // 直接下属（org_reporting_lines 反查：manager_account=? 去重）
   std::vector<std::string> direct_reports(const std::string& manager);
 
+  // —— 品牌物料（设计稿 docs/design/品牌物料.md）：全服务器单行聚合，
+  // version 每次写 +1＝客户端变更判据；PNG 字节直存（校验在路由/CLI 层）——
+  struct Branding {
+    std::string company_name;
+    std::string accent;    // '#rrggbb'，空=未配
+    std::string slogan;    // 登录页文案，空=未配
+    std::vector<unsigned char> logo;   // PNG 字节，空=未配
+    std::vector<unsigned char> splash; // PNG 字节，空=未配（可选件）
+    std::int64_t version{0};
+    std::int64_t updated_ms{0};
+  };
+  Branding branding_get(); // 无行=默认全空 version 0
+  // 文本三件；只动非空给出的项（nullopt=不动，空串=清空）；回新 version
+  std::int64_t branding_set(const std::optional<std::string>& company_name,
+                            const std::optional<std::string>& accent,
+                            const std::optional<std::string>& slogan,
+                            std::int64_t ts_ms);
+  std::int64_t branding_set_logo(const std::vector<unsigned char>& png,
+                                 std::int64_t ts_ms);
+  std::int64_t branding_set_splash(const std::vector<unsigned char>& png,
+                                   std::int64_t ts_ms);
+  std::int64_t branding_clear_logo();
+  std::int64_t branding_clear_splash();
+
   // —— 二期·办公室位置图（设计稿 docs/design/办公室位置图.md）——
   // 抽象平面（网格归一化坐标 0~1，不画真实底图）；工位即楼层归属
   //（本人楼层=本人占用工位所在楼层，不从部门推导）；编辑权 org-admin

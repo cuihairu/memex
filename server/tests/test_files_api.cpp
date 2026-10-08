@@ -2217,6 +2217,92 @@ int main() {
               .status == 404);
   }
 
+  // —— 品牌物料：读三免鉴权（登录窗鉴权前显示）/写三判权 org-admin/
+  //     PNG magic·大小·尺寸校验/version 单调（设计稿 品牌物料.md §6）——
+  {
+    // 免鉴权 GET：未配=默认全空 version 0（此段须先于任何写腿）
+    const auto b0 = http(port, "GET", "/files/branding", {}, "");
+    CHECK(b0.status == 200);
+    CHECK(b0.body.find("\"company_name\":\"\"") != std::string::npos);
+    CHECK(b0.body.find("\"version\":0") != std::string::npos);
+    CHECK(b0.body.find("\"has_logo\":false") != std::string::npos);
+    CHECK(http(port, "GET", "/files/branding/logo", {}, "").status == 404);
+    // 写判权：未登录 401；非 org-admin 403；org-admin 200 且 version+1
+    CHECK(http(port, "POST", "/files/branding", {},
+               "{\"company_name\":\"甲乙丙\"}")
+              .status == 401);
+    CHECK(http(port, "POST", "/files/branding", H("member1"),
+               "{\"company_name\":\"甲乙丙\"}")
+              .status == 403);
+    const auto bs =
+        http(port, "POST", "/files/branding", H("admin1"),
+             "{\"company_name\":\"甲乙丙有限公司\",\"accent\":\"#1a2b3c\","
+             "\"slogan\":\"高效协作\"}");
+    CHECK(bs.status == 200);
+    CHECK(jint(bs.body, "version") == 1);
+    // accent 坏形态 400（version 不动）
+    CHECK(http(port, "POST", "/files/branding", H("admin1"),
+               "{\"accent\":\"blue\"}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/branding", H("admin1"),
+               "{\"accent\":\"#12345\"}")
+              .status == 400);
+    // 素材校验：非 PNG 415；空 body 400；合法 PNG（最小 IHDR 头）200
+    const std::string not_png = "GIF89a-not-a-png-at-all";
+    CHECK(http(port, "POST", "/files/branding/logo", H("admin1"), not_png)
+              .status == 415);
+    CHECK(http(port, "POST", "/files/branding/logo", H("admin1"), "")
+              .status == 400);
+    std::string png;
+    png += std::string("\x89\x50\x4E\x47\x0D\x0A\x1A\x0A", 8); // magic
+    png += std::string("\x00\x00\x00\x0DIHDR", 8);             // IHDR
+    png += std::string("\x00\x00\x02\x00", 4);                 // 宽 512
+    png += std::string("\x00\x00\x02\x00", 4);                 // 高 512
+    png += std::string("\x08\x06\x00\x00\x00", 5);             // 位深色型等
+    CHECK(http(port, "POST", "/files/branding/splash", H("member1"), png)
+              .status == 403);
+    const auto bl =
+        http(port, "POST", "/files/branding/logo", H("admin1"), png);
+    CHECK(bl.status == 200);
+    CHECK(jint(bl.body, "version") == 2); // 素材写也 version+1
+    // 尺寸超限（宽 4097>2048）413；超大（>512KiB）413
+    std::string big = png;
+    big[16] = '\x00';
+    big[17] = '\x00';
+    big[18] = '\x10';
+    big[19] = '\x01'; // 宽 4097
+    CHECK(http(port, "POST", "/files/branding/logo", H("admin1"), big)
+              .status == 413);
+    const std::string huge(512 * 1024 + 1, '\0');
+    const std::string huge_png =
+        std::string("\x89\x50\x4E\x47\x0D\x0A\x1A\x0A", 8) + huge;
+    CHECK(http(port, "POST", "/files/branding/logo", H("admin1"), huge_png)
+              .status == 413);
+    // 免鉴权 GET 回已配值与字节面（logo 字节原样、splash 未配 404）
+    const auto b1 = http(port, "GET", "/files/branding", {}, "");
+    CHECK(b1.status == 200);
+    CHECK(b1.body.find("\"company_name\":\"甲乙丙有限公司\"") !=
+          std::string::npos);
+    CHECK(b1.body.find("\"accent\":\"#1a2b3c\"") != std::string::npos);
+    CHECK(b1.body.find("\"slogan\":\"高效协作\"") != std::string::npos);
+    CHECK(b1.body.find("\"has_logo\":true") != std::string::npos);
+    CHECK(b1.body.find("\"version\":2") != std::string::npos);
+    const auto glogo = http(port, "GET", "/files/branding/logo", {}, "");
+    CHECK(glogo.status == 200);
+    CHECK(glogo.body == png); // 字节面原样
+    CHECK(http(port, "GET", "/files/branding/splash", {}, "").status == 404);
+    // 清空（显式空串）与清除素材：version 单调递增、clear 后 404
+    CHECK(http(port, "POST", "/files/branding", H("admin1"),
+               "{\"slogan\":\"\"}")
+              .status == 200);
+    CHECK(jint(http(port, "GET", "/files/branding", {}, "").body,
+              "version") == 3);
+    CHECK(http(port, "GET", "/files/branding", {}, "").body.find(
+              "\"slogan\":\"\"") != std::string::npos);
+    // clear 走 store 面有 CLI；HTTP 面无 clear 路由（素材覆盖=重传、清空
+    // 须 CLI/运维面）——has_splash 恒 false 已证
+  }
+
   // —— 二期 远程协助：协议面＋媒体中继（模型层平台-11 在 store：
   //     五态/consent 红线/audit 红线/部门开关默认禁；此处验路由判权、
   //     状态门与媒体回环）——

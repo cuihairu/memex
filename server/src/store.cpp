@@ -245,6 +245,18 @@ bool ServerStore::ensure_schema() {
       "  ON office_seats(floor, label);"
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_office_seats_account"
       "  ON office_seats(account) WHERE account != '';"
+      // 品牌物料（设计稿 docs/design/品牌物料.md）：全服务器单行聚合
+      //（id 钉 1），version 每次写 +1＝客户端变更判据；PNG 字节直存
+      // BLOB（校验在路由/CLI 层）
+      "CREATE TABLE IF NOT EXISTS branding ("
+      "  id INTEGER PRIMARY KEY CHECK (id = 1),"
+      "  company_name TEXT NOT NULL DEFAULT '',"
+      "  accent TEXT NOT NULL DEFAULT '',"
+      "  slogan TEXT NOT NULL DEFAULT '',"
+      "  logo BLOB,"
+      "  splash BLOB,"
+      "  version INTEGER NOT NULL DEFAULT 0,"
+      "  updated_ms INTEGER NOT NULL DEFAULT 0);"
       // T2.6 组织架构：部门树（parent_id 成树）＋成员资料
       //（直属上级为独立单列——每人至多一名，结构性约束）
       "CREATE TABLE IF NOT EXISTS departments ("
@@ -3956,6 +3968,153 @@ std::vector<std::string> ServerStore::direct_reports(
   }
   sqlite3_finalize(st);
   return out;
+}
+
+// —— 品牌物料（设计稿 docs/design/品牌物料.md）：单行聚合，写后 version+1 ——
+
+ServerStore::Branding ServerStore::branding_get() {
+  Branding b;
+  const char* sql =
+      "SELECT company_name, accent, slogan, logo, splash, version,"
+      " updated_ms FROM branding WHERE id = 1;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return b;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    b.company_name =
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    b.accent = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    b.slogan = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    if (sqlite3_column_type(st, 3) == SQLITE_BLOB) {
+      const auto* p =
+          static_cast<const unsigned char*>(sqlite3_column_blob(st, 3));
+      b.logo.assign(p, p + sqlite3_column_bytes(st, 3));
+    }
+    if (sqlite3_column_type(st, 4) == SQLITE_BLOB) {
+      const auto* p =
+          static_cast<const unsigned char*>(sqlite3_column_blob(st, 4));
+      b.splash.assign(p, p + sqlite3_column_bytes(st, 4));
+    }
+    b.version = sqlite3_column_int64(st, 5);
+    b.updated_ms = sqlite3_column_int64(st, 6);
+  }
+  sqlite3_finalize(st);
+  return b;
+}
+
+// 写辅助：确保单行存在后按 COALESCE 只动给出的项，version 单调 +1
+namespace {
+std::int64_t branding_bump(sqlite3* db, const char* set_col,
+                           const std::optional<std::string>& text_val,
+                           const std::vector<unsigned char>& blob_val,
+                           bool is_blob, std::int64_t ts_ms) {
+  const char* ins = "INSERT INTO branding(id) VALUES(1)"
+                    " ON CONFLICT(id) DO NOTHING;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db, ins, -1, &st, nullptr) == SQLITE_OK) {
+    sqlite3_step(st);
+  }
+  sqlite3_finalize(st);
+  std::string sql = "UPDATE branding SET ";
+  sql += set_col;
+  sql += " = ?, version = version + 1, updated_ms = ? WHERE id = 1;";
+  st = nullptr;
+  if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
+    return -1;
+  }
+  if (is_blob) {
+    if (blob_val.empty()) {
+      sqlite3_bind_null(st, 1);
+    } else {
+      sqlite3_bind_blob(st, 1, blob_val.data(),
+                        static_cast<int>(blob_val.size()), SQLITE_TRANSIENT);
+    }
+  } else if (!text_val.has_value()) {
+    sqlite3_bind_null(st, 1); // 不可达（文本面恒有值），防御保持同形
+  } else {
+    sqlite3_bind_text(st, 1, text_val->c_str(),
+                      static_cast<int>(text_val->size()), SQLITE_TRANSIENT);
+  }
+  sqlite3_bind_int64(st, 2, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  if (!ok) return -1;
+  std::int64_t version = -1;
+  const char* q = "SELECT version FROM branding WHERE id = 1;";
+  st = nullptr;
+  if (sqlite3_prepare_v2(db, q, -1, &st, nullptr) == SQLITE_OK) {
+    if (sqlite3_step(st) == SQLITE_ROW) version = sqlite3_column_int64(st, 0);
+  }
+  sqlite3_finalize(st);
+  return version;
+}
+} // namespace
+
+std::int64_t ServerStore::branding_set(
+    const std::optional<std::string>& company_name,
+    const std::optional<std::string>& accent,
+    const std::optional<std::string>& slogan, std::int64_t ts_ms) {
+  if (!company_name.has_value() && !accent.has_value() &&
+      !slogan.has_value()) {
+    return -1; // 无可写项（路由层不会这样调，防御）
+  }
+  // 单行聚合一次写：给出的项覆盖、缺省项 COALESCE 保旧；version 只 +1
+  //（一次 set＝一个版本，客户端变更判据粒度=一次保存）
+  const char* ins =
+      "INSERT INTO branding(id) VALUES(1) ON CONFLICT(id) DO NOTHING;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, ins, -1, &st, nullptr) == SQLITE_OK) {
+    sqlite3_step(st);
+  }
+  sqlite3_finalize(st);
+  const char* upd =
+      "UPDATE branding SET"
+      " company_name = COALESCE(?, company_name),"
+      " accent = COALESCE(?, accent),"
+      " slogan = COALESCE(?, slogan),"
+      " version = version + 1, updated_ms = ? WHERE id = 1;";
+  st = nullptr;
+  if (sqlite3_prepare_v2(db_, upd, -1, &st, nullptr) != SQLITE_OK) return -1;
+  const auto bind_opt = [&](int idx, const std::optional<std::string>& v) {
+    if (v.has_value()) {
+      sqlite3_bind_text(st, idx, v->c_str(), static_cast<int>(v->size()),
+                        SQLITE_TRANSIENT);
+    } else {
+      sqlite3_bind_null(st, idx);
+    }
+  };
+  bind_opt(1, company_name);
+  bind_opt(2, accent);
+  bind_opt(3, slogan);
+  sqlite3_bind_int64(st, 4, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  if (!ok) return -1;
+  std::int64_t version = -1;
+  const char* q = "SELECT version FROM branding WHERE id = 1;";
+  st = nullptr;
+  if (sqlite3_prepare_v2(db_, q, -1, &st, nullptr) == SQLITE_OK) {
+    if (sqlite3_step(st) == SQLITE_ROW) version = sqlite3_column_int64(st, 0);
+  }
+  sqlite3_finalize(st);
+  return version;
+}
+
+std::int64_t ServerStore::branding_set_logo(
+    const std::vector<unsigned char>& png, std::int64_t ts_ms) {
+  return branding_bump(db_, "logo", std::nullopt, png, true, ts_ms);
+}
+
+std::int64_t ServerStore::branding_set_splash(
+    const std::vector<unsigned char>& png, std::int64_t ts_ms) {
+  return branding_bump(db_, "splash", std::nullopt, png, true, ts_ms);
+}
+
+std::int64_t ServerStore::branding_clear_logo() {
+  return branding_bump(db_, "logo", std::nullopt, {}, true, now_ms());
+}
+
+std::int64_t ServerStore::branding_clear_splash() {
+  return branding_bump(db_, "splash", std::nullopt, {}, true, now_ms());
 }
 
 // —— 二期·办公室位置图（设计稿 docs/design/办公室位置图.md）——
