@@ -2501,6 +2501,198 @@ int main() {
                H("owner1"), "").status == 200);
   }
 
+  // —— 二期群工具三件：投票（记名单选/改票覆盖/发起人或群主·管理员关票）
+  //     ＋接龙（一人一条 upsert）＋群任务（认领制/done 终态留痕）——
+  //     判权全循 file:read 群继承（非成员 403 不透存在性），资源号幽灵 404
+  {
+    const std::string gids = std::to_string(gid);
+    // 投票建：未登录 401；非成员 403；选项<2 400；建 200
+    CHECK(http(port, "POST", "/files/group-polls", {},
+               "{\"gid\":" + gids + ",\"topic\":\"午饭\",\"options\":[\"A\",\"B\"]}")
+              .status == 401);
+    CHECK(http(port, "POST", "/files/group-polls", H("outsider"),
+               "{\"gid\":" + gids + ",\"topic\":\"午饭\",\"options\":[\"A\",\"B\"]}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-polls", H("owner1"),
+               "{\"gid\":" + gids + ",\"topic\":\"午饭\",\"options\":[\"只一个\"]}")
+              .status == 400);
+    const auto pc = http(port, "POST", "/files/group-polls", H("owner1"),
+                         "{\"gid\":" + gids + ",\"topic\":\"午饭去哪\","
+                         "\"options\":[\"面馆\",\"食堂\",\"外卖\"]}");
+    CHECK(pc.status == 200);
+    const std::int64_t poll1 = jint(pc.body, "poll_id");
+    CHECK(poll1 > 0);
+    // 列表（成员 200）；outsider 403
+    CHECK(http(port, "GET", "/files/group-polls?gid=" + gids, H("outsider"),
+               "").status == 403);
+    const auto pl0 =
+        http(port, "GET", "/files/group-polls?gid=" + gids, H("member1"), "");
+    CHECK(pl0.status == 200);
+    CHECK(pl0.body.find("\"counts\":[0,0,0]") != std::string::npos);
+    // 投票：越界 400；幽灵票 404；改票覆盖（2 再改 1）；他人票不动
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) +
+                   ",\"choice\":9}")
+              .status == 400);
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":999999,\"choice\":1}")
+              .status == 404);
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) +
+                   ",\"choice\":2}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) +
+                   ",\"choice\":1}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("owner1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) +
+                   ",\"choice\":2}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("outsider"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) +
+                   ",\"choice\":1}")
+              .status == 403);
+    // 列表统计：counts=[1,2,0]（member1 改票后 1 号、owner1+member1 原 2 号
+    // 中 member1 移走→2 号只 owner1 与 member1=1+1）——精确断言；
+    // 记名台账：member1 恰一条且 choice=1
+    const auto pl1 =
+        http(port, "GET", "/files/group-polls?gid=" + gids, H("member1"), "");
+    CHECK(pl1.status == 200);
+    CHECK(pl1.body.find("\"counts\":[1,1,0]") != std::string::npos);
+    CHECK(pl1.body.find("\"account\":\"owner1\",\"choice\":2") !=
+          std::string::npos);
+    const auto pos_mv1 = pl1.body.find("\"account\":\"member1\",\"choice\":1");
+    const auto pos_mv2 = pl1.body.find("\"account\":\"member1\",\"choice\":2");
+    CHECK(pos_mv1 != std::string::npos);
+    CHECK(pos_mv2 == std::string::npos); // 改票覆盖：旧票不留
+    // 关票三腿：无关者（成员但非发起人非群主·管理员）403；发起人 200；
+    // 重复关 409；关后投票 409
+    CHECK(http(port, "POST", "/files/group-polls/close", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) + "}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-polls/close", H("owner1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) + "}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-polls/close", H("owner1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) + "}")
+              .status == 409);
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) +
+                   ",\"choice\":3}")
+              .status == 409);
+    // 接龙：建（title 空 400/非成员 403/建 200）；加入与更新（一人一条
+    // upsert：更新自己条目他人不动）；群主可关非本人发起；关后加入 409
+    CHECK(http(port, "POST", "/files/group-chains", H("member1"),
+               "{\"gid\":" + gids + ",\"title\":\"\"}").status == 400);
+    CHECK(http(port, "POST", "/files/group-chains", H("outsider"),
+               "{\"gid\":" + gids + ",\"title\":\"晚点接龙\"}").status == 403);
+    const auto cc = http(port, "POST", "/files/group-chains", H("member1"),
+                         "{\"gid\":" + gids + ",\"title\":\"晚饭接龙\","
+                         "\"format_hint\":\"姓名+几点\"}");
+    CHECK(cc.status == 200);
+    const std::int64_t chain1 = jint(cc.body, "chain_id");
+    CHECK(chain1 > 0);
+    CHECK(http(port, "POST", "/files/group-chains/join", H("admin1"),
+               "{\"gid\":" + gids + ",\"chain_id\":" + std::to_string(chain1) +
+                   ",\"content\":\"admin1 19点\"}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-chains/join", H("member1"),
+               "{\"gid\":" + gids + ",\"chain_id\":" + std::to_string(chain1) +
+                   ",\"content\":\"member1 18点半\"}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-chains/join", H("admin1"),
+               "{\"gid\":" + gids + ",\"chain_id\":" + std::to_string(chain1) +
+                   ",\"content\":\"admin1 改 20点\"}")
+              .status == 200);
+    const auto cl =
+        http(port, "GET", "/files/group-chains?gid=" + gids, H("member1"), "");
+    CHECK(cl.status == 200);
+    CHECK(cl.body.find("\"account\":\"admin1\",\"content\":\"admin1 改 20点\"") !=
+          std::string::npos);
+    CHECK(cl.body.find("admin1 19点") == std::string::npos); // 旧条目被覆盖
+    CHECK(cl.body.find("\"account\":\"member1\",\"content\":\"member1 18点半\"") !=
+          std::string::npos);
+    CHECK(cl.body.find("晚饭接龙") != std::string::npos);
+    // 群主关（非发起人仍可关=群主/管理员口径）；关后加入 409；重复关 409
+    CHECK(http(port, "POST", "/files/group-chains/close", H("owner1"),
+               "{\"gid\":" + gids +
+                   ",\"chain_id\":" + std::to_string(chain1) + "}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-chains/join", H("member1"),
+               "{\"gid\":" + gids + ",\"chain_id\":" + std::to_string(chain1) +
+                   ",\"content\":\"迟到的\"}")
+              .status == 409);
+    CHECK(http(port, "POST", "/files/group-chains/close", H("owner1"),
+               "{\"gid\":" + gids +
+                   ",\"chain_id\":" + std::to_string(chain1) + "}")
+              .status == 409);
+    // 群任务：幽灵负责人 404；待认领建 200；指定负责人建 200
+    CHECK(http(port, "POST", "/files/group-tasks", H("owner1"),
+               "{\"gid\":" + gids + ",\"title\":\"换投影仪\","
+               "\"assignee\":\"outsider\"}")
+              .status == 404);
+    const auto tc1 = http(port, "POST", "/files/group-tasks", H("owner1"),
+                          "{\"gid\":" + gids + ",\"title\":\"会议室白板笔补货\"}");
+    CHECK(tc1.status == 200);
+    const std::int64_t task1 = jint(tc1.body, "task_id");
+    const auto tc2 =
+        http(port, "POST", "/files/group-tasks", H("owner1"),
+             "{\"gid\":" + gids + ",\"title\":\"周报汇总\",\"assignee\":\"member1\"}");
+    CHECK(tc2.status == 200);
+    const std::int64_t task2 = jint(tc2.body, "task_id");
+    const auto tc3 =
+        http(port, "POST", "/files/group-tasks", H("admin1"),
+             "{\"gid\":" + gids + ",\"title\":\"账目核对\",\"assignee\":\"admin1\"}");
+    CHECK(tc3.status == 200);
+    const std::int64_t task3 = jint(tc3.body, "task_id");
+    // 认领：todo 且无人认领才可占；占位 409；幽灵 404
+    CHECK(http(port, "POST", "/files/group-tasks/claim", H("member1"),
+               "{\"gid\":" + gids +
+                   ",\"task_id\":" + std::to_string(task1) + "}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-tasks/claim", H("owner1"),
+               "{\"gid\":" + gids +
+                   ",\"task_id\":" + std::to_string(task1) + "}")
+              .status == 409);
+    CHECK(http(port, "POST", "/files/group-tasks/claim", H("member1"),
+               "{\"gid\":" + gids + ",\"task_id\":999999}")
+              .status == 404);
+    CHECK(http(port, "POST", "/files/group-tasks/claim", H("member1"),
+               "{\"gid\":" + gids +
+                   ",\"task_id\":" + std::to_string(task2) + "}")
+              .status == 409); // 已有负责人=占位
+    // 完成：无关者 403（member1 对 admin1 的任务非负责人/创建者/群主·管理员）；
+    // 负责人 200；群主可代（owner1 对 admin1 的任务）；重复完成 409
+    CHECK(http(port, "POST", "/files/group-tasks/done", H("member1"),
+               "{\"gid\":" + gids +
+                   ",\"task_id\":" + std::to_string(task3) + "}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/group-tasks/done", H("member1"),
+               "{\"gid\":" + gids +
+                   ",\"task_id\":" + std::to_string(task2) + "}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/group-tasks/done", H("member1"),
+               "{\"gid\":" + gids +
+                   ",\"task_id\":" + std::to_string(task2) + "}")
+              .status == 409);
+    CHECK(http(port, "POST", "/files/group-tasks/done", H("owner1"),
+               "{\"gid\":" + gids +
+                   ",\"task_id\":" + std::to_string(task3) + "}")
+              .status == 200);
+    // 列表终态留痕：done 行带 done_by；claimed_ms 留痕；todo 行仍在
+    const auto tl =
+        http(port, "GET", "/files/group-tasks?gid=" + gids, H("member1"), "");
+    CHECK(tl.status == 200);
+    CHECK(tl.body.find("\"title\":\"周报汇总\"") != std::string::npos);
+    CHECK(tl.body.find("\"status\":\"done\"") != std::string::npos);
+    CHECK(tl.body.find("\"done_by\":\"member1\"") != std::string::npos);
+    CHECK(tl.body.find("\"done_by\":\"owner1\"") != std::string::npos);
+    CHECK(tl.body.find("\"status\":\"todo\"") != std::string::npos);
+    // task1 已被认领：列表中不应再有无人认领行（认领留痕=assignee 落名）
+    CHECK(tl.body.find("\"assignee\":\"\"") == std::string::npos);
+  }
+
   io.stop();
   th.join();
 

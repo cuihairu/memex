@@ -1039,6 +1039,44 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (path_ == "/files/group-servers/credential" && method_ == "POST") {
       return route_group_servers_credential(body);
     }
+    // 二期群工具三件（原生互动，不走 R25 外部工具代理）：判权全循
+    // file:read 群继承（tool_call_allowed 同构），身份约束服务端逻辑判
+    if (path_ == "/files/group-polls" && method_ == "POST") {
+      return route_group_poll_create(body);
+    }
+    if (path_ == "/files/group-polls" && method_ == "GET") {
+      return route_group_polls_list();
+    }
+    if (path_ == "/files/group-polls/vote" && method_ == "POST") {
+      return route_group_poll_vote(body);
+    }
+    if (path_ == "/files/group-polls/close" && method_ == "POST") {
+      return route_group_poll_close(body);
+    }
+    if (path_ == "/files/group-chains" && method_ == "POST") {
+      return route_group_chain_create(body);
+    }
+    if (path_ == "/files/group-chains" && method_ == "GET") {
+      return route_group_chains_list();
+    }
+    if (path_ == "/files/group-chains/join" && method_ == "POST") {
+      return route_group_chain_join(body);
+    }
+    if (path_ == "/files/group-chains/close" && method_ == "POST") {
+      return route_group_chain_close(body);
+    }
+    if (path_ == "/files/group-tasks" && method_ == "POST") {
+      return route_group_task_create(body);
+    }
+    if (path_ == "/files/group-tasks" && method_ == "GET") {
+      return route_group_tasks_list();
+    }
+    if (path_ == "/files/group-tasks/claim" && method_ == "POST") {
+      return route_group_task_claim(body);
+    }
+    if (path_ == "/files/group-tasks/done" && method_ == "POST") {
+      return route_group_task_done(body);
+    }
     respond_json(404, {{"ok", false}, {"error", "路径不存在"}});
   }
 
@@ -4387,6 +4425,551 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                      {"updated_ms", m.updated_ms}});
     }
     respond_json(200, {{"ok", true}, {"gid", gid}, {"credentials", arr}});
+  }
+
+  // —— 二期群工具三件（原生互动，不走 R25 外部工具代理）——
+
+  // 身份约束（设计稿 §1，不新造 az 动词、服务端逻辑判）：关票/关接龙=
+  // 发起人或群主/管理员（同 R24-1 公告判权口径）
+  bool group_manage_allowed(std::uint64_t gid, const std::string& account,
+                            const std::string& initiator) {
+    if (account == initiator) return true;
+    const auto info = impl_.store.group_info(gid);
+    if (!info.has_value()) return false;
+    if (info->owner == account) return true;
+    return impl_.store.group_role(gid, account) == "admin";
+  }
+
+  void route_group_poll_create(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("topic") ||
+        !j["topic"].is_string() || !j.contains("options") ||
+        !j["options"].is_array() ||
+        (j.contains("deadline_ms") &&
+         !j["deadline_ms"].is_number_integer())) {
+      respond_json(
+          400, {{"ok", false},
+                {"error", "缺少字段：gid/topic/options（deadline_ms 可选整数）"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::string topic = j["topic"].get<std::string>();
+    std::vector<std::string> options;
+    for (const auto& o : j["options"]) {
+      if (!o.is_string()) {
+        respond_json(400, {{"ok", false}, {"error", "options 须为字符串数组"}});
+        return;
+      }
+      options.push_back(o.get<std::string>());
+    }
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权操作（非群成员）"}});
+      return;
+    }
+    if (topic.empty() || options.size() < 2 || options.size() > 10) {
+      respond_json(400,
+                   {{"ok", false},
+                    {"error", "topic 不可空，选项须 2~10 个"}});
+      return;
+    }
+    const std::int64_t deadline_ms =
+        j.contains("deadline_ms") ? j["deadline_ms"].get<std::int64_t>() : 0;
+    const std::int64_t id = impl_.store.poll_create(
+        gid, topic, options, deadline_ms, account, now_ms());
+    if (id == 0) {
+      respond_json(404, {{"ok", false}, {"error", "群不存在"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-poll create account=" << account
+              << " gid=" << gid << " poll=" << id << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"poll_id", id}});
+  }
+
+  void route_group_polls_list() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
+      return;
+    }
+    json arr = json::array();
+    for (const auto& p : impl_.store.polls_list(gid)) {
+      json counts = std::vector<int>(p.options.size(), 0);
+      json votes = json::array();
+      for (const auto& v : impl_.store.poll_votes(p.id)) {
+        if (v.choice >= 1 &&
+            v.choice <= static_cast<int>(p.options.size())) {
+          counts[v.choice - 1] = counts[v.choice - 1].get<int>() + 1;
+        }
+        votes.push_back({{"account", v.account},
+                         {"choice", v.choice},
+                         {"ts_ms", v.ts_ms}});
+      }
+      arr.push_back({{"id", p.id},
+                     {"topic", p.topic},
+                     {"options", p.options},
+                     {"deadline_ms", p.deadline_ms},
+                     {"closed", p.closed},
+                     {"created_by", p.created_by},
+                     {"created_ms", p.created_ms},
+                     {"counts", counts},
+                     {"votes", votes}});
+    }
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"polls", arr}});
+  }
+
+  void route_group_poll_vote(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("poll_id") ||
+        !j["poll_id"].is_number_integer() || !j.contains("choice") ||
+        !j["choice"].is_number_integer()) {
+      respond_json(400,
+                   {{"ok", false}, {"error", "缺少字段：gid/poll_id/choice"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::int64_t poll_id = j["poll_id"].get<std::int64_t>();
+    const int choice = j["choice"].get<int>();
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权操作（非群成员）"}});
+      return;
+    }
+    const auto p = impl_.store.poll_by_id(poll_id);
+    if (!p.has_value() || p->group_id != gid) {
+      respond_json(404, {{"ok", false}, {"error", "投票不存在"}});
+      return;
+    }
+    if (choice < 1 || choice > static_cast<int>(p->options.size())) {
+      respond_json(400, {{"ok", false},
+                         {"error", "选项越界（1~" +
+                                       std::to_string(p->options.size()) +
+                                       "）"}});
+      return;
+    }
+    if (p->closed) {
+      respond_json(409, {{"ok", false}, {"error", "投票已截止"}});
+      return;
+    }
+    if (!impl_.store.poll_vote(poll_id, account, choice, now_ms())) {
+      respond_json(409, {{"ok", false}, {"error", "投票失败"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-poll vote account=" << account
+              << " gid=" << gid << " poll=" << poll_id
+              << " choice=" << choice << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"poll_id", poll_id}});
+  }
+
+  void route_group_poll_close(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("poll_id") ||
+        !j["poll_id"].is_number_integer()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：gid/poll_id"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::int64_t poll_id = j["poll_id"].get<std::int64_t>();
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权操作（非群成员）"}});
+      return;
+    }
+    const auto p = impl_.store.poll_by_id(poll_id);
+    if (!p.has_value() || p->group_id != gid) {
+      respond_json(404, {{"ok", false}, {"error", "投票不存在"}});
+      return;
+    }
+    if (p->closed) {
+      respond_json(409, {{"ok", false}, {"error", "投票已截止"}});
+      return;
+    }
+    if (!group_manage_allowed(gid, account, p->created_by)) {
+      respond_json(
+          403, {{"ok", false}, {"error", "只有发起人或群主/管理员可截止"}});
+      return;
+    }
+    impl_.store.poll_close(poll_id);
+    std::cout << "[MEMEX] files group-poll close account=" << account
+              << " gid=" << gid << " poll=" << poll_id << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"poll_id", poll_id}});
+  }
+
+  void route_group_chain_create(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("title") ||
+        !j["title"].is_string() ||
+        (j.contains("format_hint") && !j["format_hint"].is_string())) {
+      respond_json(
+          400, {{"ok", false},
+                {"error", "缺少字段：gid/title（format_hint 可选）"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::string title = j["title"].get<std::string>();
+    const std::string format_hint =
+        j.contains("format_hint") ? j["format_hint"].get<std::string>() : "";
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权操作（非群成员）"}});
+      return;
+    }
+    if (title.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "title 不可空"}});
+      return;
+    }
+    const std::int64_t id = impl_.store.chain_create(gid, title, format_hint,
+                                                     account, now_ms());
+    if (id == 0) {
+      respond_json(404, {{"ok", false}, {"error", "群不存在"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-chain create account=" << account
+              << " gid=" << gid << " chain=" << id << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"chain_id", id}});
+  }
+
+  void route_group_chains_list() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
+      return;
+    }
+    json arr = json::array();
+    for (const auto& c : impl_.store.chains_list(gid)) {
+      json entries = json::array();
+      for (const auto& e : impl_.store.chain_entries(c.id)) {
+        entries.push_back({{"account", e.account},
+                           {"content", e.content},
+                           {"ts_ms", e.ts_ms}});
+      }
+      arr.push_back({{"id", c.id},
+                     {"title", c.title},
+                     {"format_hint", c.format_hint},
+                     {"closed", c.closed},
+                     {"created_by", c.created_by},
+                     {"created_ms", c.created_ms},
+                     {"entries", entries}});
+    }
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"chains", arr}});
+  }
+
+  void route_group_chain_join(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("chain_id") ||
+        !j["chain_id"].is_number_integer() || !j.contains("content") ||
+        !j["content"].is_string()) {
+      respond_json(400,
+                   {{"ok", false}, {"error", "缺少字段：gid/chain_id/content"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::int64_t chain_id = j["chain_id"].get<std::int64_t>();
+    const std::string content = j["content"].get<std::string>();
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权操作（非群成员）"}});
+      return;
+    }
+    const auto c = impl_.store.chain_by_id(chain_id);
+    if (!c.has_value() || c->group_id != gid) {
+      respond_json(404, {{"ok", false}, {"error", "接龙不存在"}});
+      return;
+    }
+    if (c->closed) {
+      respond_json(409, {{"ok", false}, {"error", "接龙已截止"}});
+      return;
+    }
+    if (content.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "content 不可空"}});
+      return;
+    }
+    if (!impl_.store.chain_join(chain_id, account, content, now_ms())) {
+      respond_json(409, {{"ok", false}, {"error", "接龙失败"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-chain join account=" << account
+              << " gid=" << gid << " chain=" << chain_id << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"chain_id", chain_id}});
+  }
+
+  void route_group_chain_close(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("chain_id") ||
+        !j["chain_id"].is_number_integer()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：gid/chain_id"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::int64_t chain_id = j["chain_id"].get<std::int64_t>();
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权操作（非群成员）"}});
+      return;
+    }
+    const auto c = impl_.store.chain_by_id(chain_id);
+    if (!c.has_value() || c->group_id != gid) {
+      respond_json(404, {{"ok", false}, {"error", "接龙不存在"}});
+      return;
+    }
+    if (c->closed) {
+      respond_json(409, {{"ok", false}, {"error", "接龙已截止"}});
+      return;
+    }
+    if (!group_manage_allowed(gid, account, c->created_by)) {
+      respond_json(
+          403, {{"ok", false}, {"error", "只有发起人或群主/管理员可截止"}});
+      return;
+    }
+    impl_.store.chain_close(chain_id);
+    std::cout << "[MEMEX] files group-chain close account=" << account
+              << " gid=" << gid << " chain=" << chain_id << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"chain_id", chain_id}});
+  }
+
+  void route_group_task_create(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("title") ||
+        !j["title"].is_string() ||
+        (j.contains("assignee") && !j["assignee"].is_string()) ||
+        (j.contains("due_ms") && !j["due_ms"].is_number_integer())) {
+      respond_json(400,
+                   {{"ok", false},
+                    {"error", "缺少字段：gid/title（assignee/due_ms 可选）"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::string title = j["title"].get<std::string>();
+    const std::string assignee =
+        j.contains("assignee") ? j["assignee"].get<std::string>() : "";
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权操作（非群成员）"}});
+      return;
+    }
+    if (title.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "title 不可空"}});
+      return;
+    }
+    const std::int64_t due_ms =
+        j.contains("due_ms") ? j["due_ms"].get<std::int64_t>() : 0;
+    const std::int64_t id =
+        impl_.store.gtask_create(gid, title, assignee, due_ms, account,
+                                 now_ms());
+    if (id == 0) {
+      // 指定负责人而非群成员=幽灵拒（404，不透存在性细节）
+      respond_json(404, {{"ok", false}, {"error", "群或负责人不存在"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-task create account=" << account
+              << " gid=" << gid << " task=" << id
+              << " assignee=" << assignee << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"task_id", id}});
+  }
+
+  void route_group_tasks_list() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权查看（非群成员）"}});
+      return;
+    }
+    json arr = json::array();
+    for (const auto& t : impl_.store.gtasks_list(gid)) {
+      arr.push_back({{"id", t.id},
+                     {"title", t.title},
+                     {"assignee", t.assignee},
+                     {"due_ms", t.due_ms},
+                     {"claimed_ms", t.claimed_ms},
+                     {"status", t.status},
+                     {"created_by", t.created_by},
+                     {"created_ms", t.created_ms},
+                     {"done_by", t.done_by},
+                     {"done_ms", t.done_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"tasks", arr}});
+  }
+
+  void route_group_task_claim(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("task_id") ||
+        !j["task_id"].is_number_integer()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：gid/task_id"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::int64_t task_id = j["task_id"].get<std::int64_t>();
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权操作（非群成员）"}});
+      return;
+    }
+    // 认领原子落（store 层 WHERE status='todo' AND assignee=''）；此处
+    // 只区分 404 幽灵与 409 已占
+    bool exists = false;
+    for (const auto& t : impl_.store.gtasks_list(gid)) {
+      if (t.id == task_id) {
+        exists = true;
+        break;
+      }
+    }
+    if (!exists) {
+      respond_json(404, {{"ok", false}, {"error", "任务不存在"}});
+      return;
+    }
+    if (!impl_.store.gtask_claim(task_id, account, now_ms())) {
+      respond_json(409, {{"ok", false}, {"error", "任务已被认领或已完成"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-task claim account=" << account
+              << " gid=" << gid << " task=" << task_id << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"task_id", task_id}});
+  }
+
+  void route_group_task_done(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("gid") ||
+        !j["gid"].is_number_integer() || !j.contains("task_id") ||
+        !j["task_id"].is_number_integer()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：gid/task_id"}});
+      return;
+    }
+    const std::uint64_t gid =
+        static_cast<std::uint64_t>(j["gid"].get<std::int64_t>());
+    const std::int64_t task_id = j["task_id"].get<std::int64_t>();
+    if (!tool_call_allowed(account, gid)) {
+      respond_json(403, {{"ok", false}, {"error", "无权操作（非群成员）"}});
+      return;
+    }
+    const ServerStore::GroupTask* found = nullptr;
+    ServerStore::GroupTask row;
+    for (const auto& t : impl_.store.gtasks_list(gid)) {
+      if (t.id == task_id) {
+        row = t;
+        found = &row;
+        break;
+      }
+    }
+    if (!found) {
+      respond_json(404, {{"ok", false}, {"error", "任务不存在"}});
+      return;
+    }
+    if (found->status != "todo") {
+      respond_json(409, {{"ok", false}, {"error", "任务已完成"}});
+      return;
+    }
+    // 完成=负责人/创建者/群主管理员（服务端逻辑判）
+    if (account != found->assignee && account != found->created_by &&
+        !group_manage_allowed(gid, account, found->created_by)) {
+      respond_json(403,
+                   {{"ok", false},
+                    {"error", "只有负责人/创建者/群主/管理员可完成"}});
+      return;
+    }
+    if (!impl_.store.gtask_done(task_id, account, now_ms())) {
+      respond_json(409, {{"ok", false}, {"error", "任务已完成"}});
+      return;
+    }
+    std::cout << "[MEMEX] files group-task done account=" << account
+              << " gid=" << gid << " task=" << task_id << std::endl;
+    respond_json(200, {{"ok", true}, {"gid", gid}, {"task_id", task_id}});
   }
 
   // —— R26-1 服务器 agent 面 ——

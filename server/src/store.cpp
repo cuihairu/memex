@@ -588,6 +588,56 @@ bool ServerStore::ensure_schema() {
       "  sealed_hex TEXT NOT NULL,"
       "  updated_by TEXT NOT NULL,"
       "  updated_ms INTEGER NOT NULL);"
+      // —— 二期群工具三件（原生互动，不走 R25 外部工具代理）：投票
+      // （记名单选，改票=覆盖）＋接龙（一人一条 upsert）＋群任务
+      // （认领制，done 终态留痕不删行）——
+      "CREATE TABLE IF NOT EXISTS group_polls ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  group_id INTEGER NOT NULL,"
+      "  topic TEXT NOT NULL,"
+      "  options_json TEXT NOT NULL,"
+      "  deadline_ms INTEGER NOT NULL DEFAULT 0,"
+      "  closed INTEGER NOT NULL DEFAULT 0,"
+      "  created_by TEXT NOT NULL,"
+      "  created_ms INTEGER NOT NULL);"
+      "CREATE INDEX IF NOT EXISTS idx_gpo_gid"
+      " ON group_polls(group_id, id);"
+      "CREATE TABLE IF NOT EXISTS group_poll_votes ("
+      "  poll_id INTEGER NOT NULL,"
+      "  account TEXT NOT NULL,"
+      "  choice INTEGER NOT NULL,"
+      "  ts_ms INTEGER NOT NULL,"
+      "  PRIMARY KEY (poll_id, account));"
+      "CREATE TABLE IF NOT EXISTS group_chains ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  group_id INTEGER NOT NULL,"
+      "  title TEXT NOT NULL,"
+      "  format_hint TEXT NOT NULL DEFAULT '',"
+      "  closed INTEGER NOT NULL DEFAULT 0,"
+      "  created_by TEXT NOT NULL,"
+      "  created_ms INTEGER NOT NULL);"
+      "CREATE INDEX IF NOT EXISTS idx_gch_gid"
+      " ON group_chains(group_id, id);"
+      "CREATE TABLE IF NOT EXISTS group_chain_entries ("
+      "  chain_id INTEGER NOT NULL,"
+      "  account TEXT NOT NULL,"
+      "  content TEXT NOT NULL,"
+      "  ts_ms INTEGER NOT NULL,"
+      "  PRIMARY KEY (chain_id, account));"
+      "CREATE TABLE IF NOT EXISTS group_tasks ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  group_id INTEGER NOT NULL,"
+      "  title TEXT NOT NULL,"
+      "  assignee TEXT NOT NULL DEFAULT '',"
+      "  due_ms INTEGER NOT NULL DEFAULT 0,"
+      "  claimed_ms INTEGER NOT NULL DEFAULT 0,"
+      "  status TEXT NOT NULL DEFAULT 'todo',"
+      "  created_by TEXT NOT NULL,"
+      "  created_ms INTEGER NOT NULL,"
+      "  done_by TEXT NOT NULL DEFAULT '',"
+      "  done_ms INTEGER NOT NULL DEFAULT 0);"
+      "CREATE INDEX IF NOT EXISTS idx_gtk_gid"
+      " ON group_tasks(group_id, id);"
       // —— 平台-2 Identity 模型补全：Credential 独立（口令迁出 accounts
       // 行；type 枚举预留 token/certificate/sso/device）＋IdentityBinding
       // （外部身份↔本地账号，issuer+subject 唯一）＋Session 持久面
@@ -6788,6 +6838,407 @@ std::vector<ServerStore::ServerCredentialMeta> ServerStore::server_cred_list(
   }
   sqlite3_finalize(st);
   return out;
+}
+
+// —— 二期群工具三件（原生互动，不走 R25 外部工具代理）——
+
+std::int64_t ServerStore::poll_create(std::uint64_t group_id,
+                                      const std::string& topic,
+                                      const std::vector<std::string>& options,
+                                      std::int64_t deadline_ms,
+                                      const std::string& by,
+                                      std::int64_t ts_ms) {
+  if (!group_info(group_id).has_value()) return 0;
+  if (topic.empty() || options.size() < 2 || options.size() > 10) return 0;
+  nlohmann::json arr = nlohmann::json::array();
+  for (const auto& o : options) arr.push_back(o);
+  const char* sql =
+      "INSERT INTO group_polls(group_id, topic, options_json, deadline_ms,"
+      " closed, created_by, created_ms) VALUES(?, ?, ?, ?, 0, ?, ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, topic.c_str(), -1, SQLITE_TRANSIENT);
+  const std::string arr_s = arr.dump();
+  sqlite3_bind_text(st, 3, arr_s.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, deadline_ms);
+  sqlite3_bind_text(st, 5, by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 6, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  const std::int64_t id = ok ? sqlite3_last_insert_rowid(db_) : 0;
+  sqlite3_finalize(st);
+  return id;
+}
+
+std::optional<ServerStore::GroupPoll> ServerStore::poll_by_id(
+    std::int64_t id) {
+  const char* sql =
+      "SELECT id, group_id, topic, options_json, deadline_ms, closed,"
+      " created_by, created_ms FROM group_polls WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_int64(st, 1, id);
+  std::optional<GroupPoll> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    GroupPoll p;
+    p.id = sqlite3_column_int64(st, 0);
+    p.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    const char* t = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    p.topic = t ? t : "";
+    const char* oj = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    if (oj) {
+      const auto arr = nlohmann::json::parse(oj, nullptr, false);
+      if (arr.is_array()) {
+        for (const auto& e : arr) {
+          if (e.is_string()) p.options.push_back(e.get<std::string>());
+        }
+      }
+    }
+    p.deadline_ms = sqlite3_column_int64(st, 4);
+    p.closed = sqlite3_column_int64(st, 5) != 0;
+    const char* cb = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    p.created_by = cb ? cb : "";
+    p.created_ms = sqlite3_column_int64(st, 7);
+    out = std::move(p);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::GroupPoll> ServerStore::polls_list(
+    std::uint64_t group_id) {
+  std::vector<GroupPoll> out;
+  const char* sql =
+      "SELECT id, group_id, topic, options_json, deadline_ms, closed,"
+      " created_by, created_ms FROM group_polls WHERE group_id = ?"
+      " ORDER BY id DESC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    GroupPoll p;
+    p.id = sqlite3_column_int64(st, 0);
+    p.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    const char* t = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    p.topic = t ? t : "";
+    const char* oj = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    if (oj) {
+      const auto arr = nlohmann::json::parse(oj, nullptr, false);
+      if (arr.is_array()) {
+        for (const auto& e : arr) {
+          if (e.is_string()) p.options.push_back(e.get<std::string>());
+        }
+      }
+    }
+    p.deadline_ms = sqlite3_column_int64(st, 4);
+    p.closed = sqlite3_column_int64(st, 5) != 0;
+    const char* cb = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    p.created_by = cb ? cb : "";
+    p.created_ms = sqlite3_column_int64(st, 7);
+    out.push_back(std::move(p));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::poll_vote(std::int64_t poll_id, const std::string& account,
+                            int choice, std::int64_t ts_ms) {
+  const auto p = poll_by_id(poll_id);
+  if (!p.has_value() || p->closed) return false;
+  if (choice < 1 ||
+      choice > static_cast<int>(p->options.size())) {
+    return false;
+  }
+  const char* sql =
+      "INSERT INTO group_poll_votes(poll_id, account, choice, ts_ms)"
+      " VALUES(?, ?, ?, ?)"
+      " ON CONFLICT(poll_id, account) DO UPDATE SET choice = excluded.choice,"
+      " ts_ms = excluded.ts_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, poll_id);
+  sqlite3_bind_text(st, 2, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 3, choice);
+  sqlite3_bind_int64(st, 4, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ServerStore::GroupPollVote> ServerStore::poll_votes(
+    std::int64_t poll_id) {
+  std::vector<GroupPollVote> out;
+  const char* sql =
+      "SELECT account, choice, ts_ms FROM group_poll_votes"
+      " WHERE poll_id = ? ORDER BY ts_ms ASC, account ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, poll_id);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    GroupPollVote v;
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    v.account = a ? a : "";
+    v.choice = sqlite3_column_int(st, 1);
+    v.ts_ms = sqlite3_column_int64(st, 2);
+    out.push_back(std::move(v));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::poll_close(std::int64_t poll_id) {
+  const auto p = poll_by_id(poll_id);
+  if (!p.has_value()) return false;
+  if (p->closed) return true; // 幂等收口
+  const char* sql = "UPDATE group_polls SET closed = 1 WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, poll_id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::int64_t ServerStore::chain_create(std::uint64_t group_id,
+                                       const std::string& title,
+                                       const std::string& format_hint,
+                                       const std::string& by,
+                                       std::int64_t ts_ms) {
+  if (!group_info(group_id).has_value()) return 0;
+  if (title.empty()) return 0;
+  const char* sql =
+      "INSERT INTO group_chains(group_id, title, format_hint, closed,"
+      " created_by, created_ms) VALUES(?, ?, ?, 0, ?, ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, title.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, format_hint.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  const std::int64_t id = ok ? sqlite3_last_insert_rowid(db_) : 0;
+  sqlite3_finalize(st);
+  return id;
+}
+
+std::optional<ServerStore::GroupChain> ServerStore::chain_by_id(
+    std::int64_t id) {
+  const char* sql =
+      "SELECT id, group_id, title, format_hint, closed, created_by,"
+      " created_ms FROM group_chains WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return std::nullopt;
+  }
+  sqlite3_bind_int64(st, 1, id);
+  std::optional<GroupChain> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    GroupChain c;
+    c.id = sqlite3_column_int64(st, 0);
+    c.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    const char* t = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    c.title = t ? t : "";
+    const char* fh = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    c.format_hint = fh ? fh : "";
+    c.closed = sqlite3_column_int64(st, 4) != 0;
+    const char* cb = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    c.created_by = cb ? cb : "";
+    c.created_ms = sqlite3_column_int64(st, 6);
+    out = std::move(c);
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ServerStore::GroupChain> ServerStore::chains_list(
+    std::uint64_t group_id) {
+  std::vector<GroupChain> out;
+  const char* sql =
+      "SELECT id, group_id, title, format_hint, closed, created_by,"
+      " created_ms FROM group_chains WHERE group_id = ? ORDER BY id DESC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    GroupChain c;
+    c.id = sqlite3_column_int64(st, 0);
+    c.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    const char* t = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    c.title = t ? t : "";
+    const char* fh = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    c.format_hint = fh ? fh : "";
+    c.closed = sqlite3_column_int64(st, 4) != 0;
+    const char* cb = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    c.created_by = cb ? cb : "";
+    c.created_ms = sqlite3_column_int64(st, 6);
+    out.push_back(std::move(c));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::chain_join(std::int64_t chain_id,
+                             const std::string& account,
+                             const std::string& content, std::int64_t ts_ms) {
+  const auto c = chain_by_id(chain_id);
+  if (!c.has_value() || c->closed) return false;
+  if (content.empty()) return false;
+  const char* sql =
+      "INSERT INTO group_chain_entries(chain_id, account, content, ts_ms)"
+      " VALUES(?, ?, ?, ?)"
+      " ON CONFLICT(chain_id, account) DO UPDATE SET content ="
+      " excluded.content, ts_ms = excluded.ts_ms;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, chain_id);
+  sqlite3_bind_text(st, 2, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, content.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::vector<ServerStore::GroupChainEntry> ServerStore::chain_entries(
+    std::int64_t chain_id) {
+  std::vector<GroupChainEntry> out;
+  const char* sql =
+      "SELECT account, content, ts_ms FROM group_chain_entries"
+      " WHERE chain_id = ? ORDER BY ts_ms ASC, account ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, chain_id);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    GroupChainEntry e;
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    e.account = a ? a : "";
+    const char* c = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    e.content = c ? c : "";
+    e.ts_ms = sqlite3_column_int64(st, 2);
+    out.push_back(std::move(e));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::chain_close(std::int64_t chain_id) {
+  const auto c = chain_by_id(chain_id);
+  if (!c.has_value()) return false;
+  if (c->closed) return true; // 幂等收口
+  const char* sql = "UPDATE group_chains SET closed = 1 WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, chain_id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::int64_t ServerStore::gtask_create(std::uint64_t group_id,
+                                       const std::string& title,
+                                       const std::string& assignee,
+                                       std::int64_t due_ms,
+                                       const std::string& by,
+                                       std::int64_t ts_ms) {
+  if (!group_info(group_id).has_value()) return 0;
+  if (title.empty()) return 0;
+  if (!assignee.empty() && !is_group_member(group_id, assignee)) return 0;
+  const char* sql =
+      "INSERT INTO group_tasks(group_id, title, assignee, due_ms, status,"
+      " created_by, created_ms) VALUES(?, ?, ?, ?, 'todo', ?, ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  sqlite3_bind_text(st, 2, title.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, assignee.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, due_ms);
+  sqlite3_bind_text(st, 5, by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 6, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  const std::int64_t id = ok ? sqlite3_last_insert_rowid(db_) : 0;
+  sqlite3_finalize(st);
+  return id;
+}
+
+std::vector<ServerStore::GroupTask> ServerStore::gtasks_list(
+    std::uint64_t group_id) {
+  std::vector<GroupTask> out;
+  const char* sql =
+      "SELECT id, group_id, title, assignee, due_ms, claimed_ms, status,"
+      " created_by, created_ms, done_by, done_ms FROM group_tasks"
+      " WHERE group_id = ? ORDER BY id DESC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    GroupTask t;
+    t.id = sqlite3_column_int64(st, 0);
+    t.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 1));
+    const char* ti = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    t.title = ti ? ti : "";
+    const char* as = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    t.assignee = as ? as : "";
+    t.due_ms = sqlite3_column_int64(st, 4);
+    t.claimed_ms = sqlite3_column_int64(st, 5);
+    const char* stt = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    t.status = stt ? stt : "todo";
+    const char* cb = reinterpret_cast<const char*>(sqlite3_column_text(st, 7));
+    t.created_by = cb ? cb : "";
+    t.created_ms = sqlite3_column_int64(st, 8);
+    const char* db2 = reinterpret_cast<const char*>(sqlite3_column_text(st, 9));
+    t.done_by = db2 ? db2 : "";
+    t.done_ms = sqlite3_column_int64(st, 10);
+    out.push_back(std::move(t));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::gtask_claim(std::int64_t id, const std::string& account,
+                              std::int64_t ts_ms) {
+  // 认领＝todo 且无人认领；占位原子落（status/assignee 同行判）
+  const char* sql =
+      "UPDATE group_tasks SET assignee = ?, claimed_ms = ? WHERE id = ?"
+      " AND status = 'todo' AND assignee = '';";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 2, ts_ms);
+  sqlite3_bind_int64(st, 3, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::gtask_done(std::int64_t id, const std::string& done_by,
+                             std::int64_t ts_ms) {
+  // 终态留痕：todo→done 一次性迁移，done_by/done_ms 落行不删行
+  const char* sql =
+      "UPDATE group_tasks SET status = 'done', done_by = ?, done_ms = ?"
+      " WHERE id = ? AND status = 'todo';";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, done_by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 2, ts_ms);
+  sqlite3_bind_int64(st, 3, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
 }
 
 } // namespace memex::server
