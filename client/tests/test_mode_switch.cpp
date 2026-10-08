@@ -159,6 +159,45 @@ int main(int argc, char** argv) {
   CHECK(window.banner_text().contains(QStringLiteral("消息不进归档")));
   CHECK(!window.collab_logged_in());
 
+  // —— 布局腿（布局令）：启动＝列表态（「左菜单+好友列表」长方形面板，
+  // 不摆聊天面板）；点好友→对话面板展开；再点当前好友→关回列表态；
+  // 重开＝会话照常展开（历史在库里重载）
+  CHECK(!window.chat_panel_visible());
+  window.open_direct_peer(QStringLiteral("dev-B2"));
+  CHECK(window.chat_panel_visible());
+  {
+    auto* list =
+        window.findChild<QListWidget*>(QStringLiteral("device_list"));
+    CHECK(list);
+    // 列表里 dev-B2 项可能还没到（发现广播在途），到不了就只验开/关口径
+    QListWidgetItem* target = nullptr;
+    wait_until([&] {
+      for (int i = 0; i < list->count(); ++i) {
+        if (list->item(i)->data(Qt::UserRole).toString() ==
+            QStringLiteral("dev-B2")) {
+          target = list->item(i);
+          return true;
+        }
+      }
+      return false;
+    }, 8000);
+    if (target) {
+      emit list->itemClicked(target); // 再点当前会话项＝关回列表态
+      CHECK(!window.chat_panel_visible());
+      // 验收截图①：启动无对话＝「左菜单+好友列表」长方形面板（无聊天面板）
+      {
+        const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+        CHECK(QDir().mkpath(dir));
+        CHECK(window.grab().save(dir + QStringLiteral("/layout-list.png")));
+      }
+      window.open_direct_peer(QStringLiteral("dev-B2"));
+      CHECK(window.chat_panel_visible());
+      // 验收截图②：点好友后＝对话面板展开
+      CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
+                               QStringLiteral("/layout-chat.png")));
+    }
+  }
+
   // —— 登录协作态（不重启）——
   window.login_collab(QStringLiteral("127.0.0.1"), port,
                       QStringLiteral("alice"), QStringLiteral("pass-a"));

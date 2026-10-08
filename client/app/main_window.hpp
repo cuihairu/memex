@@ -103,6 +103,10 @@ public:
   bool send_shot_to_current_chat(const QString& path);
   // 文件接收验收面（需求批④调试缝）：「from|path」（未收＝空）
   QString last_received_file() const { return last_received_file_; }
+  // 布局验收面：会话面板当前是否展开（列表态＝false）
+  bool chat_panel_visible() const {
+    return chat_panel_ && chat_panel_->isVisible();
+  }
   bool lock_screen_visible() const; // 锁屏遮罩当前是否在屏
   int lock_unread_count() const;    // 锁屏期间新到消息条数（未锁＝0）
   QString lock_screen_text() const; // 锁屏面未读行文案（断言只含数量不含内容）
@@ -146,6 +150,9 @@ private:
   void refresh_devices();
   void open_peer(const QString& device_id);
   void open_chat(const QString& kind, const QString& id);
+  // 关会话回列表态（布局令：无对话＝「左菜单+好友列表」长方形面板，
+  // 对话面板只在 open_chat 后展开；再点当前好友／点标题栏 ✕ 同此路）
+  void close_chat();
   void append_message(const QString& from_id, const QString& text,
                       qint64 ts_ms, bool outgoing, const QString& source);
   // 图片消息气泡（需求批④）：气泡内直接渲染图片（<img>，非文件系统行）
@@ -321,6 +328,7 @@ private:
 
   // 参与 apply_theme_styles 的控件（构造期为局部变量，主题重刷需长期持有）
   QWidget* side_{nullptr};
+  QWidget* chat_panel_{nullptr}; // 会话面板（布局令：空态隐藏＝列表态长方形）
   QLabel* side_title_{nullptr};
   QLabel* local_badge_{nullptr};
   QWidget* head_{nullptr};

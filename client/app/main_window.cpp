@@ -205,6 +205,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   resize(960, 640);
 
   build_ui();
+  close_chat(); // 布局令：启动无会话＝列表态长方形面板（点好友再展开对话）
 
   wire_engines();
   direct_engine_.start();
@@ -512,8 +513,9 @@ void MainWindow::build_ui() {
   side_layout->addWidget(device_list_, 1);
   side_layout->insertWidget(0, brand_row_);
 
-  // —— 右侧：聊天窗 ——
+  // —— 右侧：聊天窗 ——（布局令：空态隐藏，open_chat 展开成两栏）
   auto* chat = new QWidget(this);
+  chat_panel_ = chat;
   auto* chat_layout = new QVBoxLayout(chat);
   chat_layout->setContentsMargins(0, 0, 0, 0);
   chat_layout->setSpacing(0);
@@ -526,10 +528,16 @@ void MainWindow::build_ui() {
   chat_meta_ = new QLabel(QStringLiteral("未选择设备"), head);
   auto* local_badge = new QLabel(QStringLiteral("本机保存"), head);
   local_badge_ = local_badge;
+  auto* close_chat_btn = new QPushButton(QStringLiteral("✕"), head);
+  close_chat_btn->setFlat(true);
+  close_chat_btn->setToolTip(QStringLiteral("关闭会话（回到列表态）"));
+  connect(close_chat_btn, &QPushButton::clicked, this,
+          &MainWindow::close_chat);
   head_layout->addWidget(chat_title_);
   head_layout->addWidget(chat_meta_);
   head_layout->addStretch();
   head_layout->addWidget(local_badge);
+  head_layout->addWidget(close_chat_btn);
 
   // 「未归档」语义标记：常驻不可关（留痕铁律的界面表达）；
   // 文案随形态切换（T2.4）：直连／降级态必须出现「消息不进归档」。
@@ -598,13 +606,23 @@ void MainWindow::build_ui() {
                       !item->text().contains(needle, Qt::CaseInsensitive));
     }
   });
-  connect(device_list_, &QListWidget::itemSelectionChanged, this, [this] {
-    auto* item = device_list_->currentItem();
+  // 好友/会话列表：点击打开会话（点开＝面板展开）；再点当前会话项＝
+  // 关回列表态（经典 IM 三栏切换）。selectionChanged 键盘导航不打开，
+  // 回车/双击激活走 itemActivated 同一路径。
+  const auto list_open = [this](QListWidgetItem* item) {
     if (!item) return;
     const QString id = item->data(Qt::UserRole).toString();
     if (id.isEmpty()) return; // 分组标题行不可选
-    open_chat(item->data(Qt::UserRole + 1).toString(), id);
-  });
+    const QString kind = item->data(Qt::UserRole + 1).toString();
+    if (chat_panel_->isVisible() && id == current_peer_ &&
+        kind == current_kind_) {
+      close_chat(); // 再点当前好友＝回列表态
+      return;
+    }
+    open_chat(kind, id);
+  };
+  connect(device_list_, &QListWidget::itemClicked, this, list_open);
+  connect(device_list_, &QListWidget::itemActivated, this, list_open);
   connect(send_btn_, &QPushButton::clicked, this, [this] {
     const QString text = input_box_->text().trimmed();
     if (text.isEmpty() || current_peer_.isEmpty()) return;
@@ -2636,7 +2654,23 @@ void MainWindow::open_peer(const QString& device_id) {
 
 // 打开会话（kind=direct 设备 / collab 账号）：历史取自共享本地库——
 // 直连与协作消息同库合并，按 source 字段标注来源（T2.4 合并展示）。
+// 关会话回列表态（布局令）：清当前会话（历史在库里，重开即重渲），
+// 面板收起、窗口缩回「左菜单+好友列表」长方形
+void MainWindow::close_chat() {
+  current_kind_.clear();
+  current_peer_.clear();
+  chat_rows_.clear();
+  chat_view_->clear();
+  chat_panel_->hide();
+  if (!isMaximized() && width() > 400) resize(320, height());
+}
+
 void MainWindow::open_chat(const QString& kind, const QString& id) {
+  // 布局令：对话面板只在打开会话后展开（列表态点好友／菜单／通知点入）；
+  // 从列表态展开时若窗口还停在窄长方形，恢复会话态宽度
+  if (chat_panel_->isHidden() && !isMaximized() && width() < 520)
+    resize(960, height());
+  chat_panel_->show();
   current_kind_ = kind;
   current_peer_ = id;
   chat_showing_guidance_ = false;
