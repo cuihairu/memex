@@ -1,149 +1,163 @@
+[English](README.md) | [中文](README.zh.md)
+
 <p align="center">
   <img src="docs/src/public/logo.svg" alt="Memex" width="96" height="96" />
 </p>
 
-<h1 align="center">Memex · 内网办公即时通讯系统</h1>
+<h1 align="center">Memex · Intranet Office Instant Messaging System</h1>
 
 <p align="center">
   <a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov 覆盖率" /></a>
-  <a href="https://cuihairu.github.io/memex/"><img src="https://img.shields.io/website?url=https%3A%2F%2Fcuihairu.github.io%2Fmemex%2F&up_message=%E5%9C%A8%E7%BA%BF&down_message=%E7%A6%BB%E7%BA%BF&label=%E6%96%87%E6%A1%A3%E7%AB%99&color=e16531" alt="文档站" /></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%E5%9B%BD%E4%BA%A7%20UOS%2F%E9%BA%92%E9%BA%9F%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-e16531" alt="平台支持" />
+  <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov coverage" /></a>
+  <a href="https://cuihairu.github.io/memex/"><img src="https://img.shields.io/website?url=https%3A%2F%2Fcuihairu.github.io%2Fmemex%2F&up_message=%E5%9C%A8%E7%BA%BF&down_message=%E7%A6%BB%E7%BA%BF&label=%E6%96%87%E6%A1%A3%E7%AB%99&color=e16531" alt="Documentation site" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%E5%9B%BD%E4%BA%A7%20UOS%2F%E9%BA%92%E9%BA%9F%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-e16531" alt="Platform support" />
   <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
 </p>
 
-内网物理隔离环境下的办公即时通讯系统，参照企业微信的功能范围，覆盖沟通、办公、组织与归档检索能力。业务层全部自写，底座采用开源组件：Qt 6、asio、protobuf、SQLite、OpenSSL、AWS SDK（S3 接口，对接 RustFS），清单与许可见 [third_party/](third_party/README.md)；不基于任何开源 IM 二次开发，不集成 AGPL／SSPL 等强传染性许可组件。桌面客户端 C++17 + Qt；手机端 Android（Kotlin，已落地）／iOS（Swift，代码-only＋CI 验证）；服务端 C++17 单进程单库。
+An office instant messaging system for physically isolated intranet environments, modeled on the functional scope of WeCom (Enterprise WeChat) and covering communication, office collaboration, organization, and archive search. The business layer is written entirely in-house, while the foundation uses open-source components: Qt 6, asio, protobuf, SQLite, OpenSSL, and the AWS SDK (S3 interface, paired with RustFS); the inventory and licenses are listed in [third_party/](third_party/README.md). The system is not built on top of any open-source IM project, and it integrates no components under strong-copyleft licenses such as AGPL or SSPL. Desktop clients are C++17 + Qt; mobile clients are Android (Kotlin, shipped) and iOS (Swift, code-only with CI verification); the server is C++17, a single process on a single database.
 
-- 产品定义与分期依据：[docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
-- 产品定位一页纸：[docs/src/guide/product.md](docs/src/guide/product.md)
-- 需求与任务清单（R1–R19 主线、R23–R27 追加批次、四期拆解、验收口径）：[todo.md](todo.md)
-- 评审组决策清单（十五项 + 一项可选）：[docs/src/guide/decisions.md](docs/src/guide/decisions.md)
-- 文档站（界面预览、快速预览、架构与合规）：`docs/`（VitePress，构建 `pnpm docs:build`，部署于 GitHub Pages `/memex/`）
-- 原型设计稿：`docs/design/prototypes/`（桌面 7 屏 + 移动 4 屏），截图 `docs/src/public/screenshots/`
+- Product definition and phase basis: [docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
+- One-page product positioning: [docs/src/guide/product.md](docs/src/guide/product.md)
+- Requirements and task list (R1–R19 mainline, R23–R27 additional batches, four-phase breakdown, acceptance criteria): [todo.md](todo.md)
+- Review panel decision list (fifteen items + one optional): [docs/src/guide/decisions.md](docs/src/guide/decisions.md)
+- Documentation site (UI previews, quick tour, architecture and compliance): `docs/` (VitePress; build with `pnpm docs:build`, deployed on GitHub Pages at `/memex/`)
+- Prototype designs: `docs/design/prototypes/` (7 desktop screens + 4 mobile screens); screenshots in `docs/src/public/screenshots/`
 
-## 产品形态
+## Product Form
 
-单一安装包内含两套通信引擎：
+A single installation package contains two communication engines:
 
-| 形态 | 进入方式 | 链路 | 归档 |
+| Mode | How to enter | Link | Archiving |
 | --- | --- | --- | --- |
-| 直连态（默认） | 安装即用，零配置 | UDP 广播发现同网段终端，TCP 点对点直达（UDP 2425–2436 / TCP 2426–2437） | 仅存本机 |
-| 协作态（登录后） | 填服务器地址并登录 | 与协作服务端长连接 | 全量落服务端，可检索 |
+| Direct mode (default) | Works right after installation, zero configuration | UDP broadcast discovers terminals on the same subnet; TCP peer-to-peer connections (UDP 2425–2436 / TCP 2426–2437) | Stored on the local machine only |
+| Collaboration mode (after sign-in) | Enter the server address and sign in | Persistent connection to the collaboration server | Fully persisted on the server, searchable |
 
-登录后直连引擎不关闭（跨态互通需要）；服务端不可达时自动回落直连态。**连接服务端的唯一目的是留痕**：不提供密聊、阅后即焚、撤回即删归档、终端侧单方删除归档、面向使用者的留痕开关。
+The direct engine keeps running after sign-in (cross-mode interoperability requires it); when the server is unreachable, the client falls back to direct mode automatically. **The only purpose of connecting to the server is record retention**: no secret chats, no burn-after-reading, no deletion of archives upon message recall, no unilateral deletion of archives from the client, and no user-facing switch to turn record retention off.
 
-手机端全部为协作态：首次启动必须先完成服务器地址初始化，不提供免登录匿名使用。
+Mobile clients run in collaboration mode only: the first launch must complete server address initialization, and anonymous use without sign-in is not provided.
 
-## Monorepo 结构
+## Monorepo Structure
 
 ```
 memex/
-├── client/               # Qt C++17 桌面客户端（Windows / UOS / 麒麟 / macOS）
-│   ├── app/              # 入口与主窗口、系统集成（托盘、通知、开机启动）、
-│   │                     #   截图标注、主题、通知偏好（界面层并入 app）
-│   ├── engine/direct/    # 直连引擎：UDP 发现、点对点消息与文件
-│   ├── engine/collab/    # 协作引擎：长连接、消息同步、离线与补传
-│   ├── core/             # 共享内核：本地库（SQLite）、会话、文件传输
-│   └── tests/            # 桌面端单测
-├── server/               # C++17 协作服务端（单台集中部署）
-│   └── src/              # 单进程单库实现评审报告六模块职能（网关／账号设备／
-│                         #   组织架构／消息归档／策略／文件元数据）：
-│                         #   server.cpp session.cpp（网关与消息）
-│                         #   store.cpp authz.cpp cred.cpp（账号/组织/策略/归档）
-│                         #   files_server.cpp storage.cpp（R23 文件面与 S3 存储抽象）
-│                         #   webhook.cpp（T4.10 通知接入）
-├── common/               # 双端共用：协议定义（common/proto/memex.proto）、
-│                         #   序列化、公共工具
-├── apps/                 # 手机端客户端
-│   ├── android/          # Android（Kotlin，T6.3 已落地：R17/R18 + 会话列表收发
-│   │                     #   + 三级推送横幅震动）
-│   ├── ios/              # iOS（Swift/SwiftUI，T6.4 代码-only＋CI 验证）
-│   ├── harmony/          # 鸿蒙 NEXT（ArkTS，T6.6 代码-only＋CI 逻辑验证，
-│   │                     #   编译腿待 OHOS 工具链）
-├── admin/                # 管理后台（规划；背面见 server CLI/HTTP，README 占位）
-├── docs/                 # 文档站（VitePress）、评审报告、产品文档、原型
-└── third_party/          # 第三方组件清单与许可核验（A22；依赖经 vcpkg manifest 管理）
+├── client/               # Qt C++17 desktop client (Windows / UOS / Kylin / macOS)
+│   ├── app/              # Entry point and main window, system integration (tray,
+│   │                     #   notifications, autostart), screenshot annotation,
+│   │                     #   themes, notification preferences (UI layer merged into app)
+│   ├── engine/direct/    # Direct engine: UDP discovery, peer-to-peer messages and files
+│   ├── engine/collab/    # Collaboration engine: persistent connections, message sync,
+│   │                     #   offline messages and catch-up delivery
+│   ├── core/             # Shared core: local store (SQLite), conversations, file transfer
+│   └── tests/            # Desktop unit tests
+├── server/               # C++17 collaboration server (single-host centralized deployment)
+│   └── src/              # Single process on a single database, covering the six modules
+│                         #   of the review report (gateway / accounts & devices /
+│                         #   organization / message archive / policy / file metadata):
+│                         #   server.cpp session.cpp (gateway and messaging)
+│                         #   store.cpp authz.cpp cred.cpp (accounts / org / policy / archive)
+│                         #   files_server.cpp storage.cpp (R23 file plane and S3 storage)
+│                         #   webhook.cpp (T4.10 notification integration)
+├── common/               # Shared by client and server: protocol definitions
+│                         #   (common/proto/memex.proto), serialization, common utilities
+├── apps/                 # Mobile clients
+│   ├── android/          # Android (Kotlin, shipped in T6.3: R17/R18 + conversation list
+│   │                     #   send/receive + three-level push banner and vibration)
+│   ├── ios/              # iOS (Swift/SwiftUI, T6.4 code-only with CI verification)
+│   ├── harmony/          # HarmonyOS NEXT (ArkTS, T6.6 code-only with CI logic verification,
+│   │                     #   compile leg pending the OHOS toolchain)
+├── admin/                # Admin console (planned; see the server CLI/HTTP meanwhile,
+│                         #   this entry is a placeholder)
+├── docs/                 # Documentation site (VitePress), review report, product docs,
+│                         #   prototypes
+└── third_party/          # Third-party component inventory and license review (A22;
+                          #   dependencies managed via the vcpkg manifest)
 ```
 
-模块边界对应评审报告第四章：两套引擎各自完整、不共享通信状态，只通过共享内核（本地消息库、会话列表、联系人视图、文件传输模块）交汇；服务端六模块以单进程形式集聚（评审决策第 7 项：单进程单库实现，预留逻辑拆分），数据模型见报告第五章。
+Module boundaries correspond to Chapter 4 of the review report: the two engines are each self-contained and share no communication state; they meet only in the shared core (local message store, conversation list, contact views, file transfer module). The six server modules are consolidated into a single process (review decision no. 7: single-process, single-database implementation with logical splitting reserved); the data model is in Chapter 5 of the report.
 
-## 构建
+## Build
 
-依赖（asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / Qt6）经 vcpkg manifest 统一管理（`vcpkg.json`，版本由 `builtin-baseline` 钉住），CMake 经 `CMakePresets.json` 一条命令构建：
+Dependencies (asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / Qt6) are managed uniformly through the vcpkg manifest (`vcpkg.json`, versions pinned by `builtin-baseline`); CMake builds with a single command via `CMakePresets.json`:
 
 ```bash
-# 1. 准备 vcpkg（一次性；建议把 VCPKG_ROOT 写入 shell profile）
+# 1. Set up vcpkg (once; adding VCPKG_ROOT to your shell profile is recommended)
 git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
 ~/vcpkg/bootstrap-vcpkg.sh
 export VCPKG_ROOT="$HOME/vcpkg"
 
-# 2. 开发构建（Release · 服务端+客户端+测试；首次配置自动按 manifest 装包）
+# 2. Development build (Release · server + client + tests; the first configure
+#    installs packages per the manifest automatically)
 cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev
 ```
 
-Preset 一览：`dev`（开发构建）、`ci`（Debug+覆盖率，CI 门禁）、`server-release` / `client-release`（每日构建产物口径）。默认只装服务端依赖，带 Qt 桌面的构建启用 manifest 的 `client` feature。首次配置会编译 qtbase，耗时较长；vcpkg 二进制缓存（默认 `~/.cache/vcpkg/archives`）在后续配置中复用编译产物，秒级完成。CI 与每日构建使用 GitHub Actions 缓存（`x-gha` 二进制缓存 + 安装树整取）加速。
+Presets: `dev` (development build), `ci` (Debug + coverage, the CI gate), and `server-release` / `client-release` (the daily-build artifact configuration). By default only server dependencies are installed; Qt desktop builds enable the manifest's `client` feature. The first configure compiles qtbase and takes a while; the vcpkg binary cache (default `~/.cache/vcpkg/archives`) reuses build artifacts on later configures, which then finish in seconds. CI and daily builds use GitHub Actions caching (the `x-gha` binary cache plus the full install tree) for speed.
 
-## 部署
+## Deployment
 
-### Docker（推荐）
+### Docker (recommended)
 
-多阶段构建（`server/Dockerfile`）：依赖层按 vcpkg manifest 静态编译（vcpkg.json 变更才失效）、构建层出单二进制、运行层 `ubuntu:24.04` 非 root（uid 10001）运行。依赖口径：asio／nlohmann-json 头文件即用；protobuf／openssl(libcrypto)／sqlite3／aws-sdk-cpp(s3) 静态链接进二进制——运行层零 `.so`。容器构建与宿主开发树（`x64-linux-dynamic`，Qt 客户端同树）互不相干。
+Multi-stage build (`server/Dockerfile`): the dependency layer compiles statically per the vcpkg manifest (invalidated only when `vcpkg.json` changes), the build layer produces a single binary, and the runtime layer is `ubuntu:24.04` running as non-root (uid 10001). Dependency breakdown: asio and nlohmann-json are header-only; protobuf, openssl (libcrypto), sqlite3, and aws-sdk-cpp (s3) are statically linked into the binary, so the runtime layer contains zero `.so` files. The container build and the host development tree (`x64-linux-dynamic`, shared with the Qt client) are fully independent.
 
-vcpkg 源不走网络克隆：经 buildx named context 注入快照（须含 `vcpkg.json` builtin-baseline 对应 commit；干净 clone 一份、把该 commit checkout 出来即可，快照带 `downloads/` 缓存则依赖层全离线装）。CI 侧由 workflow 自动取快照，本地从源码构建需指定：
+The vcpkg source is not cloned over the network: a snapshot is injected through a buildx named context (it must contain the commit matching the `builtin-baseline` in `vcpkg.json`; a clean clone with that commit checked out is enough, and if the snapshot carries the `downloads/` cache, the dependency layer installs fully offline). CI fetches the snapshot automatically in the workflow; local builds from source must specify it:
 
 ```bash
-# 首次从源码构建镜像：注入 vcpkg 快照
+# First image build from source: inject the vcpkg snapshot
 git clone https://github.com/microsoft/vcpkg vcpkg-src
 git -C vcpkg-src checkout 10541e317a660f4165ba4ac2851ab54a8d4577b1
 docker buildx build --build-context vcpkgsrc=./vcpkg-src \
   -f server/Dockerfile -t ghcr.io/cuihairu/memex-server:local .
 
-# 一键起：服务端（SQLite 持久卷）+ RustFS（S3 兼容对象存储）
-# （compose 默认也走上述构建：VCPKG_SRC 环境变量改指快照，默认 ./vcpkg-src；
-#  已有镜像后直接 up 不触发构建、无需快照）
+# One-command start: server (SQLite persistent volume) + RustFS (S3-compatible object storage)
+# (compose uses the same build by default: the VCPKG_SRC environment variable points to
+#  the snapshot, ./vcpkg-src by default; once an image exists, plain up skips the build
+#  and needs no snapshot)
 docker compose up -d
-docker compose ps        # 两服务 healthy 即就绪
-# 客户端连接：<宿主机>:24360（协作面）、<宿主机>:24561（文件面）
+docker compose ps        # ready once both services are healthy
+# Client connections: <host>:24360 (collaboration plane), <host>:24561 (file plane)
 ```
 
-对象存储口令生产环境写同目录 `.env`（`MEMEX_S3_ACCESS_KEY`／`MEMEX_S3_SECRET_KEY`）再起；示例口令仅限本机试跑。服务端 S3 配置旗标优先、环境变量兜底（`MEMEX_S3_ENDPOINT`／`MEMEX_S3_BUCKET`／`MEMEX_S3_ACCESS_KEY`／`MEMEX_S3_SECRET_KEY`），桶在起面时幂等自建（含对端就绪重试）。健康探针＝文件面无鉴权 `GET /files/health`（改文件面端口时同步设容器 `MEMEX_FILES_PORT`）。
+For production, write the object-storage credentials into `.env` in the same directory (`MEMEX_S3_ACCESS_KEY` / `MEMEX_S3_SECRET_KEY`) before starting; the example credentials are for local trials only. Server-side S3 flags take precedence over environment variables (`MEMEX_S3_ENDPOINT` / `MEMEX_S3_BUCKET` / `MEMEX_S3_ACCESS_KEY` / `MEMEX_S3_SECRET_KEY`); the bucket is created idempotently when the file plane starts (with retries until the endpoint is ready). The health probe is the unauthenticated file-plane `GET /files/health` (if you change the file-plane port, also set the container's `MEMEX_FILES_PORT`).
 
-镜像发布：推 `v*` tag 或推 main 由 CI（`.github/workflows/docker.yml`）构建并推 `ghcr.io/<owner>/memex-server`（main＝不可变 `sha-<完整 sha>` + latest；v* 另出 semver），依赖层走 buildx gha 缓存。
+Image publishing: pushing a `v*` tag or pushing to main has CI (`.github/workflows/docker.yml`) build and push `ghcr.io/<owner>/memex-server` (from main: immutable `sha-<full sha>` plus latest; `v*` tags additionally produce semver tags), with the dependency layer on the buildx gha cache.
 
-### CI 部署链（runner-Docker，192.168.5.5）
+### CI deployment chain (runner-Docker, 192.168.5.5)
 
-链路：ci（测试）绿 → docker（构建推 ghcr）→ **deploy**（`.github/workflows/deploy.yml`，自托管 runner）：拉不可变 `sha-<完整 sha>` → 在 `/data/deploy/memex` compose up（只改写 `.env` 的 `TAG=` 行，S3 凭据等宿主配置原样保留且流程中永不打印）→ 有界轮询（30×10s）容器 healthcheck + 宿主真 HTTP 探活 `/files/health`=200 → 不过闸自动回滚上一 tag 并验证回滚体健康。手动 `workflow_dispatch` 可指定 `sha-xxx` 显式回滚（回滚币＝历史 sha 镜像，宿主保留）。
+Chain: ci (tests) green → docker (build and push to ghcr) → **deploy** (`.github/workflows/deploy.yml`, self-hosted runner): pull the immutable `sha-<full sha>` → compose up in `/data/deploy/memex` (only the `TAG=` line of `.env` is rewritten; host configuration such as the S3 credentials is preserved as-is and never printed during the process) → bounded polling (30×10s) of the container healthcheck plus a real host-side HTTP probe of `/files/health` = 200 → if the gate fails, roll back automatically to the previous tag and verify the rolled-back deployment is healthy. Manual `workflow_dispatch` can roll back explicitly to a given `sha-xxx` (rollback material = the historical sha images retained on the host).
 
-runner-Docker 一次性装机（在该机上执行）：
+One-time setup of runner-Docker (run on that machine):
 
 ```bash
-# 1) actions runner：注册时 custom label 填 memex-docker100（deploy.yml runs-on 依赖）
+# 1) actions runner: use the custom label memex-docker100 at registration
+#    (deploy.yml runs-on depends on it)
 mkdir -p ~/actions-runner && cd ~/actions-runner
-# 从 repo Settings→Actions→Runners 取 latest 包地址与 TOKEN（会过期，现取现用）
+# Fetch the latest package URL and TOKEN from repo Settings→Actions→Runners
+# (the token expires; obtain it fresh when needed)
 tar xzf actions-runner-linux-x64-*.tar.gz
 ./config.sh --url https://github.com/cuihairu/memex --token <TOKEN> --labels memex-docker100
 sudo ./svc.sh install && sudo ./svc.sh start
 
-# 2) ghcr 拉取凭据（包私有时装到 runner 用户；设为 public 包可跳过）
-docker login ghcr.io   # 用户名 cuihairu，PAT 需 read:packages
+# 2) ghcr pull credentials (install them for the runner user if the package is private;
+#    skip if the package is public)
+docker login ghcr.io   # user cuihairu; the PAT needs read:packages
 
-# 3) 部署目录与运行面配置（TAG 行由 deploy workflow 维护，其余手管）
+# 3) Deployment directory and runtime configuration (the deploy workflow maintains
+#    the TAG line; the rest is managed by hand)
 mkdir -p /data/deploy/memex && cd /data/deploy/memex
 cat > .env <<'EOF'
-MEMEX_S3_ACCESS_KEY=<生产口令>
-MEMEX_S3_SECRET_KEY=<生产口令>
+MEMEX_S3_ACCESS_KEY=<production credential>
+MEMEX_S3_SECRET_KEY=<production credential>
 EOF
 ```
 
-回滚演练（验收口径：故意让一次部署失败，证明回滚链路真能回 200）——dispatch 部署一个不存在的 sha：`gh workflow run deploy -f tag=sha-deadbeef`；预期：拉取即失败或起后不过健康闸，workflow 自动回滚上一 tag 并探活 200（run 日志见「回滚 … 健康」），线上服务不中断。手工修复口径：凭据从运行中容器取（`docker exec memex-server printenv | grep ^MEMEX_S3_`），不打印到外部渠道。
+Rollback drill (acceptance criterion: deliberately fail one deployment and prove the rollback chain really returns to a 200): dispatch a deployment of a nonexistent sha with `gh workflow run deploy -f tag=sha-deadbeef`. Expected outcome: the pull fails right away, or the container starts but fails the health gate; the workflow then rolls back automatically to the previous tag and probes 200 (the run log shows the "rollback … healthy" entry), and the live service is not interrupted. Manual recovery: take the credentials from the running container (`docker exec memex-server printenv | grep ^MEMEX_S3_`); never print them to external channels.
 
-### 裸机 / 虚机
+### Bare metal / virtual machines
 
 ```bash
-# 每日构建口径（Release·仅服务端）
+# Daily-build configuration (Release · server only)
 cmake --preset server-release && cmake --build --preset server-release
 ./build-server/server/memex_server serve --db /var/lib/memex/memex.db \
   --port 24360 --webhook-port 0 --files-port 24561 \
@@ -151,8 +165,8 @@ cmake --preset server-release && cmake --build --preset server-release
   --s3-access-key ... --s3-secret-key ...
 ```
 
-RustFS 对象存储可用 `./build-server/server/memex_server storage compose`（生成 `docker compose` 文件）或直接 `docker run rustfs/rustfs:latest`（监听契约见 `server/src/storage.cpp` 注记）。
+For the RustFS object store, use `./build-server/server/memex_server storage compose` (generates a `docker compose` file) or run `docker run rustfs/rustfs:latest` directly (the listening contract is documented in the notes in `server/src/storage.cpp`).
 
-## 工程纪律
+## Engineering Discipline
 
-全量测试绿才允许 commit／push，push 前先 `git fetch origin && git rebase origin/main`；每个可验收增量一笔提交，不打 tag、不发 release、不 force push。许可上不引入 AGPL／SSPL 组件，宽松许可组件登记进 `third_party/` 清单。命名按报告第五章第六节：代号 Memex，服务名 MemexServer，数据库与日志前缀 `memex`。
+All tests must be green before commit/push; before pushing, run `git fetch origin && git rebase origin/main`. One commit per acceptable increment; no tags, no releases, no force pushes. On licensing: no AGPL/SSPL components, and permissively licensed components are registered in the `third_party/` inventory. Naming follows Section 6 of Chapter 5 of the report: the codename is Memex, the service name is MemexServer, and databases and logs use the `memex` prefix.
