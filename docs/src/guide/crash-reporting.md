@@ -53,6 +53,40 @@
   （handler 完成报告时回调）状态行/日志记录 dump 路径，与运行日志可
   对时（同一时间线）。
 
-## 实现（随批续写）
+## 实现（2026-10-08 落地实录）
 
-（接入方式、CMake 目标、初始化代码与验收实录随实现批续写。）
+- **依赖与构建**：`vcpkg.json` client feature 增 `crashpad`；`client/CMakeLists.txt`
+  `find_package(crashpad CONFIG REQUIRED)`＋链接 `crashpad::crashpad` 界面库；
+  构建后 `copy_if_different` 把 `crashpad_handler` 拷到 `memex_client`
+  同目录（找不到仅 WARNING，运行时 PATH 兜底）。`third_party/组件清单.md` 已登记。
+- **初始化**：`client/app/crash_report.{hpp,cpp}`——`init_crash_reporting()`
+  在 `main()` 里 QApplication 名称设置后调用。handler 探寻顺序＝可执行同
+  目录→PATH；`CrashReportDatabase::Initialize` 建 crashes 目录；
+  `StartHandler(..., url="" /*只落盘不外发*/, annotations={product, version},
+  restartable=true, asynchronous_start=false)`。每步失败 qWarning 后返回
+  false（客户端照常运行，不因采集组件缺失拒绝启动）。
+- **符号面**：`memex_client` 目标恒 `-g`（GNU/Clang），dump_syms 可直接
+  从产物抽符号；发布分离符号（objcopy）另批。
+- **日志打通**：启动成功 `qInfo`（`[崩溃采集] Crashpad 已启动：handler=…
+  dump=…（只本地落盘不外发）`）；启动时扫描 new/pending/completed 三区
+  既有 `*.dmp` 计数同打一条，与运行日志同时间线对时。验收开关触发行
+  `qWarning` 明示。
+- **测试**：`client/tests/test_crash.cpp`（ctest 腿 `crash`）——QTemporaryDir
+  隔离 XDG 起 `MEMEX_CRASH_TEST=1` 真客户端进程，断言非零退出（CrashExit）
+  ＋`*.dmp` 落盘非空；dump 由独立 handler 进程写盘，探测按文件出现轮询
+  （40s 上界），不依赖客户端进程存活。
+- **验收实录（2026-10-08，本机 Linux）**：
+  1. `MEMEX_CRASH_TEST=1 ./memex_client`（隔离 XDG_DATA_HOME）→ 2s 后
+     SIGSEGV（exit 139），日志两行：`[崩溃采集] Crashpad 已启动：…（只
+     本地落盘不外发）`＋`[崩溃采集] MEMEX_CRASH_TEST=1 触发故意崩溃（空
+     指针写入）`；
+  2. dump 落盘 `…/memex/Memex/crashes/pending/<uuid>.dmp`（＋`.meta`），
+     约 32K；
+  3. 符号化（开发机侧，rust 工具链）：`dump_syms memex_client` 产出
+     Breakpad 符号，按 `symbols/<模块>/<build-id>/memex_client.sym` 目录树
+     摆放，`minidump-stackwalk <dump> symbols/` 还原——栈顶
+     `memex_client!QtPrivate::QCallableObject<main::{lambda()#1}>::impl
+     [qobjectdefs_impl.h:548]`（即触发 lambda），`main.cpp:71` 可见；
+     crash 原因 `SIGSEGV / SEGV_MAPERR @ 0x0`（空指针写入）；
+  4. ctest 全量 61/61 绿（新增 crash 腿约 3.3s）。
+
