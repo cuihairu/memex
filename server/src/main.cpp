@@ -22,6 +22,7 @@
 
 #include "cred.hpp"
 #include "files_server.hpp"
+#include "group_assistant.hpp"
 #include "model_gateway.hpp"
 #include "server.hpp"
 #include "storage.hpp"
@@ -61,6 +62,9 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
   std::uint16_t port = kDefaultPort;
   int webhook_port = kDefaultWebhookPort; // int 才能表达 0＝关闭
   int model_port = 0; // 模型网关默认关闭：--model-port N 显式开启
+  std::string assistant_bot;   // 群内智能助手（平台三期）：bot 名（空=关）
+  std::string assistant_token; // 该 bot 明文 token（建议 env
+                               // MEMEX_ASSISTANT_TOKEN——旗标值进 ps）
   int files_port = 0; // 文件面默认关闭：须显式 --files-port 且给 S3 配置
   // 外网单向 uplink 面（R23-4）默认关闭：须显式 --uplink-port 开启
   //（安全默认：开启即明示暴露范围，见装配处日志）
@@ -92,6 +96,12 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
         std::cerr << "无效模型网关端口（0＝关闭网关）\n";
         return 2;
       }
+    } else if (arg == "--assistant" && i + 1 < argc) {
+      // 群内智能助手（平台三期）：以 bot 身份轮询四指令；回群走回环
+      // /bot/send（须 webhook 口开启）
+      assistant_bot = argv[++i];
+    } else if (arg == "--assistant-token" && i + 1 < argc) {
+      assistant_token = argv[++i];
     } else if (arg == "--files-port" && i + 1 < argc) {
       files_port = std::atoi(argv[++i]);
       if (files_port < 0 || files_port > 65535) {
@@ -291,6 +301,47 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
                      "不受影响）：" << e.what() << std::endl;
       }
     }
+    // 群内智能助手（平台三期）：独立线程轮询 bot 收信队列，四指令
+    // （@助手/@纪要/@整理/@检索）；回群走回环 /bot/send（webhook 口须
+    // 开启），模型调用走同进程网关回环（未启用则指令回「模型未启用」，
+    // @检索 不依赖模型照常可用）。
+    std::unique_ptr<memex::server::GroupAssistantWorker> assistant;
+    if (!assistant_bot.empty()) {
+      if (assistant_token.empty()) {
+        const char* env = std::getenv("MEMEX_ASSISTANT_TOKEN");
+        if (env) assistant_token = env;
+      }
+      if (webhook_port <= 0) {
+        std::cerr << "[MEMEX] 群助手需要回环投递口：--webhook-port 未开启，"
+                     "助手未启用" << std::endl;
+      } else if (assistant_token.empty()) {
+        std::cerr << "[MEMEX] 群助手缺 token：--assistant-token 或 env "
+                     "MEMEX_ASSISTANT_TOKEN，助手未启用" << std::endl;
+      } else if (!store.bot_by_name(assistant_bot)) {
+        std::cerr << "[MEMEX] 群助手 bot 不存在：" << assistant_bot
+                  << "（先 memex_server bot add 并 join 群），助手未启用"
+                  << std::endl;
+      } else {
+        try {
+          assistant =
+              std::make_unique<memex::server::GroupAssistantWorker>(
+                  assistant_bot, assistant_token,
+                  static_cast<std::uint16_t>(webhook_port),
+                  model_port > 0
+                      ? "http://127.0.0.1:" + std::to_string(model_port) +
+                            "/v1" // 网关 OpenAI 兼容路由在 /v1 下
+                      : std::string{},
+                  db_path, /*poll_ms=*/1000);
+          assistant->start();
+          std::cout << "[MEMEX] 群内智能助手已启动（bot:" << assistant_bot
+                    << "，指令：@助手/@纪要/@整理/@检索）" << std::endl;
+        } catch (const std::exception& e) {
+          assistant.reset();
+          std::cerr << "[MEMEX] 群助手启动失败（消息主通道不受影响）："
+                    << e.what() << std::endl;
+        }
+      }
+    }
     asio::signal_set signals(io, SIGINT, SIGTERM);
     signals.async_wait([&](std::error_code, int sig) {
       std::cout << "[MEMEX] 收到信号 " << sig << "，退出" << std::endl;
@@ -301,6 +352,7 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
     if (files) files->start_accept();
     if (uplink) uplink->start_accept();
     io.run();
+    if (assistant) assistant->stop(); // 先停助手（回环依赖 webhook/网关口）
     if (gateway) gateway->stop();
     if (gateway_thread.joinable()) gateway_thread.join();
   } catch (const std::exception& e) {
@@ -2547,7 +2599,8 @@ int main(int argc, char** argv) {
     if (cmd == "storage") return cmd_storage(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
               << "用法：memex_server [serve [--port N] [--webhook-port N] "
-                 "[--model-port N] "
+                 "[--model-port N] [--assistant <bot名> "
+                 "[--assistant-token T]] "
                  "[--db P]] | account add … | "
                  "logins [账号] [--device 指纹前缀] | device … | "
                  "messages [账号] [--keyword K] [--since T] "
