@@ -13,8 +13,10 @@ const props = withDefaults(
     slides: Slide[]
     /** 自动轮播间隔（毫秒），0 表示不自动播放 */
     interval?: number
+    /** 无障碍区域名（同页多实例时各自指明，如「桌面端界面预览」） */
+    label?: string
   }>(),
-  { interval: 5000 }
+  { interval: 5000, label: '界面预览' }
 )
 
 /** 截图主题：亮 / 暗各一套（screenshots/<key>-light|dark.png） */
@@ -97,7 +99,7 @@ onBeforeUnmount(stopTimer)
     class="showcase"
     role="region"
     aria-roledescription="轮播"
-    aria-label="界面预览"
+    :aria-label="label"
     tabindex="0"
     @mouseenter="hovering = true"
     @mouseleave="hovering = false"

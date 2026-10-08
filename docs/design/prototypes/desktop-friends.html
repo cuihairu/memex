@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 好友列表（协作态列表态：无对话不摆聊天面板）</title>
+<link rel="stylesheet" href="prototypes.css">
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span class="state-badge collab"><i class="dot"></i>协作态 · 消息全量归档</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="app-body">
+    <nav class="rail">
+      <button class="rail-item active"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H7l-4 3v-4.5A8.5 8.5 0 1 1 21 11.5z"/></svg></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span class="tip">通讯录</span></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="tip">文件</span></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+      <span class="spacer"></span>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.33-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51 1.7 1.7 0 0 0 1.87-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg></button>
+      <div class="avatar v5" style="width:34px;height:34px;border-radius:10px;font-size:13px;position:relative">周<span style="position:absolute;right:-3px;bottom:-3px;width:11px;height:11px;border-radius:50%;background:var(--ok);border:2px solid var(--panel-2)"></span></div>
+    </nav>
+
+    <aside class="sidebar">
+      <div class="side-head">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <span class="side-title">好友</span>
+          <span class="device-count" style="margin-left:auto"><span style="width:6px;height:6px;border-radius:50%;background:var(--ok);display:inline-block"></span>23 / 38 在线</span>
+        </div>
+        <div class="search"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input placeholder="搜索好友 / 工号" value=""></div>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-3)">来自组织架构通讯录 · 好友须经对方同意</div>
+      </div>
+
+      <div class="side-group">星标好友</div>
+      <div class="side-list" style="padding-top:0">
+        <div class="row">
+          <div class="avatar v3">李<i class="presence on"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">李明 · 财务部</span><span class="r-time">10:24</span></div>
+            <div class="r-sub">收到，合同我这边今天发你</div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="avatar v6">王<i class="presence on"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">王芳 · 市场部</span><span class="r-time">09:58</span></div>
+            <div class="r-sub">[文件] Q4 预算表_v3.xlsx</div>
+          </div>
+          <div class="r-badges"><span class="n-count">3</span></div>
+        </div>
+        <div class="side-group">技术部 · 12 人</div>
+        <div class="row">
+          <div class="avatar v7">赵<i class="presence on"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">赵强 · 技术部</span><span class="r-time">昨天</span></div>
+            <div class="r-sub">[文件夹] 部署包/ release-2.3.1</div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="avatar v2">孙<i class="presence on"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">孙洁 · 技术部</span><span class="r-time">周一</span></div>
+            <div class="r-sub">代码评审安排在下午三点</div>
+          </div>
+        </div>
+        <div class="side-group">人事部 · 5 人</div>
+        <div class="row" style="opacity:.55">
+          <div class="avatar v8">陈<i class="presence off"></i></div>
+          <div class="r-main">
+            <div class="r-top"><span class="r-name">陈静 · 人事部</span><span class="r-time">昨天</span></div>
+            <div class="r-sub">好的，明天见</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <section class="main main-empty">
+      <div class="empty-card">
+        <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <div class="empty-title">从左侧选择好友开始会话</div>
+        <div class="empty-sub">点好友后此处展开对话；再点当前好友或点对话标题栏 ✕ 关回列表态<br>
+        消息经服务端中转 · 全量归档可检索 · 跨态会话显式标注</div>
+      </div>
+    </section>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>
