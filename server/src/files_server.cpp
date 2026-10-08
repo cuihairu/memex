@@ -4484,8 +4484,15 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     const std::int64_t deadline_ms =
         j.contains("deadline_ms") ? j["deadline_ms"].get<std::int64_t>() : 0;
+    const bool anonymous =
+        j.contains("anonymous") && j["anonymous"].is_boolean() &&
+        j["anonymous"].get<bool>();
+    const bool multi =
+        j.contains("multi") && j["multi"].is_boolean() &&
+        j["multi"].get<bool>();
     const std::int64_t id = impl_.store.poll_create(
-        gid, topic, options, deadline_ms, account, now_ms());
+        gid, topic, options, deadline_ms, account, now_ms(), anonymous,
+        multi);
     if (id == 0) {
       respond_json(404, {{"ok", false}, {"error", "群不存在"}});
       return;
@@ -4511,20 +4518,35 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     for (const auto& p : impl_.store.polls_list(gid)) {
       json counts = std::vector<int>(p.options.size(), 0);
       json votes = json::array();
+      const int n = static_cast<int>(p.options.size());
       for (const auto& v : impl_.store.poll_votes(p.id)) {
-        if (v.choice >= 1 &&
-            v.choice <= static_cast<int>(p.options.size())) {
+        if (p.multi) {
+          // 多选：choice=位集（bit i=选 i+1 号），按位展开累加
+          if (v.choice >= 1 && v.choice < (1 << n)) {
+            for (int i = 0; i < n; ++i) {
+              if ((v.choice >> i) & 1) {
+                counts[i] = counts[i].get<int>() + 1;
+              }
+            }
+          }
+        } else if (v.choice >= 1 && v.choice <= n) {
           counts[v.choice - 1] = counts[v.choice - 1].get<int>() + 1;
         }
-        votes.push_back({{"account", v.account},
-                         {"choice", v.choice},
-                         {"ts_ms", v.ts_ms}});
+        // 匿名票：台账不回带 voter 身份（counts 照常——库内留 account
+        // 供改票 upsert 与审计，展示匿名口径见设计稿）
+        if (!p.anonymous) {
+          votes.push_back({{"account", v.account},
+                           {"choice", v.choice},
+                           {"ts_ms", v.ts_ms}});
+        }
       }
       arr.push_back({{"id", p.id},
                      {"topic", p.topic},
                      {"options", p.options},
                      {"deadline_ms", p.deadline_ms},
                      {"closed", p.closed},
+                     {"anonymous", p.anonymous},
+                     {"multi", p.multi},
                      {"status", p.closed || (p.deadline_ms > 0 &&
                                              now_ms() >= p.deadline_ms)
                                   ? "closed"
@@ -4568,10 +4590,19 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(404, {{"ok", false}, {"error", "投票不存在"}});
       return;
     }
-    if (choice < 1 || choice > static_cast<int>(p->options.size())) {
+    const int n = static_cast<int>(p->options.size());
+    if (p->multi) {
+      // 多选：choice=位集（bit i=选 i+1 号），非零且每位都在界内
+      if (choice < 1 || choice >= (1 << n)) {
+        respond_json(400,
+                     {{"ok", false},
+                      {"error", "位集越界（每位须为 1~" +
+                                    std::to_string(n) + " 号选项）"}});
+        return;
+      }
+    } else if (choice < 1 || choice > n) {
       respond_json(400, {{"ok", false},
-                         {"error", "选项越界（1~" +
-                                       std::to_string(p->options.size()) +
+                         {"error", "选项越界（1~" + std::to_string(n) +
                                        "）"}});
       return;
     }

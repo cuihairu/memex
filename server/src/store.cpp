@@ -589,8 +589,8 @@ bool ServerStore::ensure_schema() {
       "  updated_by TEXT NOT NULL,"
       "  updated_ms INTEGER NOT NULL);"
       // —— 二期群工具三件（原生互动，不走 R25 外部工具代理）：投票
-      // （记名单选，改票=覆盖）＋接龙（一人一条 upsert）＋群任务
-      // （认领制，done 终态留痕不删行）——
+      // （记名单选，改票=覆盖；匿名=展示不回 voter、多选=choice 存位集）
+      // ＋接龙（一人一条 upsert）＋群任务（认领制，done 终态留痕不删行）——
       "CREATE TABLE IF NOT EXISTS group_polls ("
       "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
       "  group_id INTEGER NOT NULL,"
@@ -598,6 +598,8 @@ bool ServerStore::ensure_schema() {
       "  options_json TEXT NOT NULL,"
       "  deadline_ms INTEGER NOT NULL DEFAULT 0,"
       "  closed INTEGER NOT NULL DEFAULT 0,"
+      "  anonymous INTEGER NOT NULL DEFAULT 0,"
+      "  multi INTEGER NOT NULL DEFAULT 0,"
       "  created_by TEXT NOT NULL,"
       "  created_ms INTEGER NOT NULL);"
       "CREATE INDEX IF NOT EXISTS idx_gpo_gid"
@@ -735,6 +737,13 @@ bool ServerStore::ensure_schema() {
               nullptr, nullptr, nullptr);
   sqlite3_exec(db_, "ALTER TABLE tasks ADD COLUMN"
                     " ext_key TEXT NOT NULL DEFAULT ''",
+              nullptr, nullptr, nullptr);
+  // 旧库迁移（第七笔）：投票表补匿名/多选两列（默认 0=记名单选不变）
+  sqlite3_exec(db_, "ALTER TABLE group_polls ADD COLUMN"
+                    " anonymous INTEGER NOT NULL DEFAULT 0",
+              nullptr, nullptr, nullptr);
+  sqlite3_exec(db_, "ALTER TABLE group_polls ADD COLUMN"
+                    " multi INTEGER NOT NULL DEFAULT 0",
               nullptr, nullptr, nullptr);
   // 旧库迁移（T4.1）：offline_messages 单列 UNIQUE(msg_id) →
   // 复合 UNIQUE(msg_id, to_account)。旧表不重建则群扇出 INSERT OR IGNORE
@@ -6847,14 +6856,16 @@ std::int64_t ServerStore::poll_create(std::uint64_t group_id,
                                       const std::vector<std::string>& options,
                                       std::int64_t deadline_ms,
                                       const std::string& by,
-                                      std::int64_t ts_ms) {
+                                      std::int64_t ts_ms, bool anonymous,
+                                      bool multi) {
   if (!group_info(group_id).has_value()) return 0;
   if (topic.empty() || options.size() < 2 || options.size() > 10) return 0;
   nlohmann::json arr = nlohmann::json::array();
   for (const auto& o : options) arr.push_back(o);
   const char* sql =
       "INSERT INTO group_polls(group_id, topic, options_json, deadline_ms,"
-      " closed, created_by, created_ms) VALUES(?, ?, ?, ?, 0, ?, ?);";
+      " closed, anonymous, multi, created_by, created_ms)"
+      " VALUES(?, ?, ?, ?, 0, ?, ?, ?, ?);";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
   sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
@@ -6862,8 +6873,10 @@ std::int64_t ServerStore::poll_create(std::uint64_t group_id,
   const std::string arr_s = arr.dump();
   sqlite3_bind_text(st, 3, arr_s.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_int64(st, 4, deadline_ms);
-  sqlite3_bind_text(st, 5, by.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_int64(st, 6, ts_ms);
+  sqlite3_bind_int64(st, 5, anonymous ? 1 : 0);
+  sqlite3_bind_int64(st, 6, multi ? 1 : 0);
+  sqlite3_bind_text(st, 7, by.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 8, ts_ms);
   const bool ok = sqlite3_step(st) == SQLITE_DONE;
   const std::int64_t id = ok ? sqlite3_last_insert_rowid(db_) : 0;
   sqlite3_finalize(st);
@@ -6874,7 +6887,8 @@ std::optional<ServerStore::GroupPoll> ServerStore::poll_by_id(
     std::int64_t id) {
   const char* sql =
       "SELECT id, group_id, topic, options_json, deadline_ms, closed,"
-      " created_by, created_ms FROM group_polls WHERE id = ?;";
+      " anonymous, multi, created_by, created_ms"
+      " FROM group_polls WHERE id = ?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
     return std::nullopt;
@@ -6898,9 +6912,11 @@ std::optional<ServerStore::GroupPoll> ServerStore::poll_by_id(
     }
     p.deadline_ms = sqlite3_column_int64(st, 4);
     p.closed = sqlite3_column_int64(st, 5) != 0;
-    const char* cb = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    p.anonymous = sqlite3_column_int64(st, 6) != 0;
+    p.multi = sqlite3_column_int64(st, 7) != 0;
+    const char* cb = reinterpret_cast<const char*>(sqlite3_column_text(st, 8));
     p.created_by = cb ? cb : "";
-    p.created_ms = sqlite3_column_int64(st, 7);
+    p.created_ms = sqlite3_column_int64(st, 9);
     out = std::move(p);
   }
   sqlite3_finalize(st);
@@ -6912,7 +6928,8 @@ std::vector<ServerStore::GroupPoll> ServerStore::polls_list(
   std::vector<GroupPoll> out;
   const char* sql =
       "SELECT id, group_id, topic, options_json, deadline_ms, closed,"
-      " created_by, created_ms FROM group_polls WHERE group_id = ?"
+      " anonymous, multi, created_by, created_ms"
+      " FROM group_polls WHERE group_id = ?"
       " ORDER BY id DESC;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
@@ -6934,9 +6951,11 @@ std::vector<ServerStore::GroupPoll> ServerStore::polls_list(
     }
     p.deadline_ms = sqlite3_column_int64(st, 4);
     p.closed = sqlite3_column_int64(st, 5) != 0;
-    const char* cb = reinterpret_cast<const char*>(sqlite3_column_text(st, 6));
+    p.anonymous = sqlite3_column_int64(st, 6) != 0;
+    p.multi = sqlite3_column_int64(st, 7) != 0;
+    const char* cb = reinterpret_cast<const char*>(sqlite3_column_text(st, 8));
     p.created_by = cb ? cb : "";
-    p.created_ms = sqlite3_column_int64(st, 7);
+    p.created_ms = sqlite3_column_int64(st, 9);
     out.push_back(std::move(p));
   }
   sqlite3_finalize(st);
@@ -6952,9 +6971,12 @@ bool ServerStore::poll_vote(std::int64_t poll_id, const std::string& account,
       (p->deadline_ms > 0 && ts_ms >= p->deadline_ms)) {
     return false;
   }
-  if (choice < 1 ||
-      choice > static_cast<int>(p->options.size())) {
-    return false;
+  const int n = static_cast<int>(p->options.size());
+  if (p->multi) {
+    // 多选：choice=位集（bit i=选 i+1 号）——非零且每位都在界内
+    if (choice < 1 || choice >= (1 << n)) return false;
+  } else {
+    if (choice < 1 || choice > n) return false;
   }
   const char* sql =
       "INSERT INTO group_poll_votes(poll_id, account, choice, ts_ms)"

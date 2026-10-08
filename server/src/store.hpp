@@ -1283,8 +1283,10 @@ public:
     std::uint64_t group_id{0};
     std::string topic;
     std::vector<std::string> options;
-    std::int64_t deadline_ms{0}; // 0=不设截止（一期仅展示不自动关）
+    std::int64_t deadline_ms{0}; // 0=不设截止（到点惰性判定自动截止）
     bool closed{false};
+    bool anonymous{false}; // 匿名：结果与台账不回带 voter 身份（库内留 account 供改票与审计）
+    bool multi{false};     // 多选：choice 存位集（bit i=选 i+1 号），一人仍只一行计一票
     std::string created_by;
     std::int64_t created_ms{0};
   };
@@ -1297,7 +1299,8 @@ public:
   std::int64_t poll_create(std::uint64_t group_id, const std::string& topic,
                            const std::vector<std::string>& options,
                            std::int64_t deadline_ms, const std::string& by,
-                           std::int64_t ts_ms);
+                           std::int64_t ts_ms, bool anonymous = false,
+                           bool multi = false);
   std::optional<GroupPoll> poll_by_id(std::int64_t id);
   std::vector<GroupPoll> polls_list(std::uint64_t group_id); // id DESC
   // 投/改票（upsert 覆盖）；票不存在或已关=false、选项越界=false

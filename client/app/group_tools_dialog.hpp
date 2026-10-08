@@ -36,8 +36,11 @@ class GroupToolsDialog : public QDialog {
   // —— 程序化入口（测试共用；服务端裁决一切）——
   // 投票：建（选项≥2 由行内逗号分隔给出）/投改票/关票
   bool add_poll(const QString& topic, const QStringList& options,
-                qint64 deadline_ms = 0);
+                qint64 deadline_ms = 0, bool anonymous = false,
+                bool multi = false);
   bool vote_selected(int choice);
+  // 「1,3」→位集（多选输入）；非法（非数字/越界/重复）返回 0
+  int parse_choices(const QString& text) const;
   bool close_selected_poll();
   // 接龙：建/加入（upsert 自己条目）/关
   bool add_chain(const QString& title, const QString& format_hint);
@@ -81,6 +84,8 @@ class GroupToolsDialog : public QDialog {
   QLineEdit* poll_options_;
   QCheckBox* poll_deadline_on_;   // 「设截止」勾选（不勾=不限期）
   QDateTimeEdit* poll_deadline_;
+  QCheckBox* poll_anon_;          // 「匿名」勾选（台账不回 voter）
+  QCheckBox* poll_multi_;         // 「多选」勾选（choice 存位集）
   QLineEdit* poll_choice_;
   QLineEdit* chain_title_;
   QLineEdit* chain_hint_;

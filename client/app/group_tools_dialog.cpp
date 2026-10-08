@@ -33,14 +33,25 @@ QString tally_text(const QJsonArray& options, const QJsonArray& counts) {
   return parts.join(QStringLiteral(" "));
 }
 
-// 记名台账行内渲染：member1→1, owner1→2
-QString votes_text(const QJsonArray& votes) {
+// 记名台账行内渲染：member1→1, owner1→2；多选 choice 为位集→展开 1+3
+QString votes_text(const QJsonArray& votes, bool multi) {
   QStringList parts;
   for (const auto& v : votes) {
     const auto o = v.toObject();
+    QString choice_s;
+    const int choice = o.value(QStringLiteral("choice")).toInt();
+    if (multi) {
+      QStringList bits;
+      for (int i = 0; i < 30; ++i) {
+        if ((choice >> i) & 1) bits << QString::number(i + 1);
+      }
+      choice_s = bits.join(QStringLiteral("+"));
+    } else {
+      choice_s = QString::number(choice);
+    }
     parts << QStringLiteral("%1→%2")
-                 .arg(o.value(QStringLiteral("account")).toString())
-                 .arg(o.value(QStringLiteral("choice")).toInt());
+                 .arg(o.value(QStringLiteral("account")).toString(),
+                      choice_s);
   }
   return parts.join(QStringLiteral(", "));
 }
@@ -186,15 +197,19 @@ void GroupToolsDialog::build_ui() {
   poll_deadline_->setEnabled(false);
   connect(poll_deadline_on_, &QCheckBox::toggled, poll_deadline_,
           &QDateTimeEdit::setEnabled);
+  poll_anon_ = new QCheckBox(QStringLiteral("匿名"), poll_page);
+  poll_multi_ = new QCheckBox(QStringLiteral("多选"), poll_page);
   poll_deadline_row->addWidget(poll_deadline_on_);
   poll_deadline_row->addWidget(poll_deadline_);
+  poll_deadline_row->addWidget(poll_anon_);
+  poll_deadline_row->addWidget(poll_multi_);
   poll_deadline_row->addStretch(1);
   poll_layout->addLayout(poll_deadline_row);
   auto* poll_ops = new QHBoxLayout;
   btn_poll_add_ = new QPushButton(QStringLiteral("发起投票"), poll_page);
   poll_choice_ = new QLineEdit(poll_page);
-  poll_choice_->setPlaceholderText(QStringLiteral("选项号"));
-  poll_choice_->setMaximumWidth(70);
+  poll_choice_->setPlaceholderText(QStringLiteral("选项号（多选可 1,3）"));
+  poll_choice_->setMaximumWidth(130);
   btn_poll_vote_ = new QPushButton(QStringLiteral("投票/改票"), poll_page);
   btn_poll_close_ = new QPushButton(QStringLiteral("截止投票"), poll_page);
   poll_ops->addWidget(btn_poll_add_);
@@ -278,10 +293,15 @@ void GroupToolsDialog::build_ui() {
                                          Qt::SkipEmptyParts),
              poll_deadline_on_->isChecked()
                  ? poll_deadline_->dateTime().toMSecsSinceEpoch()
-                 : 0);
+                 : 0,
+             poll_anon_->isChecked(), poll_multi_->isChecked());
   });
   connect(btn_poll_vote_, &QPushButton::clicked, this, [this] {
-    vote_selected(poll_choice_->text().toInt());
+    // 多选行输入「1,3」→位集；单选行照旧单选项号（服务端权威裁决兜底）
+    const auto* item = poll_list_->currentItem();
+    vote_selected(item && item->data(Qt::UserRole + 1).toBool()
+                      ? parse_choices(poll_choice_->text())
+                      : poll_choice_->text().trimmed().toInt());
   });
   connect(btn_poll_close_, &QPushButton::clicked, this,
           [this] { close_selected_poll(); });
@@ -343,14 +363,15 @@ qint64 GroupToolsDialog::selected_id(QListWidget* list) const {
 
 bool GroupToolsDialog::add_poll(const QString& topic,
                                 const QStringList& options,
-                                qint64 deadline_ms) {
+                                qint64 deadline_ms, bool anonymous,
+                                bool multi) {
   if (topic.isEmpty() || options.size() < 2) {
     set_status(QStringLiteral("主题不能空，选项至少 2 个（逗号分隔）"), true);
     return false;
   }
   if (!require_connected()) return false;
   client_->create_poll(gid_box_->text().toULongLong(), topic, options,
-                       deadline_ms);
+                       deadline_ms, anonymous, multi);
   return true;
 }
 
@@ -367,6 +388,20 @@ bool GroupToolsDialog::vote_selected(int choice) {
   if (!require_connected()) return false;
   client_->vote_poll(gid_box_->text().toULongLong(), id, choice);
   return true;
+}
+
+int GroupToolsDialog::parse_choices(const QString& text) const {
+  // 「1,3」→位集（多选）；非法（非数字/0/重复）返回 0
+  int bits = 0;
+  for (const QString& part : text.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+    bool ok = false;
+    const int c = part.trimmed().toInt(&ok);
+    if (!ok || c < 1 || c > 30) return 0;
+    const int bit = 1 << (c - 1);
+    if (bits & bit) return 0;  // 重复选项号
+    bits |= bit;
+  }
+  return bits;
 }
 
 bool GroupToolsDialog::close_selected_poll() {
@@ -468,20 +503,30 @@ void GroupToolsDialog::populate_polls(const QJsonArray& polls) {
         p.value(QStringLiteral("status")).toString() ==
             QStringLiteral("closed") ||
         p.value(QStringLiteral("closed")).toBool();
+    const bool multi = p.value(QStringLiteral("multi")).toBool();
+    const bool anon = p.value(QStringLiteral("anonymous")).toBool();
     auto* item = new QListWidgetItem(QString(), poll_list_);
     item->setData(Qt::UserRole,
                   p.value(QStringLiteral("id")).toDouble());
+    item->setData(Qt::UserRole + 1, multi);
     QString head = closed ? QStringLiteral("[已截止] ")
                           : QStringLiteral("[进行中] ");
-    item->setText(QStringLiteral("%1#%2 %3 ｜%4 ｜发起人 %5 ｜票：%6")
-                      .arg(head,
+    QString tag;
+    if (anon) tag += QStringLiteral("[匿名]");
+    if (multi) tag += QStringLiteral("[多选]");
+    item->setText(QStringLiteral("%1%2#%3 %4 ｜%5 ｜发起人 %6 ｜%7")
+                      .arg(head, tag,
                            QString::number(
                                p.value(QStringLiteral("id")).toDouble()),
                            p.value(QStringLiteral("topic")).toString(),
                            tally_text(p.value(QStringLiteral("options")).toArray(),
                                       p.value(QStringLiteral("counts")).toArray()),
                            p.value(QStringLiteral("created_by")).toString(),
-                           votes_text(p.value(QStringLiteral("votes")).toArray())));
+                           anon ? QStringLiteral("匿名投票不展示投票人")
+                                : votes_text(
+                                      p.value(QStringLiteral("votes"))
+                                          .toArray(),
+                                      multi)));
     if (closed) item->setForeground(Qt::gray);
   }
 }

@@ -2625,6 +2625,62 @@ int main() {
                "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll2) +
                    ",\"choice\":1}")
               .status == 409);
+    // 匿名单选：建→投→counts 照常、votes 台账不回 voter 身份（全局唯一
+    // 空台账段）→匿名改票 200＝upsert 靠库内 account 留痕（展示匿名口径）
+    const auto pa = http(port, "POST", "/files/group-polls", H("owner1"),
+                         "{\"gid\":" + gids + ",\"topic\":\"匿名评优\","
+                         "\"options\":[\"甲\",\"乙\"],\"anonymous\":true}");
+    CHECK(pa.status == 200);
+    const std::int64_t poll3 = jint(pa.body, "poll_id");
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll3) +
+                   ",\"choice\":1}")
+              .status == 200);
+    const auto pl3 =
+        http(port, "GET", "/files/group-polls?gid=" + gids, H("member1"), "");
+    CHECK(pl3.status == 200);
+    CHECK(pl3.body.find("\"anonymous\":true") != std::string::npos);
+    CHECK(pl3.body.find("\"votes\":[]") != std::string::npos);
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll3) +
+                   ",\"choice\":2}")
+              .status == 200); // 匿名改票：库内留 account 供 upsert
+    // 匿名单选发多位集（3=bit0+bit1）→单选模式 400
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll3) +
+                   ",\"choice\":3}")
+              .status == 400);
+    // 多选：建→投位集 5（选 1+3）→counts 位展开→改投 2 覆盖→counts
+    // 此消彼长→位集越界 400→零位集 400
+    const auto pm = http(port, "POST", "/files/group-polls", H("owner1"),
+                         "{\"gid\":" + gids + ",\"topic\":\"多选征询\","
+                         "\"options\":[\"甲\",\"乙\",\"丙\"],\"multi\":true}");
+    CHECK(pm.status == 200);
+    const std::int64_t poll4 = jint(pm.body, "poll_id");
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll4) +
+                   ",\"choice\":5}")
+              .status == 200);
+    const auto pl4a =
+        http(port, "GET", "/files/group-polls?gid=" + gids, H("member1"), "");
+    CHECK(pl4a.status == 200);
+    CHECK(pl4a.body.find("\"multi\":true") != std::string::npos);
+    CHECK(pl4a.body.find("\"counts\":[1,0,1]") != std::string::npos);
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll4) +
+                   ",\"choice\":2}")
+              .status == 200); // 改投=整集覆盖
+    const auto pl4b =
+        http(port, "GET", "/files/group-polls?gid=" + gids, H("member1"), "");
+    CHECK(pl4b.body.find("\"counts\":[0,1,0]") != std::string::npos);
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll4) +
+                   ",\"choice\":8}")
+              .status == 400); // bit3 越界（n=3）
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll4) +
+                   ",\"choice\":0}")
+              .status == 400);
     // 接龙：建（title 空 400/非成员 403/建 200）；加入与更新（一人一条
     // upsert：更新自己条目他人不动）；群主可关非本人发起；关后加入 409
     CHECK(http(port, "POST", "/files/group-chains", H("member1"),

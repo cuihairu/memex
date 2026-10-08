@@ -292,6 +292,38 @@ int main(int argc, char** argv) {
       [&] { return dlg_bob.status_text().contains(QStringLiteral("409")); },
       8000));
 
+  // —— 匿名＋多选：发起区勾选提交→投位集（1+3=5）→行渲染匿名不展示
+  // 投票人＋counts 位展开→改投=整集覆盖
+  CHECK(dlg.add_poll(QStringLiteral("匿名多选票"),
+                     {QStringLiteral("甲"), QStringLiteral("乙"),
+                      QStringLiteral("丙")},
+                     0, true, true));
+  CHECK(wait_until([&] { return dlg.poll_list()->count() == 3; }, 8000));
+  CHECK(row_text(dlg.poll_list(), 0).contains(QStringLiteral("[匿名]")));
+  CHECK(row_text(dlg.poll_list(), 0).contains(QStringLiteral("[多选]")));
+  dlg_bob.refresh();
+  CHECK(wait_until(
+      [&] { return dlg_bob.poll_list()->count() == 3; }, 8000));
+  CHECK(select_row_containing(dlg_bob.poll_list(),
+                              QStringLiteral("匿名多选票")));
+  CHECK(dlg_bob.vote_selected(5));  // 位集 5=选 1+3
+  CHECK(wait_until([&] {
+    const auto text = row_text(dlg_bob.poll_list(), 0);
+    return text.contains(QStringLiteral("甲×1")) &&
+           text.contains(QStringLiteral("丙×1")) &&
+           text.contains(QStringLiteral("匿名投票不展示投票人"));
+  }, 8000));
+  // 改投=整集覆盖：位集 2（只选乙），甲清零
+  CHECK(select_row_containing(dlg_bob.poll_list(),
+                              QStringLiteral("匿名多选票")));
+  CHECK(dlg_bob.vote_selected(2));
+  CHECK(wait_until([&] {
+    const auto text = row_text(dlg_bob.poll_list(), 0);
+    return text.contains(QStringLiteral("乙×1")) &&
+           !text.contains(QStringLiteral("甲×1")) &&
+           !text.contains(QStringLiteral("丙×1"));
+  }, 8000));
+
   // —— 接龙 ——
   CHECK(dlg.add_chain(QStringLiteral("周五聚餐"),
                       QStringLiteral("姓名+菜")));

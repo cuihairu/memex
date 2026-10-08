@@ -239,9 +239,11 @@ class FilesClient : public QObject {
   // —— 群工具三件（二期·投票/接龙/群任务，原生互动不走 R25 代理）——
   // 判权与身份约束全在服务端（file:read 群继承、发起人或群主/管理员），
   // 客户端只提交与展示
-  // 建投票（topic 非空、options 2~10；deadline_ms 0=不设截止）
+  // 建投票（topic 非空、options 2~10；deadline_ms 0=不设截止；
+  // anonymous=匿名（台账不回 voter）；multi=多选（choice 存位集））
   void create_poll(quint64 gid, const QString& topic,
-                   const QStringList& options, qint64 deadline_ms);
+                   const QStringList& options, qint64 deadline_ms,
+                   bool anonymous = false, bool multi = false);
   // 投票列表（含 counts 票数统计与 votes 记名台账）
   void list_polls(quint64 gid);
   // 投/改票（choice=选项序号 1 起；改票=覆盖）

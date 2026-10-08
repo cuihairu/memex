@@ -1063,7 +1063,8 @@ void FilesClient::fetch_assist_input(const QString& id) {
 
 void FilesClient::create_poll(quint64 gid, const QString& topic,
                               const QStringList& options,
-                              qint64 deadline_ms) {
+                              qint64 deadline_ms, bool anonymous,
+                              bool multi) {
   QJsonArray arr;
   for (const QString& o : options) arr.append(o);
   send_json(QStringLiteral("group-poll.create"), QStringLiteral("POST"),
@@ -1071,7 +1072,9 @@ void FilesClient::create_poll(quint64 gid, const QString& topic,
             {{QStringLiteral("gid"), static_cast<double>(gid)},
              {QStringLiteral("topic"), topic},
              {QStringLiteral("options"), arr},
-             {QStringLiteral("deadline_ms"), static_cast<double>(deadline_ms)}},
+             {QStringLiteral("deadline_ms"), static_cast<double>(deadline_ms)},
+             {QStringLiteral("anonymous"), anonymous},
+             {QStringLiteral("multi"), multi}},
             [this](bool ok, int, const QJsonObject& resp, const QString&) {
               if (ok) {
                 emit poll_created(static_cast<qint64>(
