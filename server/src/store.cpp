@@ -6946,7 +6946,12 @@ std::vector<ServerStore::GroupPoll> ServerStore::polls_list(
 bool ServerStore::poll_vote(std::int64_t poll_id, const std::string& account,
                             int choice, std::int64_t ts_ms) {
   const auto p = poll_by_id(poll_id);
-  if (!p.has_value() || p->closed) return false;
+  // 到点视同已关闭（与 closed 同语义；store 层兜底——直接调 store 的
+  // 路径同样被挡，惰性判定不回写）
+  if (!p.has_value() || p->closed ||
+      (p->deadline_ms > 0 && ts_ms >= p->deadline_ms)) {
+    return false;
+  }
   if (choice < 1 ||
       choice > static_cast<int>(p->options.size())) {
     return false;

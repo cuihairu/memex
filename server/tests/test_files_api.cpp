@@ -2581,6 +2581,50 @@ int main() {
                "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) +
                    ",\"choice\":3}")
               .status == 409);
+    // 截止自动关票（惰性判定）：建带近秒截止的票→未到点可投→到点投票
+    // 409（改票同拒）→列表 status=closed 且 closed 库值不回写→发起人
+    // close 补写留痕 200→重复关 409→close 后投票仍 409
+    const std::int64_t now0 =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+    const auto pd = http(port, "POST", "/files/group-polls", H("owner1"),
+                         "{\"gid\":" + gids + ",\"topic\":\"快截票\","
+                         "\"options\":[\"甲\",\"乙\"],\"deadline_ms\":" +
+                             std::to_string(now0 + 2000) + "}");
+    CHECK(pd.status == 200);
+    const std::int64_t poll2 = jint(pd.body, "poll_id");
+    CHECK(poll2 > 0);
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll2) +
+                   ",\"choice\":1}")
+              .status == 200); // 未到点可投
+    while (std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+               .count() < now0 + 2100) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    const auto vexp =
+        http(port, "POST", "/files/group-polls/vote", H("member1"),
+             "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll2) +
+                 ",\"choice\":2}"); // 到点改票同拒
+    CHECK(vexp.status == 409);
+    CHECK(vexp.body.find("已到截止时间") != std::string::npos);
+    const auto pl2 =
+        http(port, "GET", "/files/group-polls?gid=" + gids, H("member1"), "");
+    CHECK(pl2.status == 200);
+    CHECK(pl2.body.find("\"status\":\"closed\"") != std::string::npos);
+    CHECK(pl2.body.find("\"closed\":false") != std::string::npos); // 惰性判定不回写
+    CHECK(http(port, "POST", "/files/group-polls/close", H("owner1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll2) + "}")
+              .status == 200); // 到点后手动关票补写留痕
+    CHECK(http(port, "POST", "/files/group-polls/close", H("owner1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll2) + "}")
+              .status == 409);
+    CHECK(http(port, "POST", "/files/group-polls/vote", H("owner1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll2) +
+                   ",\"choice\":1}")
+              .status == 409);
     // 接龙：建（title 空 400/非成员 403/建 200）；加入与更新（一人一条
     // upsert：更新自己条目他人不动）；群主可关非本人发起；关后加入 409
     CHECK(http(port, "POST", "/files/group-chains", H("member1"),

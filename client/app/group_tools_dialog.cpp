@@ -3,6 +3,9 @@
 // 已关 409/已占 409/幽灵 404）——客户端只提交与展示，不自造规则。
 #include "group_tools_dialog.hpp"
 
+#include <QCheckBox>
+#include <QDateTime>
+#include <QDateTimeEdit>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -174,6 +177,19 @@ void GroupToolsDialog::build_ui() {
   poll_form->addWidget(poll_topic_);
   poll_form->addWidget(poll_options_, 1);
   poll_layout->addLayout(poll_form);
+  // 截止时间（勾选才生效；不勾=不限期。到点判定在服务端，此处只是输入）
+  auto* poll_deadline_row = new QHBoxLayout;
+  poll_deadline_on_ = new QCheckBox(QStringLiteral("设截止"), poll_page);
+  poll_deadline_ = new QDateTimeEdit(QDateTime::currentDateTime().addSecs(3600),
+                                     poll_page);
+  poll_deadline_->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
+  poll_deadline_->setEnabled(false);
+  connect(poll_deadline_on_, &QCheckBox::toggled, poll_deadline_,
+          &QDateTimeEdit::setEnabled);
+  poll_deadline_row->addWidget(poll_deadline_on_);
+  poll_deadline_row->addWidget(poll_deadline_);
+  poll_deadline_row->addStretch(1);
+  poll_layout->addLayout(poll_deadline_row);
   auto* poll_ops = new QHBoxLayout;
   btn_poll_add_ = new QPushButton(QStringLiteral("发起投票"), poll_page);
   poll_choice_ = new QLineEdit(poll_page);
@@ -259,7 +275,10 @@ void GroupToolsDialog::build_ui() {
   connect(btn_poll_add_, &QPushButton::clicked, this, [this] {
     add_poll(poll_topic_->text().trimmed(),
              poll_options_->text().split(QLatin1Char(','),
-                                         Qt::SkipEmptyParts));
+                                         Qt::SkipEmptyParts),
+             poll_deadline_on_->isChecked()
+                 ? poll_deadline_->dateTime().toMSecsSinceEpoch()
+                 : 0);
   });
   connect(btn_poll_vote_, &QPushButton::clicked, this, [this] {
     vote_selected(poll_choice_->text().toInt());
@@ -323,13 +342,15 @@ qint64 GroupToolsDialog::selected_id(QListWidget* list) const {
 }
 
 bool GroupToolsDialog::add_poll(const QString& topic,
-                                const QStringList& options) {
+                                const QStringList& options,
+                                qint64 deadline_ms) {
   if (topic.isEmpty() || options.size() < 2) {
     set_status(QStringLiteral("主题不能空，选项至少 2 个（逗号分隔）"), true);
     return false;
   }
   if (!require_connected()) return false;
-  client_->create_poll(gid_box_->text().toULongLong(), topic, options, 0);
+  client_->create_poll(gid_box_->text().toULongLong(), topic, options,
+                       deadline_ms);
   return true;
 }
 
@@ -441,7 +462,12 @@ void GroupToolsDialog::populate_polls(const QJsonArray& polls) {
   poll_list_->clear();
   for (const auto& v : polls) {
     const auto p = v.toObject();
-    const bool closed = p.value(QStringLiteral("closed")).toBool();
+    // 到点自动截止由服务端现算 status 下发（惰性判定不回写 closed）；
+    // 客户端展示只为不误导，投票判权兜底仍在服务端
+    const bool closed =
+        p.value(QStringLiteral("status")).toString() ==
+            QStringLiteral("closed") ||
+        p.value(QStringLiteral("closed")).toBool();
     auto* item = new QListWidgetItem(QString(), poll_list_);
     item->setData(Qt::UserRole,
                   p.value(QStringLiteral("id")).toDouble());

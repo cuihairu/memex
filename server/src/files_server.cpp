@@ -4525,6 +4525,10 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                      {"options", p.options},
                      {"deadline_ms", p.deadline_ms},
                      {"closed", p.closed},
+                     {"status", p.closed || (p.deadline_ms > 0 &&
+                                             now_ms() >= p.deadline_ms)
+                                  ? "closed"
+                                  : "open"},  // 到点现算（惰性判定）
                      {"created_by", p.created_by},
                      {"created_ms", p.created_ms},
                      {"counts", counts},
@@ -4571,11 +4575,17 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                                        "）"}});
       return;
     }
-    if (p->closed) {
-      respond_json(409, {{"ok", false}, {"error", "投票已截止"}});
+    // 截止自动关票（惰性判定，不回写 closed——closed 库值保持「手动关票」
+    // 语义；到点后行为与关票完全一致，手动 close 仍可补写留痕）
+    const std::int64_t now = now_ms();
+    if (p->closed ||
+        (p->deadline_ms > 0 && now >= p->deadline_ms)) {
+      respond_json(409,
+                   {{"ok", false},
+                    {"error", p->closed ? "投票已截止" : "投票已到截止时间"}});
       return;
     }
-    if (!impl_.store.poll_vote(poll_id, account, choice, now_ms())) {
+    if (!impl_.store.poll_vote(poll_id, account, choice, now)) {
       respond_json(409, {{"ok", false}, {"error", "投票失败"}});
       return;
     }

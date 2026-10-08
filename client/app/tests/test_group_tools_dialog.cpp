@@ -8,6 +8,7 @@
 // 注：列表每次成功动作后整表重建，选中不保留——每个动作前重选中；对端
 // 数据拉式刷新（不推送），跨端断言前先 refresh。
 #include <QApplication>
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QListWidget>
 #include <QProcess>
@@ -249,6 +250,43 @@ int main(int argc, char** argv) {
 
   // 关后投票 409：状态行明示
   CHECK(select_row_containing(dlg_bob.poll_list(), QStringLiteral("午餐")));
+  CHECK(dlg_bob.vote_selected(2));
+  CHECK(wait_until(
+      [&] { return dlg_bob.status_text().contains(QStringLiteral("409")); },
+      8000));
+
+  // —— 截止自动关票（惰性判定，服务端权威）：发起区勾截止提交→未到点
+  // 可投→到点行渲染已截止→投票拒（客户端渲染不误导＝第一层，服务端
+  // 409 权威拒＝第二层兜底；客户端不重复判定故无本地截止门）
+  const qint64 dl = QDateTime::currentMSecsSinceEpoch() + 2000;
+  CHECK(dlg.add_poll(QStringLiteral("快截票"),
+                     {QStringLiteral("甲"), QStringLiteral("乙")}, dl));
+  CHECK(wait_until([&] { return dlg.poll_list()->count() == 2; }, 8000));
+  CHECK(row_text(dlg.poll_list(), 0).contains(QStringLiteral("进行中")));
+  // 未到点可投
+  CHECK(select_row_containing(dlg.poll_list(), QStringLiteral("快截票")));
+  CHECK(dlg.vote_selected(1));
+  CHECK(wait_until([&] {
+    const auto text = row_text(dlg.poll_list(), 0);
+    return text.contains(QStringLiteral("甲×1")) &&
+           text.contains(QStringLiteral("alice→1"));
+  }, 8000));
+  // 到点：两侧刷新后行转已截止（服务端 status 现算回带）
+  CHECK(wait_until(
+      [&] { return QDateTime::currentMSecsSinceEpoch() >= dl + 100; }, 8000));
+  dlg.refresh();
+  CHECK(wait_until([&] {
+    return select_row_containing(dlg.poll_list(),
+                                 QStringLiteral("快截票")) &&
+           row_text(dlg.poll_list(), 0).contains(QStringLiteral("已截止"));
+  }, 8000));
+  dlg_bob.refresh();
+  CHECK(wait_until([&] {
+    return select_row_containing(dlg_bob.poll_list(),
+                                 QStringLiteral("快截票")) &&
+           row_text(dlg_bob.poll_list(), 0).contains(QStringLiteral("已截止"));
+  }, 8000));
+  // 到点投票：服务端 409 状态行明示（改票同拒路径）
   CHECK(dlg_bob.vote_selected(2));
   CHECK(wait_until(
       [&] { return dlg_bob.status_text().contains(QStringLiteral("409")); },

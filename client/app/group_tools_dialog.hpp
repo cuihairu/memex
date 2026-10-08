@@ -10,6 +10,8 @@
 
 #include <QtGlobal>
 
+class QCheckBox;
+class QDateTimeEdit;
 class QLabel;
 class QLineEdit;
 class QListWidget;
@@ -33,7 +35,8 @@ class GroupToolsDialog : public QDialog {
 
   // —— 程序化入口（测试共用；服务端裁决一切）——
   // 投票：建（选项≥2 由行内逗号分隔给出）/投改票/关票
-  bool add_poll(const QString& topic, const QStringList& options);
+  bool add_poll(const QString& topic, const QStringList& options,
+                qint64 deadline_ms = 0);
   bool vote_selected(int choice);
   bool close_selected_poll();
   // 接龙：建/加入（upsert 自己条目）/关
@@ -76,6 +79,8 @@ class GroupToolsDialog : public QDialog {
   QListWidget* task_list_;
   QLineEdit* poll_topic_;
   QLineEdit* poll_options_;
+  QCheckBox* poll_deadline_on_;   // 「设截止」勾选（不勾=不限期）
+  QDateTimeEdit* poll_deadline_;
   QLineEdit* poll_choice_;
   QLineEdit* chain_title_;
   QLineEdit* chain_hint_;
