@@ -4,6 +4,9 @@
 //（待我决行才可决）→owner1 待决可见并批准（带批注）→member1 刷新见终态
 //（已批准·审批人 owner1）→已决行撤回本地拒→member1 新发调休再撤回
 //（申请人专属且仅 pending）→白名单外类型服务端 400 状态行明示。
+// 通知 diff 腿（经通知中心 want_tray_notify 计数，不开窗等 30s 轮询，
+// 手动 refresh 触发）：首连静默（存量不轰炸）/决定落定通知申请人/新
+// 待决通知待决人/同数据重复刷新只提醒一次/自己撤回不提醒自己。
 // 判权矩阵（自审 403/无权 403/已决 409/直属上级优先）走 test_files_api
 // 协议腿，不在此重复。
 #include <QApplication>
@@ -18,8 +21,10 @@
 #include <iostream>
 
 #include <app/approval_dialog.hpp>
+#include <app/notify_center.hpp>
 
 using memex::client::ApprovalDialog;
+using memex::client::NotificationCenter;
 
 #ifndef MEMEX_SERVER_BIN
 #error "MEMEX_SERVER_BIN 未定义（应传入 $<TARGET_FILE:memex_server>）"
@@ -148,6 +153,18 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // 通知中心观察点（单例信号，两实例共用）：按标题分流计数
+  int pending_notices = 0;   // 「审批待决」→待决人
+  int decided_notices = 0;   // 「审批落定」→申请人
+  QObject::connect(&NotificationCenter::instance(),
+                   &NotificationCenter::want_tray_notify, &app,
+                   [&](const QString& title, const QString&) {
+                     if (title.contains(QStringLiteral("审批待决")))
+                       ++pending_notices;
+                     if (title.contains(QStringLiteral("审批落定")))
+                       ++decided_notices;
+                   });
+
   ApprovalDialog dlg;
   CHECK(!dlg.is_connected());
 
@@ -213,6 +230,11 @@ int main(int argc, char** argv) {
   CHECK(dlg_owner.list()->item(0)->text().contains(QStringLiteral("年假")));
   CHECK(dlg_owner.selected_kind() == QString());
 
+  // 首连静默：开窗期轮询只提醒新出现的变化，存量待决/存量申请不轰炸
+  //（R27-1 口径——双方首连吸收后均无通知）
+  CHECK(pending_notices == 0);
+  CHECK(decided_notices == 0);
+
   // owner1 批准（带批注）：待决清空
   dlg_owner.list()->setCurrentRow(0);
   CHECK(dlg_owner.selected_kind() == QStringLiteral("pending"));
@@ -225,6 +247,15 @@ int main(int argc, char** argv) {
     return select_row_containing(dlg, QStringLiteral("已批准")) &&
            dlg.status_text().contains(QStringLiteral("待我决 0 项"));
   }, 15000));
+  // 决定落定→通知申请人（pending→终态迁移，经通知中心 IMPORTANT Toast）
+  CHECK(wait_until([&] { return decided_notices >= 1; }, 8000));
+  // 只提醒一次：同数据重复刷新不重复提醒（记忆集去重）
+  const int decided_once = decided_notices;
+  dlg.refresh();
+  CHECK(wait_until([&] {
+    return dlg.status_text().contains(QStringLiteral("已刷新"));
+  }, 8000));
+  CHECK(decided_notices == decided_once);
   CHECK(dlg.list()->currentItem()->text().contains(
       QStringLiteral("同意")));
   CHECK(dlg.list()->currentItem()->text().contains(
@@ -237,7 +268,22 @@ int main(int argc, char** argv) {
                          QString()));
   CHECK(wait_until([&] { return dlg.list()->count() == 2; }, 15000));
   CHECK(select_row_containing(dlg, QStringLiteral("调休")));
+
+  // 新待决出现→开窗期轮询/刷新 diff 通知待决人（owner 首连已吸收存量，
+  // 此为首个新现 id）
+  dlg_owner.refresh();
+  CHECK(wait_until([&] { return pending_notices >= 1; }, 8000));
+  // 只提醒一次
+  const int pending_once = pending_notices;
+  dlg_owner.refresh();
+  CHECK(wait_until([&] {
+    return dlg_owner.status_text().contains(QStringLiteral("已刷新"));
+  }, 8000));
+  CHECK(pending_notices == pending_once);
+  CHECK(select_row_containing(dlg, QStringLiteral("调休")));
   CHECK(dlg.selected_kind() == QStringLiteral("mine"));
+  // 撤回前记基线：自己撤回不提醒自己（skip 窗口吸收 withdrawn 迁移）
+  const int decided_before_withdraw = decided_notices;
   CHECK(dlg.withdraw_selected());
   CHECK(wait_until([&] {
     return select_row_containing(dlg, QStringLiteral("已撤回")) &&
@@ -245,6 +291,7 @@ int main(int argc, char** argv) {
   }, 15000));
   // 年假终态行仍在（全程留痕不删改）
   CHECK(select_row_containing(dlg, QStringLiteral("已批准")));
+  CHECK(decided_notices == decided_before_withdraw);
 
   server.kill();
   server.waitForFinished(3000);

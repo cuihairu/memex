@@ -4,6 +4,7 @@
 #include "approval_dialog.hpp"
 
 #include <QComboBox>
+#include <QDateTime>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -13,9 +14,11 @@
 #include <QPalette>
 #include <QPushButton>
 #include <QSettings>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "engine/collab/files_client.hpp"
+#include "notify_center.hpp"
 
 namespace memex::client {
 namespace {
@@ -42,6 +45,13 @@ ApprovalDialog::ApprovalDialog(QWidget* parent) : QDialog(parent) {
                QStringLiteral("）"));
     btn_add_->setEnabled(true);
     refresh();
+    // 开窗期 30s 轮询（R27-1 同口径；服务端推送/通知中心常驻化留后续）
+    if (!findChild<QTimer*>(QStringLiteral("approval_poll"))) {
+      auto* poll = new QTimer(this);
+      poll->setObjectName(QStringLiteral("approval_poll"));
+      connect(poll, &QTimer::timeout, this, [this] { refresh(); });
+      poll->start(30000);
+    }
   });
   connect(client_, &FilesClient::login_failed, this,
           [this](const QString& r) {
@@ -60,11 +70,13 @@ ApprovalDialog::ApprovalDialog(QWidget* parent) : QDialog(parent) {
     refresh();
   });
   connect(client_, &FilesClient::approval_withdrawn, this, [this](qint64) {
+    skip_notify_once_ = true;  // 自己撤回触发的刷新跳过 diff（不提醒自己）
     set_status(QStringLiteral("申请已撤回"));
     refresh();
   });
   connect(client_, &FilesClient::request_failed, this,
           [this](const QString& op, int status, const QString& error) {
+            if (op == QStringLiteral("approval.list")) return;  // 轮询失败静默
             set_status(QStringLiteral("操作失败（%1：%2 %3）")
                            .arg(op, QString::number(status), error),
                        true);
@@ -238,6 +250,49 @@ QString ApprovalDialog::selected_kind() const {
 
 void ApprovalDialog::populate(const QJsonArray& mine,
                               const QJsonArray& pending) {
+  // —— 开窗期 diff 通知（R27-1 轮询口径）——首连全量静默吸收（存量
+  // 不轰炸）；此后新待决 id→通知待决人、我的申请 pending→终态→通知
+  // 申请人；自己撤回触发的刷新跳过。服务端推送/通知中心常驻化留后续。
+  const bool notify = seeded_ && !skip_notify_once_;
+  skip_notify_once_ = false;
+  seeded_ = true;
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  for (const auto& v : pending) {
+    const auto a = v.toObject();
+    const QString id = QString::number(
+        static_cast<qint64>(a.value(QStringLiteral("id")).toDouble()));
+    if (notify && !seen_pending_.contains(id)) {
+      NotificationCenter::instance().on_notice(
+          a.value(QStringLiteral("applicant")).toString(),
+          QStringLiteral("审批待决"),
+          QStringLiteral("%1 提交了 %2 申请，请审批")
+              .arg(a.value(QStringLiteral("applicant")).toString(),
+                   a.value(QStringLiteral("type")).toString()),
+          2 /*IMPORTANT*/, QString(), now,
+          QStringLiteral("approval-pending-%1").arg(id));
+    }
+    seen_pending_.insert(id);
+  }
+  for (const auto& v : mine) {
+    const auto a = v.toObject();
+    const QString id = QString::number(
+        static_cast<qint64>(a.value(QStringLiteral("id")).toDouble()));
+    const QString st = a.value(QStringLiteral("status")).toString();
+    const auto prev = seen_mine_status_.constFind(id);
+    if (notify && prev != seen_mine_status_.constEnd() &&
+        prev.value() == QStringLiteral("pending") && st != prev.value()) {
+      NotificationCenter::instance().on_notice(
+          QStringLiteral("审批"), QStringLiteral("审批落定"),
+          QStringLiteral("你的 %1 申请%2（审批人 %3）")
+              .arg(a.value(QStringLiteral("type")).toString(),
+                   status_label(st),
+                   a.value(QStringLiteral("decider")).toString()),
+          2 /*IMPORTANT*/, QString(), now,
+          QStringLiteral("approval-decided-%1-%2").arg(id, st));
+    }
+    seen_mine_status_.insert(id, st);
+  }
+
   list_->clear();
   for (const auto& v : mine) {
     const auto a = v.toObject();

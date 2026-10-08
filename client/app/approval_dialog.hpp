@@ -1,11 +1,14 @@
 // 二期·审批窗口（请假起步）：发起（类型白名单 年假/事假/病假/调休）/
 // 同意/拒绝/撤回。审批人=直属上级（无上级 org-admin 兜底），判权全部
 // 服务端现裁——客户端只提交与展示。独立文件面会话（与 R23-3 文件助手
-// 同构：协作面同源账号、文件面独立端口）。
+// 同构：协作面同源账号、文件面独立端口）。开窗期 30s 轮询 diff 通知
+//（R27-1 口径）：新待决→提醒待决人、决定落定→提醒申请人，经通知中心。
 #pragma once
 
 #include <QDialog>
 #include <QJsonArray>
+#include <QMap>
+#include <QSet>
 #include <QString>
 
 #include <QtGlobal>
@@ -54,6 +57,12 @@ class ApprovalDialog : public QDialog {
   void build_ui();
   void populate(const QJsonArray& mine, const QJsonArray& pending);
   void set_status(const QString& text, bool error = false);
+
+  // 开窗期通知 diff 记忆集（R27-1 轮询口径：只提醒开窗后新出现的变化）
+  QSet<QString> seen_pending_;  // 待我决 id 已见集合（新现→通知待决人）
+  QMap<QString, QString> seen_mine_status_;  // 我的申请 id→状态（终态迁移→通知申请人）
+  bool seeded_{false};          // 首次 populate 全量静默吸收（不轰炸存量）
+  bool skip_notify_once_{false};  // 自己撤回触发的刷新跳过 diff（不提醒自己）
 
   FilesClient* client_;
   QLineEdit* host_;
