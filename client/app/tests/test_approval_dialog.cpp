@@ -97,21 +97,36 @@ int main(int argc, char** argv) {
              QStringLiteral("owner1"), QStringLiteral("--db"),
              db}) == 0);
 
-  const quint16 files_port = free_port();
+  quint16 files_port = free_port();
   QProcess server;
   server.setProcessChannelMode(QProcess::ForwardedChannels);
-  server.start(server_bin,
-               {QStringLiteral("serve"), QStringLiteral("--db"), db,
-                QStringLiteral("--port"), QString::number(free_port()),
-                QStringLiteral("--webhook-port"), QStringLiteral("0"),
-                QStringLiteral("--files-port"), QString::number(files_port)});
-  CHECK(server.waitForStarted(5000));
-  CHECK(wait_until([&] {
-    QTcpServer probe;
-    return probe.listen(QHostAddress::LocalHost, files_port)
-               ? (probe.close(), false)
-               : true;
-  }, 8000));
+  // 起 serve＋探活。free_port() 探到空闲与 serve bind 之间存在竞态窗口
+  // （CI 共享 runner 实录 2026-10-08：Address already in use→文件面未启
+  // 用→探活 8s 烧满→后续各腿 8s 连烧→ctest 90s 杀＝Timeout 假红；绿跑
+  // 同测试仅 0.72s）。失败换口重试一次；再失败快速收场，不烧穿测试预算。
+  const auto start_serve = [&](quint16 port) {
+    server.start(server_bin,
+                 {QStringLiteral("serve"), QStringLiteral("--db"), db,
+                  QStringLiteral("--port"), QString::number(free_port()),
+                  QStringLiteral("--webhook-port"), QStringLiteral("0"),
+                  QStringLiteral("--files-port"), QString::number(port)});
+    if (!server.waitForStarted(5000)) return false;
+    return wait_until([&] {
+      QTcpServer probe;
+      return probe.listen(QHostAddress::LocalHost, port)
+                 ? (probe.close(), false)
+                 : true;
+    }, 8000);
+  };
+  if (!start_serve(files_port)) {
+    server.kill();
+    server.waitForFinished(3000);
+    files_port = free_port();
+    if (!start_serve(files_port)) {
+      qCritical("FAIL serve 两起两败（端口竞态或服务端回归）——快速收场");
+      return 1;
+    }
+  }
 
   ApprovalDialog dlg;
   CHECK(!dlg.is_connected());
