@@ -60,6 +60,9 @@ const char* msg_type_name(MsgType t) {
   case v1::NOTICE: return "notice";
   case v1::FILE_AUTHZ: return "file_authz";
   case v1::FILE_AUTHZ_RESULT: return "file_authz_result";
+  case v1::PROFILE_CMD: return "profile_cmd"; // 需求批⑪漏列补齐
+  case v1::PROFILE_RESULT: return "profile_result";
+  case v1::NUDGE: return "nudge"; // 需求批⑥
   case v1::MSG_TYPE_UNSPECIFIED: break;
   }
   return "unknown";

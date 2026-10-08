@@ -48,6 +48,9 @@ public slots:
   void logout();
   // 发送文本消息（协作态）：返回本地序列号（sent 回执以此 seq 关联）。
   quint64 send_text(const QString& to, const QString& text);
+  // 振屏（需求批⑥，协作单聊）：空体 NUDGE 经服务端归档留痕并在线即投
+  //（不进离线补投）；本地落 "[振屏]" 标记行。返回 0＝未登录/目标空。
+  quint64 send_nudge(const QString& to);
   // 撤回一条协作态消息（服务端校验权限后全网标记，原文留痕不清）。
   void recall_text(const QString& to, const QString& msg_id);
   // 请求组织架构（部门树＋成员资料，T3.1）；结果经 org_received 送达。
@@ -96,6 +99,8 @@ signals:
   void text_delivered(quint64 seq, bool ok);
   // 一条协作消息被撤回（本地与对端副本都置标记，原文保留）。
   void message_recalled(const QString& from, const QString& msg_id);
+  // 收到协作振屏（需求批⑥）：界面层抖窗＋提示音；本地已落 "[振屏]" 标记行
+  void nudge_received(const QString& from, qint64 ts_ms);
   // 组织架构数据（T3.1）：JSON——
   // {"departments":[{"path":"公司/研发部"}],
   //  "members":[{"account","display_name","title","department_path","manager","role"}],
@@ -147,6 +152,7 @@ private:
     quint64 seq{0};
     qint64 ts_ms{0};
     qint64 sent_at_ms{0}; // 已发未回执的超时计时（0=尚未发出）
+    bool nudge{false};    // 振屏（需求批⑥）：重发按 NUDGE 空体重建
   };
 
   void send_login_frame();

@@ -529,6 +529,41 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     send(memex::protocol::encode(out));
     break;
   }
+  case v1::NUDGE: {
+    // 振屏（需求批⑥）：实时信号——归档留痕（"[振屏]" 标记文本，历史检索
+    // 可见）＋在线即投；不进离线补投（补投的抖动失去时效且成骚扰）。
+    // 防刷限频双层：服务端连接级 1s 最小间隔（静默丢弃），发送端 UI 级
+    // 同一会话 10s 冷却（客户端面）。群扇出留余量：仅单聊。
+    if (!logged_in_ || !msg.has_nudge()) break;
+    if (msg.to().rfind("group:", 0) == 0) {
+      log("群振屏不支持被拒：" + msg.to());
+      break;
+    }
+    const std::int64_t now = now_ms();
+    if (now - last_nudge_ms_ < 1000) {
+      log("振屏发送过频被拒（连接级 1s 限频）");
+      break;
+    }
+    last_nudge_ms_ = now;
+    const std::string msg_id =
+        sha256_hex(msg.from() + ":" + std::to_string(msg.seq()));
+    memex::protocol::Message out = msg;
+    out.set_msg_id(msg_id);
+    server_.store().store_message(msg_id, msg.from(), msg.to(),
+                                  static_cast<int>(msg.type()),
+                                  std::string("[振屏]"), msg.ts_ms());
+    log("振屏：" + account_ + " → " + msg.to());
+    for (const auto& target : server_.online_sessions(msg.to())) {
+      target->deliver_frame(out.SerializeAsString());
+    }
+    // 发送方受理回执（原 seq）：同 TEXT 口径，客户端同步状态推移
+    memex::protocol::Message ack;
+    ack.set_type(v1::ACK);
+    ack.set_seq(msg.seq());
+    ack.set_to(msg.from());
+    send(memex::protocol::encode(ack));
+    break;
+  }
   case v1::RECALL: {
     // 撤回：仅置标记不清正文；事件独立留痕；转发给对端会话（本地展示标记）。
     if (!logged_in_ || !msg.has_recall()) break;

@@ -139,21 +139,15 @@ void DirectTransport::handle_payload(QTcpSocket* socket,
                              : QString{};
     emit text_received(from_id, to_id, static_cast<quint64>(msg.seq()),
                        msg.ts_ms(), text);
-
-    // 送达确认：ACK 携带原 seq，经信道密文回写
-    Message ack;
-    ack.set_type(MsgType::ACK);
-    ack.set_seq(msg.seq());
-    ack.set_from(device_id_);
-    ack.set_to(msg.from());
-    ack.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
-    const std::string wire =
-        ch->protect(memex::protocol::encode_payload(ack));
-    if (wire.empty()) {
-      qWarning() << "[直连接入] 回执封装失败（信道已失效）";
-      return;
-    }
-    socket->write(QByteArray(wire.data(), static_cast<qsizetype>(wire.size())));
+    write_ack(socket, ch, msg.seq(), msg.from());
+    break;
+  }
+  case MsgType::NUDGE: {
+    // 振屏（需求批⑥）：上抛界面层抖窗；回执同文本（送达确认贯穿）
+    emit nudge_received(QString::fromStdString(msg.from()),
+                        QString::fromStdString(msg.to()),
+                        static_cast<quint64>(msg.seq()), msg.ts_ms());
+    write_ack(socket, ch, msg.seq(), msg.from());
     break;
   }
   case MsgType::ACK:
@@ -175,6 +169,26 @@ void DirectTransport::handle_payload(QTcpSocket* socket,
 void DirectTransport::send_text(const QHostAddress& target, quint16 target_port,
                                 const std::string& to_id, std::uint64_t seq,
                                 const std::string& text) {
+  Message frame;
+  frame.set_type(MsgType::TEXT);
+  frame.mutable_text()->set_text(text);
+  send_frame_with_ack(target, target_port, to_id, seq, frame);
+}
+
+void DirectTransport::send_nudge(const QHostAddress& target,
+                                 quint16 target_port, const std::string& to_id,
+                                 std::uint64_t seq) {
+  Message frame;
+  frame.set_type(MsgType::NUDGE);
+  frame.mutable_nudge(); // 空 message 进 oneof 须显式置位（需求批⑥）
+  send_frame_with_ack(target, target_port, to_id, seq, frame);
+}
+
+// 发信共用机制（文本/振屏同路）：先握手后发信，握手失败即
+// delivered(seq,false)；等对端 ACK（seq 原样回带）即成功，超时或断连为 false。
+void DirectTransport::send_frame_with_ack(
+    const QHostAddress& target, quint16 target_port, const std::string& to_id,
+    std::uint64_t seq, const memex::protocol::Message& frame) {
   if (pending_.find(seq) != pending_.end()) {
     emit delivered(seq, false);
     return;
@@ -220,7 +234,7 @@ void DirectTransport::send_text(const QHostAddress& target, quint16 target_port,
   });
 
   connect(socket, &QTcpSocket::readyRead, this,
-          [this, seq, to_id, text, finish] {
+          [this, seq, to_id, frame, finish] {
     const auto it = pending_.find(seq);
     if (it == pending_.end()) return;
     Pending& p = it->second;
@@ -234,13 +248,11 @@ void DirectTransport::send_text(const QHostAddress& target, quint16 target_port,
       return;
     }
     if (fed.established && !p.text_sent) {
-      Message msg;
-      msg.set_type(MsgType::TEXT);
+      Message msg = frame; // 帧体（文本载荷/空体振屏）由包装函数装配
       msg.set_seq(seq);
       msg.set_from(device_id_);
       msg.set_to(to_id);
       msg.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
-      msg.mutable_text()->set_text(text);
       const std::string wire =
           p.ch->protect(memex::protocol::encode_payload(msg));
       if (wire.empty()) {
@@ -275,6 +287,24 @@ void DirectTransport::send_text(const QHostAddress& target, quint16 target_port,
 
   timer->start(kAckTimeoutMs);
   socket->connectToHost(target, target_port);
+}
+
+// 送达确认：ACK 携带原 seq，经信道密文回写（TEXT/NUDGE 入站共用）
+void DirectTransport::write_ack(QTcpSocket* socket,
+                                const std::shared_ptr<SecureChannel>& ch,
+                                std::uint64_t seq, const std::string& from) {
+  Message ack;
+  ack.set_type(MsgType::ACK);
+  ack.set_seq(seq);
+  ack.set_from(device_id_);
+  ack.set_to(from);
+  ack.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  const std::string wire = ch->protect(memex::protocol::encode_payload(ack));
+  if (wire.empty()) {
+    qWarning() << "[直连接入] 回执封装失败（信道已失效）";
+    return;
+  }
+  socket->write(QByteArray(wire.data(), static_cast<qsizetype>(wire.size())));
 }
 
 } // namespace memex::client

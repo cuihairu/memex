@@ -57,10 +57,19 @@ public:
                  const std::string& to_id, std::uint64_t seq,
                  const std::string& text);
 
+  // 振屏（需求批⑥）：与文本同一机制（握手→发信→等 ACK，seq 键控
+  // delivered 回报）；载荷为空体 Nudge，类型即信号。
+  void send_nudge(const QHostAddress& target, quint16 target_port,
+                  const std::string& to_id, std::uint64_t seq);
+
 signals:
   // 收到对端文本（尚未回执前先缓存，回执由本类发出）
   void text_received(const QString& from_id, const QString& to_id,
                      quint64 seq, qint64 ts_ms, const QString& text);
+  // 收到对端振屏（回执由本类发出；窗口抖动效果在界面层）。seq＝对端
+  // 发送序号——本地落库去重键（与 text_received 同口径）
+  void nudge_received(const QString& from_id, const QString& to_id,
+                      quint64 seq, qint64 ts_ms);
   void delivered(quint64 seq, bool ok);
   // 文件连接移交（T1.3）：kFileMeta 已解出，socket 所有权随之移交
   // （父对象置空、本类槽位断开），此后字节流由文件服务按块处理。
@@ -81,6 +90,14 @@ private:
   void on_inbound_ready(QTcpSocket* socket);
   void handle_payload(QTcpSocket* inbound, const std::string& payload,
                       const std::shared_ptr<SecureChannel>& ch);
+  // 发信共用机制（文本/振屏同路）：握手→写帧→等 ACK，seq 键控 delivered
+  void send_frame_with_ack(const QHostAddress& target, quint16 target_port,
+                           const std::string& to_id, std::uint64_t seq,
+                           const memex::protocol::Message& frame);
+  // 回执密文回写（入站连接应答：TEXT/NUDGE 共用）
+  void write_ack(QTcpSocket* socket,
+                 const std::shared_ptr<SecureChannel>& ch, std::uint64_t seq,
+                 const std::string& from);
 
   QTcpServer server_;
   std::string device_id_;

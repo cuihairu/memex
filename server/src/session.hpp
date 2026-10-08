@@ -55,6 +55,7 @@ private:
   std::string device_name_;
   std::string device_fingerprint_;
   std::string kind_{"desktop"}; // 设备类型：同类型单点在线互踢，跨类型并存
+  std::int64_t last_nudge_ms_{0}; // 振屏连接级限频（需求批⑥：1s 最小间隔）
 };
 
 } // namespace memex::server

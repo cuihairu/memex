@@ -194,6 +194,51 @@ quint64 CollabEngine::send_text(const QString& to, const QString& text) {
   return seq;
 }
 
+// 振屏（需求批⑥，协作单聊）：空体 NUDGE——与文本同走至少一次管线
+//（受理回执/超时重发/断线补传按 p.nudge 重建同型帧），本地落 "[振屏]"
+// 标记行；服务端归档留痕＋在线即投，不进离线补投。
+quint64 CollabEngine::send_nudge(const QString& to) {
+  if (to.isEmpty()) return 0;
+  const quint64 seq = next_seq_++;
+  PendingSend p;
+  p.to = to.toStdString();
+  p.nudge = true;
+  p.seq = seq;
+  p.ts_ms = QDateTime::currentMSecsSinceEpoch();
+
+  if (logged_in_) {
+    Message m;
+    m.set_type(MsgType::NUDGE);
+    m.mutable_nudge(); // 空 message 进 oneof 须显式置位（需求批⑥）
+    m.set_seq(seq);
+    m.set_from(account_.toStdString());
+    m.set_to(p.to);
+    m.set_ts_ms(p.ts_ms);
+    send_frame(m);
+    p.sent_at_ms = QDateTime::currentMSecsSinceEpoch();
+    inflight_.insert(seq, p);
+    if (!delivery_timer_.isActive()) delivery_timer_.start(500);
+  } else if (reconnecting_) {
+    pending_reconnect_.push_back(p);
+  } else {
+    return 0;
+  }
+
+  if (store_) {
+    memex::client::StoredMessage sm;
+    sm.seq = seq;
+    sm.peer = p.to;
+    sm.from = account_.toStdString();
+    sm.to = p.to;
+    sm.ts_ms = p.ts_ms;
+    sm.text = "[振屏]";
+    sm.source = "collab";
+    sm.sync_state = logged_in_ ? "SENDING" : "PENDING"; // 受理回执推移
+    store_->append(sm);
+  }
+  return seq;
+}
+
 void CollabEngine::recall_text(const QString& to, const QString& msg_id) {
   if (!logged_in_ || to.isEmpty() || msg_id.isEmpty()) return;
   Message m;
@@ -495,6 +540,34 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
   case MsgType::TEXT:
     if (msg.has_text()) handle_text(msg);
     break;
+  case MsgType::NUDGE: {
+    // 振屏（需求批⑥）：本地落 "[振屏]" 标记行（服务端已归档）后上抛
+    // 界面层抖窗；按 msg_id 去重（补投/重发幂等）。无离线补投——
+    // 到达即在线，无需回 ACK 清队列。
+    if (!msg.has_nudge()) break;
+    if (msg.to().rfind("group:", 0) == 0) break; // 群振屏不支持（服务端同裁）
+    bool inserted = true;
+    if (store_) {
+      memex::client::StoredMessage sm;
+      sm.seq = msg.seq();
+      sm.peer = msg.from();
+      sm.from = msg.from();
+      sm.to = msg.to();
+      sm.ts_ms = msg.ts_ms() > 0 ? msg.ts_ms()
+                                 : QDateTime::currentMSecsSinceEpoch();
+      sm.text = "[振屏]";
+      sm.source = "collab";
+      sm.msg_id = msg.msg_id();
+      sm.sync_state = "ARCHIVED"; // 服务端已归档（平台-9 接收方向）
+      store_->append(sm, &inserted);
+    }
+    if (inserted) {
+      emit nudge_received(QString::fromStdString(msg.from()),
+                          msg.ts_ms() > 0 ? msg.ts_ms()
+                                          : QDateTime::currentMSecsSinceEpoch());
+    }
+    break;
+  }
   case MsgType::NOTICE:
     if (msg.has_notice()) handle_notice(msg);
     break;
@@ -797,12 +870,17 @@ void CollabEngine::check_delivery_timeouts() {
       if (logged_in_) {
         PendingSend p = it.value();
         Message m;
-        m.set_type(MsgType::TEXT);
         m.set_seq(p.seq);
         m.set_from(account_.toStdString());
         m.set_to(p.to);
         m.set_ts_ms(p.ts_ms);
-        m.mutable_text()->set_text(p.text);
+        if (p.nudge) { // 振屏重发：按原类型空体重建（需求批⑥）
+          m.set_type(MsgType::NUDGE);
+          m.mutable_nudge();
+        } else {
+          m.set_type(MsgType::TEXT);
+          m.mutable_text()->set_text(p.text);
+        }
         send_frame(m);
         p.sent_at_ms = now;
         it.value() = p;
@@ -845,6 +923,9 @@ void CollabEngine::flush_pending_sends() {
       p.text = m.text;
       p.seq = seq;
       p.ts_ms = m.ts_ms;
+      // 振屏标记行恢复为振屏帧（用户字面输入同名文本的极端情形下重建为
+      // TEXT/NUDGE 渲染面等价——都是 "[振屏]" 系统行，如实口径）
+      p.nudge = m.text == "[振屏]";
       pending_reconnect_.push_back(p);
       qInfo() << "[协作] 重启恢复：库中待同步消息重新入队（seq" << seq << "）";
     }
@@ -853,12 +934,17 @@ void CollabEngine::flush_pending_sends() {
   const qint64 now = QDateTime::currentMSecsSinceEpoch();
   for (const PendingSend& p : pending_reconnect_) {
     Message m;
-    m.set_type(MsgType::TEXT);
     m.set_seq(p.seq);
     m.set_from(account_.toStdString());
     m.set_to(p.to);
     m.set_ts_ms(p.ts_ms);
-    m.mutable_text()->set_text(p.text);
+    if (p.nudge) { // 振屏补传：按原类型空体重建（需求批⑥）
+      m.set_type(MsgType::NUDGE);
+      m.mutable_nudge();
+    } else {
+      m.set_type(MsgType::TEXT);
+      m.mutable_text()->set_text(p.text);
+    }
     send_frame(m);
     PendingSend inflight = p;
     inflight.sent_at_ms = now;

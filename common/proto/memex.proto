@@ -40,6 +40,8 @@ enum MsgType {
   FILE_AUTHZ_RESULT = 50;  // 服务端 → 终端：授权裁决（允许/拒绝＋依据＋可转发）
   PROFILE_CMD = 51;    // 终端 → 服务端：个人资料设置（个性签名，需求批⑪）
   PROFILE_RESULT = 52; // 服务端 → 终端：资料命令回执
+  NUDGE = 53;          // 振屏消息（需求批⑥：窗口抖动提醒——实时信号，
+                       // 服务端归档留痕但不进离线补投）
 }
 
 message Hello {
@@ -262,6 +264,11 @@ message ProfileResult {
   string op = 3;     // 回执对应的命令
 }
 
+// 振屏（需求批⑥）：空体——类型即信号（窗口抖动提醒无内容载荷）。
+// 实时信号：在线即投；不进离线补投（补投的抖动失去时效且成骚扰），
+// 归档留痕以 "[振屏]" 标记文本落库，历史检索可见。
+message Nudge {}
+
 // 通知（T4.10）：webhook 接入推送的站内通知——紧急程度三级驱动客户端分级
 // 推送（普通＝站内会话消息、重要＝桌面通知强提醒、紧急＝置顶弹窗需确认收悉）。
 message Notice {
@@ -313,5 +320,6 @@ message Envelope {
     FileAuthzResult file_authz_result = 150;
     ProfileCmd profile_cmd = 151;
     ProfileResult profile_result = 152;
+    Nudge nudge = 153;
   }
 }

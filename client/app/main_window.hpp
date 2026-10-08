@@ -110,6 +110,11 @@ public:
   // 最近一次文件传输终态错误（授权链修复·验收面）：空=无失败；含
   // deny:server-unreachable＝未登录 fail-closed 本地拒
   QString last_file_error() const { return last_file_error_; }
+  // 振屏发送流（需求批⑥，与「振屏」按钮同一路径；测试缝）：守卫（无
+  // 会话/群会话）＋防刷限频（同一会话 10s 冷却）。true＝已发出
+  bool send_nudge_to_current_chat();
+  // 振屏接收验收面（需求批⑥）：窗口抖动生效次数（接收侧效果限频内计 1）
+  int shake_count() const { return shake_count_; }
   // 布局验收面：会话面板当前是否展开（列表态＝false）
   bool chat_panel_visible() const {
     return chat_panel_ && chat_panel_->isVisible();
@@ -223,6 +228,12 @@ private:
   // 文件夹发送守卫（需求批⑤，按钮与发送缝单源）：无会话/群会话/策略闸门；
   // false＝已给状态文案
   bool folder_send_allowed();
+  // 振屏到达（需求批⑥，直连/协作两域单源）：当前会话渲染 "[振屏]" 系统行
+  // ＋窗口抖动与提示音（效果限频）；不在当前会话只提示（历史重载可见）
+  void on_nudge_received(const QString& from, qint64 ts_ms,
+                         const QString& source);
+  // 窗口抖动（需求批⑥）：短促左右移位后复位（离屏/测试环境同样生效）
+  void shake_window();
   // 截图确认后发送（PNG 临时文件走既有文件通道；与「发文件」同口径）
   void on_screenshot_confirmed(const QString& path);
 
@@ -359,6 +370,11 @@ private:
   QAction* act_collab_logout_{nullptr};
   QString last_received_file_; // 文件接收验收面（「from|path」）
   QString last_file_error_;    // 最近一次文件传输终态错误（验收面；空=无失败）
+  // 振屏（需求批⑥）：发送冷却（peer→上次发送时刻）＋接收效果限频＋
+  // 抖动生效计数（测试缝）
+  QHash<QString, qint64> last_nudge_sent_;
+  qint64 last_nudge_effect_ms_{0};
+  int shake_count_{0};
   QShortcut* shot_sc_{nullptr}; // 截图快捷键（键可改：apply_screenshot_shortcut）
   // 离开锁屏（用户令 2026-10-08 ④）：无操作计时器＋锁屏遮罩（只显未读数）
   QTimer* idle_timer_{nullptr};
@@ -377,6 +393,7 @@ private:
   QPushButton* shot_btn_{nullptr};
   QPushButton* emoji_btn_{nullptr};
   QPushButton* color_btn_{nullptr};
+  QPushButton* nudge_btn_{nullptr};
 
   // 品牌物料（设计稿 docs/design/品牌物料.md）：侧栏品牌行（无牌隐藏=
   // 没配就不变）＋brand_applied 驱动的整窗换牌（标题/图标/托盘）

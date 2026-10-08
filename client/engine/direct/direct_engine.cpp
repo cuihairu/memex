@@ -131,6 +131,23 @@ bool DirectEngine::start() {
   connect(transport_.get(), &DirectTransport::delivered, this,
           [this](quint64 seq, bool ok) { emit text_delivered(seq, ok); });
 
+  // 振屏（需求批⑥）：本地落标记行后上抛（界面抖窗＋提示音）
+  connect(transport_.get(), &DirectTransport::nudge_received, this,
+          [this](const QString& from_id, const QString& /*to_id*/,
+                 quint64 seq, qint64 ts_ms) {
+            StoredMessage m;
+            m.peer = from_id.toStdString();
+            m.from = from_id.toStdString();
+            m.to = device_id_;
+            m.seq = seq; // 对端发送序号＝去重键（与文本接收同口径）
+            m.ts_ms = ts_ms;
+            m.text = "[振屏]";
+            m.source = "direct";
+            m.sync_state = "LOCAL"; // 直连域不进服务端同步（平台-9）
+            store_->append(m);
+            emit nudge_received(from_id, m.seq, ts_ms);
+          });
+
   // 文件传输：连接移交与信号转发（QString 化），目录作业链在 file_finished 驱动；
   // 移交携带该连接的安全信道（已握手），数据面续用其密钥
   connect(transport_.get(), &DirectTransport::file_incoming, this,
@@ -240,6 +257,32 @@ quint64 DirectEngine::send_text(const std::string& peer_device_id,
   store_->append(m);
 
   transport_->send_text(target.address, target.tcp_port, peer_device_id, seq, text);
+  return static_cast<quint64>(seq);
+}
+
+// 振屏（需求批⑥）：空体 NUDGE 走文本同一机制；本地落 "[振屏]" 标记行
+//（对端同标记落库——界面把该标记渲染为居中系统行，历史重载与实时同构）
+quint64 DirectEngine::send_nudge(const std::string& peer_device_id) {
+  if (!running_) return 0;
+  const Peer target = peer(peer_device_id);
+  if (target.device_id.empty() || target.tcp_port == 0) {
+    qWarning() << "[直连引擎] 对端不可达："
+               << QString::fromStdString(peer_device_id);
+    return 0;
+  }
+  const std::uint64_t seq = ++seq_counter_;
+  const qint64 ts_ms = QDateTime::currentMSecsSinceEpoch();
+  StoredMessage m;
+  m.peer = peer_device_id;
+  m.from = device_id_;
+  m.to = peer_device_id;
+  m.seq = seq;
+  m.ts_ms = ts_ms;
+  m.text = "[振屏]";
+  m.source = "direct";
+  m.sync_state = "LOCAL"; // 直连域不进服务端同步（平台-9）
+  store_->append(m);
+  transport_->send_nudge(target.address, target.tcp_port, peer_device_id, seq);
   return static_cast<quint64>(seq);
 }
 

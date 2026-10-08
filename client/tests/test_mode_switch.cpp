@@ -562,6 +562,35 @@ int main(int argc, char** argv) {
     db.set_collab_account(""); // 还原匿名宣告（后文降级态跨态判定不受扰）
   }
 
+  // —— 需求批⑥ 振屏（直连域）：主窗缝发送＋对端引擎收＋防刷限频＋抖窗 ——
+  {
+    const QString win_id =
+        QSettings().value(QStringLiteral("direct/device_id")).toString();
+    int db_nudge = 0;
+    QString db_nudge_from;
+    QObject::connect(&db, &DirectEngine::nudge_received, &db,
+                     [&](const QString& from, quint64, qint64) {
+                       ++db_nudge;
+                       db_nudge_from = from;
+                     });
+    CHECK(window.send_nudge_to_current_chat());
+    CHECK(wait_until([&] { return db_nudge == 1; }, 6000));
+    CHECK(db_nudge_from == win_id);
+    // 对端本地标记行（历史重载渲染源；seq＝对端发送序号）
+    const auto b_hist = db.history(win_id, 5);
+    CHECK(!b_hist.isEmpty() &&
+          b_hist.crbegin()->text == QStringLiteral("[振屏]"));
+    // 本端系统行（受控标记渲染，非气泡）
+    CHECK(window.chat_html().contains(QStringLiteral("你发送了窗口抖动")));
+    // 防刷限频：同一会话 10s 内第二次拒（同轮状态断言无竞态）
+    CHECK(!window.send_nudge_to_current_chat());
+    CHECK(window.status_text().contains(QStringLiteral("太频繁")));
+    // 反向：db 振窗口（裸引擎发送面）→ 窗口抖窗＋系统行（当前会话匹配）
+    CHECK(db.send_nudge(win_id.toStdString()) != 0);
+    CHECK(wait_until([&] { return window.shake_count() >= 1; }, 6000));
+    CHECK(window.chat_html().contains(QStringLiteral("给你发来窗口抖动")));
+  }
+
   // 同库注入一条直连历史（peer 同为 bob）：合并展示按来源标注
   {
     const QString win_db = tmp.filePath(
@@ -587,6 +616,13 @@ int main(int argc, char** argv) {
   CHECK(window.chat_html().contains(QStringLiteral("直连·仅本机")));
   CHECK(window.chat_html().contains(QStringLiteral("协作·已归档")));
   CHECK(window.chat_html().contains(QStringLiteral("直连旧消息（仅本机）")));
+
+  // —— 需求批⑥ 振屏（协作域）：NUDGE 经服务端（归档＋受理回执＋限频
+  //    语义见服务端 test_nudge）；本端系统行＋同会话 10s 限频 ——
+  CHECK(window.send_nudge_to_current_chat());
+  CHECK(window.chat_html().contains(QStringLiteral("你发送了窗口抖动")));
+  CHECK(!window.send_nudge_to_current_chat());
+  CHECK(window.status_text().contains(QStringLiteral("太频繁")));
 
   // —— 停服务端 → 登录回落直连态，明确提示「消息不进归档」 ——
   window.logout_collab();

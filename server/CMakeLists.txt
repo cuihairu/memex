@@ -105,6 +105,13 @@ if(MEMEX_BUILD_TESTS)
   add_test(NAME read_presence COMMAND test_read_presence)
   set_tests_properties(read_presence PROPERTIES TIMEOUT 60)
 
+  # 振屏（需求批⑥，服务端面）：NUDGE 空体受理——归档留痕＋在线即投＋
+  # 受理回执；不进离线补投；连接级 1s 限频静默拒；群目标拒；未登录拒
+  add_executable(test_nudge tests/test_nudge.cpp)
+  target_link_libraries(test_nudge PRIVATE memex_server_core)
+  add_test(NAME nudge COMMAND test_nudge)
+  set_tests_properties(nudge PROPERTIES TIMEOUT 60)
+
   # T4.6 通讯录可见性验收（A20）：库级过滤／脱敏／上级引用抹除／落盘重开＋
   # CLI 配置面（org hide|fields|allow|visibility list）＋协议级 ORG_QUERY
   # 按查询者过滤（被隐藏者不可见不可搜——数据不出服务端）

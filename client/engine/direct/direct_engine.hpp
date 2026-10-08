@@ -55,6 +55,10 @@ public:
   // 异步发送文本；结果经 text_delivered(seq, ok)。失败返回 false（seq=0）。
   quint64 send_text(const std::string& peer_device_id, const std::string& text);
 
+  // 振屏（需求批⑥）：发送窗口抖动提醒（空体 NUDGE，无内容载荷）；本地
+  // 落 "[振屏]" 标记行，送达结果同文本走 text_delivered(seq, ok)。失败 0。
+  quint64 send_nudge(const std::string& peer_device_id);
+
   // 异步发送文件；返回传输 ID（失败为空）。进度与终态经 file_progress /
   // file_finished 回报。须在 start() 前设置接收目录（set_download_dir）。
   std::string send_file(const std::string& peer_device_id,
@@ -105,6 +109,8 @@ public:
 signals:
   void message_received(const QString& from_id, const QString& text, qint64 ts_ms);
   void text_delivered(quint64 seq, bool ok);
+  // 收到对端振屏（需求批⑥）：界面层抖窗＋提示音；本地已落 "[振屏]" 标记行
+  void nudge_received(const QString& from_id, quint64 seq, qint64 ts_ms);
   void peers_changed();
   void file_progress(const QString& transfer_id, quint64 bytes_done,
                      quint64 bytes_total);

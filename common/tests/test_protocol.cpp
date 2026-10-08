@@ -178,6 +178,28 @@ void test_type_names() {
   CHECK(std::string(msg_type_name(v1::KICK)) == "kick");
 }
 
+// 振屏（需求批⑥）：空体 NUDGE——类型即信号；oneof 字段号 153 对账。
+// 空 message 进 oneof 须显式 mutable_nudge() 置位（proto3 语义：未置位
+// 即 has_nudge()==false 且不序列化）
+void test_nudge() {
+  Message m;
+  m.set_type(v1::NUDGE);
+  m.mutable_nudge();
+  m.set_seq(7);
+  m.set_from("dev-A");
+  m.set_to("dev-B");
+  m.set_ts_ms(1727848800456);
+  const Message back = decode_frame(encode(m));
+  CHECK(back.type() == v1::NUDGE);
+  CHECK(back.has_nudge());
+  CHECK(back.nudge().ByteSizeLong() == 0); // 空体：无载荷字节
+  CHECK(back.seq() == 7);
+  CHECK(back.from() == "dev-A");
+  CHECK(back.to() == "dev-B");
+  CHECK(back.ts_ms() == m.ts_ms());
+  CHECK(std::string(msg_type_name(v1::NUDGE)) == "nudge");
+}
+
 } // namespace
 
 int main() {
@@ -188,6 +210,7 @@ int main() {
   test_bad_payloads();
   test_unknown_field_tolerance();
   test_type_names();
+  test_nudge();
   if (g_failures == 0) {
     std::cout << "protocol tests: all passed\n";
     return 0;

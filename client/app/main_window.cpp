@@ -609,11 +609,18 @@ void MainWindow::build_ui() {
   color_btn->setToolTip(QStringLiteral("选中文字后点此设置颜色"));
   connect(color_btn, &QPushButton::clicked, this,
           [this] { request_input_color(); });
+  auto* nudge_btn = new QPushButton(QStringLiteral("振屏"), input_row);
+  nudge_btn_ = nudge_btn;
+  nudge_btn->setToolTip(
+      QStringLiteral("发送窗口抖动提醒（单聊；同一会话 10 秒一次）"));
+  connect(nudge_btn, &QPushButton::clicked, this,
+          [this] { send_nudge_to_current_chat(); });
   input_layout->addWidget(shot_btn);
   input_layout->addWidget(file_btn);
   input_layout->addWidget(folder_btn);
   input_layout->addWidget(emoji_btn);
   input_layout->addWidget(color_btn);
+  input_layout->addWidget(nudge_btn);
   input_box_ = new QLineEdit(input_row);
   input_box_->setPlaceholderText(QStringLiteral("输入消息，回车发送"));
   send_btn_ = new QPushButton(QStringLiteral("发送"), input_row);
@@ -776,6 +783,11 @@ void MainWindow::wire_engines() {
               last_pct = pct;
               show_status(QStringLiteral("文件传输进度：%1%").arg(pct));
             }
+          });
+  // 振屏（需求批⑥）：直连域到达——抖窗＋提示音，当前会话渲染系统行
+  connect(&direct_engine_, &DirectEngine::nudge_received, this,
+          [this](const QString& from, quint64 /*seq*/, qint64 ts_ms) {
+            on_nudge_received(from, ts_ms, QStringLiteral("direct"));
           });
   connect(&direct_engine_, &DirectEngine::file_finished, this,
           [this](const QString& id, bool ok, const QString& error) {
@@ -1028,6 +1040,11 @@ void MainWindow::wire_collab() {
             set_delivery_state(
                 ok ? QStringLiteral("协作消息已送达（seq %1）").arg(seq)
                    : QStringLiteral("协作消息送达超时（seq %1）").arg(seq));
+          });
+  // 振屏（需求批⑥）：协作域到达——抖窗＋提示音，当前会话渲染系统行
+  connect(&collab_engine_, &CollabEngine::nudge_received, this,
+          [this](const QString& from, qint64 ts_ms) {
+            on_nudge_received(from, ts_ms, QStringLiteral("collab"));
           });
   connect(&collab_engine_, &CollabEngine::org_received, this,
           [this](const QString& org_json) {
@@ -1636,6 +1653,89 @@ QString MainWindow::send_folder_to_current_chat(const QString& dir) {
       QStringLiteral("[文件夹] %1 开始发送（递归含子目录）").arg(esc(st.name)));
   show_status(QStringLiteral("文件夹发送中：%1").arg(st.name));
   return job;
+}
+
+// 振屏发送缝（需求批⑥，与「振屏」按钮单源）：守卫＋防刷限频（同一会话
+// 10s 冷却）→ 协作走 NUDGE 帧经服务端归档＋在线即投，直连走点对点空体
+// NUDGE。true＝已发出（本端标记行由引擎落库，界面此处渲染系统行）。
+bool MainWindow::send_nudge_to_current_chat() {
+  if (current_peer_.isEmpty()) {
+    show_status(QStringLiteral("先选择会话再发送振屏"));
+    return false;
+  }
+  if (current_kind_ == QStringLiteral("group") ||
+      current_kind_ == QStringLiteral("dgroup")) {
+    show_status(QStringLiteral("群会话暂不支持振屏（走单聊点对点）"));
+    return false;
+  }
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  if (now - last_nudge_sent_.value(current_peer_, 0) < 10000) {
+    show_status(QStringLiteral("振屏发送太频繁（同一会话 10 秒一次）"));
+    return false;
+  }
+  const quint64 seq = current_kind_ == QStringLiteral("collab")
+                          ? collab_engine_.send_nudge(current_peer_)
+                          : direct_engine_.send_nudge(
+                                direct_peer_target().toStdString());
+  if (seq == 0) {
+    show_status(QStringLiteral("振屏发送失败（对端不可达或通道不可用）"));
+    return false;
+  }
+  last_nudge_sent_.insert(current_peer_, now);
+  const QString source = current_kind_ == QStringLiteral("collab")
+                             ? QStringLiteral("collab")
+                             : QStringLiteral("direct");
+  append_message(current_peer_, QStringLiteral("[振屏]"),
+                 QDateTime::currentMSecsSinceEpoch(), true, source);
+  if (current_kind_ == QStringLiteral("collab")) {
+    set_delivery_state(QStringLiteral("发送中…（seq %1）").arg(seq));
+  }
+  show_status(QStringLiteral("振屏已发送"));
+  return true;
+}
+
+// 振屏到达（需求批⑥，直连/协作两域单源）：当前会话即时渲染（append_message
+// 对标记文本特判为居中系统行，历史重载同构）＋抖窗与提示音（效果限频 2s）；
+// 窗口非激活时托盘通知（复用消息事件开关与提示音档位）。
+void MainWindow::on_nudge_received(const QString& from, qint64 ts_ms,
+                                   const QString& source) {
+  const bool in_chat =
+      from == current_peer_ &&
+      (current_kind_ == QStringLiteral("direct") ||
+       current_kind_ == QStringLiteral("collab")) &&
+      ((source == QStringLiteral("collab")) ==
+       (current_kind_ == QStringLiteral("collab")));
+  if (in_chat) {
+    append_message(from, QStringLiteral("[振屏]"), ts_ms, false, source);
+  } else {
+    show_status(QStringLiteral("来自 %1 的振屏").arg(from));
+  }
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  if (now - last_nudge_effect_ms_ >= 2000) {
+    last_nudge_effect_ms_ = now;
+    ++shake_count_;
+    shake_window();
+  }
+  if (!isActiveWindow()) {
+    event_notify(NotifyPrefs::load().popup_message, SoundEvent::Message,
+                 QStringLiteral("振屏"),
+                 QStringLiteral("来自 %1 的窗口抖动").arg(from));
+  }
+}
+
+// 窗口抖动（需求批⑥）：短促左右移位后复位。move 在离屏/测试环境同样
+// 可行；效果计数在 on_nudge_received 已记（提示音复用消息档位，无独立音频）。
+void MainWindow::shake_window() {
+  const QPoint orig = pos();
+  constexpr int kAmplitude = 8;  // 单侧移位像素
+  constexpr int kSteps = 8;      // 抖动步数（约 320ms）
+  for (int i = 0; i < kSteps; ++i) {
+    const int dx = (i % 2 == 0) ? kAmplitude : -kAmplitude;
+    QTimer::singleShot(i * 40, this,
+                       [this, orig, dx] { move(orig.x() + dx, orig.y()); });
+  }
+  QTimer::singleShot(kSteps * 40, this,
+                     [this, orig] { move(orig.x(), orig.y()); });
 }
 
 // 截图发送流（需求批④）：持久拷贝（图片消息本机保留——传输完成后临时
@@ -3056,6 +3156,16 @@ void MainWindow::append_message(const QString& from_id, const QString& text,
   } else {
     name = QStringLiteral("我");
   }
+  // 振屏标记（需求批⑥）：不进气泡，渲染居中系统行（实时与历史重载同构）。
+  // 受控标记口径（同文字颜色〔#RRGGBB〕）：普通文本恰为 "[振屏]" 亦按
+  // 振屏渲染——两侧落库一致，副作用可接受。
+  if (text == QStringLiteral("[振屏]")) {
+    const QString line =
+        outgoing ? QStringLiteral("你发送了窗口抖动")
+                 : QStringLiteral("%1 给你发来窗口抖动").arg(esc(name));
+    append_system_line(line);
+    return;
+  }
   // 来源字段（合并展示）：直连＝仅本机；协作＝服务端归档
   const QString tag =
       source == QStringLiteral("collab")
@@ -3197,7 +3307,8 @@ void MainWindow::apply_theme_styles() {
       "QPushButton:hover { background:%4; }")
       .arg(t.surface_raised.name(), t.brand_text.name(), t.brand.name(),
            t.brand_wash.name());
-  for (QPushButton* btn : {file_btn_, folder_btn_, shot_btn_, emoji_btn_, color_btn_}) {
+  for (QPushButton* btn :
+       {file_btn_, folder_btn_, shot_btn_, emoji_btn_, color_btn_, nudge_btn_}) {
     if (btn) btn->setStyleSheet(outline);
   }
   if (send_btn_) {

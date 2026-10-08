@@ -115,6 +115,17 @@ int main(int argc, char** argv) {
     }, 3000));
   }
 
+  // —— 需求批⑥ 振屏：入口在场；无会话点击守卫（同口径）——
+  QPushButton* nudge = find_button(window, QStringLiteral("振屏"));
+  CHECK(nudge != nullptr);
+  if (nudge) {
+    nudge->click();
+    CHECK(wait_until([&] {
+      return window.status_text().contains(
+          QStringLiteral("先选择会话再发送振屏"));
+    }, 3000));
+  }
+
   // —— BUG-003 表情：点击弹面板（锚定可见）→ 点 😀 落输入框 → 面板自关 ——
   QLineEdit* input = find_input(window);
   CHECK(input != nullptr);
