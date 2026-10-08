@@ -98,6 +98,11 @@ public:
   // 重读 net_blacklist/remote_control：黑名单开关+段表转过滤器注入直连
   // 引擎（运行中改即按新表判；开关关=不装过滤器全放行）
   void apply_net_settings();
+  // 截图发送流（需求批④，与截图确认回调同一路径；测试缝）：持久拷贝＋
+  // 走直连文件通道＋本端图片气泡；返回 false＝未发出（状态行明示原因）
+  bool send_shot_to_current_chat(const QString& path);
+  // 文件接收验收面（需求批④调试缝）：「from|path」（未收＝空）
+  QString last_received_file() const { return last_received_file_; }
   bool lock_screen_visible() const; // 锁屏遮罩当前是否在屏
   int lock_unread_count() const;    // 锁屏期间新到消息条数（未锁＝0）
   QString lock_screen_text() const; // 锁屏面未读行文案（断言只含数量不含内容）
@@ -143,6 +148,10 @@ private:
   void open_chat(const QString& kind, const QString& id);
   void append_message(const QString& from_id, const QString& text,
                       qint64 ts_ms, bool outgoing, const QString& source);
+  // 图片消息气泡（需求批④）：气泡内直接渲染图片（<img>，非文件系统行）
+  void append_image_message(const QString& from_id, const QString& image_path,
+                            qint64 ts_ms, bool outgoing, const QString& source);
+  QString direct_peer_target() const; // 直连文件通道目标设备（collab 按账号匹配）
   void append_system_line(const QString& text);
   void show_guidance();
   void render_guidance();  // 空态引导正文（颜色走令牌，主题切换可重渲）
@@ -161,6 +170,7 @@ private:
     qint64 ts_ms{0};
     bool outgoing{false};
     bool at_mode{false}; // 群聊：@账号 高亮
+    QString image;      // 非空＝图片消息（需求批④：text 存文件路径，气泡渲染 <img>）
   };
   void show_status(const QString& text);
   // 新消息闪烁提醒（用户令 2026-10-05）：仅窗口非激活时；同窗多条合并；
@@ -302,6 +312,7 @@ private:
   QLineEdit* input_box_{nullptr};
   QPushButton* send_btn_{nullptr};
   QAction* act_collab_logout_{nullptr};
+  QString last_received_file_; // 文件接收验收面（「from|path」）
   QShortcut* shot_sc_{nullptr}; // 截图快捷键（键可改：apply_screenshot_shortcut）
   // 离开锁屏（用户令 2026-10-08 ④）：无操作计时器＋锁屏遮罩（只显未读数）
   QTimer* idle_timer_{nullptr};

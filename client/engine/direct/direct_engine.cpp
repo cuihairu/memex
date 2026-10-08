@@ -143,8 +143,10 @@ bool DirectEngine::start() {
             emit file_progress(QString::fromStdString(id), done, total);
           });
   connect(file_service_.get(), &FileTransferService::file_received, this,
-          [this](const std::string& id, const QString& path) {
-            emit file_received(QString::fromStdString(id), path);
+          [this](const std::string& id, const std::string& peer_id,
+                 const QString& path) {
+            emit file_received(QString::fromStdString(id),
+                               QString::fromStdString(peer_id), path);
           });
   connect(file_service_.get(), &FileTransferService::file_finished, this,
           [this](const std::string& id, bool ok, const QString& error) {

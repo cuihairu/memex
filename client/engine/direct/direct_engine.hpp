@@ -109,8 +109,9 @@ signals:
   void file_progress(const QString& transfer_id, quint64 bytes_done,
                      quint64 bytes_total);
   void file_finished(const QString& transfer_id, bool ok, const QString& error);
-  // 接收侧：文件完整落地
-  void file_received(const QString& transfer_id, const QString& final_path);
+  // 接收侧：文件完整落地（peer_id＝发送方设备号）
+  void file_received(const QString& transfer_id, const QString& peer_id,
+                     const QString& final_path);
   void directory_finished(const QString& job_id, bool ok);
 
 private:

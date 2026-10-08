@@ -11,7 +11,9 @@
 #include <QCheckBox>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPixmap>
 #include <QProcess>
+#include <QRandomGenerator>
 #include <QSettings>
 #include <QTcpServer>
 #include <QTemporaryDir>
@@ -402,6 +404,64 @@ int main(int argc, char** argv) {
   da_delivered = false;
   CHECK(da.send_text("dev-B2", "服务端已停，直连仍可用") != 0);
   CHECK(wait_until([&] { return db_received == 1 && da_delivered; }, 6000));
+
+  // —— 需求批④ 截图发送＝图片消息（气泡内直接渲染图片，非系统行）——
+  {
+    window.open_direct_peer(QStringLiteral("dev-B2"));
+    // 本端发送流：真 PNG 走 send_shot_to_current_chat（截图确认回调同一路径）
+    const QString shot = tmp.filePath(QStringLiteral("shot-msg.png"));
+    {
+      QPixmap pm(96, 60);
+      pm.fill(Qt::red);
+      CHECK(pm.save(shot, "PNG"));
+    }
+    CHECK(window.send_shot_to_current_chat(shot));
+    CHECK(wait_until([&] {
+      return window.chat_html().contains(QStringLiteral("<img"));
+    }, 8000));
+    CHECK(window.chat_html().contains(QStringLiteral("图片消息")));
+    CHECK(!window.chat_html().contains(QStringLiteral("[截图] 开始发送")));
+    // 收方渲染腿：db 发真 PNG 给窗口（窗口正开着 dev-B2 会话）→
+    // file_received 图片且会话匹配＝气泡追加（非文件系统行）。
+    // 文件名带随机段：同进程窗口与 db 共用 AppData 下载目录，基线腿
+    // 落过同名文件会撞幂等重发直达终态（收不到 FILE_RESUME 数据面）
+    const QString recv_png = tmp.filePath(QStringLiteral("recv-msg-%1.png")
+                                              .arg(QRandomGenerator::global()
+                                                       ->generate()));
+    {
+      QPixmap pm(80, 50);
+      pm.fill(Qt::blue);
+      CHECK(pm.save(recv_png, "PNG"));
+    }
+    const int imgs_before = window.chat_html().count(
+        QStringLiteral("<img"));
+    const QString win_id =
+        QSettings().value(QStringLiteral("direct/device_id")).toString();
+    // 对照基线：裸引擎对文件通道（da→db，test_screenshot 已验窗口发方向）
+    QString db_recv;
+    QObject::connect(&db, &DirectEngine::file_received, &db,
+                     [&](const QString&, const QString&, const QString& path) {
+                       db_recv = path;
+                     });
+    CHECK(!da.send_file("dev-B2", recv_png).empty());
+    CHECK(wait_until([&] { return !db_recv.isEmpty(); }, 15000));
+    // 探针：窗口 file_received 是否到达（验收面分离传输层 vs 渲染层）
+    CHECK(!db.send_file(win_id.toStdString(), recv_png).empty());
+    CHECK(wait_until([&] {
+      return window.last_received_file().startsWith(
+          QStringLiteral("dev-B2|"));
+    }, 15000));
+    CHECK(wait_until([&] {
+      return window.chat_html().count(QStringLiteral("<img")) ==
+             imgs_before + 1;
+    }, 5000));
+    // 验收截图：图片消息气泡（本端发送+收方接收两条）
+    {
+      const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+      CHECK(QDir().mkpath(dir));
+      CHECK(window.grab().save(dir + QStringLiteral("/image-message.png")));
+    }
+  }
 
   // —— 离开锁屏（用户令 2026-10-08 ④）：无操作超时→锁屏只显未读数不显
   //     内容→错密码拒→对密码解锁（db 仍活着：锁屏期间真来一条直连消息）——

@@ -216,7 +216,9 @@ std::string FileTransferService::send_file(const QHostAddress& target,
         p->offset = offset;
         emit file_progress(id, offset, p->total);
         pump(id);
-      } else if (m.type() == MsgType::FILE_DONE && p->resumed) {
+      } else if (m.type() == MsgType::FILE_DONE) {
+        // 终态帧：正常收完（resumed 走完数据面）与幂等直达（对端已有
+        // 同哈希文件、未走 FILE_RESUME 数据面）都要终结发送侧
         const bool ok = m.has_file_done() && m.file_done().ok();
         finish_outgoing(id, ok,
                         ok ? QString() : QStringLiteral("对端校验未通过"));
@@ -230,9 +232,15 @@ std::string FileTransferService::send_file(const QHostAddress& target,
     if (p && p->resumed) pump(id);
   });
 
-  connect(p->socket, &QTcpSocket::errorOccurred, this, [this, id](auto) {
-    finish_outgoing(id, false, QStringLiteral("连接错误"));
-  });
+  connect(p->socket, &QTcpSocket::errorOccurred, this,
+          [this, id](auto) {
+            Outgoing* p = outgoing(id);
+            finish_outgoing(id, false,
+                            QStringLiteral("连接错误：%1")
+                                .arg(p && p->socket
+                                         ? p->socket->errorString()
+                                         : QStringLiteral("未知")));
+          });
   connect(p->socket, &QTcpSocket::disconnected, this, [this, id] {
     finish_outgoing(id, false, QStringLiteral("连接中断"));
   });
@@ -367,7 +375,7 @@ void FileTransferService::handle_incoming(QTcpSocket* socket,
       done.mutable_file_done()->set_sha256(in.sha256.toStdString());
       reply(socket, done, in.ch);
       emit file_progress(in.id, in.total, in.total);
-      emit file_received(in.id, in.final_path);
+      emit file_received(in.id, in.peer_id, in.final_path);
       emit file_finished(in.id, true, {});
       // 优雅关闭：abort 会丢掉刚写入的回执帧
       socket->disconnect(this);
@@ -534,7 +542,7 @@ void FileTransferService::finalize_incoming(QTcpSocket* socket) {
     done.mutable_file_done()->set_sha256(in.sha256.toStdString());
     reply(socket, done, in.ch);
     emit file_progress(in.id, in.total, in.total);
-    emit file_received(in.id, in.final_path);
+    emit file_received(in.id, in.peer_id, in.final_path);
     emit file_finished(in.id, true, {});
   } else {
     // 哈希不符：坏数据不可续传，删部分文件要求整发重来

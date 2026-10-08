@@ -117,7 +117,7 @@ int main(int argc, char** argv) {
                      fin_ok = ok;
                    });
   QObject::connect(&b, &DirectEngine::file_received, &b,
-                   [&](const QString&, const QString& path) {
+                   [&](const QString&, const QString&, const QString& path) {
                      got_path = path;
                      ++received_count;
                    });

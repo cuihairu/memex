@@ -138,13 +138,22 @@ QString hhmm(qint64 ts_ms) {
 // 气泡行：外出＝品牌橙靠右，来访＝浅灰靠左（QTextBrowser 富文本子集，不用圆角）。
 // at_mode=true（群聊）：@账号 标记整体包品牌橙加粗。
 QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
-                    bool outgoing, bool at_mode = false) {
+                    bool outgoing, bool at_mode = false,
+                    const QString& image = {}) {
   const ThemeTokens& t = tk();
   const QString meta = QStringLiteral(
                            "<span style=\"color:%1; font-size:small;\">%2 %3</span>")
                            .arg(t.text_muted.name(), esc(name), hhmm(ts_ms));
-  QString content = esc(text);
-  if (at_mode) {
+  // 图片消息（需求批④）：气泡内容＝内嵌图片（本机保留路径，file:// 直载）；
+  // 普通消息照旧转义文本。
+  QString content =
+      image.isEmpty()
+          ? esc(text)
+          : QStringLiteral(
+                "<img src=\"file://%1\" width=\"280\"><br>"
+                "<span style=\"color:%2; font-size:small;\">图片消息 %3</span>")
+                .arg(image, t.text_muted.name(), esc(QFileInfo(image).fileName()));
+  if (at_mode && image.isEmpty()) {
     static const QRegularExpression at_re(
         QStringLiteral("@[A-Za-z0-9_.\\-]+"));
     QString highlighted;
@@ -698,14 +707,48 @@ void MainWindow::wire_engines() {
             }
           });
   connect(&direct_engine_, &DirectEngine::file_received, this,
-          [this](const QString& /*id*/, const QString& path) {
-            append_system_line(
-                QStringLiteral("[文件] 已接收：%1").arg(esc(path)));
-            show_status(QStringLiteral("文件已接收：%1").arg(path));
+          [this](const QString& id, const QString& peer_id,
+                 const QString& path) {
+            last_received_file_ =
+                peer_id + QLatin1Char('|') + path; // 验收面
+            // 图片消息（需求批④）：图片扩展名且属于当前会话＝气泡内直接
+            // 渲染图片；否则按普通文件系统行（口径不混淆）。
+            // 会话归属按发送方设备号（peer_id）判，transfer id 是 UUID
+            // 不指向任何会话。
+            static const QStringList kImageExt = {
+                QStringLiteral("png"), QStringLiteral("jpg"),
+                QStringLiteral("jpeg"), QStringLiteral("gif"),
+                QStringLiteral("bmp"), QStringLiteral("webp")};
+            const bool is_image =
+                kImageExt.contains(QFileInfo(path).suffix().toLower());
+            bool in_session = false;
+            if (is_image) {
+              if (current_kind_ == QStringLiteral("direct")) {
+                in_session = (peer_id == current_peer_);
+              } else if (current_kind_ == QStringLiteral("collab")) {
+                const Peer p = direct_engine_.peer(peer_id.toStdString());
+                in_session =
+                    !p.account.empty() &&
+                    QString::fromStdString(p.account) == current_peer_;
+              }
+            }
+            if (in_session) {
+              append_image_message(id, path,
+                                   QDateTime::currentMSecsSinceEpoch(),
+                                   /*outgoing=*/false,
+                                   QStringLiteral("direct"));
+              show_status(QStringLiteral("图片消息已接收：%1").arg(path));
+            } else {
+              append_system_line(
+                  QStringLiteral("[文件] 已接收：%1").arg(esc(path)));
+              show_status(QStringLiteral("文件已接收：%1").arg(path));
+            }
             // 收到文件→弹通知窗（与消息同款激活门：激活中不打扰）
             if (!isActiveWindow()) {
               event_notify(NotifyPrefs::load().popup_file_arrive,
-                           SoundEvent::File, QStringLiteral("收到文件"),
+                           SoundEvent::File,
+                           is_image ? QStringLiteral("收到图片")
+                                    : QStringLiteral("收到文件"),
                            QFileInfo(path).fileName());
             }
           });
@@ -1329,31 +1372,76 @@ QString MainWindow::apply_screenshot_shortcut(const QKeySequence& seq) {
 
 // 截图确认后发送到当前会话：PNG 临时文件走既有文件通道（与「发文件」同路径）。
 void MainWindow::on_screenshot_confirmed(const QString& path) {
-  if (current_peer_.isEmpty() || current_kind_ == QStringLiteral("group") ||
-      current_kind_ == QStringLiteral("dgroup") ||
-      (current_kind_ != QStringLiteral("collab") && !direct_send_allowed())) {
-    // 发送路径的临时文件清理挂在传输结束回调；这里不进传输，自己兜
+  if (!send_shot_to_current_chat(path)) {
+    // 发送路径的临时文件清理挂在传输结束回调；这里未进传输，自己兜
     QFile::remove(path);
-    if (current_peer_.isEmpty()) {
-      show_status(QStringLiteral("截图已取消：先选择会话再截图发送"));
-    } else if (current_kind_ == QStringLiteral("group") ||
-               current_kind_ == QStringLiteral("dgroup")) {
-      show_status(QStringLiteral(
-          "群会话暂不支持截图发送（文件通道本期仅单聊/协作）"));
-    }
-    return;
   }
-  const std::string tid =
-      direct_engine_.send_file(current_peer_.toStdString(), path);
+}
+
+// 直连文件通道的目标设备：direct 会话＝当前 peer；collab 会话＝按对端
+// 账号匹配宣告中设备（同网段互见才有通道；找不到＝空，调用方给文案）。
+QString MainWindow::direct_peer_target() const {
+  if (current_kind_ != QStringLiteral("collab")) return current_peer_;
+  for (const Peer& p : direct_engine_.peers()) {
+    if (!p.account.empty() &&
+        QString::fromStdString(p.account) == current_peer_) {
+      return QString::fromStdString(p.device_id);
+    }
+  }
+  return QString();
+}
+
+// 截图发送流（需求批④）：持久拷贝（图片消息本机保留——传输完成后临时
+// 件清理不裂图）→直连文件通道→本端图片气泡（图片消息，非系统行）。
+bool MainWindow::send_shot_to_current_chat(const QString& path) {
+  if (current_peer_.isEmpty()) {
+    show_status(QStringLiteral("截图已取消：先选择会话再截图发送"));
+    return false;
+  }
+  if (current_kind_ == QStringLiteral("group") ||
+      current_kind_ == QStringLiteral("dgroup")) {
+    show_status(QStringLiteral(
+        "群会话暂不支持截图发送（文件通道本期仅单聊/协作）"));
+    return false;
+  }
+  if (current_kind_ != QStringLiteral("collab") && !direct_send_allowed()) {
+    return false;
+  }
+  const QString target = direct_peer_target();
+  if (target.isEmpty()) {
+    show_status(QStringLiteral(
+        "对方未发现直连通道（同网段未互见），截图无法发送"));
+    return false;
+  }
+  // 持久拷贝：AppDataLocation/sent-shots/（时间戳防重名；失败=仍走原
+  // 文件路径发，气泡退化系统行——临时件传完清理不指向它）
+  const QString shots_dir =
+      QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) +
+      QStringLiteral("/sent-shots");
+  QDir().mkpath(shots_dir);
+  const QString persist =
+      shots_dir + QLatin1Char('/') +
+      QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmsszzz")) +
+      QLatin1Char('-') + QFileInfo(path).fileName();
+  const bool copied = QFile::copy(path, persist);
+  const std::string tid = direct_engine_.send_file(target.toStdString(), path);
   if (tid.empty()) {
     show_status(QStringLiteral("截图发送失败"));
-    return;
+    return false;
   }
   shot_paths_.insert(QString::fromStdString(tid), path);
   const QString name = QFileInfo(path).fileName();
   file_sent_.insert(name, 0);
-  append_system_line(QStringLiteral("[截图] %1 开始发送").arg(esc(name)));
-  show_status(QStringLiteral("截图已发送至当前会话：%1").arg(name));
+  if (copied) {
+    append_image_message(current_peer_, persist,
+                         QDateTime::currentMSecsSinceEpoch(),
+                         /*outgoing=*/true, QStringLiteral("direct"));
+    show_status(QStringLiteral("截图已发送至当前会话：%1").arg(name));
+  } else {
+    append_system_line(QStringLiteral("[截图] %1 开始发送").arg(esc(name)));
+    show_status(QStringLiteral("截图已发送至当前会话：%1").arg(name));
+  }
+  return true;
 }
 
 // 解析本人生效策略：本人部门 → 逐级上级部门 → 全局行 → 默认宽松
@@ -2699,6 +2787,36 @@ void MainWindow::append_message(const QString& from_id, const QString& text,
   bar->setValue(bar->maximum());
 }
 
+void MainWindow::append_image_message(const QString& from_id,
+                                      const QString& image_path, qint64 ts_ms,
+                                      bool outgoing, const QString& source) {
+  QString name = from_id;
+  if (outgoing) {
+    name = QStringLiteral("我");
+  } else if (current_kind_ != QStringLiteral("collab") &&
+             current_kind_ != QStringLiteral("group")) {
+    const Peer p = direct_engine_.peer(from_id.toStdString());
+    if (!p.name.empty()) name = QString::fromStdString(p.name);
+  }
+  const QString tag =
+      source == QStringLiteral("collab")
+          ? QStringLiteral(" · 协作·已归档")
+          : QStringLiteral(" · 直连·仅本机");
+  ChatRow row;
+  row.system = false;
+  row.name = name + tag;
+  row.text = image_path; // 文本位存路径（图片渲染在 image 分支）
+  row.image = image_path;
+  row.ts_ms = ts_ms;
+  row.outgoing = outgoing;
+  row.at_mode = false;
+  chat_rows_.append(row);
+  chat_view_->append(bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
+                                 row.at_mode, row.image));
+  auto* bar = chat_view_->verticalScrollBar();
+  bar->setValue(bar->maximum());
+}
+
 void MainWindow::append_system_line(const QString& text) {
   ChatRow row;
   row.system = true;
@@ -2826,7 +2944,7 @@ void MainWindow::rerender_chat() {
       chat_view_->append(system_line_html(row.text));
     } else {
       chat_view_->append(bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
-                                     row.at_mode));
+                                     row.at_mode, row.image));
     }
   }
   if (at_bottom) {

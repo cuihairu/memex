@@ -261,7 +261,7 @@ void test_end_to_end() {
   DirectEngine peer("dev-shot-peer", QString());
   QString received_path;
   QObject::connect(&peer, &DirectEngine::file_received, &peer,
-                   [&](const QString&, const QString& path) {
+                   [&](const QString&, const QString&, const QString& path) {
                      received_path = path;
                    });
   // 先起发现再宣告协作账号：discovery_ 随 start() 建立，set_account 在
@@ -316,8 +316,10 @@ void test_end_to_end() {
   }
   CHECK(has_orange);
 
-  // 聊天区出现 [截图] 系统行
-  CHECK(window.chat_html().contains(QStringLiteral("[截图]")));
+  // 聊天区出现图片消息气泡（需求批④：截图发送成功＝图片消息，
+  // 不再走「[截图] 开始发送」文件系统行）
+  CHECK(window.chat_html().contains(QStringLiteral("<img")));
+  CHECK(window.chat_html().contains(QStringLiteral("图片消息")));
 
   // 传输结束后临时文件清理（成功路径）
   CHECK(wait_until(

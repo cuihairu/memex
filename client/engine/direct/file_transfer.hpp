@@ -72,8 +72,9 @@ signals:
                      quint64 bytes_total);
   void file_finished(const std::string& transfer_id, bool ok,
                      const QString& error);
-  // 接收侧：文件完整落地
-  void file_received(const std::string& transfer_id, const QString& final_path);
+  // 接收侧：文件完整落地（peer_id＝发送方设备号，接收方判会话归属用）
+  void file_received(const std::string& transfer_id,
+                     const std::string& peer_id, const QString& final_path);
 
 private:
   // 发送侧：一条独占连接，控制面（meta/resume/done）走 JSON 帧，数据面走二进制块
