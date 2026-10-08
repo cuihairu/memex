@@ -34,6 +34,7 @@ export default defineConfig({
           { text: '备份恢复', link: '/guide/backup-restore' },
           { text: '跨地域与断线补传验证', link: '/guide/wan-drill' },
           { text: '通知与 webhook 接入', link: '/guide/notify' },
+          { text: '客户端设置', link: '/guide/settings' },
           { text: '国产系统适配验证', link: '/guide/platform-adapter' },
           { text: '音视频与协同文档底座', link: '/guide/av-collab' }
         ]
