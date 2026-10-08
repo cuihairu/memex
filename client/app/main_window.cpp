@@ -36,6 +36,7 @@
 #include "group_tools_dialog.hpp"
 #include "brand_settings_page.hpp"
 #include "shortcut_settings.hpp"
+#include "away_settings.hpp"
 #include "assist_dialog.hpp"
 #include "audit_dialog.hpp"
 #include "office_map_dialog.hpp"
@@ -207,6 +208,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   });
   connect(&screenshot_tool_, &ScreenshotTool::failed, this,
           [this](const QString& reason) { show_status(reason); });
+
+  // 离开锁屏（用户令 2026-10-08 ④）：全局输入事件喂计时器，超时即锁
+  idle_timer_ = new QTimer(this);
+  idle_timer_->setSingleShot(true);
+  connect(idle_timer_, &QTimer::timeout, this,
+          &MainWindow::maybe_lock_screen);
+  qApp->installEventFilter(this);
+  apply_away_lock_settings();
 
   refresh_devices();
   show_status(QStringLiteral("就绪"));
@@ -402,6 +411,17 @@ void MainWindow::build_ui() {
     shortcut_dialog_->show();
     shortcut_dialog_->raise();
     shortcut_dialog_->activateWindow();
+  });
+  // —— 离开锁屏设置（用户令 2026-10-08 ④：离开密码＋无操作超时＋启用）——
+  auto* act_away = opt_menu->addAction(QStringLiteral("离开与锁屏…"));
+  connect(act_away, &QAction::triggered, this, [this] {
+    if (!away_dialog_) {
+      away_dialog_ = new AwayLockSettingsDialog(this, this);
+      away_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    away_dialog_->show();
+    away_dialog_->raise();
+    away_dialog_->activateWindow();
   });
   opt_menu->addSeparator();
   act_autostart_ =
@@ -2105,6 +2125,12 @@ void MainWindow::tray_notify(const QString& title, const QString& text) {
 
 void MainWindow::event_notify(bool enabled, SoundEvent ev,
                               const QString& title, const QString& text) {
+  // 锁屏期间（用户令 2026-10-08 ④）：内容不出锁屏面——弹窗与提示音全静默，
+  // 只累计未读条数（上线不是消息不计）
+  if (lock_) {
+    if (ev != SoundEvent::Online) lock_->bump_unread();
+    return;
+  }
   const NotifyPrefs p = NotifyPrefs::load();
   if (enabled) tray_notify(title, text); // 弹窗受事件开关裁决
   // 提示音三档独立裁决（弹窗关了声音仍可按档播）；beep 兜底＝无
@@ -2113,6 +2139,64 @@ void MainWindow::event_notify(bool enabled, SoundEvent ev,
                         p.sound_online, ev)) {
     QApplication::beep();
   }
+}
+
+// —— 离开锁屏（用户令 2026-10-08 ④）——
+// 全局输入事件喂计时器：鼠标移动/点击、键盘、滚轮任一即重计。
+// 锁屏遮罩在屏时不再重置（锁已锁上，输密码动作不算「回来了」）。
+bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+  switch (event->type()) {
+    case QEvent::MouseMove:
+    case QEvent::MouseButtonPress:
+    case QEvent::KeyPress:
+    case QEvent::Wheel:
+      if (idle_timer_ && !lock_) idle_timer_->start();
+      break;
+    default:
+      break;
+  }
+  return QMainWindow::eventFilter(watched, event);
+}
+
+// 重读 away_lock 设置（设置对话框关闭/测试接线即调＝即时生效）：
+// 计时器间隔换算毫秒重启；未启用或没密码则停表（没密码锁不住人，不装锁）。
+void MainWindow::apply_away_lock_settings() {
+  if (!idle_timer_) return;
+  if (away_lock::enabled() && away_lock::has_password()) {
+    idle_timer_->start(away_lock::timeout_seconds() * 1000);
+  } else {
+    idle_timer_->stop();
+  }
+}
+
+void MainWindow::maybe_lock_screen() {
+  if (lock_) return;
+  if (!away_lock::enabled() || !away_lock::has_password()) return;
+  lock_ = new LockScreenDialog(
+      [](const QString& pwd) { return away_lock::verify_password(pwd); },
+      this);
+  connect(lock_, &QDialog::finished, this, [this](int) {
+    lock_->deleteLater();
+    lock_ = nullptr;
+    apply_away_lock_settings(); // 解锁后重新计时（下次离开再锁）
+  });
+  lock_->showFullScreen(); // 无边框置顶全屏；Esc/close 拒，唯一出路＝密码
+}
+
+bool MainWindow::lock_screen_visible() const {
+  return lock_ && lock_->isVisible();
+}
+
+int MainWindow::lock_unread_count() const {
+  return lock_ ? lock_->unread_count() : 0;
+}
+
+QString MainWindow::lock_screen_text() const {
+  return lock_ ? lock_->unread_text() : QString();
+}
+
+void MainWindow::lock_try_unlock(const QString& pwd) {
+  if (lock_) lock_->try_unlock(pwd);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {

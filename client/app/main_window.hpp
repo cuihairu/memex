@@ -23,10 +23,12 @@
 
 #include <app/screenshot_tool.hpp>
 #include <app/notify_prefs.hpp>
+#include <app/lock_screen.hpp>
 
 class QAction;
 class QCloseEvent;
 class QShortcut;
+class QTimer;
 class QSystemTrayIcon;
 
 namespace memex::client {
@@ -46,6 +48,7 @@ class AssistDialog;
 class GroupToolsDialog;
 class BrandSettingsDialog;
 class ShortcutSettingsDialog;
+class AwayLockSettingsDialog;
 
 class MainWindow : public QMainWindow {
 public:
@@ -88,6 +91,13 @@ public:
   // 改键（设置页与测试共用）：冲突检测（应用内其他 QShortcut/QAction
   // 键序列）→无冲突＝重绑＋落盘，返回空串；有冲突＝返回冲突文案不改现状。
   QString apply_screenshot_shortcut(const QKeySequence& seq);
+  // —— 离开锁屏（用户令 2026-10-08 ④；验收面与设置页共用）——
+  // 重读 away_lock 设置：重启无操作计时器（设置对话框关闭即调＝即时生效）
+  void apply_away_lock_settings();
+  bool lock_screen_visible() const; // 锁屏遮罩当前是否在屏
+  int lock_unread_count() const;    // 锁屏期间新到消息条数（未锁＝0）
+  QString lock_screen_text() const; // 锁屏面未读行文案（断言只含数量不含内容）
+  void lock_try_unlock(const QString& pwd); // 解锁（设置对话框/测试同一路径）
   void show_emoji_panel(); // T4.5：表情面板（内置按频次＋自定义导入）
   // 自定义表情导入（测试缝：面板「导入」按钮即此函数；同名覆盖、失败回 false）
   bool import_emoji(const QString& src);
@@ -118,6 +128,9 @@ public:
   void activate_from_tray(); // 隐藏→弹出、最小化→还原（保留最大化），随后置顶聚焦
 
 private:
+  // 离开锁屏（用户令 2026-10-08 ④）：全局输入喂计时器＋超时上锁
+  bool eventFilter(QObject* watched, QEvent* event) override;
+  void maybe_lock_screen();
   void build_ui();
   void wire_engines();
   void wire_collab(); // 协作信号接入界面（T2.4）
@@ -272,6 +285,7 @@ private:
   QPointer<GroupToolsDialog> group_tools_dialog_; // 二期·群工具三件窗口（懒建）
   QPointer<BrandSettingsDialog> brand_settings_dialog_; // 二期·品牌物料设置页（懒建）
   QPointer<ShortcutSettingsDialog> shortcut_dialog_; // 二期·快捷键设置页（懒建）
+  QPointer<AwayLockSettingsDialog> away_dialog_; // 二期·离开锁屏设置页（懒建）
 
   QLabel* device_count_{nullptr};
   QLineEdit* search_box_{nullptr};
@@ -284,6 +298,9 @@ private:
   QPushButton* send_btn_{nullptr};
   QAction* act_collab_logout_{nullptr};
   QShortcut* shot_sc_{nullptr}; // 截图快捷键（键可改：apply_screenshot_shortcut）
+  // 离开锁屏（用户令 2026-10-08 ④）：无操作计时器＋锁屏遮罩（只显未读数）
+  QTimer* idle_timer_{nullptr};
+  LockScreenDialog* lock_{nullptr};
   QAction* act_theme_{nullptr}; // 「设置 → 主题…」菜单项
 
   // 参与 apply_theme_styles 的控件（构造期为局部变量，主题重刷需长期持有）

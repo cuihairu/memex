@@ -9,6 +9,7 @@
 #include <QDir>
 #include <QFile>
 #include <QProcess>
+#include <QSettings>
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QThread>
@@ -23,6 +24,7 @@
 #include <engine/collab/collab_engine.hpp>
 #include <engine/direct/direct_engine.hpp>
 
+namespace away_lock = memex::client::away_lock; // 离开锁屏设置面（C++17 无 using-ns）
 using memex::client::CollabEngine;
 using memex::client::DirectEngine;
 using memex::client::LocalStore;
@@ -392,6 +394,50 @@ int main(int argc, char** argv) {
   da_delivered = false;
   CHECK(da.send_text("dev-B2", "服务端已停，直连仍可用") != 0);
   CHECK(wait_until([&] { return db_received == 1 && da_delivered; }, 6000));
+
+  // —— 离开锁屏（用户令 2026-10-08 ④）：无操作超时→锁屏只显未读数不显
+  //     内容→错密码拒→对密码解锁（db 仍活着：锁屏期间真来一条直连消息）——
+  {
+    CHECK(away_lock::set_password(QStringLiteral("lock-pwd")));
+    away_lock::set_timeout_seconds(1); // 1 秒超时（测试内无输入事件＝必到期）
+    away_lock::set_enabled(true);
+    window.apply_away_lock_settings(); // 设置对话框关闭即此路径＝即时生效
+    window.hide(); // 无输入事件，超时即锁
+    CHECK(wait_until([&] { return window.lock_screen_visible(); }, 8000));
+    CHECK(window.lock_screen_text().contains(QStringLiteral("暂无新消息")));
+    // 锁屏期间真来一条直连消息：只累计条数；弹窗与提示音全静默
+    // （消息文本不出锁屏面——last_notify 不动＝通知路径被抑制）
+    const QString prev_notify = window.last_notify();
+    const QString win_id =
+        QSettings().value(QStringLiteral("direct/device_id")).toString();
+    CHECK(!win_id.isEmpty());
+    CHECK(db.send_text(win_id.toStdString(),
+                       std::string("锁屏期间不该上屏的内容")) != 0);
+    CHECK(wait_until([&] { return window.lock_unread_count() == 1; }, 6000));
+    CHECK(window.last_notify() == prev_notify);
+    CHECK(window.lock_screen_text().contains(
+        QStringLiteral("锁屏期间新消息 1 条")));
+    CHECK(!window.lock_screen_text().contains(QStringLiteral("不该上屏")));
+    // 截图验收：锁屏遮罩面只含数量（docs/src/public/screenshots/lock-screen.png）
+    {
+      QWidget* lock_w = QApplication::activeWindow(); // 全屏遮罩＝当前激活窗
+      CHECK(lock_w && lock_w->isVisible());
+      const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+      CHECK(QDir().mkpath(dir));
+      if (lock_w)
+        CHECK(lock_w->grab().save(dir + QStringLiteral("/lock-screen.png")));
+    }
+    // 错密码拒（仍在屏）；对密码解锁
+    window.lock_try_unlock(QStringLiteral("wrong-pwd"));
+    CHECK(window.lock_screen_visible());
+    window.lock_try_unlock(QStringLiteral("lock-pwd"));
+    CHECK(wait_until([&] { return !window.lock_screen_visible(); }, 3000));
+    CHECK(window.lock_unread_count() == 0); // 解锁即清（随遮罩销毁）
+    // 还原：关开关（QSettings 面 XDG_CONFIG_HOME 已隔离；也保重复执行可重跑）
+    away_lock::set_enabled(false);
+    window.apply_away_lock_settings();
+    window.show();
+  }
 
   da.stop();
   db.stop();

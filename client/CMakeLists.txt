@@ -46,6 +46,8 @@ qt_add_executable(memex_client
   app/brand_kit.hpp
   app/brand_settings_page.cpp
   app/shortcut_settings.cpp
+  app/lock_screen.cpp
+  app/away_settings.cpp
   app/theme.cpp
   app/theme.hpp
   app/theme_settings_page.cpp
@@ -452,6 +454,10 @@ if(MEMEX_BUILD_TESTS)
     app/tests/test_brand_settings.cpp
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
+  app/lock_screen.cpp
+  app/away_settings.cpp
+    app/lock_screen.cpp
+    app/away_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
     app/file_assistant.cpp
@@ -555,6 +561,10 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.hpp
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
+  app/lock_screen.cpp
+  app/away_settings.cpp
+    app/lock_screen.cpp
+    app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -586,7 +596,8 @@ if(MEMEX_BUILD_TESTS)
     memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
     OpenSSL::Crypto)
   target_compile_definitions(test_mode_switch PRIVATE
-    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
   add_test(NAME mode_switch COMMAND test_mode_switch)
   set_tests_properties(mode_switch PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
@@ -602,6 +613,10 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.hpp
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
+  app/lock_screen.cpp
+  app/away_settings.cpp
+    app/lock_screen.cpp
+    app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -647,6 +662,10 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.hpp
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
+  app/lock_screen.cpp
+  app/away_settings.cpp
+    app/lock_screen.cpp
+    app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -714,6 +733,10 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.hpp
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
+  app/lock_screen.cpp
+  app/away_settings.cpp
+    app/lock_screen.cpp
+    app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -760,6 +783,10 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.hpp
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
+  app/lock_screen.cpp
+  app/away_settings.cpp
+    app/lock_screen.cpp
+    app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -804,6 +831,10 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.hpp
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
+  app/lock_screen.cpp
+  app/away_settings.cpp
+    app/lock_screen.cpp
+    app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -848,6 +879,10 @@ if(MEMEX_BUILD_TESTS)
     app/brand_kit.hpp
     app/brand_settings_page.cpp
     app/shortcut_settings.cpp
+  app/lock_screen.cpp
+  app/away_settings.cpp
+    app/lock_screen.cpp
+    app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
