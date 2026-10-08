@@ -364,9 +364,15 @@ if(MEMEX_BUILD_TESTS)
   # 协议腿，不在此重复
   add_executable(test_approval_dialog
     app/tests/test_approval_dialog.cpp
-    app/approval_dialog.cpp)
+    app/approval_dialog.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp)
   target_link_libraries(test_approval_dialog PRIVATE
-    memex_engine_collab Qt6::Widgets)
+    memex_engine_direct
+    memex_engine_collab
+    Qt6::Widgets
+    Qt6::Sql
+    OpenSSL::Crypto)
   target_include_directories(test_approval_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_approval_dialog PRIVATE
