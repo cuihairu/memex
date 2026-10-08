@@ -184,12 +184,14 @@ int main(int argc, char** argv) {
   // 发起方 500ms 轮询拉帧渲染
   CHECK(wait_until([&] { return helper.frame_seq_seen() >= 1; }, 8000));
 
-  // 程序化点画面（真 eventFilter 路径）→受控方轮询取走输入
+  // 程序化点画面（真 eventFilter 路径）→受控方轮询取走输入。
+  // 投递与取走由持久面 input_log_count 钉住（受控方输入日志落行）；
+  // 「已发点击」是瞬态状态行——CI 实录×2（37706806272/37721299234）
+  // 慢回包下被 500ms 轮询回包覆盖＝假红，禁等瞬态（同
+  // test_ui 冒烟口径：只等持久面）
   helper.click_frame(0.5, 0.25);
   CHECK(wait_until(
       [&] { return subject.input_log_count() == 1; }, 8000));
-  CHECK(subject.status_text().contains(QStringLiteral("已发点击")) ||
-        helper.status_text().contains(QStringLiteral("已发点击")));
 
   // 受控方结束=撤权即时生效：发起方台账见终态
   subject.stop_sharing();
