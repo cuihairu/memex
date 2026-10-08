@@ -2188,6 +2188,16 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(400, {{"ok", false}, {"error", "slogan 须为字符串"}});
       return;
     }
+    // 素材清除（品牌设置页「清除 logo/splash」按钮）：布尔门；清除即
+    // 一次独立动作＝一个版本（文本三件与清除同请求时按序各 bump）
+    if ((j.contains("clear_logo") && !j["clear_logo"].is_boolean()) ||
+        (j.contains("clear_splash") && !j["clear_splash"].is_boolean())) {
+      respond_json(400,
+                   {{"ok", false}, {"error", "clear_logo/clear_splash 须为布尔"}});
+      return;
+    }
+    const bool clear_logo = j.value("clear_logo", false);
+    const bool clear_splash = j.value("clear_splash", false);
     // 字段缺省=nullopt（不动）；显式空串=清空
     const auto pick = [&](const char* key) -> std::optional<std::string> {
       if (!j.contains(key)) return std::nullopt;
@@ -2210,10 +2220,34 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         return;
       }
     }
-    const std::int64_t version = impl_.store.branding_set(
-        name, accent, slogan, now_ms());
-    if (version < 0) {
-      respond_json(500, {{"ok", false}, {"error", "品牌配置写入失败"}});
+    std::int64_t version = 0;
+    bool wrote = false;
+    if (name.has_value() || accent.has_value() || slogan.has_value()) {
+      version = impl_.store.branding_set(name, accent, slogan, now_ms());
+      if (version < 0) {
+        respond_json(500, {{"ok", false}, {"error", "品牌配置写入失败"}});
+        return;
+      }
+      wrote = true;
+    }
+    if (clear_logo) {
+      version = impl_.store.branding_clear_logo();
+      if (version < 0) {
+        respond_json(500, {{"ok", false}, {"error", "品牌配置写入失败"}});
+        return;
+      }
+      wrote = true;
+    }
+    if (clear_splash) {
+      version = impl_.store.branding_clear_splash();
+      if (version < 0) {
+        respond_json(500, {{"ok", false}, {"error", "品牌配置写入失败"}});
+        return;
+      }
+      wrote = true;
+    }
+    if (!wrote) {
+      respond_json(400, {{"ok", false}, {"error", "无可写品牌字段"}});
       return;
     }
     std::cout << "[MEMEX] files branding set by=" << account

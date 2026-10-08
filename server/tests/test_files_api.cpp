@@ -2299,8 +2299,22 @@ int main() {
               "version") == 3);
     CHECK(http(port, "GET", "/files/branding", {}, "").body.find(
               "\"slogan\":\"\"") != std::string::npos);
-    // clear 走 store 面有 CLI；HTTP 面无 clear 路由（素材覆盖=重传、清空
-    // 须 CLI/运维面）——has_splash 恒 false 已证
+    // 素材清除路由（品牌设置页「清除」按钮所需，store 六方法全暴露）：
+    // 布尔门 400／member 403／清除 200 version+1／has_logo 回 false 且
+    // 字节面 404／空对象 400（无可写品牌字段）；素材覆盖=重传照旧
+    CHECK(http(port, "POST", "/files/branding", H("admin1"),
+               "{\"clear_logo\":\"yes\"}").status == 400);
+    CHECK(http(port, "POST", "/files/branding", H("member1"),
+               "{\"clear_splash\":true}").status == 403);
+    CHECK(http(port, "POST", "/files/branding", H("admin1"),
+               "{\"clear_logo\":true}").status == 200);
+    CHECK(jint(http(port, "GET", "/files/branding", {}, "").body,
+              "version") == 4);
+    CHECK(http(port, "GET", "/files/branding", {}, "").body.find(
+              "\"has_logo\":false") != std::string::npos);
+    CHECK(http(port, "GET", "/files/branding/logo", {}, "").status == 404);
+    CHECK(http(port, "POST", "/files/branding", H("admin1"), "{}").status ==
+          400);
   }
 
   // —— 二期 远程协助：协议面＋媒体中继（模型层平台-11 在 store：
