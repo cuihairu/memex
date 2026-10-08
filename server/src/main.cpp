@@ -252,6 +252,13 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
           (void)memex::server::deliver_notice(server, target, title, content,
                                               urgency, "");
         });
+        // 群工具结果卡片回群（R26）：普通 TEXT 群消息（群会话气泡点开
+        // 可见明细；离线入队＋归档＋在线扇出与手发消息同路）；from=操作者。
+        files->set_group_text([&server](const std::string& target,
+                                        const std::string& from,
+                                        const std::string& text) {
+          (void)memex::server::deliver_group_text(server, target, from, text);
+        });
         // R25-4 凭据面：主密钥派生 GCM 密钥（空=未启用，凭据路由 503）
         files->set_tool_cred_secret(tool_cred_secret);
       } catch (const std::exception& e) {

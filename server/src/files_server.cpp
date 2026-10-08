@@ -206,6 +206,8 @@ struct FileServer::Impl {
   std::shared_ptr<FileSessions> sessions;
   // R25-2 工具结果卡片回群回调（缺省未设＝只落账不回群）
   GroupNoticeFn notice;
+  // R26 群工具结果卡片回群回调（TEXT 群消息；缺省未设＝不回群）
+  GroupTextFn group_text;
   // R25-4 凭据面 GCM 密钥（主密钥 SHA-256 派生 32B raw；空＝主密钥未
   // 配置＝凭据面未启用，路由 503）
   std::string tool_cred_key;
@@ -4626,6 +4628,62 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     respond_json(200, {{"ok", true}, {"gid", gid}, {"poll_id", poll_id}});
   }
 
+  // —— 结果卡片文本（R26：显式截止后回群，TEXT 群消息；与列表页渲染
+  //    同口径——counts 按位集展开、匿名不回 voter 只报参与人数）——
+  std::string poll_card_text(const ServerStore::GroupPoll& p) {
+    const auto votes = impl_.store.poll_votes(p.id);
+    const int n = static_cast<int>(p.options.size());
+    std::vector<int> counts(n, 0);
+    for (const auto& v : votes) {
+      if (p.multi) {
+        if (v.choice >= 1 && v.choice < (1 << n)) {
+          for (int i = 0; i < n; ++i) {
+            if ((v.choice >> i) & 1) ++counts[i];
+          }
+        }
+      } else if (v.choice >= 1 && v.choice <= n) {
+        ++counts[v.choice - 1];
+      }
+    }
+    std::string card = "【投票结果】#" + std::to_string(p.id) + " " +
+                       p.topic + "\n";
+    for (int i = 0; i < n; ++i) {
+      card += "· " + p.options[i] + "×" + std::to_string(counts[i]) + "\n";
+    }
+    if (p.anonymous) {
+      card += "匿名投票，共 " + std::to_string(votes.size()) + " 人参与\n";
+    } else {
+      std::string ledger;
+      for (const auto& v : votes) {
+        std::string choice_s;
+        if (p.multi) {
+          for (int i = 0; i < n; ++i) {
+            if ((v.choice >> i) & 1) {
+              if (!choice_s.empty()) choice_s += "+";
+              choice_s += std::to_string(i + 1);
+            }
+          }
+        } else {
+          choice_s = std::to_string(v.choice);
+        }
+        if (!ledger.empty()) ledger += ", ";
+        ledger += v.account + "→" + choice_s;
+      }
+      if (!ledger.empty()) card += ledger + "\n";
+    }
+    card += "已截止";
+    return card;
+  }
+  std::string chain_card_text(const ServerStore::GroupChain& c) {
+    std::string card = "【接龙结果】#" + std::to_string(c.id) + " " +
+                       c.title + "\n";
+    for (const auto& e : impl_.store.chain_entries(c.id)) {
+      card += "· " + e.account + "：" + e.content + "\n";
+    }
+    card += "已截止";
+    return card;
+  }
+
   void route_group_poll_close(const std::string& body) {
     const std::string account = account_or_respond();
     if (account.empty()) return;
@@ -4666,6 +4724,12 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     impl_.store.poll_close(poll_id);
     std::cout << "[MEMEX] files group-poll close account=" << account
               << " gid=" << gid << " poll=" << poll_id << std::endl;
+    // 结果卡片回群（R26）：显式截止动作即回（到点惰性截止无明确动作
+    // 钩子不发卡、避免重复；到点后手动 close 补写留痕时同发）
+    if (impl_.group_text) {
+      impl_.group_text("group:" + std::to_string(gid), account,
+                       poll_card_text(*p));
+    }
     respond_json(200, {{"ok", true}, {"gid", gid}, {"poll_id", poll_id}});
   }
 
@@ -4859,6 +4923,11 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     impl_.store.chain_close(chain_id);
     std::cout << "[MEMEX] files group-chain close account=" << account
               << " gid=" << gid << " chain=" << chain_id << std::endl;
+    // 结果卡片回群（R26）：同投票——显式截止动作即回
+    if (impl_.group_text) {
+      impl_.group_text("group:" + std::to_string(gid), account,
+                       chain_card_text(*c));
+    }
     respond_json(200, {{"ok", true}, {"gid", gid}, {"chain_id", chain_id}});
   }
 
@@ -5504,6 +5573,10 @@ std::uint16_t FileServer::port() const {
 }
 
 void FileServer::set_notice(GroupNoticeFn fn) { impl_->notice = std::move(fn); }
+
+void FileServer::set_group_text(GroupTextFn fn) {
+  impl_->group_text = std::move(fn);
+}
 
 void FileServer::set_tool_cred_secret(const std::string& secret) {
   // 派生空（secret 空）＝凭据面未启用；只存派生密钥，明文主密钥不驻留

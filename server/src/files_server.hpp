@@ -36,6 +36,14 @@ using GroupNoticeFn = std::function<void(const std::string& target,
                                          const std::string& content,
                                          int urgency)>;
 
+// R26 群工具结果卡片回群回调：投票/接龙显式截止后以普通 TEXT 群消息
+// 回发结果卡片（复用现有消息发送面，不新造协议——群会话气泡点开可见
+// 明细、离线入队、归档、在线扇出与手发消息同路）；main 接线
+// deliver_group_text，测试注桩。缺省未设＝只落账不回群。
+using GroupTextFn = std::function<void(const std::string& target,
+                                       const std::string& from,
+                                       const std::string& text)>;
+
 // 会话库前置声明（实体在 files_server.cpp；调用方只持句柄不 deref）：
 // 双实例部署两面共享一份，scope 闸才有实体。
 struct FileSessions;
@@ -86,6 +94,8 @@ class FileServer {
 
   // 工具结果卡片回群回调（R25-2；缺省未设＝只落账不回群，测试面用）
   void set_notice(GroupNoticeFn fn);
+  // 群工具结果卡片回群回调（R26 TEXT 群消息；缺省未设＝不回群）
+  void set_group_text(GroupTextFn fn);
 
   // R25-4 工具凭据面主密钥（服务端 SHA-256 派生 32B GCM 密钥）：未设或
   // 空串＝凭据面未启用（两路由一律 503）；凭据永不回客户端。

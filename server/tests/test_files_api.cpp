@@ -2506,6 +2506,14 @@ int main() {
   //     判权全循 file:read 群继承（非成员 403 不透存在性），资源号幽灵 404
   {
     const std::string gids = std::to_string(gid);
+    // 结果卡片回群面（R26）：注桩捕获（main 接线 deliver_group_text＝
+    // TEXT 群消息，测试注桩验卡片文本；缺省未设＝只落账不回群——本段
+    // 之前所有 close 腿未设回调照常跑＝不崩口径隐式覆盖）
+    std::vector<std::string> cards;
+    files.set_group_text([&cards](const std::string& t, const std::string& f,
+                                  const std::string& x) {
+      cards.push_back(t + "|" + f + "|" + x);
+    });
     // 投票建：未登录 401；非成员 403；选项<2 400；建 200
     CHECK(http(port, "POST", "/files/group-polls", {},
                "{\"gid\":" + gids + ",\"topic\":\"午饭\",\"options\":[\"A\",\"B\"]}")
@@ -2577,6 +2585,21 @@ int main() {
     CHECK(http(port, "POST", "/files/group-polls/close", H("owner1"),
                "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) + "}")
               .status == 409);
+    // 结果卡片回群（R26）：显式关票发卡（counts/台账与列表页同口径）；
+    // 重复关 409 不重复发（size 仍 1）
+    CHECK(cards.size() == 1);
+    {
+      const auto& card = cards.back();
+      CHECK(card.find("group:" + gids + "|owner1|") == 0);
+      CHECK(card.find("【投票结果】#" + std::to_string(poll1) + " 午饭去哪") !=
+            std::string::npos);
+      CHECK(card.find("面馆×1") != std::string::npos);
+      CHECK(card.find("食堂×1") != std::string::npos);
+      CHECK(card.find("外卖×0") != std::string::npos);
+      CHECK(card.find("member1→1") != std::string::npos);
+      CHECK(card.find("owner1→2") != std::string::npos);
+      CHECK(card.find("已截止") != std::string::npos);
+    }
     CHECK(http(port, "POST", "/files/group-polls/vote", H("member1"),
                "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll1) +
                    ",\"choice\":3}")
@@ -2618,6 +2641,12 @@ int main() {
     CHECK(http(port, "POST", "/files/group-polls/close", H("owner1"),
                "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll2) + "}")
               .status == 200); // 到点后手动关票补写留痕
+    // 到点补写关票同发卡（size 2）
+    CHECK(cards.size() == 2);
+    CHECK(cards.back().find("【投票结果】#" + std::to_string(poll2) +
+                            " 快截票") != std::string::npos);
+    CHECK(cards.back().find("甲×1") != std::string::npos);
+    CHECK(cards.back().find("member1→1") != std::string::npos);
     CHECK(http(port, "POST", "/files/group-polls/close", H("owner1"),
                "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll2) + "}")
               .status == 409);
@@ -2650,6 +2679,18 @@ int main() {
                "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll3) +
                    ",\"choice\":3}")
               .status == 400);
+    // 匿名票关票发卡：只报参与人数不回 voter 身份（展示匿名口径）
+    CHECK(http(port, "POST", "/files/group-polls/close", H("owner1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll3) + "}")
+              .status == 200);
+    CHECK(cards.size() == 3);
+    {
+      const auto& card = cards.back();
+      CHECK(card.find("【投票结果】#" + std::to_string(poll3) + " 匿名评优") !=
+            std::string::npos);
+      CHECK(card.find("匿名投票，共 1 人参与") != std::string::npos);
+      CHECK(card.find("member1→") == std::string::npos); // 台账不回 voter
+    }
     // 多选：建→投位集 5（选 1+3）→counts 位展开→改投 2 覆盖→counts
     // 此消彼长→位集越界 400→零位集 400
     const auto pm = http(port, "POST", "/files/group-polls", H("owner1"),
@@ -2681,6 +2722,19 @@ int main() {
                "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll4) +
                    ",\"choice\":0}")
               .status == 400);
+    // 多选关票发卡：counts 位展开＋台账位集展开（改投后 2=单 bit 无加号）
+    CHECK(http(port, "POST", "/files/group-polls/close", H("owner1"),
+               "{\"gid\":" + gids + ",\"poll_id\":" + std::to_string(poll4) + "}")
+              .status == 200);
+    CHECK(cards.size() == 4);
+    {
+      const auto& card = cards.back();
+      CHECK(card.find("【投票结果】#" + std::to_string(poll4) + " 多选征询") !=
+            std::string::npos);
+      CHECK(card.find("乙×1") != std::string::npos);
+      CHECK(card.find("甲×0") != std::string::npos);
+      CHECK(card.find("member1→2") != std::string::npos);
+    }
     // 接龙：建（title 空 400/非成员 403/建 200）；加入与更新（一人一条
     // upsert：更新自己条目他人不动）；群主可关非本人发起；关后加入 409
     CHECK(http(port, "POST", "/files/group-chains", H("member1"),
@@ -2743,6 +2797,17 @@ int main() {
                "{\"gid\":" + gids +
                    ",\"chain_id\":" + std::to_string(chain1) + "}")
               .status == 200);
+    // 接龙关发卡：条目全量明细（upsert 后终态）＋已截止
+    CHECK(cards.size() == 5);
+    {
+      const auto& card = cards.back();
+      CHECK(card.find("group:" + gids + "|owner1|") == 0);
+      CHECK(card.find("【接龙结果】#" + std::to_string(chain1) + " 晚饭接龙") !=
+            std::string::npos);
+      CHECK(card.find("admin1：admin1+改 20点") != std::string::npos);
+      CHECK(card.find("member1：member1+18点半") != std::string::npos);
+      CHECK(card.find("已截止") != std::string::npos);
+    }
     CHECK(http(port, "POST", "/files/group-chains/join", H("member1"),
                "{\"gid\":" + gids + ",\"chain_id\":" + std::to_string(chain1) +
                    ",\"content\":\"迟到的\"}")

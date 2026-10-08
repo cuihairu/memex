@@ -533,6 +533,46 @@ NoticeDelivery deliver_notice(CollabServer& server, const std::string& target,
   return r;
 }
 
+bool deliver_group_text(CollabServer& server, const std::string& target,
+                        const std::string& from, const std::string& text) {
+  using Message = memex::protocol::Message;
+  if (target.rfind("group:", 0) != 0) return false;
+  ServerStore& store = server.store();
+  const auto gid = static_cast<std::uint64_t>(
+      std::strtoull(target.c_str() + 6, nullptr, 10));
+  if (!store.group_info(gid)) return false;
+  // 收件人＝群成员（不含发送者，镜像 TEXT 群消息扇出语义）
+  std::vector<std::string> recipients;
+  for (const auto& m : store.group_members(gid)) {
+    if (m != from) recipients.push_back(m);
+  }
+  // 服务端注入无会话 seq，msg_id 以 from＋target＋时间戳＋随机盐派生
+  // （同毫秒并发投递不撞；客户端按 msg_id 去重与对账）
+  const std::int64_t ts = now_ms();
+  const std::string msg_id = sha256_hex(
+      from + ":" + target + ":" + std::to_string(ts) + ":" +
+      random_salt_hex());
+  Message out;
+  out.set_type(memex::protocol::v1::TEXT);
+  out.set_from(from);
+  out.set_to(target);
+  out.set_ts_ms(ts);
+  out.set_msg_id(msg_id);
+  out.mutable_text()->set_text(text);
+  const std::string blob = out.SerializeAsString();
+  for (const auto& to : recipients) store.queue_offline(msg_id, to, blob);
+  // T2.3 全量归档（to=群标识，一次）
+  store.store_message(msg_id, from, target,
+                      static_cast<int>(memex::protocol::v1::TEXT), text, ts);
+  for (const auto& to : recipients) {
+    for (const auto& s : server.online_sessions(to)) s->deliver_frame(blob);
+  }
+  // T4.5 常用联系人刷新（操作者↔群＋各收件人↔群）
+  store.fav_touch(from, target, ts);
+  for (const auto& to : recipients) store.fav_touch(to, target, ts);
+  return true;
+}
+
 WebhookServer::WebhookServer(asio::io_context& io, CollabServer& server,
                              std::uint16_t port)
     : io_(io), server_(server),
