@@ -31,6 +31,7 @@ ReportDialog::ReportDialog(QWidget* parent) : QDialog(parent) {
     set_status(QStringLiteral("已连接（") + client_->account() +
                QStringLiteral("）"));
     btn_save_->setEnabled(true);
+    btn_week_save_->setEnabled(true);
     refresh();
   });
   connect(client_, &FilesClient::login_failed, this,
@@ -43,7 +44,9 @@ ReportDialog::ReportDialog(QWidget* parent) : QDialog(parent) {
   connect(client_, &FilesClient::team_reports_listed, this,
           &ReportDialog::populate_team);
   connect(client_, &FilesClient::report_saved, this, [this](qint64) {
-    set_status(QStringLiteral("日报已保存（当日重复提交=更新）"));
+    set_status(pending_kind_ == QStringLiteral("week")
+                   ? QStringLiteral("周报已保存（同周重复提交=更新，以周一落笔）")
+                   : QStringLiteral("日报已保存（当日重复提交=更新）"));
     refresh();
   });
   connect(client_, &FilesClient::request_failed, this,
@@ -103,12 +106,29 @@ void ReportDialog::build_ui() {
   content_->setMaximumHeight(140);
   layout->addWidget(content_, 1);
 
+  // 周报补写：任选周内一天→保存时归一到该周周一落笔（同周重复=更新；
+  // 与日报同表同 upsert 语义，服务端零改动）
+  auto* week_form = new QHBoxLayout;
+  week_form->addWidget(
+      new QLabel(QStringLiteral("周报补写（选周内任一天）"), this));
+  week_date_ = new QDateEdit(
+      QDate::currentDate().addDays(1 - QDate::currentDate().dayOfWeek()),
+      this); // 默认本周一
+  week_date_->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
+  week_date_->setCalendarPopup(true);
+  week_form->addWidget(week_date_);
+  week_form->addStretch(1);
+  layout->addLayout(week_form);
+
   // 操作区
   auto* ops = new QHBoxLayout;
   btn_save_ = new QPushButton(QStringLiteral("保存日报"), this);
   btn_save_->setEnabled(false);
+  btn_week_save_ = new QPushButton(QStringLiteral("保存周报"), this);
+  btn_week_save_->setEnabled(false);
   btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
   ops->addWidget(btn_save_);
+  ops->addWidget(btn_week_save_);
   ops->addWidget(btn_refresh_);
   ops->addStretch(1);
   layout->addLayout(ops);
@@ -143,6 +163,10 @@ void ReportDialog::build_ui() {
   connect(btn_save_, &QPushButton::clicked, this, [this] {
     write_report(date_->date().toString(QStringLiteral("yyyy-MM-dd")),
                  content_->toPlainText().trimmed());
+  });
+  connect(btn_week_save_, &QPushButton::clicked, this, [this] {
+    write_week_report(week_date_->date(),
+                      content_->toPlainText().trimmed());
   });
   connect(btn_refresh_, &QPushButton::clicked, this, [this] { refresh(); });
   // 点我的日报行回填编辑器（改完再存=当日 upsert 更新）
@@ -188,7 +212,30 @@ bool ReportDialog::write_report(const QString& date, const QString& content) {
     set_status(QStringLiteral("未连接文件面"), true);
     return false;
   }
+  pending_kind_ = QStringLiteral("day");
   client_->save_report(date, content);
+  return true;
+}
+
+bool ReportDialog::write_week_report(const QDate& any_day,
+                                     const QString& content) {
+  if (content.isEmpty()) {
+    set_status(QStringLiteral("内容不能为空"), true);
+    return false;
+  }
+  if (!any_day.isValid()) {
+    set_status(QStringLiteral("周日期非法"), true);
+    return false;
+  }
+  if (!is_connected()) {
+    set_status(QStringLiteral("未连接文件面"), true);
+    return false;
+  }
+  // 归一到该周周一落笔：与日报同表同 upsert 语义（UNIQUE(author,
+  // report_date)，同周重复提交=更新、updated_ms 留痕），服务端零改动
+  const QDate mon = any_day.addDays(1 - any_day.dayOfWeek());
+  pending_kind_ = QStringLiteral("week");
+  client_->save_report(mon.toString(QStringLiteral("yyyy-MM-dd")), content);
   return true;
 }
 

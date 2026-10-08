@@ -1,10 +1,11 @@
 // 二期·日报周报窗口冒烟：真服务端进程 × 离屏 QDialog。
 // owner1 经汇报线为 member1 直属上级（org reporting set CLI 夹具）→
 // ReportDialog 连接文件面→member1 写日报→当日重复提交=更新（同日期
-// 仍一行、内容覆盖）→owner1 团队聚合可见（下属分组）→「仅本周」过滤
-// （当周日期在窗内）→admin1 无下属=空列表（判权服务端裁）。判权矩阵
-//（org-admin 不兜底/转岗断权/幽灵 403）走 test_files_api 协议腿，
-// 不在此重复。
+// 仍一行、内容覆盖）→周报手动补写（选周内任一天→归一到周一落笔、同周
+// 重复提交=更新同一笔、空内容本地拒）→owner1 团队聚合可见（下属分组）
+// →「仅本周」过滤（当周日期在窗内）→关开关见全量含周报→admin1 无下属
+// =空列表（判权服务端裁）。判权矩阵（org-admin 不兜底/转岗断权/幽灵
+// 403）走 test_files_api 协议腿，不在此重复。
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QListWidget>
@@ -151,8 +152,40 @@ int main(int argc, char** argv) {
                          QStringLiteral("今日完成：历史日报")));
   CHECK(wait_until([&] { return dlg.report_count() == 2; }, 8000));
 
+  // —— 周报手动补写（设计 §2：周报=聚合视图＋手动补写）——以所选周的
+  // 周一日期落 reports 表一笔（与日报同表同 upsert 语义，服务端零改动）
+  const QDate wed(2026, 9, 23);  // 与现有两笔日报都不同周（09-23=周三）
+  const QDate mon = wed.addDays(1 - wed.dayOfWeek());  // → 2026-09-21
+  // 空内容本地拒（不发网）
+  CHECK(!dlg.write_week_report(wed, QString()));
+  // 补写周报：选周内任一天→归一到周一落笔
+  CHECK(dlg.write_week_report(wed, QStringLiteral("本周完成：周报补写链路")));
+  CHECK(wait_until([&] { return dlg.report_count() == 3; }, 8000));
+  bool week_row = false;
+  for (int i = 0; i < dlg.list()->count(); ++i) {
+    if (dlg.list()->item(i)->text().startsWith(
+            mon.toString(QStringLiteral("yyyy-MM-dd")))) {
+      week_row = true;
+    }
+  }
+  CHECK(week_row);  // 落笔在周一（归一脚）
+  // 同周周五再补写=更新同一笔（upsert 脚：仍 3 行、内容覆盖 v2）
+  const QDate fri = mon.addDays(4);
+  CHECK(dlg.write_week_report(fri, QStringLiteral("本周完成：周报补写 v2")));
+  CHECK(wait_until([&] {
+    if (dlg.report_count() != 3) return false;
+    for (int i = 0; i < dlg.list()->count(); ++i) {
+      if (dlg.list()->item(i)->text().startsWith(
+              mon.toString(QStringLiteral("yyyy-MM-dd"))) &&
+          dlg.list()->item(i)->text().contains(QStringLiteral("v2"))) {
+        return true;
+      }
+    }
+    return false;
+  }, 8000));
+
   // owner1（直属上级）：团队聚合见 member1 分组；「仅本周」默认开——
-  // 过期日报被滤、当周日报可见（周报=按周过滤的聚合视图）
+  // 过期日报与周报均被滤、当周日报可见（周报=按周过滤的聚合视图）
   ReportDialog dlg_owner;
   dlg_owner.connect_to(QStringLiteral("127.0.0.1"), files_port,
                        QStringLiteral("owner1"), QStringLiteral("pass-2"));
@@ -169,17 +202,27 @@ int main(int argc, char** argv) {
   CHECK(dlg_owner.team_list()->item(0)->text().contains(QStringLiteral("v2")));
   CHECK(dlg_owner.report_count() == 0); // owner1 自己没写
 
-  // 关「仅本周」（周报视图→日报全量）：过期日报也见（开关语义双向可走）
+  // 关「仅本周」（周报视图→日报全量）：过期日报与补写周报也见（开关
+  // 语义双向可走；周报=周一日期落笔的 reports 行，聚合视图同源可见）
   dlg_owner.toggle_team_week();
-  CHECK(wait_until([&] { return dlg_owner.team_count() == 2; }, 8000));
+  CHECK(wait_until([&] { return dlg_owner.team_count() == 3; }, 8000));
   int hist_row = -1;
+  int week_hist_row = -1;
   for (int i = 0; i < dlg_owner.team_list()->count(); ++i) {
     if (dlg_owner.team_list()->item(i)->text().contains(
             QStringLiteral("2026-09-01"))) {
       hist_row = i;
     }
+    if (dlg_owner.team_list()->item(i)->text().contains(
+            mon.toString(QStringLiteral("yyyy-MM-dd")))) {
+      week_hist_row = i;
+    }
   }
   CHECK(hist_row >= 0);
+  CHECK(week_hist_row >= 0);  // 下属补写的周报上级可见
+  CHECK(dlg_owner.team_list()->item(week_hist_row)
+            ->text()
+            .contains(QStringLiteral("周报补写 v2")));
 
   // admin1（无下属；即便有角色也不兜底看别人）：团队聚合=空
   ReportDialog dlg_admin;

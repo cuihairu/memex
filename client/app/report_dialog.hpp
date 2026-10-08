@@ -1,7 +1,9 @@
 // 二期·日报周报窗口：个人日报写/看（当日重复提交=服务端 upsert 更新）
 // ＋直属上级看下属（团队聚合；判权服务端 az report:read 现裁——直属
-// 上级专属，org-admin 不兜底）。周报=日报按周过滤的聚合视图（客户端
-// 过滤展示，不单设表）。独立文件面会话（与 R23-3 文件助手同构）。
+// 上级专属，org-admin 不兜底）。周报=日报按周过滤的聚合视图＋手动补写
+//（补写以所选周的周一日期落 reports 表一笔，与日报同表同 upsert 语义：
+// 同 (author,周一) 重复提交=更新）。独立文件面会话（与 R23-3 文件助手
+// 同构）。
 #pragma once
 
 #include <QDialog>
@@ -33,6 +35,8 @@ class ReportDialog : public QDialog {
 
   // 程序化入口（测试共用）：内容空拒（本地门，服务端同门）
   bool write_report(const QString& date, const QString& content);
+  // 周报补写：任选周内一天→归一到该周周一落笔（同周重复提交=更新）
+  bool write_week_report(const QDate& any_day, const QString& content);
   // 拉我的日报＋团队聚合（一次双拉）
   void refresh();
   // 团队视图「仅本周」开关（周报=按周过滤聚合；按钮与测试共用同一入口）
@@ -59,15 +63,18 @@ class ReportDialog : public QDialog {
 
   FilesClient* client_;
   QDateEdit* date_;
+  QDateEdit* week_date_;
   QPlainTextEdit* content_;
   QLabel* status_;
   QListWidget* list_;
   QListWidget* team_list_;
   QPushButton* btn_connect_;
   QPushButton* btn_save_;
+  QPushButton* btn_week_save_;
   QPushButton* btn_refresh_;
   QPushButton* btn_team_week_;
   bool team_week_only_{true}; // 团队视图「仅本周」默认开（周报=按周聚合）
+  QString pending_kind_;      // 在途保存种类："day"=日报/"week"=周报（回包状态行区分）
   QString account_;
 };
 
