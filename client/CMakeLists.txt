@@ -939,6 +939,9 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_chat_actions PRIVATE
     memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
     OpenSSL::Crypto)
+  # 需求批①验收截图：输入面标记＋气泡彩色渲染实况落 docs 截图目录
+  target_compile_definitions(test_chat_actions PRIVATE
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
   add_test(NAME chat_actions COMMAND test_chat_actions)
   set_tests_properties(chat_actions PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"

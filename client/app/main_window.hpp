@@ -111,10 +111,14 @@ public:
   int lock_unread_count() const;    // 锁屏期间新到消息条数（未锁＝0）
   QString lock_screen_text() const; // 锁屏面未读行文案（断言只含数量不含内容）
   void lock_try_unlock(const QString& pwd); // 解锁（设置对话框/测试同一路径）
-  void show_emoji_panel(); // T4.5：表情面板（内置按频次＋自定义导入）
+  void show_emoji_panel(); // T4.5：表情面板（内置按频次＋自定义导入＋图标组）
   // 自定义表情导入（测试缝：面板「导入」按钮即此函数；同名覆盖、失败回 false）
   bool import_emoji(const QString& src);
   static QString emoji_dir(); // 表情目录（MEMEX_TEST_EMOJI_DIR 可覆盖，测后无污染）
+  // 需求批①文字颜色：请求＝读选区弹 QColorDialog（取消无动作）；
+  // apply＝把选区包上受控颜色标记〔#RRGGBB〕…〔/〕（带参＝测试直调不弹框）
+  void request_input_color();
+  void apply_input_color(const QColor& color);
 
   // 状态断言面（验收测试）
   bool collab_logged_in() const;
@@ -134,6 +138,11 @@ public:
   bool tray_available() const; // 托盘是否可用（offscreen 等环境为假）
   bool autostart_enabled() const; // 开机启动是否已登记
   void set_autostart(bool on);    // 登记／撤销开机启动（freedesktop .desktop）
+  // —— 需求批①（验收面）——
+  // 注入一条消息走气泡渲染（测试缝：生产路径＝引擎信号驱动 append_message，
+  // 纯 UI 测试无对端时经此面断言 colorize 渲染）
+  void inject_message(const QString& from_id, const QString& text,
+                      bool outgoing);
   // —— BUG-004 托盘激活（验收面）——
   // 单击/双击托盘 → 激活主界面（右键 Context 留给菜单，不接线）；
   // 测试用裸 QSystemTrayIcon 复用生产接线（发 activated 信号即走同一路径）。
@@ -336,6 +345,7 @@ private:
   QPushButton* file_btn_{nullptr};
   QPushButton* shot_btn_{nullptr};
   QPushButton* emoji_btn_{nullptr};
+  QPushButton* color_btn_{nullptr};
 
   // 品牌物料（设计稿 docs/design/品牌物料.md）：侧栏品牌行（无牌隐藏=
   // 没配就不变）＋brand_applied 驱动的整窗换牌（标题/图标/托盘）

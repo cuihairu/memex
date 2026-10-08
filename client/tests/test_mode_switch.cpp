@@ -195,6 +195,38 @@ int main(int argc, char** argv) {
       // 验收截图②：点好友后＝对话面板展开
       CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
                                QStringLiteral("/layout-chat.png")));
+
+      // —— 需求批⑨ 查找：昵称/账号(设备 id)/IP 多字段，模糊+精确 ——
+      // 模糊＝子串（dev- 前缀全命中）；精确＝整 id（dev-A2 只剩一台）；
+      // 不存在串全隐；清空恢复（列表里 dev-A2/dev-B2 来自双引擎宣告）
+      QLineEdit* search = nullptr;
+      for (QLineEdit* e : window.findChildren<QLineEdit*>()) {
+        if (e->placeholderText().contains(QStringLiteral("查找："))) {
+          search = e;
+          break;
+        }
+      }
+      CHECK(search != nullptr);
+      if (search) {
+        const auto visible_count = [&]() {
+          int n = 0;
+          for (int i = 0; i < list->count(); ++i) {
+            if (!list->item(i)->isHidden() &&
+                !list->item(i)->data(Qt::UserRole).toString().isEmpty()) ++n;
+          }
+          return n;
+        };
+        const int total = visible_count();
+        CHECK(total >= 2); // dev-A2 + dev-B2
+        search->setText(QStringLiteral("dev-"));
+        CHECK(visible_count() == total); // 模糊：前缀两台都在
+        search->setText(QStringLiteral("dev-A2"));
+        CHECK(visible_count() == 1); // 精确：整 id 只剩一台
+        search->setText(QStringLiteral("zzz-不存在"));
+        CHECK(visible_count() == 0); // 无命中全隐
+        search->setText(QString());
+        CHECK(visible_count() == total); // 清空恢复
+      }
     }
   }
 

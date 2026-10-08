@@ -3,6 +3,7 @@
 #include <QAction>
 #include <QCloseEvent>
 #include <QApplication>
+#include <QColorDialog>
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDialog>
@@ -135,6 +136,26 @@ QString hhmm(qint64 ts_ms) {
   return QDateTime::fromMSecsSinceEpoch(ts_ms).toString(QStringLiteral("HH:mm"));
 }
 
+// 需求批①文字颜色：受控标记〔#RRGGBB〕…〔/〕→ 颜色 span。线上与存储仍是
+// 纯文本（协议/归档无感）；渲染侧先 esc 后替换＝零注入面，色值严格
+// [0-9A-Fa-f]{6} 才生效，不成对/坏色保持字面显示（无害降级）。
+QString colorize(const QString& content) {
+  static const QRegularExpression re(
+      QStringLiteral("〔#([0-9A-Fa-f]{6})〕(.*?)〔/〕"));
+  QString out;
+  qsizetype pos = 0;
+  auto it = re.globalMatch(content);
+  while (it.hasNext()) {
+    const auto m = it.next();
+    out += content.mid(pos, m.capturedStart() - pos);
+    out += QStringLiteral("<span style=\"color:#%1;\">%2</span>")
+               .arg(m.captured(1), m.captured(2));
+    pos = m.capturedEnd();
+  }
+  out += content.mid(pos);
+  return out;
+}
+
 // 气泡行：外出＝品牌橙靠右，来访＝浅灰靠左（QTextBrowser 富文本子集，不用圆角）。
 // at_mode=true（群聊）：@账号 标记整体包品牌橙加粗。
 QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
@@ -148,7 +169,7 @@ QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
   // 普通消息照旧转义文本。
   QString content =
       image.isEmpty()
-          ? esc(text)
+          ? colorize(esc(text))
           : QStringLiteral(
                 "<img src=\"file://%1\" width=\"280\"><br>"
                 "<span style=\"color:%2; font-size:small;\">图片消息 %3</span>")
@@ -496,7 +517,8 @@ void MainWindow::build_ui() {
   side_head->addWidget(device_count_);
 
   search_box_ = new QLineEdit(side);
-  search_box_->setPlaceholderText(QStringLiteral("搜索设备 / IP"));
+  search_box_->setPlaceholderText(
+      QStringLiteral("查找：昵称 / 账号 / IP / 群名"));
   search_box_->setClearButtonEnabled(true);
 
   device_list_ = new QListWidget(side);
@@ -571,9 +593,16 @@ void MainWindow::build_ui() {
   emoji_btn_ = emoji_btn;
   connect(emoji_btn, &QPushButton::clicked, this,
           [this] { show_emoji_panel(); });
+  // 需求批①文字颜色：选区着色（弹取色器，标记入输入框可继续编辑）
+  auto* color_btn = new QPushButton(QStringLiteral("颜色"), input_row);
+  color_btn_ = color_btn;
+  color_btn->setToolTip(QStringLiteral("选中文字后点此设置颜色"));
+  connect(color_btn, &QPushButton::clicked, this,
+          [this] { request_input_color(); });
   input_layout->addWidget(shot_btn);
   input_layout->addWidget(file_btn);
   input_layout->addWidget(emoji_btn);
+  input_layout->addWidget(color_btn);
   input_box_ = new QLineEdit(input_row);
   input_box_->setPlaceholderText(QStringLiteral("输入消息，回车发送"));
   send_btn_ = new QPushButton(QStringLiteral("发送"), input_row);
@@ -598,12 +627,33 @@ void MainWindow::build_ui() {
   // ThemeManager::theme_changed 重刷，切换即时生效）。
   apply_theme_styles();
 
+  // 需求批⑨查找联系人：可检索字段＝昵称/账号/设备 id/IP/群名/群成员
+  // （UserRole+6，\n 分行）；模糊＝子串、精确＝整行相等（contains 超集，
+  // 两种输入都命中）；分组头随组内可见项折叠，不留孤悬标题行。
   connect(search_box_, &QLineEdit::textChanged, this, [this](const QString& t) {
     const QString needle = t.trimmed();
     for (int i = 0; i < device_list_->count(); ++i) {
       auto* item = device_list_->item(i);
-      item->setHidden(!needle.isEmpty() &&
-                      !item->text().contains(needle, Qt::CaseInsensitive));
+      const bool selectable =
+          !item->data(Qt::UserRole).toString().isEmpty(); // 分组头＝空 id
+      if (!selectable) continue; // 头行在第二遍按组内可见性折叠
+      const QString hay = item->data(Qt::UserRole + 6).toString();
+      const bool hit = needle.isEmpty() ||
+                       (!hay.isEmpty() &&
+                        hay.contains(needle, Qt::CaseInsensitive));
+      item->setHidden(!hit);
+    }
+    // 第二遍：分组头＝其后到下一分组头之间还有可见项才显示
+    for (int i = 0; i < device_list_->count(); ++i) {
+      auto* item = device_list_->item(i);
+      if (!item->data(Qt::UserRole).toString().isEmpty()) continue;
+      bool any_visible = false;
+      for (int j = i + 1; j < device_list_->count(); ++j) {
+        auto* next = device_list_->item(j);
+        if (next->data(Qt::UserRole).toString().isEmpty()) break; // 下一组
+        if (!next->isHidden()) { any_visible = true; break; }
+      }
+      item->setHidden(!needle.isEmpty() && !any_visible);
     }
   });
   // 好友/会话列表：点击打开会话（点开＝面板展开）；再点当前会话项＝
@@ -1173,6 +1223,37 @@ void MainWindow::show_emoji_panel() {
     grid->addWidget(b, i / 8, i % 8);
     ++i;
   }
+  // 图标组（需求批③）：符号图标插入消息——与表情面板同源（②表情包面板
+  // 后续扩展即此面板），简版先行：点击即入输入框光标处，不记频次
+  {
+    const QStringList icons = {
+        QStringLiteral("⚠"),  QStringLiteral("☎"),  QStringLiteral("✉"),
+        QStringLiteral("🔒"), QStringLiteral("🔑"), QStringLiteral("📅"),
+        QStringLiteral("📌"), QStringLiteral("📎"), QStringLiteral("⏰"),
+        QStringLiteral("⭐"), QStringLiteral("💡"), QStringLiteral("🚀"),
+        QStringLiteral("➤"),  QStringLiteral("✔"),  QStringLiteral("✘"),
+        QStringLiteral("★")};
+    const int label_row = (i + 7) / 8; // 空满当前行，标签整行占位
+    auto* label =
+        new QLabel(QStringLiteral("—— 图标（插入消息） ——"), dlg);
+    grid->addWidget(label, label_row, 0, 1, 8);
+    int r = label_row + 1;
+    int c = 0;
+    for (const QString& ic : icons) {
+      auto* b = new QPushButton(ic, dlg);
+      b->setFixedSize(34, 34);
+      b->setStyleSheet(
+          QStringLiteral("QPushButton{border:none;font-size:17px;}"));
+      connect(b, &QPushButton::clicked, this, [this, ic, dlg] {
+        input_box_->insert(ic);
+        input_box_->setFocus();
+        dlg->close();
+      });
+      grid->addWidget(b, r, c);
+      if (++c >= 8) { c = 0; ++r; }
+    }
+    i = r * 8 + c; // 自定义表情从新行接排
+  }
   // 自定义表情包：emoji 目录（emoji_dir，测试缝可覆盖）下的图片，
   // 点击即按文件通道发送
   const QString dir = emoji_dir();
@@ -1230,6 +1311,41 @@ void MainWindow::show_emoji_panel() {
   dlg->show();
   dlg->raise();
   dlg->activateWindow();
+}
+
+// —— 需求批① 文字颜色 ——
+void MainWindow::inject_message(const QString& from_id, const QString& text,
+                                bool outgoing) {
+  append_message(from_id, text, QDateTime::currentMSecsSinceEpoch(), outgoing,
+                 QStringLiteral("direct"));
+}
+
+void MainWindow::request_input_color() {
+  if (!input_box_->hasSelectedText()) {
+    show_status(QStringLiteral("先选中要着色的文字，再点「颜色」"));
+    return;
+  }
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  const QColor last = QColor(settings.value(QStringLiteral("input_color"))
+                                 .toString());
+  const QColor picked = QColorDialog::getColor(
+      last.isValid() ? last : QColor(QStringLiteral("#e16531")), this,
+      QStringLiteral("文字颜色"), QColorDialog::ShowAlphaChannel);
+  if (!picked.isValid()) return; // 取消＝无动作
+  settings.setValue(QStringLiteral("input_color"), picked.name());
+  apply_input_color(picked);
+}
+
+void MainWindow::apply_input_color(const QColor& color) {
+  if (!input_box_->hasSelectedText()) {
+    show_status(QStringLiteral("先选中要着色的文字，再点「颜色」"));
+    return;
+  }
+  const QString marked = QStringLiteral("〔%1〕%2〔/〕")
+                             .arg(color.name(), input_box_->selectedText());
+  input_box_->insert(marked); // 替换选区（QLineEdit::insert 即替换当前选区）
+  input_box_->setFocus();
 }
 
 // —— T4.5 自定义表情：目录与导入 ——
@@ -2556,6 +2672,12 @@ void MainWindow::refresh_devices() {
                            QString::number(p.tcp_port), acct));
     item->setData(Qt::UserRole, id);
     item->setData(Qt::UserRole + 1, QStringLiteral("direct"));
+    // 需求批⑨查找：可检索字段＝昵称/设备 id/IP/协作账号（\n 分行，整行比对
+    // ＝精确、子串＝模糊，两态都能命中）
+    item->setData(Qt::UserRole + 6,
+                  QStringList{name, id, p.address.toString(),
+                             QString::fromStdString(p.account)}
+                      .join(QLatin1Char('\n')));
   }
 
   // 协作会话分组（登录后出现；本地历史 + 本会话窗口期的对端）
@@ -2585,6 +2707,9 @@ void MainWindow::refresh_devices() {
                         .arg(star, account, presence));
       item->setData(Qt::UserRole, account);
       item->setData(Qt::UserRole + 1, QStringLiteral("collab"));
+      item->setData(Qt::UserRole + 6,
+                    QStringList{account, star.trimmed()}.join(
+                        QLatin1Char('\n'))); // ⑨：账号精确/模糊皆命中
     }
   }
 
@@ -2602,6 +2727,12 @@ void MainWindow::refresh_devices() {
       item->setData(Qt::UserRole,
                     QStringLiteral("group:%1").arg(it.key()));
       item->setData(Qt::UserRole + 1, QStringLiteral("group"));
+      // ⑨：群名/群号/成员账号（按成员找群＝找联系人的群面）
+      item->setData(Qt::UserRole + 6,
+                    QStringList{it->name, QString::number(it.key())}
+                        .join(QLatin1Char('\n')) +
+                        QLatin1Char('\n') + it->members.join(
+                            QLatin1Char('\n')));
     }
   }
 
@@ -2618,6 +2749,11 @@ void MainWindow::refresh_devices() {
                         .arg(it->size()));
       item->setData(Qt::UserRole, it.key());
       item->setData(Qt::UserRole + 1, QStringLiteral("dgroup"));
+      // ⑨：临群名/成员设备 id
+      item->setData(Qt::UserRole + 6,
+                    QStringList{dgroup_title(it.key())}.join(
+                        QLatin1Char('\n')) +
+                        QLatin1Char('\n') + it->join(QLatin1Char('\n')));
     }
   }
   device_list_->blockSignals(false);
@@ -2934,14 +3070,14 @@ void MainWindow::apply_theme_styles() {
     input_row_->setStyleSheet(
         QStringLiteral("background:%1;").arg(t.surface_raised.name()));
   }
-  // 描边按钮（发文件／截图／表情）同款：品牌色描边＋品牌色文字
+  // 描边按钮（发文件／截图／表情／颜色）同款：品牌色描边＋品牌色文字
   const QString outline = QStringLiteral(
       "QPushButton { background:%1; color:%2; border:1px solid %3; "
       "border-radius:8px; padding:6px 12px; }"
       "QPushButton:hover { background:%4; }")
       .arg(t.surface_raised.name(), t.brand_text.name(), t.brand.name(),
            t.brand_wash.name());
-  for (QPushButton* btn : {file_btn_, shot_btn_, emoji_btn_}) {
+  for (QPushButton* btn : {file_btn_, shot_btn_, emoji_btn_, color_btn_}) {
     if (btn) btn->setStyleSheet(outline);
   }
   if (send_btn_) {
