@@ -277,6 +277,13 @@ private:
   QPushButton* file_btn_{nullptr};
   QPushButton* shot_btn_{nullptr};
   QPushButton* emoji_btn_{nullptr};
+
+  // 品牌物料（设计稿 docs/design/品牌物料.md）：侧栏品牌行（无牌隐藏=
+  // 没配就不变）＋brand_applied 驱动的整窗换牌（标题/图标/托盘）
+  QWidget* brand_row_{nullptr};
+  QLabel* brand_logo_{nullptr};
+  QLabel* brand_name_{nullptr};
+  void apply_brand();
 };
 
 } // namespace memex::client

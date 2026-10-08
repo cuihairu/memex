@@ -61,6 +61,7 @@
 #include <core/local_store.hpp>
 
 #include "notify_center.hpp"
+#include "brand_kit.hpp"
 
 #ifndef MEMEX_VERSION // 测试目标未传版本定义时兜底（与 main.cpp 同款）
 #define MEMEX_VERSION "dev"
@@ -213,6 +214,32 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             apply_theme_styles();
             setWindowIcon(brand_icon());
           });
+
+  // 品牌物料：缓存先行（离线也有牌）＋拉取应用后整窗换牌（设计稿
+  // 品牌物料.md §4——brand_applied 驱动，默认标兜底没配就不变）
+  BrandKit::instance().load_cache();
+  connect(&BrandKit::instance(), &BrandKit::brand_applied, this,
+          &MainWindow::apply_brand);
+  apply_brand();
+}
+
+void MainWindow::apply_brand() {
+  const BrandKit& kit = BrandKit::instance();
+  setWindowTitle(kit.window_title());
+  setWindowIcon(kit.window_icon());
+  if (tray_) tray_->setIcon(kit.window_icon());
+  if (brand_row_ != nullptr) {
+    const bool has = kit.branded();
+    brand_row_->setVisible(has);
+    if (has) {
+      if (!kit.logo().isNull()) {
+        brand_logo_->setPixmap(
+            kit.logo().scaled(20, 20, Qt::KeepAspectRatio,
+                              Qt::SmoothTransformation));
+      }
+      brand_name_->setText(kit.company_name());
+    }
+  }
 }
 
 void MainWindow::build_ui() {
@@ -375,6 +402,20 @@ void MainWindow::build_ui() {
   side_layout->setContentsMargins(10, 10, 6, 10);
   side_layout->setSpacing(6);
 
+  // 品牌行（服务器配了牌才显＝没配就不变；apply_brand 驱动显隐与内容）
+  auto* brand_row = new QWidget(side);
+  brand_row_ = brand_row;
+  auto* brand_lay = new QHBoxLayout(brand_row);
+  brand_lay->setContentsMargins(0, 0, 0, 0);
+  brand_lay->setSpacing(6);
+  brand_logo_ = new QLabel(brand_row);
+  brand_logo_->setFixedSize(20, 20);
+  brand_name_ = new QLabel(brand_row);
+  brand_lay->addWidget(brand_logo_);
+  brand_lay->addWidget(brand_name_);
+  brand_lay->addStretch();
+  brand_row->setVisible(false); // 默认标兜底：无牌不占位
+
   auto* side_head = new QHBoxLayout();
   auto* side_title = new QLabel(QStringLiteral("局域网设备"), side);
   side_title_ = side_title;
@@ -399,6 +440,7 @@ void MainWindow::build_ui() {
   side_layout->addLayout(side_head);
   side_layout->addWidget(search_box_);
   side_layout->addWidget(device_list_, 1);
+  side_layout->insertWidget(0, brand_row_);
 
   // —— 右侧：聊天窗 ——
   auto* chat = new QWidget(this);
@@ -2098,8 +2140,40 @@ void MainWindow::seed_collab_peers() {
 
 void MainWindow::show_collab_login_dialog() {
   QDialog dlg(this);
-  dlg.setWindowTitle(QStringLiteral("登录协作态"));
-  auto* form = new QFormLayout(&dlg);
+  const BrandKit& kit = BrandKit::instance();
+  // 品牌随换：标题与顶部品牌区（公司名/logo/登录页文案；无牌=默认标）
+  dlg.setWindowTitle(kit.company_name().isEmpty()
+                         ? QStringLiteral("登录协作态")
+                         : QStringLiteral("%1 · 登录").arg(
+                               kit.company_name()));
+  auto* lay = new QVBoxLayout(&dlg);
+  if (kit.branded()) {
+    auto* brand_area = new QWidget(&dlg);
+    auto* brand_lay = new QHBoxLayout(brand_area);
+    brand_lay->setContentsMargins(0, 0, 0, 0);
+    auto* logo = new QLabel(brand_area);
+    if (!kit.logo().isNull()) {
+      logo->setPixmap(kit.logo().scaled(
+          40, 40, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    } else {
+      logo->setPixmap(kit.window_icon().pixmap(40, 40));
+    }
+    auto* name = new QLabel(kit.company_name(), brand_area);
+    QFont bf = name->font();
+    bf.setBold(true);
+    bf.setPointSize(bf.pointSize() + 2);
+    name->setFont(bf);
+    brand_lay->addWidget(logo);
+    brand_lay->addWidget(name);
+    brand_lay->addStretch();
+    lay->addWidget(brand_area);
+    if (!kit.slogan().isEmpty()) {
+      auto* slogan = new QLabel(kit.slogan(), &dlg);
+      lay->addWidget(slogan);
+    }
+  }
+  auto* form = new QFormLayout;
+  lay->addLayout(form);
   QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
   auto* host = new QLineEdit(
       settings.value(QStringLiteral("host"), QStringLiteral("127.0.0.1"))
@@ -2108,12 +2182,17 @@ void MainWindow::show_collab_login_dialog() {
   auto* port = new QLineEdit(
       settings.value(QStringLiteral("port"), QStringLiteral("24360")).toString(),
       &dlg);
+  auto* files_port = new QLineEdit(
+      settings.value(QStringLiteral("files_port"), QStringLiteral("24362"))
+          .toString(),
+      &dlg);
   auto* account = new QLineEdit(
       settings.value(QStringLiteral("account")).toString(), &dlg);
   auto* password = new QLineEdit(&dlg);
   password->setEchoMode(QLineEdit::Password);
   form->addRow(QStringLiteral("服务器地址"), host);
   form->addRow(QStringLiteral("端口"), port);
+  form->addRow(QStringLiteral("文件口"), files_port);
   form->addRow(QStringLiteral("账号"), account);
   form->addRow(QStringLiteral("口令"), password);
   auto* buttons = new QDialogButtonBox(
@@ -2125,7 +2204,13 @@ void MainWindow::show_collab_login_dialog() {
   if (account->text().trimmed().isEmpty()) return;
   settings.setValue(QStringLiteral("host"), host->text().trimmed());
   settings.setValue(QStringLiteral("port"), port->text().trimmed());
+  settings.setValue(QStringLiteral("files_port"),
+                    files_port->text().trimmed());
   settings.setValue(QStringLiteral("account"), account->text().trimmed());
+  // 品牌拉取（免鉴权 GET 不依赖登录成败；accept 后 host/文件口已知，
+  // 比登录成功后拉取更早见效——设计稿 §4 差异如实注明）
+  BrandKit::instance().fetch(host->text().trimmed(),
+                             static_cast<quint16>(files_port->text().toUInt()));
   login_collab(host->text().trimmed(),
                static_cast<quint16>(port->text().toUInt()),
                account->text().trimmed(), password->text());

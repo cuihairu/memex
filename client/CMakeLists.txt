@@ -42,6 +42,8 @@ qt_add_executable(memex_client
   app/notify_prefs.hpp
   app/screenshot_tool.cpp
   app/screenshot_tool.hpp
+  app/brand_kit.cpp
+  app/brand_kit.hpp
   app/theme.cpp
   app/theme.hpp
   app/theme_settings_page.cpp
@@ -420,6 +422,25 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # 二期·品牌物料客户端面冒烟：真服务端进程 × 离屏——默认标兜底（没配就
+  # 不变：Memex 标题/默认图标/logo 空）→CLI 配牌 fetch 换牌（标题/公司名/
+  # accent/slogan/version）→配 logo（QPixmap 产真 PNG 走 CLI）位图落地+
+  # 缓存文件→新实例 load_cache 离线复原→坏端口 fetch 静默不改现状→CLI
+  # 清牌 fetch 回默认标。判权/PNG 校验协议腿走 test_files_api，不在此重复
+  add_executable(test_brand_kit
+    app/tests/test_brand_kit.cpp
+    app/brand_kit.cpp)
+  target_link_libraries(test_brand_kit PRIVATE
+    memex_engine_collab Qt6::Widgets)
+  target_include_directories(test_brand_kit PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_brand_kit PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME brand_kit COMMAND test_brand_kit)
+  set_tests_properties(brand_kit PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # 二期·会话审计窗口冒烟：真服务端进程 × 离屏 QDialog——CollabEngine
   # 造归档消息→无角色检索 403 状态行明示→授 auditor 后持证检索命中→
   # 查阅日志台账见检索与被拒留痕（可对账）。判权分立腿（admin≠auditor）
@@ -479,6 +500,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
     app/main_window.cpp
+    app/brand_kit.cpp
+    app/brand_kit.hpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -522,6 +545,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_tray
     tests/test_tray.cpp
     app/main_window.cpp
+    app/brand_kit.cpp
+    app/brand_kit.hpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -563,6 +588,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_screenshot
     tests/test_screenshot.cpp
     app/main_window.cpp
+    app/brand_kit.cpp
+    app/brand_kit.hpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -626,6 +653,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_icon
     tests/test_icon.cpp
     app/main_window.cpp
+    app/brand_kit.cpp
+    app/brand_kit.hpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -668,6 +697,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_theme
     tests/test_theme.cpp
     app/main_window.cpp
+    app/brand_kit.cpp
+    app/brand_kit.hpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -708,6 +739,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_chat_actions
     tests/test_chat_actions.cpp
     app/main_window.cpp
+    app/brand_kit.cpp
+    app/brand_kit.hpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -748,6 +781,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_flash_alert
     tests/test_flash_alert.cpp
     app/main_window.cpp
+    app/brand_kit.cpp
+    app/brand_kit.hpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
