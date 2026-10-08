@@ -41,6 +41,7 @@ class AuditDialog;
 class OfficeMapDialog;
 class AssistDialog;
 class GroupToolsDialog;
+class BrandSettingsDialog;
 
 class MainWindow : public QMainWindow {
 public:
@@ -255,6 +256,7 @@ private:
   QPointer<OfficeMapDialog> office_dialog_; // 二期·办公室位置图窗口（懒建）
   QPointer<AssistDialog> assist_dialog_; // 二期·远程协助窗口（懒建）
   QPointer<GroupToolsDialog> group_tools_dialog_; // 二期·群工具三件窗口（懒建）
+  QPointer<BrandSettingsDialog> brand_settings_dialog_; // 二期·品牌物料设置页（懒建）
 
   QLabel* device_count_{nullptr};
   QLineEdit* search_box_{nullptr};

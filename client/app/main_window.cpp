@@ -33,6 +33,7 @@
 #include "approval_dialog.hpp"
 #include "report_dialog.hpp"
 #include "group_tools_dialog.hpp"
+#include "brand_settings_page.hpp"
 #include "assist_dialog.hpp"
 #include "audit_dialog.hpp"
 #include "office_map_dialog.hpp"
@@ -376,6 +377,18 @@ void MainWindow::build_ui() {
   act_theme_ = opt_menu->addAction(QStringLiteral("主题…"));
   act_theme_->setMenuRole(QAction::PreferencesRole); // macOS 走应用菜单偏好项
   connect(act_theme_, &QAction::triggered, this, &MainWindow::show_theme_settings);
+  // —— 品牌物料设置页（设计稿 docs/design/品牌物料.md §4）：org-admin
+  //     配牌入口；保存成功后本机 BrandKit 即时换牌（＝本机先见）——
+  auto* act_brand = opt_menu->addAction(QStringLiteral("品牌物料…"));
+  connect(act_brand, &QAction::triggered, this, [this] {
+    if (!brand_settings_dialog_) {
+      brand_settings_dialog_ = new BrandSettingsDialog(this);
+      brand_settings_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    brand_settings_dialog_->show();
+    brand_settings_dialog_->raise();
+    brand_settings_dialog_->activateWindow();
+  });
   opt_menu->addSeparator();
   act_autostart_ =
       opt_menu->addAction(QStringLiteral("开机启动（登录后自动运行）"));

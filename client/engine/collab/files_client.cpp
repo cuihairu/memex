@@ -1285,4 +1285,127 @@ void FilesClient::download_file(qint64 file_id, const QString& file_name,
   });
 }
 
+// —— 品牌物料（二期）——
+
+void FilesClient::fetch_branding() {
+  send_json(QStringLiteral("branding.fetch"), QStringLiteral("GET"),
+            QStringLiteral("/files/branding"), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) emit branding_fetched(resp);
+            });
+}
+
+void FilesClient::save_branding(const QString& company_name,
+                                const QString& accent,
+                                const QString& slogan) {
+  // 三件齐发（服务端口径：显式空串=清空、缺省不动——设置页表单语义
+  // 「留空=清空该字段」与服务端显式空串对齐）
+  send_json(QStringLiteral("branding.set"), QStringLiteral("POST"),
+            QStringLiteral("/files/branding"),
+            {{QStringLiteral("company_name"), company_name},
+             {QStringLiteral("accent"), accent},
+             {QStringLiteral("slogan"), slogan}},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit branding_saved(static_cast<qint64>(
+                    resp.value(QStringLiteral("version")).toDouble()));
+              }
+            });
+}
+
+void FilesClient::clear_brand_logo() {
+  send_json(QStringLiteral("branding.clear_logo"), QStringLiteral("POST"),
+            QStringLiteral("/files/branding"),
+            {{QStringLiteral("clear_logo"), true}},
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit brand_logo_cleared();
+            });
+}
+
+void FilesClient::clear_brand_splash() {
+  send_json(QStringLiteral("branding.clear_splash"), QStringLiteral("POST"),
+            QStringLiteral("/files/branding"),
+            {{QStringLiteral("clear_splash"), true}},
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit brand_splash_cleared();
+            });
+}
+
+// 素材上传（PNG 原始字节 octet-stream；send_json 只走 JSON 面，照
+// upload_inbox 直挂 NAM；类型/大小/尺寸校验在服务端，语义化 413/415
+// 文案经统一失败通道回状态行）
+void FilesClient::upload_brand_logo(const QString& file_path) {
+  const QString op = QStringLiteral("branding.logo");
+  if (token_.isEmpty()) {
+    fail(op, 0, QStringLiteral("未登录"));
+    return;
+  }
+  QFile f(file_path);
+  if (!f.open(QIODevice::ReadOnly)) {
+    fail(op, 0, QStringLiteral("文件打开失败"));
+    return;
+  }
+  const QByteArray bytes = f.readAll();
+  QNetworkRequest req(
+      QUrl(base_url() + QStringLiteral("/files/branding/logo")));
+  req.setTransferTimeout(kByteTimeoutMs);
+  req.setRawHeader("Authorization", "Bearer " + token_.toUtf8());
+  req.setHeader(QNetworkRequest::ContentTypeHeader,
+                QStringLiteral("image/png"));
+  QNetworkReply* rep = nam_->post(req, bytes);
+  connect(rep, &QNetworkReply::finished, this, [this, rep, op] {
+    rep->deleteLater();
+    const int status =
+        rep->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QJsonDocument doc = QJsonDocument::fromJson(rep->readAll());
+    const QJsonObject obj = doc.isObject() ? doc.object() : QJsonObject{};
+    if (rep->error() != QNetworkReply::NoError || status < 200 ||
+        status >= 300) {
+      QString msg = obj.value(QStringLiteral("error")).toString();
+      if (msg.isEmpty()) msg = rep->errorString();
+      fail(op, status, msg);
+      return;
+    }
+    emit brand_logo_uploaded(static_cast<qint64>(
+        obj.value(QStringLiteral("version")).toDouble()));
+  });
+}
+
+void FilesClient::upload_brand_splash(const QString& file_path) {
+  const QString op = QStringLiteral("branding.splash");
+  if (token_.isEmpty()) {
+    fail(op, 0, QStringLiteral("未登录"));
+    return;
+  }
+  QFile f(file_path);
+  if (!f.open(QIODevice::ReadOnly)) {
+    fail(op, 0, QStringLiteral("文件打开失败"));
+    return;
+  }
+  const QByteArray bytes = f.readAll();
+  QNetworkRequest req(
+      QUrl(base_url() + QStringLiteral("/files/branding/splash")));
+  req.setTransferTimeout(kByteTimeoutMs);
+  req.setRawHeader("Authorization", "Bearer " + token_.toUtf8());
+  req.setHeader(QNetworkRequest::ContentTypeHeader,
+                QStringLiteral("image/png"));
+  QNetworkReply* rep = nam_->post(req, bytes);
+  connect(rep, &QNetworkReply::finished, this, [this, rep, op] {
+    rep->deleteLater();
+    const int status =
+        rep->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QJsonDocument doc = QJsonDocument::fromJson(rep->readAll());
+    const QJsonObject obj = doc.isObject() ? doc.object() : QJsonObject{};
+    if (rep->error() != QNetworkReply::NoError || status < 200 ||
+        status >= 300) {
+      QString msg = obj.value(QStringLiteral("error")).toString();
+      if (msg.isEmpty()) msg = rep->errorString();
+      fail(op, status, msg);
+      return;
+    }
+    emit brand_splash_uploaded(static_cast<qint64>(
+        obj.value(QStringLiteral("version")).toDouble()));
+  });
+}
+
 } // namespace memex::client

@@ -269,6 +269,21 @@ class FilesClient : public QObject {
   // 完成（负责人/创建者/群主/管理员；非 todo 409）
   void done_group_task(quint64 gid, qint64 task_id);
 
+  // —— 品牌物料（二期 /files/branding；读面免鉴权归 BrandKit，此处是
+  //     设置页写面，判权 branding-manage=org-admin 全在服务端）——
+  // 当前配置回显（登录后拉；展示区＋编辑区初始值）
+  void fetch_branding();
+  // 保存文本三件（显式空串=清空；一次保存=服务端一个版本）
+  void save_branding(const QString& company_name, const QString& accent,
+                     const QString& slogan);
+  // 素材清除（clear_* 布尔走同一路由；一次动作=一个版本）
+  void clear_brand_logo();
+  void clear_brand_splash();
+  // 素材上传（PNG 原始字节；类型/大小/尺寸校验在服务端，语义化
+  // 413/415 经统一失败通道回状态行）
+  void upload_brand_logo(const QString& file_path);
+  void upload_brand_splash(const QString& file_path);
+
  signals:
   void logged_in();
   void login_failed(const QString& reason);
@@ -359,6 +374,13 @@ class FilesClient : public QObject {
   void group_tasks_listed(const QJsonArray& tasks);
   void group_task_claimed(qint64 id);
   void group_task_done(qint64 id);
+  // —— 品牌物料 ——
+  void branding_fetched(const QJsonObject& branding); // 全字段＋version
+  void branding_saved(qint64 version);
+  void brand_logo_cleared();
+  void brand_splash_cleared();
+  void brand_logo_uploaded(qint64 version);
+  void brand_splash_uploaded(qint64 version);
   // 统一失败通道：op=操作名（"memo.create"/"inbox.upload"/…）、
   // status=HTTP 状态码（0=网络层失败）、error=服务端 error 字段或网络串
   void request_failed(const QString& op, int status, const QString& error);

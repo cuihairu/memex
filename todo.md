@@ -223,6 +223,15 @@
 - [x] R24-4 UI 边界：备忘录疑似密码提示、密码箱默认掩码、复制密码=显式动作+留痕、导出默认关闭。
   - 2026-10-07 疑似密码提示（6577c60）：GroupMemoDialog looks_like_secret 识别（密码/口令关键词＋password=/token=/api_key=/secret=/Bearer 赋值形态）——只提示不拦（硬禁言会误伤「WiFi 密码请看密码箱」类合法正文），程序化提交挂状态栏红提示且随列表刷新挂住（secret_hint_ 不被「共 N 条」冲掉）＋手工路径二次确认弹窗（默认 No）；顺带修 test_group_vault_dialog 收窄恢复腿状态行竞态（幂等 GET 重试等真回落）。其余三项随 R24-3 落地不另起炉灶：密码箱列表默认掩码只露名称/账号（UI 冒烟断言不露密文）、复制密码=显式动作+服务端 access 留痕（audit reveal|copy 分计）、无导出面=导出默认关闭（要导出须新立设计）。ctest 37/37。
 
+## 品牌物料（2026-10-08 用户令：服务器端可配公司品牌，客户端接入后自动换牌；设计=docs/design/品牌物料.md）
+
+- [x] 全链三批（服务端→客户端接入→设置页），ctest 59/59 全绿；实现差异已回填设计稿（缓存路径 AppDataLocation、brand_applied 信号驱动、clear 素材路由、登录窗 accept 后即 fetch 四处以回填后为准）。
+  - 2026-10-08 服务端批（086c99d）＋素材清除路由（113e39f）：store 单行聚合表 branding（id 钉 1/version 单调判变更；branding_set 三 COALESCE 单 UPDATE＝一次保存一个版本）＋FileServer 六路由（读三**免鉴权**＝登录窗鉴权前可用、物料非敏感；写三 az 新规则 branding-manage=org-admin；PNG 校验 magic 415/≤512KiB 413/IHDR ≤2048² 413；路由感知 body_cap 素材路由放行 512KiB+64KiB；clear_logo/clear_splash 布尔＝素材清除一次动作一版本）＋CLI branding show|set 运维兜底（PNG 校验同口径，失败非零退出）；test_files_api 品牌段 25 腿。
+  - 2026-10-08 客户端接入批（03fb60e）：BrandKit（独立 NAM 免鉴权 fetch＋PNG 跟随拉取 shared_ptr 计数防悬垂＋AppDataLocation/brand 缓存三文件＋MEMEX_TEST_BRAND_DIR 测试覆写；window_title/icon 默认标兜底＝没配就不变；brand_applied 信号）＋主窗接线（构造尾 load_cache 先行离线也有牌；apply_brand 换标题/图标/托盘/侧栏品牌行——无牌隐藏；登录窗品牌区＋文件口行（QSettings 缺省 24362），accept 后即 fetch 免鉴权早于登录见效）；test_brand_kit 第 58 腿（兜底/换牌/缓存/离线复原/坏端口静默/清牌回落）。
+  - 2026-10-08 设置页批（本笔）：FilesClient 品牌写面六方法六信号（fetch/save_branding/clear×2/upload×2，统一失败通道透传服务端语义化 413/415）＋brand_settings_page 对话框（连接区/展示区回显（版本可见）/编辑区文本三件+accent 取色（坏形态本地拒不发网）/logo+splash 选图即时预览（QPixmap 打不开即拒）/上传/清除两按钮；403「品牌设置归 org-admin」；保存/清除/上传成功后本机 BrandKit fetch 即时换牌＝本机先见）＋主窗「设置→品牌物料…」（QPointer 懒建）；test_brand_settings 第 59 腿（未连接拒/错口令/member 403 不换牌/org-admin 保存换牌/accent 本地拒/预览上传/非 PNG 本地拒/清除回落）＋截图验收：程序化 grab 落 docs/src/public/branding/before|after.png（另一客户端＝独立 MainWindow 实例；前后差异＝侧栏品牌行公司名+logo 随牌更换）。
+
+
+
 ## 客户端需求批（2026-10-08 用户连发令，15 件逐件分批实现；鸿蒙不涉；排期 2026-10-08 报批）
 
 - [ ] 批次 A（小件速收，5 件）

@@ -44,6 +44,7 @@ qt_add_executable(memex_client
   app/screenshot_tool.hpp
   app/brand_kit.cpp
   app/brand_kit.hpp
+  app/brand_settings_page.cpp
   app/theme.cpp
   app/theme.hpp
   app/theme_settings_page.cpp
@@ -441,6 +442,54 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # 二期·品牌物料设置页冒烟：真服务端进程 × 离屏——未连接本地拒→错口令
+  # 状态行→member 保存 403 归属文案→org-admin 保存换牌（本机 BrandKit
+  # 即时生效）→accent 坏形态本地拒→logo 选图预览＋上传/非 PNG 本地拒→
+  # 清除回落→截图验收（配置前后主窗 grab 落 docs/src/public/branding/，
+  # 另一客户端＝独立 MainWindow 实例）。判权/PNG 校验协议腿走 test_files_api
+  add_executable(test_brand_settings
+    app/tests/test_brand_settings.cpp
+    app/brand_settings_page.cpp
+    app/brand_kit.cpp
+    app/main_window.cpp
+    app/file_assistant.cpp
+    app/task_dialog.cpp
+    app/approval_dialog.cpp
+    app/report_dialog.cpp
+    app/group_tools_dialog.cpp
+    app/audit_dialog.cpp
+    app/office_map_dialog.cpp
+    app/assist_dialog.cpp
+    engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
+    engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
+    app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
+    app/group_ci_dialog.cpp
+    app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
+    app/theme.cpp
+    app/theme_settings_page.cpp)
+  target_include_directories(test_brand_settings PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_brand_settings PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
+  target_compile_definitions(test_brand_settings PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_DOCS_BRAND_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/branding")
+  add_test(NAME brand_settings COMMAND test_brand_settings)
+  set_tests_properties(brand_settings PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # 二期·会话审计窗口冒烟：真服务端进程 × 离屏 QDialog——CollabEngine
   # 造归档消息→无角色检索 403 状态行明示→授 auditor 后持证检索命中→
   # 查阅日志台账见检索与被拒留痕（可对账）。判权分立腿（admin≠auditor）
@@ -502,6 +551,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
+    app/brand_settings_page.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -547,6 +597,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
+    app/brand_settings_page.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -590,6 +641,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
+    app/brand_settings_page.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -655,6 +707,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
+    app/brand_settings_page.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -699,6 +752,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
+    app/brand_settings_page.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -741,6 +795,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
+    app/brand_settings_page.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -783,6 +838,7 @@ if(MEMEX_BUILD_TESTS)
     app/main_window.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
+    app/brand_settings_page.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
