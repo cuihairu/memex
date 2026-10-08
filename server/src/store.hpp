@@ -830,6 +830,26 @@ public:
   std::int64_t branding_clear_logo();
   std::int64_t branding_clear_splash();
 
+  // —— 表情包素材（需求批②：个人素材，仅本人读写——收藏随账号走）——
+  // 字节以 BLOB 落库（≤1MiB/张，与品牌素材同口径；大文件仍走对象存储面）
+  struct EmojiAsset { // 列表面（无字节）
+    std::int64_t id{0};
+    std::string name;
+    std::int64_t size{0};
+    std::int64_t ts_ms{0};
+  };
+  // 新增素材；回 id（失败 -1）
+  std::int64_t emoji_add(const std::string& account, const std::string& name,
+                         const std::vector<unsigned char>& bytes,
+                         std::int64_t ts_ms);
+  // 该账号素材（ts 倒序）
+  std::vector<EmojiAsset> emoji_list(const std::string& account);
+  // 取字节：仅资产属主可取（他人/不存在 false）
+  bool emoji_bytes(std::int64_t id, const std::string& account,
+                   std::vector<unsigned char>& out, std::string& name_out);
+  // 删除：仅属主（非属主/不存在 false）
+  bool emoji_delete(std::int64_t id, const std::string& account);
+
   // —— 二期·办公室位置图（设计稿 docs/design/办公室位置图.md）——
   // 抽象平面（网格归一化坐标 0~1，不画真实底图）；工位即楼层归属
   //（本人楼层=本人占用工位所在楼层，不从部门推导）；编辑权 org-admin

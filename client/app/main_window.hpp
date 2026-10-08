@@ -155,6 +155,12 @@ public:
   // 纯 UI 测试无对端时经此面断言 colorize 渲染）
   void inject_message(const QString& from_id, const QString& text,
                       bool outgoing);
+  // 注入一条图片消息走气泡渲染（需求批②验收缝：右键「收藏到表情包」
+  // 需图片气泡在场；生产路径＝引擎文件回执驱动 append_image_message）
+  void inject_image(const QString& from_id, const QString& image_path,
+                    bool outgoing);
+  // 聊天区控件（验收缝：右键菜单/cursorRect 定位）
+  QTextBrowser* chat_widget() { return chat_view_; }
   // —— 需求批⑪ 个性签名（验收面）——
   // 直接发送签名设置（带参＝测试直调不弹框；须登录协作态，回执异步）
   void apply_signature(const QString& signature);

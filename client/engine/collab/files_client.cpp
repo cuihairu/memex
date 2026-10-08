@@ -1408,4 +1408,136 @@ void FilesClient::upload_brand_splash(const QString& file_path) {
   });
 }
 
+// —— 表情包素材（需求批②）——
+
+void FilesClient::emoji_upload(const QString& file_path, const QString& name) {
+  const QString op = QStringLiteral("emoji.upload");
+  if (token_.isEmpty()) {
+    fail(op, 0, QStringLiteral("未登录"));
+    return;
+  }
+  QFile f(file_path);
+  if (!f.open(QIODevice::ReadOnly)) {
+    fail(op, 0, QStringLiteral("文件打开失败"));
+    return;
+  }
+  const QString suffix = QFileInfo(file_path).suffix().toLower();
+  QString content_type = QStringLiteral("image/png");
+  if (suffix == QStringLiteral("jpg") || suffix == QStringLiteral("jpeg")) {
+    content_type = QStringLiteral("image/jpeg");
+  } else if (suffix == QStringLiteral("gif")) {
+    content_type = QStringLiteral("image/gif");
+  }
+  const QByteArray bytes = f.readAll();
+  // name 进 query（magic 与 1MiB 上限校验在服务端）
+  QNetworkRequest req(QUrl(base_url() +
+                           QStringLiteral("/files/emoji/upload?name=") +
+                           QString::fromUtf8(
+                               QUrl::toPercentEncoding(name.toUtf8()))));
+  req.setTransferTimeout(kByteTimeoutMs);
+  req.setRawHeader("Authorization", "Bearer " + token_.toUtf8());
+  req.setHeader(QNetworkRequest::ContentTypeHeader, content_type);
+  QNetworkReply* rep = nam_->post(req, bytes);
+  connect(rep, &QNetworkReply::finished, this, [this, rep, op] {
+    rep->deleteLater();
+    const int status =
+        rep->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QJsonDocument doc = QJsonDocument::fromJson(rep->readAll());
+    const QJsonObject obj = doc.isObject() ? doc.object() : QJsonObject{};
+    if (rep->error() != QNetworkReply::NoError || status < 200 ||
+        status >= 300) {
+      QString msg = obj.value(QStringLiteral("error")).toString();
+      if (msg.isEmpty()) msg = rep->errorString();
+      fail(op, status, msg);
+      return;
+    }
+    emit emoji_uploaded(static_cast<qint64>(
+        obj.value(QStringLiteral("id")).toDouble()));
+  });
+}
+
+void FilesClient::emoji_list() {
+  send_json(QStringLiteral("emoji.list"), QStringLiteral("GET"),
+            QStringLiteral("/files/emoji/list"), {},
+            [this](bool ok, int status, const QJsonObject& body,
+                   const QString& error) {
+              if (!ok) return;
+              emit emoji_listed(
+                  body.value(QStringLiteral("assets")).toArray());
+            });
+}
+
+void FilesClient::emoji_download(qint64 id, const QString& name,
+                                 const QString& save_dir) {
+  const QString op = QStringLiteral("emoji.download");
+  if (token_.isEmpty()) {
+    fail(op, 0, QStringLiteral("未登录"));
+    return;
+  }
+  QDir dir(save_dir);
+  if (!dir.exists() && !dir.mkpath(QStringLiteral("."))) {
+    fail(op, 0, QStringLiteral("保存目录创建失败"));
+    return;
+  }
+  // 重名加序号（-1/-2…），不覆盖已有文件
+  QString path = dir.filePath(name);
+  const QFileInfo fi(name);
+  for (int n = 1; QFileInfo::exists(path); ++n) {
+    path = dir.filePath(fi.completeBaseName() + QStringLiteral("-%1").arg(n) +
+                        (fi.suffix().isEmpty()
+                             ? QString()
+                             : QStringLiteral(".") + fi.suffix()));
+  }
+  QNetworkRequest req(QUrl(base_url() +
+                           QStringLiteral("/files/emoji/download?id=") +
+                           QString::number(id)));
+  req.setTransferTimeout(kByteTimeoutMs);
+  req.setRawHeader("Authorization", "Bearer " + token_.toUtf8());
+  QNetworkReply* rep = nam_->get(req);
+  auto out = std::make_shared<QSaveFile>(path);
+  if (!out->open(QIODevice::WriteOnly)) {
+    rep->abort();
+    rep->deleteLater();
+    fail(op, 0, QStringLiteral("本地文件创建失败"));
+    return;
+  }
+  connect(rep, &QNetworkReply::readyRead, this, [rep, out] {
+    if (rep->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() !=
+        200) {
+      return; // 非 200（JSON 错误体）不写入
+    }
+    out->write(rep->readAll());
+  });
+  connect(rep, &QNetworkReply::finished, this, [this, rep, out, op, path] {
+    rep->deleteLater();
+    const int status =
+        rep->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (rep->error() != QNetworkReply::NoError || status != 200) {
+      out->cancelWriting();
+      const QJsonDocument doc = QJsonDocument::fromJson(rep->readAll());
+      const QJsonObject obj = doc.isObject() ? doc.object() : QJsonObject{};
+      QString msg = obj.value(QStringLiteral("error")).toString();
+      if (msg.isEmpty()) msg = rep->errorString();
+      fail(op, status, msg);
+      return;
+    }
+    if (!out->commit()) {
+      fail(op, 0, QStringLiteral("本地写入失败"));
+      return;
+    }
+    emit emoji_downloaded(path);
+  });
+}
+
+void FilesClient::emoji_delete(qint64 id) {
+  QJsonObject body;
+  body[QStringLiteral("id")] = id;
+  send_json(QStringLiteral("emoji.delete"), QStringLiteral("POST"),
+            QStringLiteral("/files/emoji/delete"), body,
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (!ok) return;
+              emit emoji_deleted(id);
+            });
+}
+
 } // namespace memex::client

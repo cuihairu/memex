@@ -257,6 +257,15 @@ bool ServerStore::ensure_schema() {
       "  splash BLOB,"
       "  version INTEGER NOT NULL DEFAULT 0,"
       "  updated_ms INTEGER NOT NULL DEFAULT 0);"
+      // 表情包素材（需求批②）：个人素材库——收藏随账号走（换机即得）；
+      // BLOB 落库（≤1MiB/张，与品牌素材同口径），大文件仍走对象存储面
+      "CREATE TABLE IF NOT EXISTS emoji_assets ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  account TEXT NOT NULL,"
+      "  name TEXT NOT NULL,"
+      "  size INTEGER NOT NULL,"
+      "  ts_ms INTEGER NOT NULL,"
+      "  bytes BLOB NOT NULL);"
       // T2.6 组织架构：部门树（parent_id 成树）＋成员资料
       //（直属上级为独立单列——每人至多一名，结构性约束）
       "CREATE TABLE IF NOT EXISTS departments ("
@@ -4144,6 +4153,91 @@ std::int64_t ServerStore::branding_clear_logo() {
 
 std::int64_t ServerStore::branding_clear_splash() {
   return branding_bump(db_, "splash", std::nullopt, {}, true, now_ms());
+}
+
+// —— 表情包素材（需求批②）——
+
+std::int64_t ServerStore::emoji_add(const std::string& account,
+                                    const std::string& name,
+                                    const std::vector<unsigned char>& bytes,
+                                    std::int64_t ts_ms) {
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "INSERT INTO emoji_assets(account, name, size, ts_ms,"
+                         " bytes) VALUES(?1, ?2, ?3, ?4, ?5)",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return -1;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, static_cast<std::int64_t>(bytes.size()));
+  sqlite3_bind_int64(st, 4, ts_ms);
+  sqlite3_bind_blob(st, 5, bytes.data(), static_cast<int>(bytes.size()),
+                    SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok ? sqlite3_last_insert_rowid(db_) : -1;
+}
+
+std::vector<ServerStore::EmojiAsset> ServerStore::emoji_list(
+    const std::string& account) {
+  std::vector<EmojiAsset> out;
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT id, name, size, ts_ms FROM emoji_assets "
+                         "WHERE account = ?1 ORDER BY ts_ms DESC, id DESC",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return out;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    EmojiAsset a;
+    a.id = sqlite3_column_int64(st, 0);
+    a.name = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    a.size = sqlite3_column_int64(st, 2);
+    a.ts_ms = sqlite3_column_int64(st, 3);
+    out.push_back(std::move(a));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::emoji_bytes(std::int64_t id, const std::string& account,
+                              std::vector<unsigned char>& out,
+                              std::string& name_out) {
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT name, bytes FROM emoji_assets "
+                         "WHERE id = ?1 AND account = ?2",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, id);
+  sqlite3_bind_text(st, 2, account.c_str(), -1, SQLITE_TRANSIENT);
+  const bool found = sqlite3_step(st) == SQLITE_ROW;
+  if (found) {
+    name_out = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    const void* blob = sqlite3_column_blob(st, 1);
+    const int n = sqlite3_column_bytes(st, 1);
+    out.assign(static_cast<const unsigned char*>(blob),
+               static_cast<const unsigned char*>(blob) + n);
+  }
+  sqlite3_finalize(st);
+  return found;
+}
+
+bool ServerStore::emoji_delete(std::int64_t id, const std::string& account) {
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "DELETE FROM emoji_assets WHERE id = ?1 AND account = ?2",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, id);
+  sqlite3_bind_text(st, 2, account.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
 }
 
 // —— 二期·办公室位置图（设计稿 docs/design/办公室位置图.md）——

@@ -26,6 +26,7 @@
 #include <QMenu>
 
 #include "file_assistant.hpp"
+#include "emoji_pack_dialog.hpp"
 #include "group_memo_dialog.hpp"
 #include "group_vault_dialog.hpp"
 #include "group_ci_dialog.hpp"
@@ -57,7 +58,10 @@
 #include <QStatusBar>
 #include <QSystemTrayIcon>
 #include <QTextStream>
+#include <QTextCursor>
+#include <QTextImageFormat>
 #include <QTreeWidget>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -573,6 +577,29 @@ void MainWindow::build_ui() {
 
   chat_view_ = new QTextBrowser(chat);
   chat_view_->setFrameShape(QFrame::NoFrame);
+  // 需求批② 表情包：图片气泡右键「收藏到表情包」——命中原样保留的
+  // 本机图片路径（bubble_html 的 file:// 直载），导入本地表情目录。
+  chat_view_->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(chat_view_, &QTextBrowser::customContextMenuRequested, this,
+          [this](const QPoint& pos) {
+    QTextCursor cur = chat_view_->cursorForPosition(pos);
+    const QTextImageFormat img = cur.charFormat().toImageFormat();
+    const QString src = img.name(); // file:///…
+    if (!img.isValid() || !src.startsWith(QStringLiteral("file://"))) {
+      return; // 非图片气泡：不弹菜单（QTextBrowser 默认行为不拦）
+    }
+    const QString path = QUrl(src).toLocalFile();
+    auto* menu = new QMenu(this);
+    QAction* act = menu->addAction(QStringLiteral("收藏到表情包"));
+    connect(act, &QAction::triggered, this, [this, path] {
+      if (import_emoji(path)) {
+        show_status(QStringLiteral("已收藏到表情包：%1（表情面板可见）")
+                        .arg(QFileInfo(path).fileName()));
+      }
+    });
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    menu->popup(chat_view_->mapToGlobal(pos));
+  });
 
   auto* input_row = new QWidget(chat);
   input_row_ = input_row;
@@ -1393,6 +1420,15 @@ void MainWindow::show_emoji_panel() {
     if (import_emoji(src)) dlg->close(); // 导入失败留下面板＋状态栏报因
   });
   grid->addWidget(imp, row + 1, 0, 1, 4);
+  // 需求批② 表情包：云素材管理（上传/清单/删除/下载到本地表情目录）；
+  // 收藏随账号走——换机登录即得，下载落 emoji 目录即可在面板发送。
+  auto* cloud = new QPushButton(QStringLiteral("云表情包…"), dlg);
+  connect(cloud, &QPushButton::clicked, this, [this, dlg] {
+    dlg->close();
+    EmojiPackDialog d(this, emoji_dir());
+    d.exec();
+  });
+  grid->addWidget(cloud, row + 1, 4, 1, 4);
   // 锚定到「表情」按钮正下方并抬窗激活：Qt::Popup 默认位置交给 WM 摆，
   // 部分环境摆到屏外/父窗后面＝「点表情没反应」（BUG-003）
   if (emoji_btn_) {
@@ -1409,6 +1445,12 @@ void MainWindow::inject_message(const QString& from_id, const QString& text,
                                 bool outgoing) {
   append_message(from_id, text, QDateTime::currentMSecsSinceEpoch(), outgoing,
                  QStringLiteral("direct"));
+}
+
+void MainWindow::inject_image(const QString& from_id, const QString& image_path,
+                              bool outgoing) {
+  append_image_message(from_id, image_path, QDateTime::currentMSecsSinceEpoch(),
+                       outgoing, QStringLiteral("direct"));
 }
 
 void MainWindow::request_input_color() {

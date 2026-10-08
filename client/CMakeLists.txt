@@ -38,6 +38,7 @@ set(CMAKE_AUTORCC ON)
 qt_add_executable(memex_client
   app/main.cpp
   app/main_window.cpp
+  app/emoji_pack_dialog.cpp
   app/main_window.hpp
   app/crash_report.cpp
   app/crash_report.hpp
@@ -62,6 +63,8 @@ qt_add_executable(memex_client
   app/theme_settings_page.hpp
   app/file_assistant.cpp
   app/file_assistant.hpp
+  app/emoji_pack_dialog.cpp
+  app/emoji_pack_dialog.hpp
   app/task_dialog.cpp
   app/approval_dialog.cpp
   app/report_dialog.cpp
@@ -509,6 +512,7 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
+    app/emoji_pack_dialog.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
     app/approval_dialog.cpp
@@ -565,6 +569,24 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # 表情包云素材管理冒烟（需求批②）：真服务端进程 × 离屏 QDialog——
+  # 未连接上传本地拒→错口令状态行→连接即拉清单（空态）→上传 PNG 入册
+  # （清单行含名字）→选中下载到本地表情目录（字节往返＝面板即发口径）。
+  # magic/1MiB/判权协议腿走服务端 test_emoji，不在此重复
+  add_executable(test_emoji_pack_dialog
+    app/tests/test_emoji_pack_dialog.cpp
+    app/emoji_pack_dialog.cpp)
+  target_link_libraries(test_emoji_pack_dialog PRIVATE
+    memex_engine_collab Qt6::Widgets)
+  target_include_directories(test_emoji_pack_dialog PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_emoji_pack_dialog PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME emoji_pack_dialog COMMAND test_emoji_pack_dialog)
+  set_tests_properties(emoji_pack_dialog PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # 二期·办公室位置图窗口冒烟：真服务端进程 × 离屏 QDialog——member1
   # 无权编辑 403 状态行明示→admin1（org-admin）建座＋拖拽落位保存回查→
   # 同层互见（工位即楼层归属）→搜索过滤→绑定/解绑。判权协议腿走
@@ -607,6 +629,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
     app/main_window.cpp
+    app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
@@ -663,6 +686,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_tray
     tests/test_tray.cpp
     app/main_window.cpp
+    app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
@@ -716,6 +740,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_screenshot
     tests/test_screenshot.cpp
     app/main_window.cpp
+    app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
@@ -791,6 +816,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_icon
     tests/test_icon.cpp
     app/main_window.cpp
+    app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
@@ -845,6 +871,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_theme
     tests/test_theme.cpp
     app/main_window.cpp
+    app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
@@ -897,6 +924,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_chat_actions
     tests/test_chat_actions.cpp
     app/main_window.cpp
+    app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp
@@ -952,6 +980,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_flash_alert
     tests/test_flash_alert.cpp
     app/main_window.cpp
+    app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
     app/brand_settings_page.cpp

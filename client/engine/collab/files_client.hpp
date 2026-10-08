@@ -284,6 +284,18 @@ class FilesClient : public QObject {
   void upload_brand_logo(const QString& file_path);
   void upload_brand_splash(const QString& file_path);
 
+  // —— 表情包素材（需求批②：个人素材，仅本人读写；随账号走）——
+  // 上传本地图片（png/jpg/jpeg/gif 按后缀定 Content-Type；magic 与
+  // 1MiB 上限校验在服务端）
+  void emoji_upload(const QString& file_path, const QString& name);
+  // 我的素材清单（ts 倒序；[{id,name,size,ts_ms}]，不含字节）
+  void emoji_list();
+  // 下载到 save_dir（文件名用素材原名；重名自动加序号）
+  void emoji_download(qint64 id, const QString& name,
+                      const QString& save_dir);
+  // 删除我的素材
+  void emoji_delete(qint64 id);
+
  signals:
   void logged_in();
   void login_failed(const QString& reason);
@@ -381,6 +393,11 @@ class FilesClient : public QObject {
   void brand_splash_cleared();
   void brand_logo_uploaded(qint64 version);
   void brand_splash_uploaded(qint64 version);
+  // —— 表情包素材（需求批②）——
+  void emoji_uploaded(qint64 id);
+  void emoji_listed(const QJsonArray& assets);
+  void emoji_downloaded(const QString& save_path);
+  void emoji_deleted(qint64 id);
   // 统一失败通道：op=操作名（"memo.create"/"inbox.upload"/…）、
   // status=HTTP 状态码（0=网络层失败）、error=服务端 error 字段或网络串
   void request_failed(const QString& op, int status, const QString& error);

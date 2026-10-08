@@ -112,6 +112,13 @@ if(MEMEX_BUILD_TESTS)
   add_test(NAME nudge COMMAND test_nudge)
   set_tests_properties(nudge PROPERTIES TIMEOUT 60)
 
+  # 表情包素材（需求批②，服务端面）：个人素材 BLOB 落库——上传 magic/
+  # 1MiB 校验、清单属主隔离、下载字节往返＋Content-Type 嗅探、删除属主裁决
+  add_executable(test_emoji tests/test_emoji.cpp)
+  target_link_libraries(test_emoji PRIVATE memex_server_core)
+  add_test(NAME emoji COMMAND test_emoji)
+  set_tests_properties(emoji PROPERTIES TIMEOUT 60)
+
   # T4.6 通讯录可见性验收（A20）：库级过滤／脱敏／上级引用抹除／落盘重开＋
   # CLI 配置面（org hide|fields|allow|visibility list）＋协议级 ORG_QUERY
   # 按查询者过滤（被隐藏者不可见不可搜——数据不出服务端）

@@ -752,6 +752,9 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     } else if (path_ == "/files/branding/logo" ||
                path_ == "/files/branding/splash") {
       body_cap_ = kBrandAssetMax + 64 * 1024;
+    } else if (path_ == "/files/emoji/upload") {
+      // 表情素材（需求批②）：GIF 动图放宽到 1MiB（上限校验在路由层）
+      body_cap_ = kEmojiAssetMax + 64 * 1024;
     } else {
       body_cap_ = kMaxJsonBody;
     }
@@ -918,6 +921,19 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/branding/splash" && method_ == "POST") {
       return route_branding_asset_upload(body, /*logo=*/false);
+    }
+    // 表情包素材（需求批②）：个人素材面——判权＝仅本人（收藏随账号走）
+    if (path_ == "/files/emoji/upload" && method_ == "POST") {
+      return route_emoji_upload(body);
+    }
+    if (path_ == "/files/emoji/list" && method_ == "GET") {
+      return route_emoji_list();
+    }
+    if (path_ == "/files/emoji/download" && method_ == "GET") {
+      return route_emoji_download();
+    }
+    if (path_ == "/files/emoji/delete" && method_ == "POST") {
+      return route_emoji_delete(body);
     }
     // 远程协助（二期）：生命周期＋台账＋媒体中继（模型层平台-11 在 store）
     if (path_ == "/files/assist/request" && method_ == "POST") {
@@ -2119,11 +2135,61 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     return {0, ""};
   }
 
+  // 表情素材常量（需求批②）：GIF 动图上限 1MiB
+  static constexpr std::size_t kEmojiAssetMax = 1024 * 1024;
+
+  // 表情图片嗅探（需求批②）：PNG/JPEG/GIF magic + 大小上限。
+  // 回空串=过；否则回 {status, error}
+  static std::pair<int, std::string> emoji_asset_check(
+      const std::string& bytes) {
+    static const unsigned char kPngMagic[8] = {0x89, 0x50, 0x4E, 0x47,
+                                               0x0D, 0x0A, 0x1A, 0x0A};
+    if (bytes.size() < 8) {
+      return {415, "素材字节过短"};
+    }
+    const bool png =
+        std::memcmp(bytes.data(), kPngMagic, 8) == 0;
+    const bool jpeg = static_cast<unsigned char>(bytes[0]) == 0xFF &&
+                      static_cast<unsigned char>(bytes[1]) == 0xD8 &&
+                      static_cast<unsigned char>(bytes[2]) == 0xFF;
+    const bool gif = bytes.compare(0, 6, "GIF87a") == 0 ||
+                     bytes.compare(0, 6, "GIF89a") == 0;
+    if (!png && !jpeg && !gif) {
+      return {415, "表情须为 PNG/JPEG/GIF 图片"};
+    }
+    if (bytes.size() > kEmojiAssetMax) {
+      return {413, "表情超大小上限（1MiB）"};
+    }
+    return {0, ""};
+  }
+
+  // 嗅探结果 → Content-Type（emoji_asset_check 已校验过，兜底 png）
+  static const char* emoji_content_type(const std::string& bytes) {
+    static const unsigned char kPngMagic[8] = {0x89, 0x50, 0x4E, 0x47,
+                                               0x0D, 0x0A, 0x1A, 0x0A};
+    if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xFF &&
+        static_cast<unsigned char>(bytes[1]) == 0xD8) {
+      return "image/jpeg";
+    }
+    if (bytes.compare(0, 6, "GIF87a") == 0 ||
+        bytes.compare(0, 6, "GIF89a") == 0) {
+      return "image/gif";
+    }
+    (void)kPngMagic;
+    return "image/png";
+  }
+
   void respond_png(int status, const std::vector<unsigned char>& bytes) {
+    respond_image(status, "image/png", bytes);
+  }
+
+  // 图片字节回包（需求批②：表情素材 png/jpeg/gif 同一出口）
+  void respond_image(int status, const char* content_type,
+                     const std::vector<unsigned char>& bytes) {
     std::ostringstream head;
     head << "HTTP/1.1 " << status
          << (status == 200 ? " OK" : " Not Found") << "\r\n"
-         << "Content-Type: image/png\r\n"
+         << "Content-Type: " << content_type << "\r\n"
          << "Content-Length: " << bytes.size() << "\r\n"
          << "Cache-Control: no-cache\r\n"
          << "Connection: close\r\n\r\n";
@@ -2135,6 +2201,86 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                     std::make_shared<const std::string>(body), true,
                     [](std::error_code) {});
               });
+  }
+
+  // —— 表情包素材（需求批②）：个人素材面，判权＝仅本人 ——
+  void route_emoji_upload(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    const std::string name = query_param(query_, "name");
+    if (name.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少素材名（?name=）"}});
+      return;
+    }
+    if (body.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "素材字节不可空"}});
+      return;
+    }
+    const auto [status, err] = emoji_asset_check(body);
+    if (status != 0) {
+      respond_json(status, {{"ok", false}, {"error", err}});
+      return;
+    }
+    const std::vector<unsigned char> bytes(body.begin(), body.end());
+    const std::int64_t id =
+        impl_.store.emoji_add(account, name, bytes, now_ms());
+    if (id < 0) {
+      respond_json(500, {{"ok", false}, {"error", "素材写入失败"}});
+      return;
+    }
+    std::cout << "[MEMEX] files emoji upload by=" << account
+              << " name=" << name << " bytes=" << body.size() << std::endl;
+    respond_json(200, {{"ok", true}, {"id", id}});
+  }
+
+  void route_emoji_list() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json arr = json::array();
+    for (const auto& a : impl_.store.emoji_list(account)) {
+      arr.push_back({{"id", a.id}, {"name", a.name}, {"size", a.size},
+                     {"ts_ms", a.ts_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"assets", arr}});
+  }
+
+  void route_emoji_download() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    const std::int64_t id =
+        std::strtoll(query_param(query_, "id").c_str(), nullptr, 10);
+    std::vector<unsigned char> bytes;
+    std::string name;
+    if (id <= 0 || !impl_.store.emoji_bytes(id, account, bytes, name)) {
+      respond_json(404, {{"ok", false}, {"error", "素材不存在或非本人"}});
+      return;
+    }
+    respond_image(200, emoji_content_type(std::string(bytes.begin(), bytes.end())),
+                  bytes);
+  }
+
+  void route_emoji_delete(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：id"}});
+      return;
+    }
+    const std::int64_t id = j["id"].get<std::int64_t>();
+    if (!impl_.store.emoji_delete(id, account)) {
+      respond_json(404, {{"ok", false}, {"error", "素材不存在或非本人"}});
+      return;
+    }
+    std::cout << "[MEMEX] files emoji delete by=" << account << " id=" << id
+              << std::endl;
+    respond_json(200, {{"ok", true}});
   }
 
   void route_branding_get() {

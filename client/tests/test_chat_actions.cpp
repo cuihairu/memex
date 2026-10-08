@@ -3,18 +3,28 @@
 // 遮罩拖拽链路另由 test_screenshot 端到端覆盖）；表情走全链——面板弹出→
 // 点内置表情→落地输入框→面板自关（顺带暴露面板 lambda 悬垂引用类缺陷）。
 #include <QApplication>
+#include <QContextMenuEvent>
 #include <QDateTime>
 #include <QDialog>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QFile>
+#include <QFileInfo>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPushButton>
+#include <QTemporaryDir>
+#include <QTextBlock>
+#include <QTextBrowser>
+#include <QTextCursor>
 #include <QThread>
+#include <QTimer>
 
 #include <functional>
 
+#include <app/emoji_pack_dialog.hpp>
 #include <app/main_window.hpp>
 #include <app/screenshot_tool.hpp>
 #include <app/theme.hpp>
@@ -238,6 +248,113 @@ int main(int argc, char** argv) {
         warn->click();
         CHECK(wait_until([&] { return !panel2->isVisible(); }, 3000));
         CHECK(input->text().contains(QStringLiteral("⚠")));
+      }
+    }
+  }
+
+  // —— 需求批② 表情包：面板「云表情包…」开云素材管理窗（模态自收场）
+  //     ＋图片气泡右键「收藏到表情包」落本地表情目录 ——
+  if (emoji) {
+    emoji->click();
+    QDialog* panel3 = nullptr;
+    CHECK(wait_until(
+        [&] {
+          for (QWidget* w : QApplication::topLevelWidgets()) {
+            auto* d = qobject_cast<QDialog*>(w);
+            if (d && d->isVisible() &&
+                d->windowTitle() == QStringLiteral("表情")) {
+              panel3 = d;
+              return true;
+            }
+          }
+          return false;
+        },
+        3000));
+    if (panel3) {
+      QPushButton* cloud = nullptr;
+      for (QPushButton* b : panel3->findChildren<QPushButton*>()) {
+        if (b->text() == QStringLiteral("云表情包…")) {
+          cloud = b;
+          break;
+        }
+      }
+      CHECK(cloud != nullptr);
+      if (cloud) {
+        bool cloud_opened = false;
+        QTimer::singleShot(300, [&cloud_opened] {
+          for (QWidget* w : QApplication::topLevelWidgets()) {
+            auto* d = qobject_cast<memex::client::EmojiPackDialog*>(w);
+            if (d && d->isVisible()) {
+              cloud_opened = true;
+              d->reject(); // 模态 exec 在事件循环内收场
+            }
+          }
+        });
+        cloud->click();
+        CHECK(cloud_opened);
+      }
+      // 面板 WA_DeleteOnClose：cloud 处理器内已 close＝析构，不可再触碰
+    }
+
+    // 右键收藏：图片气泡在场 → 上下文菜单点「收藏到表情包」→ 文件落
+    // 本地表情目录（MEMEX_TEST_EMOJI_DIR 指向临时目录，不污染真实数据）
+    QTemporaryDir tmp2;
+    const QString src = tmp2.filePath(QStringLiteral("fave.png"));
+    {
+      // 最小合法 PNG（1×1 RGBA）：QTextBrowser 能真加载，cursorRect 才有效
+      QFile f(src);
+      CHECK(f.open(QIODevice::WriteOnly));
+      f.write(QByteArray::fromBase64(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+          "YPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="));
+      f.close();
+    }
+    const QString emoji_dir = tmp2.filePath(QStringLiteral("emoji"));
+    qputenv("MEMEX_TEST_EMOJI_DIR", emoji_dir.toUtf8());
+    window.open_direct_peer(QStringLiteral("dev-B9"));
+    CHECK(window.chat_panel_visible());
+    window.inject_image(QStringLiteral("dev-B9"), src, false);
+    QTextBrowser* view = window.chat_widget();
+    CHECK(view != nullptr);
+    QPoint hit;
+    for (QTextBlock blk = view->document()->firstBlock(); blk.isValid();
+         blk = blk.next()) {
+      for (QTextBlock::iterator it = blk.begin(); !it.atEnd(); ++it) {
+        QTextCursor cur(view->document());
+        cur.setPosition(it.fragment().position());
+        if (cur.charFormat().toImageFormat().isValid()) {
+          hit = view->cursorRect(cur).center(); // 视口坐标
+          break;
+        }
+      }
+      if (!hit.isNull()) break;
+    }
+    CHECK(!hit.isNull());
+    if (!hit.isNull() && view) {
+      QContextMenuEvent ev(QContextMenuEvent::Mouse, hit,
+                           view->viewport()->mapToGlobal(hit));
+      QApplication::sendEvent(view->viewport(), &ev);
+      QAction* fav = nullptr;
+      for (QWidget* w : QApplication::topLevelWidgets()) {
+        auto* m = qobject_cast<QMenu*>(w);
+        if (m == nullptr) continue;
+        for (QAction* a : m->actions()) {
+          if (a->text() == QStringLiteral("收藏到表情包")) {
+            fav = a;
+            break;
+          }
+        }
+      }
+      CHECK(fav != nullptr);
+      if (fav) {
+        fav->trigger();
+        CHECK(wait_until([&] {
+          return QFileInfo::exists(emoji_dir + QStringLiteral("/fave.png"));
+        }, 3000));
+        CHECK(wait_until([&] {
+          return window.status_text().contains(
+              QStringLiteral("已收藏到表情包"));
+        }, 3000));
       }
     }
   }
