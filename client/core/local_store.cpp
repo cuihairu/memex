@@ -215,6 +215,51 @@ QList<StoredMessage> LocalStore::history(const QString& peer, int limit) const {
   return out;
 }
 
+// 按日期范围的历史（需求批⑧）：与 history 同构（最近 N 条整体正序），
+// 差异只在 WHERE 时间窗；时间窗走 idx_messages_peer_ts(peer, ts_ms)。
+QList<StoredMessage> LocalStore::history_between(const QString& peer,
+                                                 qint64 from_ms, qint64 until_ms,
+                                                 int limit) const {
+  QList<StoredMessage> out;
+  if (!open_) return out;
+  QString where = QStringLiteral("peer = ?");
+  if (from_ms > 0) where += QStringLiteral(" AND ts_ms >= ?");
+  if (until_ms > 0) where += QStringLiteral(" AND ts_ms <= ?");
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "SELECT id, peer, from_id, to_id, seq, ts_ms, text, source, msg_id,"
+      " recalled, sync_state, receipt FROM ("
+      " SELECT * FROM messages WHERE %1"
+      " ORDER BY ts_ms DESC, id DESC LIMIT ?)"
+      " ORDER BY ts_ms ASC, id ASC")
+                .arg(where));
+  q.addBindValue(peer);
+  if (from_ms > 0) q.addBindValue(from_ms);
+  if (until_ms > 0) q.addBindValue(until_ms);
+  q.addBindValue(limit);
+  if (!q.exec()) {
+    qWarning() << "[本地库] 日期范围查询失败：" << q.lastError().text();
+    return out;
+  }
+  while (q.next()) {
+    StoredMessage m;
+    m.id = q.value(0).toLongLong();
+    m.peer = q.value(1).toString().toStdString();
+    m.from = q.value(2).toString().toStdString();
+    m.to = q.value(3).toString().toStdString();
+    m.seq = static_cast<std::uint64_t>(q.value(4).toLongLong());
+    m.ts_ms = q.value(5).toLongLong();
+    m.text = q.value(6).toString().toStdString();
+    m.source = q.value(7).toString().toStdString();
+    m.msg_id = q.value(8).toString().toStdString();
+    m.recalled = q.value(9).toInt() != 0;
+    m.sync_state = q.value(10).toString().toStdString();
+    m.receipt = q.value(11).toString().toStdString();
+    out.push_back(std::move(m));
+  }
+  return out;
+}
+
 QStringList LocalStore::peers(const QString& source) const {
   QStringList out;
   if (!open_) return out;

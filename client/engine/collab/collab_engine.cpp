@@ -153,6 +153,10 @@ namespace {
 QString derive_msg_id(const QString& account, quint64 seq) {
   return CollabEngine::msg_id_for(account, seq);
 }
+// 需求批⑧ 补齐行（MESSAGE_PAGE 落库）的本地序号保留段：线上 seq 是
+// 发送方小整数计数器，补齐行序号从 2^62 起计——两段永不相交，杜绝
+// 补齐行占位把同 (from_id, seq) 的后续实时投递行静默 IGNORE 丢行。
+constexpr std::uint64_t kGapSeqBase = 1ULL << 62;
 } // namespace
 
 QString CollabEngine::msg_id_for(const QString& account, quint64 seq) {
@@ -444,6 +448,23 @@ void CollabEngine::query_receipts(const QStringList& msg_ids) {
     if (id.isEmpty()) continue;
     q->add_msg_ids(id.toStdString());
   }
+  send_frame(m);
+}
+
+// 会话历史按日期范围查询（需求批⑧）：回包落本地索引后经 history_received
+// 通知——服务端归档比本地多的行（离线期/换机）就此补齐。
+void CollabEngine::query_history(const QString& peer, qint64 from_ms,
+                                 qint64 until_ms) {
+  if (!logged_in_ || peer.isEmpty()) return;
+  Message m;
+  m.set_type(MsgType::MESSAGE_QUERY);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* q = m.mutable_message_query();
+  q->set_peer(peer.toStdString());
+  q->set_from_ms(from_ms);
+  q->set_until_ms(until_ms);
   send_frame(m);
 }
 
@@ -763,6 +784,36 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
       }
     }
     emit receipts_received(QString::fromStdString(arr.dump()));
+    break;
+  }
+  case MsgType::MESSAGE_PAGE: {
+    // 日期范围查询回包（需求批⑧）：逐条落本地索引——已在库的按 msg_id
+    // 去重不计，缺行（离线期/换机漏收）就此补齐，信号带新增计数。
+    if (!msg.has_message_page()) return;
+    const auto& p = msg.message_page();
+    const QString peer = QString::fromStdString(p.peer());
+    int added = 0;
+    if (store_) {
+      for (const auto& e : p.messages()) {
+        memex::client::StoredMessage sm;
+        // 补齐行无线上 seq（服务端不存）：按发送方行空间取下一序号再
+        // 平移到高位保留段——与线上小整数 seq 永不相交（撞 UNIQUE(from_id,
+        // seq) 会把后续实时投递行静默 IGNORE 丢行）；去重靠 msg_id 唯一索引。
+        sm.seq = kGapSeqBase + store_->next_local_seq(e.from());
+        sm.peer = peer.toStdString();
+        sm.from = e.from();
+        sm.to = e.to();
+        sm.ts_ms = e.ts_ms();
+        sm.text = e.text();
+        sm.source = "collab";
+        sm.msg_id = e.msg_id();
+        sm.sync_state = "ARCHIVED";
+        bool inserted = false;
+        store_->append(sm, &inserted);
+        if (inserted) ++added;
+      }
+    }
+    emit history_received(peer, p.from_ms(), p.until_ms(), added);
     break;
   }
   case MsgType::PRESENCE_DATA: {

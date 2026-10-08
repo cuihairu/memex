@@ -90,6 +90,11 @@ public:
 
   // 某对端的本地历史：取最近 limit 条，按时间正序返回。
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;
+  // 按日期范围的历史（需求批⑧）：时间窗毫秒含端点（≤0=该侧不限），
+  // 窗内最近 limit 条正序返回。走既有 idx_messages_peer_ts(peer, ts_ms)
+  // 复合索引（本地索引面），与 history 同构。
+  QList<StoredMessage> history_between(const QString& peer, qint64 from_ms,
+                                       qint64 until_ms, int limit = 200) const;
   // 有历史的对端列表（按最近消息时间倒序）。source 过滤：
   // 空=全部，"collab"=协作会话（T2.4 会话列表），"direct"=直连会话。
   QStringList peers(const QString& source = {}) const;

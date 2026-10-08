@@ -1,5 +1,6 @@
 #include "session.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 
@@ -479,6 +480,54 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       }
       for (const auto& r : server_.store().readers_for(id)) {
         e->add_readers(r.reader);
+      }
+    }
+    send(memex::protocol::encode(out));
+    break;
+  }
+  case v1::MESSAGE_QUERY: {
+    // 会话历史按日期查询（需求批⑧）：按请求者视角检索归档——search_messages
+    // 的 account 口径保证只见自己参与的消息（单聊双向成对、群靠成员关系
+    // 联入）；peer=对端账号或群键 group:N。已撤回条目不出回包（撤回即
+    // 不可见）；时间窗含端点；正序回包（聊天渲染方向）。归档倒序取最近
+    // N 条后反转，与本端 history 的「最近 N 条正序」口径同构。
+    if (!logged_in_ || !msg.has_message_query()) break;
+    const auto& q = msg.message_query();
+    memex::protocol::Message out;
+    out.set_type(v1::MESSAGE_PAGE);
+    out.set_from("server");
+    out.set_to(account_);
+    out.set_ts_ms(now_ms());
+    auto* page = out.mutable_message_page();
+    page->set_peer(q.peer());
+    page->set_from_ms(q.from_ms());
+    page->set_until_ms(q.until_ms());
+    if (!q.peer().empty()) {
+      memex::server::MessageSearch s;
+      s.account = account_;
+      s.peer = q.peer();
+      s.since_ms = q.from_ms();
+      s.until_ms = q.until_ms();
+      s.limit = q.limit() > 0 ? std::min(q.limit(), 500) : 200;
+      auto hits = server_.store().search_messages(s);
+      // search_messages 按 id 倒序取「最近 N 条」（与 CLI/审计共面）；
+      // 回包契约是时间正序——稳定排序按 ts 升（并列保持 id 序）。
+      // 不直接按 ts 取最近 N：窗内截断口径沿用归档插入序，边界行为
+      // 与既有检索面一致。
+      std::reverse(hits.begin(), hits.end());
+      std::stable_sort(hits.begin(), hits.end(),
+                       [](const memex::server::ArchivedMessage& x,
+                          const memex::server::ArchivedMessage& y) {
+                         return x.ts_ms < y.ts_ms;
+                       });
+      for (const auto& h : hits) {
+        if (h.recalled) continue;
+        auto* e = page->add_messages();
+        e->set_msg_id(h.msg_id);
+        e->set_from(h.from_account);
+        e->set_to(h.to_account);
+        e->set_ts_ms(h.ts_ms);
+        e->set_text(h.text);
       }
     }
     send(memex::protocol::encode(out));

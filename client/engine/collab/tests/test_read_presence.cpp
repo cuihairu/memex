@@ -2,6 +2,7 @@
 // READ_NOTICE（message_read 信号）、在线表推送（presence_changed 信号，
 // 含自己，他人上线/下线即刷新）、同账号第二台桌面登录触发互踢（kicked）。
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QElapsedTimer>
 #include <QProcess>
 #include <QTcpServer>
@@ -209,6 +210,46 @@ int main(int argc, char** argv) {
   CHECK(a_receipts_json.contains(QStringLiteral("\"delivered_to\":[\"bob\"]")));
   CHECK(a_receipts_json.contains(QStringLiteral("\"readers\":[\"bob\"]")));
 
+  // —— 需求批⑧：按日期范围查询（服务端补拉→落本地索引→信号）——
+  QString h_peer;
+  qint64 h_from = -1, h_until = -1;
+  int h_added = -1;
+  QObject::connect(&a, &CollabEngine::history_received, &a,
+                   [&](const QString& peer, qint64 from_ms, qint64 until_ms,
+                       int added) {
+                     h_peer = peer;
+                     h_from = from_ms;
+                     h_until = until_ms;
+                     h_added = added;
+                   });
+  // 空历史窗（1999-01-01 当日）：零新增——回包与信号链路完好
+  const QDateTime ancient(QDate(1999, 1, 1), QTime(0, 0));
+  a.query_history(QStringLiteral("bob"), ancient.toMSecsSinceEpoch(),
+                  ancient.toMSecsSinceEpoch() + 86400000LL - 1);
+  CHECK(wait_until([&] { return h_added == 0 && h_peer == QStringLiteral("bob"); },
+                   8000));
+  // 今日窗：已在库的行按 msg_id 去重不重复入库（added=0），回包字段回带
+  const QDate today = QDate::currentDate();
+  const QDateTime day0(today, QTime(0, 0));
+  const qint64 day_end = day0.toMSecsSinceEpoch() + 86400000LL - 1;
+  a.query_history(QStringLiteral("bob"), day0.toMSecsSinceEpoch(), day_end);
+  CHECK(wait_until([&] { return h_added == 0 && h_until == day_end &&
+                              h_from == day0.toMSecsSinceEpoch(); },
+                   8000));
+  {
+    // 本地索引按日期窗读取（⑧ 本地查询面）：今日两条消息（已读/送达态）
+    // 都在窗内
+    const auto between =
+        store_a.history_between(QStringLiteral("bob"),
+                                day0.toMSecsSinceEpoch(), day_end);
+    bool saw_read = false, saw_delivered = false;
+    for (const auto& m : between) {
+      if (m.msg_id == mid1.toStdString()) saw_read = true;
+      if (m.msg_id == mid2.toStdString()) saw_delivered = true;
+    }
+    CHECK(saw_read && saw_delivered);
+  }
+
   // bob 登出 → alice 收到变更推送（bob 消失，alice 仍在）
   b.logout();
   CHECK(wait_until([&] { return !b.is_logged_in(); }, 5000));
@@ -236,6 +277,26 @@ int main(int argc, char** argv) {
   CHECK(kick_reason.contains(QStringLiteral("单点在线")));
   CHECK(!kick_by.isEmpty());
   CHECK(!a.is_logged_in());
+
+  // —— 需求批⑧ gap 补齐：全新本地库（模拟换机）经日期查询回包补齐 ——
+  // a2（alice 当前在线会话）挂接空库，查全窗 → 服务端归档的两条消息
+  // 全部落入新库（added=2），history/history_between 可读
+  LocalStore store_gap;
+  CHECK(store_gap.open(tmp.filePath(QStringLiteral("gap.db"))));
+  a2.attach_store(&store_gap);
+  QString gap_peer;
+  int gap_added = -1;
+  QObject::connect(&a2, &CollabEngine::history_received, &a2,
+                   [&](const QString& peer, qint64, qint64, int added) {
+                     gap_peer = peer;
+                     gap_added = added;
+                   });
+  const QDateTime gap_day0(QDate::currentDate(), QTime(0, 0));
+  a2.query_history(QStringLiteral("bob"), 0,
+                   gap_day0.toMSecsSinceEpoch() + 86400000LL - 1);
+  CHECK(wait_until([&] { return gap_added == 2; }, 8000));
+  CHECK(gap_peer == QStringLiteral("bob"));
+  CHECK(store_gap.history(QStringLiteral("bob")).size() == 2);
 
   server.kill();
   CHECK(server.waitForFinished(5000));

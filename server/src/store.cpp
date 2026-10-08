@@ -2253,6 +2253,20 @@ std::vector<ArchivedMessage> ServerStore::search_messages(
            " (SELECT 'group:' || group_id FROM group_members"
            "  WHERE account = ?))";
   }
+  // 会话维度（需求批⑧）：群键限定目标群（成员资格由 account 子查询把关）；
+  // 单聊对端限定双向会话（from/to 两侧成对匹配——与 account 条件叠加后
+  // 恰为「我与该对端的完整双向会话」）。以 account 视角为前提（无主体
+  // 的 peer 查询无意义，忽略）。
+  const bool peer_is_group =
+      q.peer.rfind("group:", 0) == 0;
+  if (!q.peer.empty() && !q.account.empty()) {
+    if (peer_is_group) {
+      sql += " AND to_account = ?";
+    } else {
+      sql += " AND ((from_account = ? AND to_account = ?) OR"
+             " (from_account = ? AND to_account = ?))";
+    }
+  }
   // 关键词子串匹配：%／_／转义符先转义，避免用户输入被当通配符
   std::string like;
   if (!q.keyword.empty()) {
@@ -2276,6 +2290,17 @@ std::vector<ArchivedMessage> ServerStore::search_messages(
     sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
+  }
+  if (!q.peer.empty() && !q.account.empty()) {
+    if (peer_is_group) {
+      sqlite3_bind_text(st, idx++, q.peer.c_str(), -1, SQLITE_TRANSIENT);
+    } else {
+      // (from=peer AND to=account) OR (from=account AND to=peer)
+      sqlite3_bind_text(st, idx++, q.peer.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
+      sqlite3_bind_text(st, idx++, q.peer.c_str(), -1, SQLITE_TRANSIENT);
+    }
   }
   if (!like.empty()) {
     const std::string pat = "%" + like + "%";

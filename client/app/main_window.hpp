@@ -4,6 +4,7 @@
 // 历史按 source 字段合并展示；服务端不可达回落直连态并常驻提示「消息不进归档」。
 #pragma once
 
+#include <QDate>
 #include <QHash>
 #include <QLabel>
 #include <QPointer>
@@ -170,6 +171,15 @@ public:
   // 回执态落行重渲（测试缝：生产路径＝引擎 message_delivered/
   // message_read/receipts_received 信号驱动同款；state=delivered/read）
   void apply_message_receipt(const QString& msg_id, const QString& state);
+  // —— 需求批⑧ 聊天记录按日期（验收面与「按日期」对话框同一路径）——
+  // 范围筛选（毫秒含端点）：本地索引重建当前会话行；协作/群登录态同时向
+  // 服务端补拉该窗（回包落本地索引后自动重渲）。
+  void apply_date_filter(qint64 from_ms, qint64 until_ms);
+  // 清除筛选恢复全量（幂等：无筛选即无动作）。
+  void clear_date_filter();
+  // 跳转到目标日首条消息（锚点滚动；缺数据的日期先向服务端补拉，到达后
+  // 自动重渲再定位）。
+  void jump_to_date(const QDate& date);
   // —— 需求批⑪ 个性签名（验收面）——
   // 直接发送签名设置（带参＝测试直调不弹框；须登录协作态，回执异步）
   void apply_signature(const QString& signature);
@@ -210,6 +220,16 @@ private:
   void apply_theme_styles();
   // 聊天区富文本重渲：气泡/@高亮/系统行的颜色是内联的，随主题重放记录。
   void rerender_chat();
+  // —— 需求批⑧ 聊天记录按日期 ——
+  // 「按日期」对话框：日历选择起始/结束日，跳转/筛选/清除三动作。
+  void show_date_dialog();
+  // 会话历史渲染（open_chat 尾段抽取，跳转/清筛选复用）：跨态标记→空历史
+  // 引导→双态合并行→已读上报（⑦开关裁决）→回执态补查（⑦）。
+  void render_open_history();
+  // 筛选态渲染：本地索引按时间窗重建当前会话行（头部注明范围）。
+  void render_filtered_history();
+  // 滚动定位到目标日首条消息行（锚点＝本机日期 yyyyMMdd）。
+  void scroll_to_day(const QDate& date);
   void show_theme_settings();  // 「设置 → 主题…」入口
   // 「设置 → 个人资料…」（需求批⑪）：签名编辑对话框（登录门；保存走
   // apply_signature，回执后重拉 org 即时刷新悬浮）
@@ -311,6 +331,11 @@ private:
   QMap<QString, quint64> file_sent_; // 文件名 → 最近一次进度字节（节流）
   bool chat_showing_guidance_{false}; // 聊天区当前是否为引导态
   QVector<ChatRow> chat_rows_;       // 当前会话的聊天行记录（重渲用）
+  // 需求批⑧ 按日期查看：筛选窗（毫秒含端点，0=未筛选）与挂起跳转日
+  //（服务端补拉到达后自动重渲再定位；换会话即复位）
+  qint64 filter_from_ms_{0};
+  qint64 filter_until_ms_{0};
+  QDate pending_jump_;
   QString status_hint_;               // 状态栏事件提示（引擎态前缀实时拼）
   bool alert_active_{false};          // 闪烁合并窗进行中（窗内消息不叠加）
   int alert_count_{0};                // 实际触发的闪烁次数（验收断言面）
@@ -413,6 +438,7 @@ private:
   QPushButton* emoji_btn_{nullptr};
   QPushButton* color_btn_{nullptr};
   QPushButton* nudge_btn_{nullptr};
+  QPushButton* date_btn_{nullptr}; // 「按日期」（需求批⑧：跳转/筛选入口）
 
   // 品牌物料（设计稿 docs/design/品牌物料.md）：侧栏品牌行（无牌隐藏=
   // 没配就不变）＋brand_applied 驱动的整窗换牌（标题/图标/托盘）

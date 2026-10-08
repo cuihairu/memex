@@ -6,6 +6,7 @@
 #include <QColorDialog>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDateEdit>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -231,6 +232,30 @@ QString system_line_html(const QString& text) {
   return QStringLiteral("<div align=\"center\"><span style=\"color:%1; "
                         "font-size:small;\">%2</span></div>")
       .arg(ThemeManager::instance().tokens().text_muted.name(), text);
+}
+
+// —— 需求批⑧ 聊天记录按日期 ——
+// 日期锚点：消息行按本机日期带命名锚，跳转用 scrollToAnchor 定位。
+// 系统行无时刻不锚——目标日以系统行开头时定位到其后最近的消息行。
+QString day_anchor(qint64 ts_ms) {
+  if (ts_ms <= 0) return QString();
+  return QStringLiteral("<a name=\"d%1\"></a>")
+      .arg(QDateTime::fromMSecsSinceEpoch(ts_ms)
+               .date()
+               .toString(QStringLiteral("yyyyMMdd")));
+}
+// 当日窗（毫秒含端点）：按本机时区取 [00:00:00.000, 23:59:59.999]。
+qint64 day_start_ms(const QDate& d) {
+  return QDateTime(d, QTime(0, 0)).toMSecsSinceEpoch();
+}
+qint64 day_end_ms(const QDate& d) {
+  return day_start_ms(d) + 86400000LL - 1;
+}
+// 筛选头的时间端展示（0=不限侧以「…」示）
+QString day_label(qint64 ms) {
+  return ms > 0 ? QDateTime::fromMSecsSinceEpoch(ms).date().toString(
+                      QStringLiteral("yyyy-MM-dd"))
+                : QStringLiteral("…");
 }
 
 } // namespace
@@ -660,12 +685,21 @@ void MainWindow::build_ui() {
       QStringLiteral("发送窗口抖动提醒（单聊；同一会话 10 秒一次）"));
   connect(nudge_btn, &QPushButton::clicked, this,
           [this] { send_nudge_to_current_chat(); });
+  // 需求批⑧ 按日期查看：日历选择器跳转＋范围筛选（协作/群登录态自动
+  // 向服务端补拉该窗，回包落本地索引后重渲）
+  auto* date_btn = new QPushButton(QStringLiteral("按日期"), input_row);
+  date_btn_ = date_btn;
+  date_btn->setToolTip(QStringLiteral(
+      "按日期跳转或范围筛选聊天记录（协作/群会话自动向服务端补拉）"));
+  connect(date_btn, &QPushButton::clicked, this,
+          [this] { show_date_dialog(); });
   input_layout->addWidget(shot_btn);
   input_layout->addWidget(file_btn);
   input_layout->addWidget(folder_btn);
   input_layout->addWidget(emoji_btn);
   input_layout->addWidget(color_btn);
   input_layout->addWidget(nudge_btn);
+  input_layout->addWidget(date_btn);
   input_box_ = new QLineEdit(input_row);
   input_box_->setPlaceholderText(QStringLiteral("输入消息，回车发送"));
   send_btn_ = new QPushButton(QStringLiteral("发送"), input_row);
@@ -1250,6 +1284,20 @@ void MainWindow::wire_collab() {
                            QStringLiteral("联系人上线"), a);
             }
             refresh_devices(); // 协作会话行在线标识随推送刷新
+          });
+  // —— 需求批⑧ 日期范围补拉回包：落库已完成（引擎），此处只管重渲 ——
+  connect(&collab_engine_, &CollabEngine::history_received, this,
+          [this](const QString& peer, qint64, qint64, int) {
+            if (peer != current_peer_ || chat_panel_->isHidden()) return;
+            if (filter_from_ms_ > 0 || filter_until_ms_ > 0) {
+              render_filtered_history(); // 筛选窗内新行并入
+              return;
+            }
+            if (pending_jump_.isValid()) {
+              render_open_history(); // 跳转日数据到齐——重渲后再定位
+              scroll_to_day(pending_jump_);
+            }
+            // 既不筛选也无挂起跳转：补拉行静默落库（下次打开/筛选可见）
           });
 }
 
@@ -3189,9 +3237,6 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
 
   const bool collab = kind == QStringLiteral("collab");
   const bool group = kind == QStringLiteral("group");
-  const QString my_id = (collab || group)
-                             ? collab_engine_.account()
-                             : QString::fromStdString(direct_engine_.device_id());
   if (collab) {
     chat_title_->setText(id);
     chat_meta_->setText(QStringLiteral("%1 · 协作态 · 消息进入服务端归档")
@@ -3237,6 +3282,26 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
     }
   }
   update_banner();
+
+  // 需求批⑧：筛选态与挂起跳转只属于当前会话——换会话即复位
+  filter_from_ms_ = 0;
+  filter_until_ms_ = 0;
+  pending_jump_ = QDate();
+  render_open_history();
+}
+
+// 会话历史渲染（open_chat 尾段抽取，按日期跳转/清筛选复用）：跨态标记→
+// 空历史引导→双态合并行→已读上报（⑦开关裁决）→回执态补查（⑦）。
+void MainWindow::render_open_history() {
+  const QString kind = current_kind_;
+  const QString id = current_peer_;
+  const bool collab = kind == QStringLiteral("collab");
+  const bool group = kind == QStringLiteral("group");
+  const QString my_id = (collab || group)
+                            ? collab_engine_.account()
+                            : QString::fromStdString(direct_engine_.device_id());
+  chat_view_->clear();
+  chat_rows_.clear();
 
   // T4.2 跨态会话固定标识（A7）＋归档起点提示（A8 客户端面）：
   // 标识常驻不可关闭，无论历史空否都打。
@@ -3309,6 +3374,157 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
   }
 }
 
+// —— 需求批⑧ 聊天记录按日期 ——
+// 筛选态渲染：本地索引（双态合并，idx_messages_peer_ts）按时间窗重建当前
+// 会话行；头部系统行注明范围与条数；自己发出行的回执态照常补查（⑦）。
+void MainWindow::render_filtered_history() {
+  const bool collab = current_kind_ == QStringLiteral("collab");
+  const bool group = current_kind_ == QStringLiteral("group");
+  const QString my_id = (collab || group)
+                            ? collab_engine_.account()
+                            : QString::fromStdString(direct_engine_.device_id());
+  chat_view_->clear();
+  chat_rows_.clear();
+  const auto hist = direct_engine_.history_between(
+      current_peer_, filter_from_ms_, filter_until_ms_, 2000);
+  append_system_line(QStringLiteral("已筛选：%1 ~ %2 · 共 %3 条 · "
+                                   "「按日期」对话框可清除筛选")
+                         .arg(day_label(filter_from_ms_),
+                              day_label(filter_until_ms_))
+                         .arg(hist.size()));
+  for (const StoredMessage& m : hist) {
+    append_message(QString::fromStdString(m.from),
+                   QString::fromStdString(m.text), m.ts_ms,
+                   m.from == my_id.toStdString(),
+                   QString::fromStdString(m.source),
+                   QString::fromStdString(m.msg_id),
+                   QString::fromStdString(m.receipt));
+  }
+  if ((collab || group) && collab_engine_.is_logged_in()) {
+    QStringList mine;
+    for (auto it = hist.crbegin(); it != hist.crend() && mine.size() < 50;
+         ++it) {
+      if (it->from == my_id.toStdString() && !it->msg_id.empty())
+        mine.push_back(QString::fromStdString(it->msg_id));
+    }
+    collab_engine_.query_receipts(mine);
+  }
+}
+
+// 范围筛选（毫秒含端点）：本地即时重建；协作/群登录态同时向服务端补拉
+// 该窗（服务端归档比本地多的行——离线期/换机漏收——回包落本地索引后
+// history_received 触发再次渲染）。
+void MainWindow::apply_date_filter(qint64 from_ms, qint64 until_ms) {
+  if (current_peer_.isEmpty() || chat_panel_->isHidden()) {
+    show_status(QStringLiteral("先选择会话再按日期查看"));
+    return;
+  }
+  // 两侧全开的窗＝未筛选（与清除同义，避免「筛选态字段全 0」歧义）
+  if (from_ms <= 0 && until_ms <= 0) {
+    clear_date_filter();
+    return;
+  }
+  filter_from_ms_ = from_ms;
+  filter_until_ms_ = until_ms;
+  render_filtered_history();
+  if ((current_kind_ == QStringLiteral("collab") ||
+       current_kind_ == QStringLiteral("group")) &&
+      collab_engine_.is_logged_in()) {
+    collab_engine_.query_history(current_peer_, from_ms, until_ms);
+  }
+}
+
+// 清除筛选恢复全量（幂等：无筛选即无动作；重渲含跨态标记与引导，与
+// open_chat 同构）。
+void MainWindow::clear_date_filter() {
+  if (filter_from_ms_ == 0 && filter_until_ms_ == 0) return;
+  filter_from_ms_ = 0;
+  filter_until_ms_ = 0;
+  render_open_history();
+  show_status(QStringLiteral("已清除日期筛选"));
+}
+
+// 跳转到目标日首条：先按当日窗向服务端补拉（协作/群登录态；本地缺的行
+// 到达后重渲再定位），本地全量重渲（保持上下文完整）后锚点滚动。
+void MainWindow::jump_to_date(const QDate& date) {
+  if (current_peer_.isEmpty() || chat_panel_->isHidden()) {
+    show_status(QStringLiteral("先选择会话再按日期查看"));
+    return;
+  }
+  if (!date.isValid()) return;
+  pending_jump_ = date;
+  if ((current_kind_ == QStringLiteral("collab") ||
+       current_kind_ == QStringLiteral("group")) &&
+      collab_engine_.is_logged_in()) {
+    collab_engine_.query_history(current_peer_, day_start_ms(date),
+                                 day_end_ms(date));
+  }
+  render_open_history();
+  scroll_to_day(date);
+  show_status(QStringLiteral("已跳转到 %1")
+                  .arg(date.toString(QStringLiteral("yyyy-MM-dd"))));
+}
+
+void MainWindow::scroll_to_day(const QDate& date) {
+  if (!date.isValid()) return;
+  chat_view_->scrollToAnchor(QStringLiteral("d") +
+                              date.toString(QStringLiteral("yyyyMMdd")));
+}
+
+// 「按日期」对话框：日历选择起始/结束日；跳转（滚到起始日首条）、
+// 范围筛选（只看窗内记录）、清除筛选三动作。
+void MainWindow::show_date_dialog() {
+  if (current_peer_.isEmpty() || chat_panel_->isHidden()) {
+    show_status(QStringLiteral("先选择会话再按日期查看"));
+    return;
+  }
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("按日期查看聊天记录"));
+  auto* layout = new QVBoxLayout(&dlg);
+  auto* form = new QFormLayout;
+  auto* from_edit = new QDateEdit(QDate::currentDate(), &dlg);
+  from_edit->setCalendarPopup(true);
+  from_edit->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
+  auto* until_edit = new QDateEdit(QDate::currentDate(), &dlg);
+  until_edit->setCalendarPopup(true);
+  until_edit->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
+  form->addRow(QStringLiteral("起始"), from_edit);
+  form->addRow(QStringLiteral("结束"), until_edit);
+  layout->addLayout(form);
+  layout->addWidget(new QLabel(
+      QStringLiteral("跳转＝滚动到起始日第一条；筛选＝只看日期范围内的记录"
+                     "（协作/群会话自动向服务端补拉）"),
+      &dlg));
+  auto* actions = new QHBoxLayout;
+  auto* jump_btn = new QPushButton(QStringLiteral("跳转到起始日"), &dlg);
+  auto* filter_btn = new QPushButton(QStringLiteral("按范围筛选"), &dlg);
+  auto* clear_btn = new QPushButton(QStringLiteral("清除筛选"), &dlg);
+  auto* close_btn = new QPushButton(QStringLiteral("关闭"), &dlg);
+  // 清除只在筛选态可用（无筛选可清）
+  clear_btn->setEnabled(filter_from_ms_ > 0 || filter_until_ms_ > 0);
+  connect(jump_btn, &QPushButton::clicked, this, [&] {
+    dlg.accept();
+    jump_to_date(from_edit->date());
+  });
+  connect(filter_btn, &QPushButton::clicked, this, [&] {
+    dlg.accept();
+    apply_date_filter(day_start_ms(from_edit->date()),
+                      day_end_ms(until_edit->date()));
+  });
+  connect(clear_btn, &QPushButton::clicked, this, [&] {
+    dlg.accept();
+    clear_date_filter();
+  });
+  connect(close_btn, &QPushButton::clicked, &dlg, &QDialog::reject);
+  actions->addWidget(jump_btn);
+  actions->addWidget(filter_btn);
+  actions->addWidget(clear_btn);
+  actions->addStretch();
+  actions->addWidget(close_btn);
+  layout->addLayout(actions);
+  dlg.exec();
+}
+
 void MainWindow::append_message(const QString& from_id, const QString& text,
                                 qint64 ts_ms, bool outgoing,
                                 const QString& source, const QString& msg_id,
@@ -3352,7 +3568,8 @@ void MainWindow::append_message(const QString& from_id, const QString& text,
   row.msg_id = msg_id;
   row.receipt = receipt;
   chat_rows_.append(row);
-  chat_view_->append(bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
+  chat_view_->append(day_anchor(row.ts_ms) +
+                     bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
                                  row.at_mode, QString(), row.receipt));
   auto* bar = chat_view_->verticalScrollBar();
   bar->setValue(bar->maximum());
@@ -3382,7 +3599,8 @@ void MainWindow::append_image_message(const QString& from_id,
   row.outgoing = outgoing;
   row.at_mode = false;
   chat_rows_.append(row);
-  chat_view_->append(bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
+  chat_view_->append(day_anchor(row.ts_ms) +
+                     bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
                                  row.at_mode, row.image));
   auto* bar = chat_view_->verticalScrollBar();
   bar->setValue(bar->maximum());
@@ -3515,8 +3733,10 @@ void MainWindow::rerender_chat() {
     if (row.system) {
       chat_view_->append(system_line_html(row.text));
     } else {
-      chat_view_->append(bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
-                                     row.at_mode, row.image, row.receipt));
+      chat_view_->append(day_anchor(row.ts_ms) +
+                         bubble_html(row.name, row.text, row.ts_ms,
+                                     row.outgoing, row.at_mode, row.image,
+                                     row.receipt));
     }
   }
   if (at_bottom) {

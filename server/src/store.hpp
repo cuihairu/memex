@@ -81,12 +81,19 @@ struct OrgImportResult {
 };
 
 // 检索条件（T3.2）：全部字段可空——空=不过滤；组合为 AND。
+// 字段序=既有位置初始化式 {"account","keyword",since,until,limit} 的兼容序——
+// 新增字段只能尾插（peer，需求批⑧），插中间会让既有位置实参整体错位
+//（test_nudge 等四处因此踩过 std::string(int) 的 null 构造崩溃）。
 struct MessageSearch {
   std::string account;  // 该账号收发两侧都命中；空=全部
   std::string keyword;  // 正文包含（子串）；空=不过滤
   std::int64_t since_ms{0}; // 起始时间（含），0=不限
   std::int64_t until_ms{0}; // 截止时间（含），0=不限
   int limit{200};
+  // 会话维度（需求批⑧）：对端账号（单聊双向）或群键 "group:N"；空=不限。
+  // account 非空为前提（群靠成员关系联入；单聊叠加为「我与该对端」双向）。
+  // 新代码请用字段名赋值，勿依赖位置。
+  std::string peer;
 };
 
 // 查阅日志（T3.2）：每次检索／导出都落一条——谁、何时、用了什么条件、命中几条。

@@ -426,6 +426,43 @@ int main(int argc, char** argv) {
     s.remove(QStringLiteral("receipts/peer/peer-y"));
   }
 
+  // —— 需求批⑧ 按日期查看：「按日期」按钮在场＋无会话守卫＋筛选/清除/
+  //     跳转路径（本地索引面；测试窗为本测试私有库，注入气泡不入库——
+  //     重渲自索引即被筛掉，恰好验证「渲染源＝本地索引」口径）——
+  {
+    QPushButton* date_btn = find_button(window, QStringLiteral("按日期"));
+    CHECK(date_btn != nullptr);
+    // 无会话点击守卫（先关掉 ⑦ 腿留下的会话回列表态）
+    QPushButton* close_btn = find_button(window, QStringLiteral("✕"));
+    CHECK(close_btn != nullptr);
+    if (close_btn) close_btn->click();
+    CHECK(!window.chat_panel_visible());
+    if (date_btn) {
+      date_btn->click();
+      CHECK(wait_until([&] {
+        return window.status_text().contains(
+            QStringLiteral("先选择会话再按日期查看"));
+      }, 3000));
+    }
+    // 有会话：注入 UI 气泡（不入库）→ 筛选当日窗 → 只余筛选头系统行
+    window.open_direct_peer(QStringLiteral("dev-D4"));
+    CHECK(window.chat_panel_visible());
+    window.inject_message(QStringLiteral("dev-D4"),
+                          QStringLiteral("筛选前气泡"), true);
+    CHECK(window.chat_html().contains(QStringLiteral("筛选前气泡")));
+    const QDate today = QDate::currentDate();
+    const qint64 day0 = QDateTime(today, QTime(0, 0)).toMSecsSinceEpoch();
+    window.apply_date_filter(day0, day0 + 86400000LL - 1);
+    CHECK(window.chat_html().contains(QStringLiteral("已筛选")));
+    CHECK(!window.chat_html().contains(QStringLiteral("筛选前气泡")));
+    // 清除 → 恢复全量重渲（筛选头消失；注入气泡同被重渲——渲染源为库）
+    window.clear_date_filter();
+    CHECK(!window.chat_html().contains(QStringLiteral("已筛选")));
+    // 跳转当日：重渲自索引＋锚点滚动（空库无气泡——路径不崩即过）
+    window.jump_to_date(today);
+    CHECK(window.chat_panel_visible());
+  }
+
   if (g_failures == 0) {
     qInfo("chat action buttons: all passed");
     return 0;

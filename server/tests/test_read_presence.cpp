@@ -179,6 +179,43 @@ int main() {
     s.close();
   }
 
+  // —— 库级：会话维度过滤（需求批⑧ 按日期查询的存储面）——
+  // peer=对端账号 → 双向会话（不含与其他对端的行）；peer=群键 → 目标群
+  // 群消息（成员资格由 account 口径把关）；时间窗叠加。
+  {
+    memex::server::ServerStore s;
+    CHECK(s.open(":memory:"));
+    CHECK(s.create_account("alice", "pw", "alice"));
+    CHECK(s.create_account("bob", "pw", "bob"));
+    CHECK(s.create_account("carol", "pw", "carol"));
+    CHECK(s.store_message("q1", "alice", "bob", 1, "给鲍勃", 1000));
+    CHECK(s.store_message("q2", "bob", "alice", 1, "回爱丽丝", 2000));
+    CHECK(s.store_message("q3", "alice", "carol", 2, "给卡罗尔", 3000));
+    const std::uint64_t gid = s.create_group("查询群", "alice", {"bob"});
+    CHECK(gid > 0);
+    CHECK(s.store_message("q4", "bob", "group:" + std::to_string(gid), 3,
+                          "群消息", 4000));
+    memex::server::MessageSearch q;
+    q.account = "alice";
+    q.peer = "bob";
+    auto hits = s.search_messages(q);
+    CHECK(hits.size() == 2); // 双向会话恰 q1+q2，不含与 carol 的 q3
+    q.peer = "carol";
+    CHECK(s.search_messages(q).size() == 1);
+    q.peer = "group:" + std::to_string(gid);
+    CHECK(s.search_messages(q).size() == 1); // alice 是群主：群消息命中
+    q.account = "carol";
+    CHECK(s.search_messages(q).empty()); // 非成员：群消息不可见
+    q.account = "bob";
+    q.peer = "alice";
+    q.since_ms = 1500;
+    q.until_ms = 2500;
+    hits = s.search_messages(q);
+    CHECK(hits.size() == 1); // 时间窗与双向会话叠加
+    CHECK(!hits.empty() && hits[0].msg_id == "q2");
+    s.close();
+  }
+
   // —— 协议级：上报→留痕→发送方在线即收 NOTICE；在线表查询与推送 ——
   {
     memex::server::ServerStore s;
@@ -410,6 +447,106 @@ int main() {
         const auto r = b.read();
         CHECK(r.type() == v1::RECEIPT_DATA);
         CHECK(r.receipt_data().entries_size() == 0);
+      }
+    } // b 析构断开
+    io.stop();
+    io_thread.join();
+    s.close();
+  }
+
+  // —— 协议级：会话历史按日期查询（需求批⑧）——
+  // 两条可控时间戳的归档消息：窗选今天/窗选旧日各恰一条；对端视角查询
+  // 双向会话（含自己发的）；空窗与伪造对端零条目；回包正序。
+  {
+    memex::server::ServerStore s;
+    CHECK(s.open(":memory:"));
+    for (const char* acct : {"alice", "bob"}) {
+      CHECK(s.create_account(acct, "pw", acct));
+    }
+    asio::io_context io;
+    memex::server::CollabServer server(io, s, 0);
+    server.start_accept();
+    std::thread io_thread([&] { io.run(); });
+
+    TestClient a(io, server.port());
+    {
+      TestClient b(io, server.port());
+      a.login("alice", "pc-a3");
+      b.login("bob", "pc-b3");
+      {
+        const auto r = a.read(); // b 上线推送：a 先读掉
+        CHECK(r.type() == v1::PRESENCE_DATA);
+      }
+
+      const std::int64_t old_ms = 1577923445000LL; // 2020-01-02（历史旧日）
+      for (const auto& [seq, text, ts] :
+           {std::tuple<int, const char*, std::int64_t>{1, "今天的消息", now_ms()},
+            {2, "旧消息", old_ms}}) {
+        memex::protocol::Message t;
+        t.set_type(v1::TEXT);
+        t.set_seq(seq);
+        t.set_from("alice");
+        t.set_to("bob");
+        t.set_ts_ms(ts);
+        t.mutable_text()->set_text(text);
+        a.send(t);
+        CHECK(a.read().type() == v1::ACK);
+        CHECK(b.read().type() == v1::TEXT); // 在线即投（b 不 ACK 也无妨：
+      }                                    //  在线投递不入离线队列）
+      b.sync();
+
+      auto query = [&](const std::string& from, const std::string& peer,
+                       std::int64_t from_ms, std::int64_t until_ms) {
+        memex::protocol::Message q;
+        q.set_type(v1::MESSAGE_QUERY);
+        q.set_from(from);
+        q.set_to("server");
+        q.set_ts_ms(now_ms());
+        auto* in = q.mutable_message_query();
+        in->set_peer(peer);
+        in->set_from_ms(from_ms);
+        in->set_until_ms(until_ms);
+        in->set_limit(50);
+        TestClient& c = from == "alice" ? a : b;
+        c.send(q);
+        return c.read();
+      };
+
+      // 窗覆盖今天：恰一条（归档保留发送方时间戳——旧消息不在窗）
+      {
+        const auto r = query("alice", "bob", now_ms() - 60000,
+                             now_ms() + 60000);
+        CHECK(r.type() == v1::MESSAGE_PAGE);
+        CHECK(r.message_page().peer() == "bob");
+        CHECK(r.message_page().messages_size() == 1);
+        CHECK(r.message_page().messages(0).text() == "今天的消息");
+        CHECK(r.message_page().messages(0).from() == "alice");
+        CHECK(!r.message_page().messages(0).msg_id().empty());
+      }
+      // 窗覆盖 2020-01-02：恰一条（旧消息，时间戳原样回带）
+      {
+        const auto r = query("alice", "bob", old_ms - 1000, old_ms + 1000);
+        CHECK(r.type() == v1::MESSAGE_PAGE);
+        CHECK(r.message_page().messages_size() == 1);
+        CHECK(r.message_page().messages(0).text() == "旧消息");
+        CHECK(r.message_page().messages(0).ts_ms() == old_ms);
+      }
+      // 空窗（1999）：零条目；伪造对端：零条目
+      {
+        const auto r = query("alice", "bob", 900000000000LL, 900000000001LL);
+        CHECK(r.type() == v1::MESSAGE_PAGE);
+        CHECK(r.message_page().messages_size() == 0);
+        const auto r2 = query("alice", "no-such-peer", 0, 0);
+        CHECK(r2.message_page().messages_size() == 0);
+      }
+      // bob 视角（对端=alice）：双向会话全量，回包正序（旧在前）
+      {
+        const auto r = query("bob", "alice", 0, 0);
+        CHECK(r.type() == v1::MESSAGE_PAGE);
+        CHECK(r.message_page().messages_size() == 2);
+        CHECK(r.message_page().messages(0).text() == "旧消息");
+        CHECK(r.message_page().messages(1).text() == "今天的消息");
+        CHECK(r.message_page().from_ms() == 0 && r.message_page().until_ms() == 0);
       }
     } // b 析构断开
     io.stop();

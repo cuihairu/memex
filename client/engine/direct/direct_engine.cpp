@@ -290,6 +290,14 @@ QList<StoredMessage> DirectEngine::history(const QString& peer, int limit) const
   return store_ ? store_->history(peer, limit) : QList<StoredMessage>{};
 }
 
+QList<StoredMessage> DirectEngine::history_between(const QString& peer,
+                                                   qint64 from_ms,
+                                                   qint64 until_ms,
+                                                   int limit) const {
+  return store_ ? store_->history_between(peer, from_ms, until_ms, limit)
+                : QList<StoredMessage>{};
+}
+
 std::string DirectEngine::send_file(const std::string& peer_device_id,
                                     const QString& local_path) {
   if (!running_ || !file_service_) return {};

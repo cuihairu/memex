@@ -47,6 +47,9 @@ enum MsgType {
   RECEIPT_QUERY = 55;  // 终端 → 服务端：批量查询自己发出消息的回执态
                        //（需求批⑦ 归档扩：离线期错过的通知重查面）
   RECEIPT_DATA = 56;   // 服务端 → 终端：回执态回包（逐条送达/已读名单）
+  MESSAGE_QUERY = 57;  // 终端 → 服务端：会话历史按日期范围查询
+                       //（需求批⑧：日期跳转/范围筛选的服务端补拉面）
+  MESSAGE_PAGE = 58;   // 服务端 → 终端：日期范围查询回包（正序，落本地索引）
 }
 
 message Hello {
@@ -259,6 +262,31 @@ message ReceiptData {
   repeated ReceiptEntry entries = 1; // 非本人消息不出现在回包里
 }
 
+// —— 会话历史按日期查询（需求批⑧）——
+// 请求：peer=对端账号（单聊）或群键 group:N；时间窗毫秒含端点（0=不限）；
+// limit 由服务端封顶（缺省 200，至多 500）。
+message MessageQuery {
+  string peer = 1;
+  int64 from_ms = 2;
+  int64 until_ms = 3;
+  int32 limit = 4;
+}
+// 归档消息条目：text 即归档形态（通知为组合文本、振屏为 "[振屏]" 标记）；
+// 已撤回的条目不出现在回包里（撤回即不可见，客户端本地已有撤回渲染）。
+message ArchivedMsg {
+  string msg_id = 1;
+  string from = 2;
+  string to = 3;
+  int64 ts_ms = 4;
+  string text = 5;
+}
+message MessagePage {
+  string peer = 1;      // 回显查询目标（客户端按它路由会话）
+  int64 from_ms = 2;
+  int64 until_ms = 3;
+  repeated ArchivedMsg messages = 4; // 时间正序（聊天渲染方向）
+}
+
 // 在线账号表：查询回执与变更推送共用。推送点=登录成功／登出／互踢／
 // 意外断开（服务端在线表变化即广播，在线者都收到，含自己）。
 message PresenceData {
@@ -353,5 +381,7 @@ message Envelope {
     DeliverNotice deliver_notice = 154;
     ReceiptQuery receipt_query = 155;
     ReceiptData receipt_data = 156;
+    MessageQuery message_query = 157;
+    MessagePage message_page = 158;
   }
 }

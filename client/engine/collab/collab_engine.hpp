@@ -83,6 +83,10 @@ public slots:
   // 批量查询自己发出消息的回执态（需求批⑦ 归档扩：离线期错过的
   // 送达/已读通知经服务端台账补查）；回包经 receipts_received。
   void query_receipts(const QStringList& msg_ids);
+  // 会话历史按日期范围查询（需求批⑧）：peer=对端账号或群键 group:N，
+  // 时间窗毫秒含端点。回包落本地索引（msg_id 去重）后经 history_received
+  // 通知（gap 补齐——服务端有的本地没有的行就此同步）。
+  void query_history(const QString& peer, qint64 from_ms, qint64 until_ms);
   // 主动拉取在线账号表（登录/登出/互踢变更由服务端推送，无需轮询）。
   void query_presence();
   // —— 直连文件旁路授权（平台-10，蓝图§十九四问）——
@@ -146,6 +150,10 @@ signals:
   // 回执态查询回包（需求批⑦）：JSON [{"msg_id","delivered_to":[…],
   // "readers":[…]}]——仅自己发出消息的条目（服务端裁决）
   void receipts_received(const QString& receipts_json);
+  // 日期范围查询回包（需求批⑧）：peer/from_ms/until_ms 回带，added=本次
+  // 新入库条数（已在库的按 msg_id 去重不计）
+  void history_received(const QString& peer, qint64 from_ms, qint64 until_ms,
+                        int added);
   // 在线账号表（T4.3）：登录/登出/互踢/断开变更即推送，含自己
   void presence_changed(const QStringList& online_accounts);
   // 收到通知（T4.10，webhook 推入）：from（＝"通知"）、标题、正文、紧急程度

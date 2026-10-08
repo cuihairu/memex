@@ -81,6 +81,9 @@ public:
   void set_address_filter(std::function<bool(const QHostAddress&)> f);
 
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;
+  // 按日期范围的历史（需求批⑧）：时间窗毫秒含端点（≤0=该侧不限）。
+  QList<StoredMessage> history_between(const QString& peer, qint64 from_ms,
+                                       qint64 until_ms, int limit = 200) const;
 
   // 本地库（start() 后有效）。双态共用同一份本地库：协作引擎挂接同一库，
   // 界面按 source 字段合并展示直连与协作历史（T2.4 模式切换）。
