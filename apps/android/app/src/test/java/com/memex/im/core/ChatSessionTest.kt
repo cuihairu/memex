@@ -11,8 +11,10 @@ import java.io.IOException
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.Callable
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
@@ -266,6 +268,73 @@ class ChatSessionTest {
 
         session.close()
         server.close()
+    }
+
+    @Test
+    fun `发送不阻塞调用线程（外发帧走会话发送线程）`() {
+        // BUG-006 回归面：假服务端读完 LOGIN 回 LOGIN_RESULT 后装死不再读——
+        // 发送缓冲塞满后同步写会卡死调用线程；移发送线程后调用方立即返回
+        val stall = ServerSocket(0, 1, InetAddress.getLoopbackAddress())
+        thread(isDaemon = true, name = "fake-stalled") {
+            try {
+                stall.accept().use { conn ->
+                    val input = conn.getInputStream()
+                    val out = conn.getOutputStream()
+                    val decoder = FrameCodec.Decoder()
+                    val buf = ByteArray(16 * 1024)
+                    var replied = false
+                    while (!replied) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        for (frame in decoder.feed(buf.copyOf(n)).frames) {
+                            val req = Envelope.parseFrom(frame)
+                            if (req.type == MsgType.LOGIN) {
+                                out.write(
+                                    FrameCodec.encode(
+                                        Envelope.newBuilder()
+                                            .setType(MsgType.LOGIN_RESULT)
+                                            .setSeq(1).setFrom("server").setTo(req.login.account)
+                                            .setTsMs(System.currentTimeMillis())
+                                            .setLoginResult(LoginResult.newBuilder().setOk(true).build())
+                                            .build()
+                                            .toByteArray()
+                                    )
+                                )
+                                out.flush()
+                                replied = true
+                            }
+                        }
+                    }
+                    Thread.sleep(60_000) // 装死：不读不关，等测试侧 close 收尸
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        val listener = RecordingListener()
+        val session = ChatSession(
+            store = InMemoryChatStore(), account = "alice", displayName = "Alice",
+        )
+        val outcome = session.connect(
+            address = ServerAddress("127.0.0.1", stall.localPort),
+            password = "pw", deviceFingerprint = "fp", deviceName = "Pixel",
+            clientVersion = "0.1.0", listener = listener,
+        )
+        assertTrue("期望 Ok，实得 $outcome", outcome is ChatSession.ConnectOutcome.Ok)
+
+        // 3MiB：超内核收发缓冲（同步写必阻塞）、低于 4MiB 帧上限
+        val big = "x".repeat(3 * 1024 * 1024)
+        val caller = Executors.newSingleThreadExecutor()
+        try {
+            val future = caller.submit(Callable { session.sendText("bob", big) })
+            val seq = future.get(5, TimeUnit.SECONDS) // 同步写实现=TimeoutException＝回归红灯
+            assertTrue("seq 应为正，实得 $seq", seq > 0)
+        } finally {
+            caller.shutdownNow()
+        }
+
+        session.close() // 关连接收尸：挂死的发送线程随 socket 关闭 IOException 退场
+        stall.close()
     }
 
     @Test

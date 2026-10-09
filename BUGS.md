@@ -59,9 +59,15 @@
 
 ## 2026-10-09 真机走查发现批次（BUG×1）
 
-- [ ] BUG-006 Android 聊天页「发送」按钮点击即崩溃（NetworkOnMainThreadException）
+- [x] BUG-006 Android 聊天页「发送」按钮点击即崩溃（NetworkOnMainThreadException）
   现象：模拟器 android-34（Pixel 6 / API 34）真机走查——登录后发起会话进聊天页，输入文本点「发送」→应用崩溃退出回登录页；服务端零 TEXT 到达（帧未上线）。
   定位（2026-10-09，logcat crash buffer 实录）：`android.os.NetworkOnMainThreadException`——ChatActivity 发送 onClick（ChatActivity.kt:60）→ ChatManager.sendText（ChatManager.kt:82）→ ChatSession.sendText（ChatSession.kt:181）→ Wire.send 阻塞式 socket 写（ChatSession.kt:349）全在主线程；Android 严格模式禁止主线程网络。
   影响面：Android 端一切外发文本路径（点对点发送；文件助手等共用 sendText 的入口同险）；入站不受影响——走查中 webhook 真实下发可正常收（列表未读角标＋聊天气泡渲染均正常）。
   备注：T6.3 走查（2026-10-04）只覆盖初始化向导/登录/重启持久化，发送路径未真机验证（单测假服务端不触发 StrictMode），故此前未暴露。按「只登记不修」挂起。
   平台：Android（debug 变体实测崩溃；release 同代码路径）。
+  修复记录（2026-10-09）：
+  - 修法：外发帧全部移出调用线程——ChatSession 新增单条发送线程（`memex-chat-send`，daemon，随会话存亡），TEXT/LOGOUT/ACK 出站帧一律排队经此写 socket（sendText/logout/sendAck 三处出口全改）；另加输出流写锁把 connect 登录帧与发送线程串行化——此前读线程 ACK 与调用线程发送本就无锁并发写同一输出流（帧交错隐患），一并消除。
+  - 语义不变：seq 分配、本地立即落库、onMessage 回调仍在调用线程同步完成（「本地立即落库」不动）；线格式零改动；ACK(seq)/msg_id 去重/归档语义不动；写失败改走 onDisconnected 回调（调用方不阻塞），主动 close 引发的写失败不误报断连（与 readLoop 同口径）；LOGOUT 帧保持「写完再关连接」。
+  - 覆盖面核对：ChatActivity 发送（原报路径）＋MainActivity 退出登录（logout 同险同类，一并修）；文件助手（FilesClient/UplinkClient）经查为 HTTP 面且已在自身 executor 上调（FileAssistantActivity/LoginActivity 既有后台线程模式），无主线程网络，BUG-006 影响面中「共用 sendText 的入口」实查不存在。
+  - 回归：新增 `ChatSessionTest.发送不阻塞调用线程（外发帧走会话发送线程）`——假服务端回完 LOGIN_RESULT 后装死不再读，3MiB 消息塞满发送缓冲，同步写实现＝TimeoutException 红灯、异步实现即返回（对修复前实现实测红、修复后绿，真咬合）；`./gradlew test` 双变体 83/84 绿（唯一红＝`MemexClientTest.域名无法解析→连不上`，BUG-005 已登记的环境 DNS 项——本机 127.0.0.53 fake-IP 通配解析 `.invalid` 假域名致 connect 成功后对端即关，净树（无本修改动）复跑同红，与本修无关、按已知偶发处理）；assembleDebug 产出。
+  - 真机走查（2026-10-09，模拟器 android-34＋本机 serve 24370 新库）：登录 zhangsan→发起会话 lisi→发送文本——不再崩、气泡本地即渲染、输入框清空（seq>0 成功路径）；服务端 `messages` 表归档收到 TEXT（zhangsan→lisi，msg_id 已分配，lisi 离线入 `offline_messages` 队列＝受理回执链走通）；logcat crash buffer 0 条 NetworkOnMainThreadException；退出登录回登录页无崩溃。截图 `walkthrough-12-chat-sent.png`／`walkthrough-13-sessions-sent.png` 入档。

@@ -78,7 +78,7 @@ class ChatManager(
         return outcome
     }
 
-    /** 发送文本。seq=0 表示未连接。 */
+    /** 发送文本。seq=0 表示未连接。阻塞写走会话发送线程（主线程调用安全，BUG-006）。 */
     fun sendText(to: String, text: String): Long = session?.sendText(to, text) ?: 0
 
     fun addListener(l: Listener) {

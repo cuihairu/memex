@@ -13,6 +13,7 @@ import java.net.Socket
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -30,8 +31,10 @@ import java.util.concurrent.atomic.AtomicLong
  * - KICK：服务端单点互踢 → 收到即断开并回调 onKicked；
  * - 断线：onDisconnected 回调，由上层决定重连（首块不做自动重连）。
  *
- * 线程模型：单连接后台读线程；发送方为调用线程（UI 外部封装）；回调全部投递
- * 到构造时传入的 executor（UI 线程）。
+ * 线程模型：单连接后台读线程＋单条发送线程（外发帧一律排队经发送线程写
+ * socket——调用方常为主线程，Android 严格模式禁主线程网络，BUG-006；
+ * 并发写共享输出流也由此串行化）；回调全部投递到构造时传入的 executor
+ * （UI 线程）。
  */
 class ChatSession(
     private val store: ChatStore,
@@ -80,6 +83,19 @@ class ChatSession(
     private var listener: Listener? = null
 
     /**
+     * 发送线程（单条，随会话存亡）：外发帧（TEXT/LOGOUT/ACK）一律排队经此
+     * 写 socket。阻塞写不得落在调用线程——调用方常为主线程，Android 严格
+     * 模式禁主线程网络（BUG-006 NetworkOnMainThreadException）；单线程串行
+     * 同时消除多线程并发写共享输出流的帧交错。daemon 线程随进程退场。
+     */
+    private val sendExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "memex-chat-send").apply { isDaemon = true }
+    }
+
+    /** 输出流写锁：发送线程之外，connect 的登录帧同锁串行 */
+    private val writeLock = Any()
+
+    /**
      * 同步登录并起读循环。成功返回 Ok；失败返回对应结果且连接已关闭。
      * 单测可直接在测试线程调用；UI 侧放后台线程。
      */
@@ -108,7 +124,8 @@ class ChatSession(
             s.soTimeout = readTimeoutMs
             wire = Wire(s)
 
-            wire!!.send(
+            writeEnvelope(
+                wire!!,
                 Envelope.newBuilder()
                     .setType(MsgType.LOGIN)
                     .setSeq(1)
@@ -171,27 +188,25 @@ class ChatSession(
         }
     }
 
-    /** 发送文本。返回分配的 seq（0=未连接/空对象）。 */
+    /**
+     * 发送文本。返回分配的 seq（0=未连接/空对象）。
+     * 本地落库与回调仍在调用线程同步完成（「本地立即落库」语义不变）；
+     * 阻塞的 socket 写移发送线程排队（BUG-006：调用方常为主线程），
+     * 写失败走 onDisconnected 回调，调用方不感知写时延。
+     */
     fun sendText(to: String, text: String): Long {
         val w = wire ?: return 0
         if (closed.get() || to.isEmpty()) return 0
         val seq = seqGen.getAndIncrement()
         val ts = System.currentTimeMillis()
-        try {
-            w.send(
-                Envelope.newBuilder()
-                    .setType(MsgType.TEXT)
-                    .setSeq(seq)
-                    .setFrom(account)
-                    .setTo(to)
-                    .setTsMs(ts)
-                    .setText(memex.protocol.v1.Memex.Text.newBuilder().setText(text))
-                    .build()
-            )
-        } catch (e: IOException) {
-            notifyDisconnect(e.message ?: "发送失败")
-            return 0
-        }
+        val frame = Envelope.newBuilder()
+            .setType(MsgType.TEXT)
+            .setSeq(seq)
+            .setFrom(account)
+            .setTo(to)
+            .setTsMs(ts)
+            .setText(memex.protocol.v1.Memex.Text.newBuilder().setText(text))
+            .build()
         // 本地立即落库（自己发的消息；msg_id 空，服务端受理后才有——对齐桌面）
         store.append(
             StoredMessage(
@@ -200,6 +215,7 @@ class ChatSession(
             )
         )
         dispatch { listener?.onMessage(to, "", mine = true) }
+        enqueueSend(w, frame) { e -> notifyDisconnect(e.message ?: "发送失败") }
         return seq
     }
 
@@ -207,18 +223,17 @@ class ChatSession(
     fun logout() {
         val w = wire
         if (w != null && !closed.get()) {
-            try {
-                w.send(
-                    Envelope.newBuilder()
-                        .setType(MsgType.LOGOUT)
-                        .setSeq(seqGen.getAndIncrement())
-                        .setFrom(account)
-                        .setTo("server")
-                        .setTsMs(System.currentTimeMillis())
-                        .build()
-                )
-            } catch (_: IOException) {
-            }
+            val frame = Envelope.newBuilder()
+                .setType(MsgType.LOGOUT)
+                .setSeq(seqGen.getAndIncrement())
+                .setFrom(account)
+                .setTo("server")
+                .setTsMs(System.currentTimeMillis())
+                .build()
+            // LOGOUT 帧同样移发送线程（主线程调用同险），写完再关连接
+            enqueueSend(w, frame)
+            safeCloseAfterWrite()
+            return
         }
         safeClose()
     }
@@ -296,20 +311,20 @@ class ChatSession(
         }
     }
 
+    /** 已收取回执（读线程发起，同样移发送线程排队——共享输出流禁并发写） */
     private fun sendAck(msgId: String) {
-        try {
-            wire?.send(
-                Envelope.newBuilder()
-                    .setType(MsgType.ACK)
-                    .setSeq(seqGen.getAndIncrement())
-                    .setFrom(account)
-                    .setTo("server")
-                    .setTsMs(System.currentTimeMillis())
-                    .setAck(memex.protocol.v1.Memex.Ack.newBuilder().setMsgId(msgId))
-                    .build()
-            )
-        } catch (_: IOException) {
-        }
+        val w = wire ?: return
+        enqueueSend(
+            w,
+            Envelope.newBuilder()
+                .setType(MsgType.ACK)
+                .setSeq(seqGen.getAndIncrement())
+                .setFrom(account)
+                .setTo("server")
+                .setTsMs(System.currentTimeMillis())
+                .setAck(memex.protocol.v1.Memex.Ack.newBuilder().setMsgId(msgId))
+                .build()
+        )
     }
 
     private fun onAck(env: Envelope) {
@@ -328,6 +343,29 @@ class ChatSession(
             executor(r)
         } catch (_: Exception) {
         }
+    }
+
+    /** 出站帧排队（发送线程 FIFO 写，写前复查 closed）；[onFailure] 收写失败
+     *  （主动关闭引发的写失败不算断连，与 readLoop 同口径不回调） */
+    private fun enqueueSend(w: Wire, frame: Envelope, onFailure: (IOException) -> Unit = {}) {
+        sendExecutor.execute {
+            if (closed.get()) return@execute
+            try {
+                writeEnvelope(w, frame)
+            } catch (e: IOException) {
+                if (!closed.get()) onFailure(e)
+            }
+        }
+    }
+
+    /** 输出流写（connect 登录帧在调用线程直写，与此处同锁串行） */
+    private fun writeEnvelope(w: Wire, msg: Envelope) {
+        synchronized(writeLock) { w.send(msg) }
+    }
+
+    /** 发送队列排空后关连接（单线程 FIFO：在队尾追加 close 任务即「写完再关」） */
+    private fun safeCloseAfterWrite() {
+        sendExecutor.execute { safeClose() }
     }
 
     private fun safeClose() {
