@@ -46,6 +46,8 @@
 
 > 副本注明：t44/t45 为搁置中的实验性 worktree（分支 t44-screenshot、t45-emoji-favorites，HEAD 停 2026-10-04 且带在途未提交改动），其 decisions.md 副本不随本次拍板同步，以主仓为准。
 
+> 2026-10-10 工程对账复核（巡检批）：#1–#15 与附项「当前工程口径」逐项对码复核——单点互踢（`session.cpp` 同类型互踢＋KICK 帧）、跨态互通开关（`allow_cross_state`）、留存 180 天默认（`retention_resolve` fallback）、S3 文件面（`--files-port`＋`storage compose`）、暂存补传（collab 引擎＋`test_collab_resend`）、模型网关红线（`memex_archive_scope`＋无本地端点 503）、客户端网段准入（`net_guard`）＋服务端不扩、远程协助 consent 红线（批/拒只属受控方本人）、位置图同层互见（`office_seats` floor）、通讯录字段隐藏、上级 CSV 导入（`org import`）——全部与实现相符，「当前工程口径」列无陈旧、无改动。
+
 ## 建设方追加决策（评审报告之后下达，已执行）
 
 | 项 | 内容 | 落点 |
