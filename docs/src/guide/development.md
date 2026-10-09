@@ -22,19 +22,22 @@ openssl、aws-sdk-cpp:s3、qtbase），
 
 | 依赖 | 用途 | 说明 |
 | --- | --- | --- |
-| `asio` | 服务端网络 I／O | header-only，默认安装 |
-| `protobuf` | 协议载荷编解码（libprotobuf + protoc 生成） | 默认安装；Android/iOS/鸿蒙端由各自工具链按同一 `common/proto/memex.proto` 生成 |
-| `nlohmann-json` | 协议 JSON 编解码 | 默认安装（≥3.11.3） |
-| `sqlite3` | 服务端本地库（账号/设备/归档/文件元数据） | 默认安装 |
-| `openssl` | 凭据 PBKDF2、设备指纹 SHA-256（仅 libcrypto） | 默认安装 |
-| `aws-sdk-cpp` | R23 存储抽象层（S3 兼容对象存储客户端） | 默认安装，`s3` feature |
+| `asio` | 服务端网络 I／O | header-only，`server` feature |
+| `protobuf` | 协议载荷编解码（libprotobuf + protoc 生成） | 默认安装（底座）；Android/iOS/鸿蒙端由各自工具链按同一 `common/proto/memex.proto` 生成 |
+| `nlohmann-json` | 协议 JSON 编解码 | 默认安装（底座，≥3.11.3） |
+| `sqlite3` | 服务端本地库（账号/设备/归档/文件元数据） | `server` feature |
+| `openssl` | 凭据 PBKDF2、设备指纹 SHA-256（仅 libcrypto） | 默认安装（底座，双端共用） |
+| `aws-sdk-cpp` | R23 存储抽象层（S3 兼容对象存储客户端） | `server` feature，启用 `s3` |
 | `qtbase` | 客户端界面框架 | `client` feature，启用 `glib`／`xkb`／`xkbcommon-x11` |
 | `gcovr` | CI 覆盖率汇总 | vcpkg 无此 port，由 CI 系统包提供（宿主工具，不随产物分发） |
 
-默认（不启用 feature）只装服务端依赖，带 Qt 桌面的构建启用 `client` feature——
-preset 通过 `VCPKG_MANIFEST_FEATURES` 声明，所以每日构建的服务端产物不会拖 Qt 编译，
+底座（不启用 feature）只装双端共享依赖（protobuf／nlohmann-json／openssl）；
+服务端构建启用 `server` feature（preset 经 `VCPKG_MANIFEST_FEATURES` 声明，
+容器 deps 层直调 `vcpkg install --x-feature=server`），带 Qt 桌面的构建启用
+`client` feature（＋`crashpad`）——所以每日构建的服务端产物不会拖 Qt 编译，
 清单仍是唯一入口。服务端 preset 另用安装树 `vcpkg_installed-server/`，
-与带 Qt 的 `vcpkg_installed/` 并存，两边互不剪枝。
+与带 Qt 的 `vcpkg_installed/` 并存，两边互不剪枝。鸿蒙交叉构建（T6.2）用
+`client` feature＋官方 `arm64-ohos` triplet，不装服务端三件套。
 
 Qt 的 `glib` feature 不是可选项：Linux 桌面 Qt 的 xcb 平台插件引用 glib
 事件分发器符号，缺该 feature 时桌面端启动即中止。

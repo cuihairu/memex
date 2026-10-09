@@ -1,6 +1,6 @@
 # memex 服务端镜像（多阶段）：
-#   deps   —— vcpkg 依赖层：manifest（vcpkg.json，默认 feature＝服务端依赖、无
-#             Qt）按 x64-linux 静态三件套装，只有 vcpkg.json 变更才失效重装；
+#   deps   —— vcpkg 依赖层：manifest（vcpkg.json，`server` feature＝服务端
+#             依赖、无 Qt）按 x64-linux 静态三件套装，只有 vcpkg.json 变更才失效重装；
 #   build  —— C++17 编译（仅服务端，MEMEX_BUILD_CLIENT/TESTS=OFF），产出
 #             自包含单二进制；
 #   runtime—— ubuntu:24.04 精简运行层，非 root（uid 10001）运行。
@@ -47,6 +47,7 @@ COPY vcpkg.json ./
 # downloads/ 源码包缓存在快照里则全程离线可装；种子无缓存（CI 干净检出）
 # 则走源码包下载（GHA 网络原生可达）
 RUN /opt/vcpkg/vcpkg install --triplet x64-linux \
+      --x-feature=server \
       --x-manifest-root=/src --x-install-root=/src/vcpkg_installed \
       --keep-going
 
@@ -59,6 +60,7 @@ RUN cmake -S . -B build -G Ninja \
       -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
       -DVCPKG_TARGET_TRIPLET=x64-linux \
       -DVCPKG_INSTALLED_DIR=/src/vcpkg_installed \
+      -DVCPKG_MANIFEST_FEATURES=server \
       -DMEMEX_BUILD_CLIENT=OFF -DMEMEX_BUILD_TESTS=OFF \
     && cmake --build build --target memex_server -j"$(nproc)"
 
