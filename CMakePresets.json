@@ -24,7 +24,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "MEMEX_BUILD_CLIENT": "ON",
-        "VCPKG_MANIFEST_FEATURES": "client;crashpad"
+        "VCPKG_MANIFEST_FEATURES": "server;client;crashpad"
       }
     },
     {
@@ -36,6 +36,7 @@
         "CMAKE_BUILD_TYPE": "Release",
         "MEMEX_BUILD_CLIENT": "OFF",
         "MEMEX_BUILD_TESTS": "OFF",
+        "VCPKG_MANIFEST_FEATURES": "server",
         "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed-server"
       }
     },
@@ -47,6 +48,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "MEMEX_BUILD_CLIENT": "ON",
+        "MEMEX_BUILD_SERVER": "OFF",
         "MEMEX_BUILD_TESTS": "OFF",
         "VCPKG_MANIFEST_FEATURES": "client;crashpad"
       }
@@ -92,7 +94,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "MEMEX_BUILD_CLIENT": "ON",
-        "VCPKG_MANIFEST_FEATURES": "client;crashpad",
+        "VCPKG_MANIFEST_FEATURES": "server;client;crashpad",
         "CMAKE_CXX_FLAGS": "--coverage"
       }
     }

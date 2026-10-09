@@ -3,12 +3,8 @@
   "version-string": "0.1.0",
   "description": "Memex 内网办公即时通讯系统",
   "builtin-baseline": "10541e317a660f4165ba4ac2851ab54a8d4577b1",
-  "$comment": "顶层唯一依赖清单：默认（无 feature）只装服务端依赖；带 Qt 桌面的构建启用 client feature",
+  "$comment": "顶层唯一依赖清单：默认（无 feature）只装双端共享依赖（protobuf/nlohmann-json/openssl）；服务端构建启用 server feature，Qt 桌面客户端启用 client feature（Windows/macOS 官方 Qt 构建只开 crashpad），鸿蒙交叉构建启用 client（OHOS triplet，T6.2）",
   "dependencies": [
-    {
-      "name": "asio",
-      "$comment": "服务端网络 I/O（header-only）；需锁版本的包写进下方 overrides"
-    },
     {
       "name": "nlohmann-json",
       "version>=": "3.11.3"
@@ -18,23 +14,32 @@
       "$comment": "协议载荷单一事实源（common/proto/memex.proto）：libprotobuf 运行时 + protoc 生成工具，双端共用"
     },
     {
-      "name": "sqlite3",
-      "$comment": "服务端本地库（账号／设备／登录记录，后续消息归档同库）"
-    },
-    {
       "name": "openssl",
-      "$comment": "服务端凭据口令 PBKDF2-HMAC-SHA256 与设备指纹 SHA-256（仅 libcrypto）"
-    },
-    {
-      "name": "aws-sdk-cpp",
-      "features": [
-        "s3"
-      ],
-      "$comment": "R23-1 存储抽象层：S3 兼容对象存储客户端（server 侧 find_package 消费）。2024 起 vcpkg 老端口 aws-cpp-sdk-s3 并入本品 s3 feature，find_package(aws-cpp-sdk-s3) 兼容名仍由端口生成"
+      "$comment": "凭据口令 PBKDF2-HMAC-SHA256 与设备指纹 SHA-256（仅 libcrypto；服务端 PBKDF2 + 客户端直连加密/密码箱共用）"
     }
   ],
   "default-features": [],
   "features": {
+    "server": {
+      "description": "服务端依赖（server-release/dev/ci preset 启用；OHOS 交叉树不装）",
+      "dependencies": [
+        {
+          "name": "asio",
+          "$comment": "服务端网络 I/O（header-only）；需锁版本的包写进下方 overrides"
+        },
+        {
+          "name": "sqlite3",
+          "$comment": "服务端本地库（账号／设备／登录记录，后续消息归档同库）"
+        },
+        {
+          "name": "aws-sdk-cpp",
+          "features": [
+            "s3"
+          ],
+          "$comment": "R23-1 存储抽象层：S3 兼容对象存储客户端（server 侧 find_package 消费）。2024 起 vcpkg 老端口 aws-cpp-sdk-s3 并入本品 s3 feature，find_package(aws-cpp-sdk-s3) 兼容名仍由端口生成"
+        }
+      ]
+    },
     "client": {
       "description": "Qt 桌面客户端依赖（本地 dev/ci 与每日构建客户端产物启用）",
       "dependencies": [
