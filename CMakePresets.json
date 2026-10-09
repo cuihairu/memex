@@ -77,6 +77,22 @@
       }
     },
     {
+      "name": "client-release-ohos",
+      "inherits": "client-release",
+      "displayName": "客户端 Release（HarmonyOS arm64 交叉：Qt for OpenHarmony + vcpkg ohos 依赖；T6.2 待真机验证）",
+      "binaryDir": "${sourceDir}/build-client-ohos",
+      "cacheVariables": {
+        "MEMEX_ENABLE_CRASHPAD": "OFF",
+        "CMAKE_PREFIX_PATH": "$env{QT_OHOS_ROOT}",
+        "QT_HOST_PATH": "$env{QT_HOST_PATH}",
+        "OHOS_ARCH": "arm64-v8a",
+        "VCPKG_TARGET_TRIPLET": "arm64-ohos",
+        "VCPKG_MANIFEST_FEATURES": "client",
+        "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed-ohos",
+        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "$env{OHOS_SDK_ROOT}/native/build/cmake/ohos.toolchain.cmake"
+      }
+    },
+    {
       "name": "server-release-mac",
       "inherits": "server-release",
       "displayName": "服务端 Release（macOS arm64：vcpkg 静态依赖，单二进制分发）",
@@ -119,6 +135,10 @@
     {
       "name": "client-release-mac",
       "configurePreset": "client-release-mac"
+    },
+    {
+      "name": "client-release-ohos",
+      "configurePreset": "client-release-ohos"
     },
     {
       "name": "server-release-mac",

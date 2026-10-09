@@ -168,6 +168,24 @@ if(WIN32)
   target_sources(memex_client PRIVATE app/memex.rc)
 endif()
 
+# T6.2 鸿蒙（HarmonyOS NEXT，桌面矩阵项）：HAP 打包元数据。Qt 6.12 官方
+# CMake API（technology preview）——qt_add_executable 目标平台为 OHOS 时自动
+# 生成 <target>_make_hap，经 harmonydeployqt 收集产物并调 hvigor 出 HAP；
+# 属性名实证自 doc.qt.io qt-for-harmonyos-cmake-api（2026-10-09）。
+# 网络权限：qt_add_harmonyos_permission 文档口径「Qt 模块默认贡献权限」，所链
+# Qt6::Network 应自带 ohos.permission.INTERNET——首建时核对生成 module.json5
+# 的 requestPermissions（见 packaging/ohos/README.md 检查点）。待真机验证。
+if(OHOS)
+  set_target_properties(memex_client PROPERTIES
+    QT_HARMONYOS_APP_NAME "memex"
+    QT_HARMONYOS_APP_BUNDLE_NAME "site.cuihairu.memex"
+    QT_HARMONYOS_APP_LABEL "Memex"
+    QT_HARMONYOS_APP_VENDOR "cuihairu"
+    QT_HARMONYOS_APP_VERSION_NAME "${PROJECT_VERSION}"
+    QT_HARMONYOS_APP_VERSION_CODE "1"
+    QT_HARMONYOS_MODULE_DESCRIPTION "Memex 内网办公即时通讯")
+endif()
+
 if(MEMEX_BUILD_TESTS)
   # 测试环境隔离：offscreen 无头渲染 + XDG_CACHE_HOME 指向构建树。
   # fontconfig 缓存必须隔离——用户机既有缓存与随链 Qt 携带的 fontconfig
