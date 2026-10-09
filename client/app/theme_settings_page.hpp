@@ -1,12 +1,13 @@
-// 主题设置页（R19 · T4.9）：跟随系统／亮／暗（＋已注册扩展主题）手动切换，
-// 点选即时生效并落盘；主窗只需挂一个入口打开本页，切换逻辑全在 ThemeManager。
+// 主题设置页（R19 · T4.9；需求批⑬扩默认 20 套）：跟随系统＋内置 22 套
+// （＋已注册扩展主题）列表点选，即时生效并落盘；主窗只需挂一个入口打开
+// 本页，切换逻辑全在 ThemeManager。⑬ 起 23+ 项改 QListWidget 列表。
 #pragma once
 
 #include <QString>
 #include <QWidget>
 
-class QButtonGroup;
 class QLabel;
+class QListWidget;
 
 namespace memex::client {
 
@@ -28,7 +29,7 @@ class ThemeSettingsPage : public QWidget {
   void sync_from_manager();
 
   ThemeManager* manager_;
-  QButtonGroup* group_ = nullptr;
+  QListWidget* list_ = nullptr;
   QLabel* effective_label_ = nullptr;
   QWidget* swatch_ = nullptr;
 };
