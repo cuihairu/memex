@@ -14,7 +14,9 @@
 | protobuf（含 protoc） | 6.33.4 | BSD-3-Clause | vcpkg（运行时＋生成工具） | 线路协议唯一事实源 memex.proto |
 | sqlite3 | 3.53.4 | Public Domain | vcpkg | 服务端归档库 |
 | openssl（仅 libcrypto） | 3.6.4 | Apache-2.0 | vcpkg | 口令 PBKDF2／指纹 SHA-256 |
+| aws-sdk-cpp（s3 feature） | 1.11.880 | Apache-2.0 | vcpkg（server feature） | R23-1 存储抽象层 S3 兼容客户端（服务端侧 find_package 消费） |
 | qtbase（含 Widgets/Sql/Network，xcb/glib/xkb 插件） | 6.11.1 | LGPL-3.0（动态链接，未修改） | vcpkg client feature | 桌面客户端 |
+| crashpad | 2026-07-02（date） | Apache-2.0 | vcpkg crashpad feature | 桌面客户端崩溃采集（dump 仅本地落盘，win/mac preset 启用） |
 | vcpkg 本体 | 基线见 vcpkg.json（builtin-baseline 锁版本） | MIT | 构建工具 | 依赖管理 |
 
 ## 音视频／协同文档底座（独立进程部署，保持进程边界）
