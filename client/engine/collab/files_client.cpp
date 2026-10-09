@@ -9,6 +9,7 @@
 #include <QNetworkRequest>
 #include <QSaveFile>
 #include <QUrl>
+#include <QUrlQuery>
 
 namespace memex::client {
 
@@ -1537,6 +1538,89 @@ void FilesClient::emoji_delete(qint64 id) {
             [this, id](bool ok, int, const QJsonObject&, const QString&) {
               if (!ok) return;
               emit emoji_deleted(id);
+            });
+}
+
+// —— 用户头像（需求批⑫）——
+
+void FilesClient::avatar_upload(int size, const QByteArray& png_bytes) {
+  const QString op = QStringLiteral("avatar.upload");
+  if (token_.isEmpty()) {
+    fail(op, 0, QStringLiteral("未登录"));
+    return;
+  }
+  // size 进 query（字节已按档编码 PNG；magic 与上限校验在服务端）
+  QNetworkRequest req(QUrl(base_url() +
+                           QStringLiteral("/files/avatar/upload?size=") +
+                           QString::number(size)));
+  req.setTransferTimeout(kByteTimeoutMs);
+  req.setRawHeader("Authorization", "Bearer " + token_.toUtf8());
+  req.setHeader(QNetworkRequest::ContentTypeHeader,
+                QStringLiteral("image/png"));
+  QNetworkReply* rep = nam_->post(req, png_bytes);
+  connect(rep, &QNetworkReply::finished, this, [this, rep, op, size] {
+    rep->deleteLater();
+    const int status =
+        rep->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QJsonDocument doc = QJsonDocument::fromJson(rep->readAll());
+    const QJsonObject obj = doc.isObject() ? doc.object() : QJsonObject{};
+    if (rep->error() != QNetworkReply::NoError || status < 200 ||
+        status >= 300) {
+      QString msg = obj.value(QStringLiteral("error")).toString();
+      if (msg.isEmpty()) msg = rep->errorString();
+      fail(op, status, msg);
+      return;
+    }
+    emit avatar_uploaded(size, static_cast<qint64>(
+                                   obj.value(QStringLiteral("ver"))
+                                       .toDouble()));
+  });
+}
+
+void FilesClient::avatar_download(const QString& account, int size) {
+  const QString op = QStringLiteral("avatar.download");
+  if (token_.isEmpty()) {
+    fail(op, 0, QStringLiteral("未登录"));
+    return;
+  }
+  QUrl url(base_url() + QStringLiteral("/files/avatar/download"));
+  QUrlQuery q;
+  if (!account.isEmpty()) {
+    q.addQueryItem(QStringLiteral("account"), account);
+  }
+  q.addQueryItem(QStringLiteral("size"), QString::number(size));
+  url.setQuery(q);
+  QNetworkRequest req(url);
+  req.setTransferTimeout(kByteTimeoutMs);
+  req.setRawHeader("Authorization", "Bearer " + token_.toUtf8());
+  QNetworkReply* rep = nam_->get(req);
+  // 回包 200=原始字节（非 JSON）；404=未设置头像（错误体才是 JSON）
+  connect(rep, &QNetworkReply::finished, this,
+          [this, rep, op, account, size] {
+            rep->deleteLater();
+            const int status =
+                rep->attribute(QNetworkRequest::HttpStatusCodeAttribute)
+                    .toInt();
+            const QByteArray bytes = rep->readAll();
+            if (rep->error() != QNetworkReply::NoError || status != 200) {
+              const QJsonDocument doc = QJsonDocument::fromJson(bytes);
+              const QJsonObject obj =
+                  doc.isObject() ? doc.object() : QJsonObject{};
+              QString msg = obj.value(QStringLiteral("error")).toString();
+              if (msg.isEmpty()) msg = rep->errorString();
+              fail(op, status, msg);
+              return;
+            }
+            emit avatar_fetched(account, size, bytes);
+          });
+}
+
+void FilesClient::avatar_delete() {
+  send_json(QStringLiteral("avatar.delete"), QStringLiteral("POST"),
+            QStringLiteral("/files/avatar/delete"), {},
+            [this](bool ok, int, const QJsonObject&, const QString&) {
+              if (!ok) return;
+              emit avatar_deleted();
             });
 }
 

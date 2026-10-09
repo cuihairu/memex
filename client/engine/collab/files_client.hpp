@@ -296,6 +296,16 @@ class FilesClient : public QObject {
   // 删除我的素材
   void emoji_delete(qint64 id);
 
+  // —— 用户头像（需求批⑫：四档 32/64/128/256）——
+  // 裁剪与逐档 PNG 编码在客户端完成，这里只传编码好的字节（magic 与
+  // 上限校验在服务端）；上传/删除恒本人（服务端属主裁决）
+  void avatar_upload(int size, const QByteArray& png_bytes);
+  // 取任意成员头像（组织内互见；字节回 avatar_fetched，404=未设置——
+  // 客户端据此回落内置默认头像）
+  void avatar_download(const QString& account, int size);
+  // 删除本人头像（各档全清，回落默认头像）
+  void avatar_delete();
+
  signals:
   void logged_in();
   void login_failed(const QString& reason);
@@ -398,6 +408,10 @@ class FilesClient : public QObject {
   void emoji_listed(const QJsonArray& assets);
   void emoji_downloaded(const QString& save_path);
   void emoji_deleted(qint64 id);
+  // —— 用户头像（需求批⑫）——
+  void avatar_uploaded(int size, qint64 ver); // 服务端最新版本戳
+  void avatar_fetched(const QString& account, int size, const QByteArray& bytes);
+  void avatar_deleted();
   // 统一失败通道：op=操作名（"memo.create"/"inbox.upload"/…）、
   // status=HTTP 状态码（0=网络层失败）、error=服务端 error 字段或网络串
   void request_failed(const QString& op, int status, const QString& error);

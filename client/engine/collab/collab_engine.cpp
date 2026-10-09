@@ -685,7 +685,9 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
                               // 需求批⑩ 在线时长：滚动窗并集秒数（界面侧展示）
                               {"online_day_s", m.online_day_s()},
                               {"online_week_s", m.online_week_s()},
-                              {"online_month_s", m.online_month_s()}});
+                              {"online_month_s", m.online_month_s()},
+                              // 需求批⑫ 头像：版本戳（0=未设置，字节走文件面）
+                              {"avatar_ver", m.avatar_ver()}});
     }
     j["policies"] = nlohmann::json::array();
     for (const auto& p : msg.org_data().policies()) {

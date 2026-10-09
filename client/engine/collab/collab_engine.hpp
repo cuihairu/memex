@@ -31,6 +31,8 @@ public:
 
   bool is_logged_in() const { return logged_in_; }
   QString account() const { return account_; }
+  // 登录口令（内存常驻供重连；需求批⑫ 文件面同源自动登录复用，不出进程）
+  QString password() const { return password_; }
   QStringList online_accounts() const { return online_accounts_; }
   std::string status_text() const;
 
