@@ -56,3 +56,12 @@
   - 单测：`client/tests/test_tray.cpp` 7 块（双击隐藏弹出/单击激活幂等/Context·中键·未知不弹/最小化还原/最大化保留/直调同路径/气泡点击激活），offscreen 裸 QSystemTrayIcon 发真实信号驱动生产接线，ctest `tray` 绿。
   - 真机走查：`scripts/bug-004-tray-walkthrough/run.sh`（裸 Xvfb＋假托盘宿主＋xdotool 真点击，无 DE 可复跑），5 门禁全过、5 截图入档 `docs/src/public/screenshots/bug-004-tray-{1..5}.png`：①启动 ②隐藏进托盘（气泡在屏）③双击还原 ④单击还原 ⑤右键菜单（显示主窗口/开机启动/通知偏好/退出 照旧）。补充实证：隐藏后第一击无论落气泡（messageClicked）还是落图标（Trigger）都弹窗，两轮连测均通过。
   - 环境备注（如实）：走查环境曾有用户 fontconfig 缓存与随链 Qt 错位导致 xcb 首布局崩溃，已清理 `~/.cache/fontconfig/*.cache-*`（可再生缓存，非项目资产）；走查脚本 ⑤ 须在无点击历史态抓图（裸 X 合成输入下点过左键后右键 press 不再送达，合成环境现象、真桌面无此问题），run.sh 内有注释与顺序说明。
+
+## 2026-10-09 真机走查发现批次（BUG×1）
+
+- [ ] BUG-006 Android 聊天页「发送」按钮点击即崩溃（NetworkOnMainThreadException）
+  现象：模拟器 android-34（Pixel 6 / API 34）真机走查——登录后发起会话进聊天页，输入文本点「发送」→应用崩溃退出回登录页；服务端零 TEXT 到达（帧未上线）。
+  定位（2026-10-09，logcat crash buffer 实录）：`android.os.NetworkOnMainThreadException`——ChatActivity 发送 onClick（ChatActivity.kt:60）→ ChatManager.sendText（ChatManager.kt:82）→ ChatSession.sendText（ChatSession.kt:181）→ Wire.send 阻塞式 socket 写（ChatSession.kt:349）全在主线程；Android 严格模式禁止主线程网络。
+  影响面：Android 端一切外发文本路径（点对点发送；文件助手等共用 sendText 的入口同险）；入站不受影响——走查中 webhook 真实下发可正常收（列表未读角标＋聊天气泡渲染均正常）。
+  备注：T6.3 走查（2026-10-04）只覆盖初始化向导/登录/重启持久化，发送路径未真机验证（单测假服务端不触发 StrictMode），故此前未暴露。按「只登记不修」挂起。
+  平台：Android（debug 变体实测崩溃；release 同代码路径）。

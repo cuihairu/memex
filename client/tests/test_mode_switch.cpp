@@ -13,6 +13,7 @@
 #include <QListWidget>
 #include <QPixmap>
 #include <QProcess>
+#include <QPushButton>
 #include <QRandomGenerator>
 #include <QSettings>
 #include <QTcpServer>
@@ -27,6 +28,7 @@
 #include <app/main_window.hpp>
 #include <app/net_guard.hpp>
 #include <app/net_remote_settings.hpp>
+#include <app/theme.hpp>
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
 #include <engine/direct/direct_engine.hpp>
@@ -244,6 +246,18 @@ int main(int argc, char** argv) {
       // 验收截图②：点好友后＝对话面板展开
       CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
                                QStringLiteral("/layout-chat.png")));
+      // 验收截图②b：会话展开态·深色（实况补摄）——切暗抓一张后还原原模式。
+      // apply(qApp) 先行：set_mode 只在 applied_ 后才 push_to_app（测试环境
+      // 无人调 apply，缺这步令牌换了界面不刷，抓图仍是浅色）
+      {
+        auto& tm = memex::client::ThemeManager::instance();
+        tm.apply(qApp);
+        const QString prev_mode = tm.mode();
+        tm.set_mode(QStringLiteral("dark"));
+        CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
+                                 QStringLiteral("/layout-chat-dark.png")));
+        tm.set_mode(prev_mode); // 还原（持久面随原值，重跑与后续腿不受扰）
+      }
 
       // —— 需求批⑨ 查找：昵称/账号(设备 id)/IP 多字段，模糊+精确 ——
       // 模糊＝子串（dev- 前缀全命中）；精确＝整 id（dev-A2 只剩一台）；
@@ -265,6 +279,9 @@ int main(int argc, char** argv) {
           }
           return n;
         };
+        // 两台都到齐再数：宣告 3s 周期漂入列表，上面 target 等待只保证
+        // dev-B2 到场——无等待即计数＝竞态（负载下 dev-A2 项未到即闪失）
+        CHECK(wait_until([&] { return visible_count() >= 2; }, 8000));
         const int total = visible_count();
         CHECK(total >= 2); // dev-A2 + dev-B2
         search->setText(QStringLiteral("dev-"));
@@ -318,6 +335,27 @@ int main(int argc, char** argv) {
 
   // —— T4.5 常用联系人（主窗验收）：发送后 FAV 数据应含 bob，星标可切换 ——
   CHECK(wait_until([&] { return window.fav_json().contains("bob"); }, 8000));
+
+  // —— 好友列表屏实况（布局令列表态·协作侧）：协作会话已建立（bob 入
+  //    「协作会话·服务端归档」分组）后，经生产 ✕ 路径关回列表态——
+  //    「左菜单+好友列表」长方形面板（局域网设备＋协作会话两分组），抓
+  //    一张浅色进 docs 截图目录 ——
+  {
+    QPushButton* close_btn = nullptr;
+    for (QPushButton* b : window.findChildren<QPushButton*>()) {
+      if (b->toolTip().contains(QStringLiteral("关闭会话"))) {
+        close_btn = b;
+        break;
+      }
+    }
+    CHECK(close_btn != nullptr);
+    if (close_btn) {
+      close_btn->click();
+      CHECK(!window.chat_panel_visible());
+      CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
+                               QStringLiteral("/layout-friends.png")));
+    }
+  }
 
   // —— T4.5 自定义表情导入（A18「表情包可导入」；发送半边＝文件通道，
   //    direct_file 已验；面板走 import_emoji 缝，QFileDialog 面不进断言）——
