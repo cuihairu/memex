@@ -46,9 +46,20 @@ struct ThemeTokens {
   QColor selection;
   QColor input_bg;
 
+  // —— 排版与密度（需求批⑬：字体/密度成套）——颜色令牌之外的第二组
+  // 维度，QSS 模板以 %font_family%/%font_pt%/%radius%/%pad_sm%/%pad_md%
+  // 引用（as_map 只管颜色，此处单独替换）
+  QString font_family = QStringLiteral("Sans Serif");
+  int font_pt = 10;   // 基准字号
+  int radius = 8;     // 控件圆角 px
+  int pad_sm = 6;     // 控件纵向内边距 px
+  int pad_md = 12;    // 控件横向内边距 px
+
   QHash<QString, QColor> as_map() const;
-  // 全部令牌有效（alpha>0）——缺色即实现失误，测试守住
+  // 全部颜色令牌有效（alpha>0）——缺色即实现失误，测试守住
   bool is_complete() const;
+  // 排版与密度取值合法（字体非空、数值为正）——⑬ 批量生成面测试守住
+  bool is_typography_valid() const;
 };
 
 class ThemeManager : public QObject {
