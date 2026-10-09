@@ -237,9 +237,13 @@ int main() {
       b2.expect_pong_only(); // 重登后无补投帧（否证）
     }
 
-    s.close();
+    // 收尾序＝先停 io 线程再关库：io_thread 活着时 s.close() 会与断连链
+    // 的 unregister_online（store_.add_presence_event）并发 sqlite3_close
+    // ——sqlite 连接被使用中不可关闭（负载下 io_thread 被抢占即 SEGFAULT）。
+    // 与 test_read_presence/test_group 同序。
     io.stop();
     io_thread.join();
+    s.close();
   }
 
   if (g_failures == 0) {
