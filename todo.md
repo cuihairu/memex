@@ -192,6 +192,7 @@
    进展（2026-10-10 Android 深色补摄轮）：初始化向导与登录成功主界面深色实况补齐——`docs/src/public/screenshots/mobile-live-init-dark.png`／`mobile-live-main-dark.png`（源＝`apps/android/docs/walkthrough-18/19`，prototypes.md 两处引用改浅深成对），至此手机端四屏浅深配平。走查口径：android-34 模拟器（`test34`）＋系统 `cmd uimode night yes` 深色＋本机 serve 25360 新库（zhangsan 单账号），`pm clear` 后首启落初始化向导抓深色图，填 `10.0.2.2:25360` 连通校验过→登录 zhangsan（系统通知权限弹窗照实准了）→登录成功主界面抓深色图，两图逐张目检为真深色（暗底白字、品牌橙头保留）；无界面缺陷需登记，docs 站构建绿（5.4s）。
 - [ ] 组件清单（third_party/）：引入任何第三方组件即登记名称、版本、许可证、引入方式。
 - [ ] BUGS 跟踪：缺陷登记在仓库根 `BUGS.md`（2026-10-04 起），只登记不修，修一条关一条。
+- [ ] 测试夹具换口重试补齐（CI 竞态加固）：2026-10-10 CI 实录 group_vault_dialog Timeout 假红一桩（free_port 探活与 serve bind 之间文件面端口被抢→bind 失败→金库腿全级联烧满 ctest 120s，run 37964676008）——vault 夹具已照 approval 惯例补 3 次换口重试（本机复验 30+ 连绿；早期两次红聚在自压负载窗口未复现，疑负载相关留观）；尚有 15 个起文件面的测试夹具裸 free_port()（emoji_pack/brand_kit/task/group_server/group_memo/files_assistant/assist/group_tools/audit/brand_settings/office_map/group_ci/group_report/avatar_client/group_pack），遇同类假红逐个照补，或抽共享测试头一次收口。
 
 ## R23 文件存储与外网单向传输（2026-10-04 用户拍板，设计=docs/design/文件存储与外网单向传输.md）
 

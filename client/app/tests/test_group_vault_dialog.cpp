@@ -121,22 +121,50 @@ int main(int argc, char** argv) {
              QStringLiteral("alice"), QStringLiteral("--db"),
              db}) == 0);
 
-  const quint16 collab_port = free_port();
-  const quint16 files_port = free_port();
+  // 双端口显式 free_port() + 重试整个 server 启动（最多 3 次），
+  // 吸收 CI 共享 runner 竞态（free_port 探活与 serve bind 之间端口可被
+  // 抢占→文件面 bind 失败→金库腿全级联，2026-10-10 CI 实录一桩）；
+  // 与 test_approval_dialog 同构带重试，耗尽快速收场不烧满 ctest 时限。
+  quint16 collab_port = 0;
+  quint16 files_port = 0;
   QProcess server;
-  server.setProcessChannelMode(QProcess::ForwardedChannels);
-  server.start(server_bin,
-               {QStringLiteral("serve"), QStringLiteral("--db"), db,
-                QStringLiteral("--port"), QString::number(collab_port),
-                QStringLiteral("--webhook-port"), QStringLiteral("0"),
-                QStringLiteral("--files-port"), QString::number(files_port)});
-  CHECK(server.waitForStarted(5000));
-  CHECK(wait_until([&] {
-    QTcpServer probe;
-    return probe.listen(QHostAddress::LocalHost, files_port)
-               ? (probe.close(), false)
-               : true;
-  }, 8000));
+  bool server_ok = false;
+  for (int attempt = 0; attempt < 3 && !server_ok; ++attempt) {
+    collab_port = free_port();
+    files_port = free_port();
+    if (collab_port == 0 || files_port == 0) {
+      QThread::msleep(100);
+      continue;
+    }
+    server.setProcessChannelMode(QProcess::ForwardedChannels);
+    server.start(server_bin,
+                 {QStringLiteral("serve"), QStringLiteral("--db"), db,
+                  QStringLiteral("--port"), QString::number(collab_port),
+                  QStringLiteral("--webhook-port"), QStringLiteral("0"),
+                  QStringLiteral("--files-port"), QString::number(files_port)});
+    if (!server.waitForStarted(5000)) {
+      qCritical("FAIL server 启动超时（尝试 %d/3）", attempt + 1);
+      continue;
+    }
+    // 探活 files_port（占用＝bind 成功）
+    if (wait_until([&] {
+          QTcpServer probe;
+          return probe.listen(QHostAddress::LocalHost, files_port)
+                     ? (probe.close(), false)
+                     : true;
+        }, 15000)) {
+      server_ok = true;
+      break;
+    }
+    qCritical("FAIL files_port %u 探活超时（尝试 %d/3），重试", files_port,
+              attempt + 1);
+    server.kill();
+    server.waitForFinished(3000);
+  }
+  if (!server_ok) {
+    qCritical("FAIL server 启动重试耗尽");
+    return 1;
+  }
 
   // 建群（alice 建，拉 bob）：group_result 回执取 gid（顶层 connect）
   LocalStore store_ce;
