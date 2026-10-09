@@ -27,7 +27,9 @@
     },
     {
       "name": "aws-sdk-cpp",
-      "features": ["s3"],
+      "features": [
+        "s3"
+      ],
       "$comment": "R23-1 存储抽象层：S3 兼容对象存储客户端（server 侧 find_package 消费）。2024 起 vcpkg 老端口 aws-cpp-sdk-s3 并入本品 s3 feature，find_package(aws-cpp-sdk-s3) 兼容名仍由端口生成"
     }
   ],
@@ -44,7 +46,12 @@
             "xkb",
             "xkbcommon-x11"
           ]
-        },
+        }
+      ]
+    },
+    "crashpad": {
+      "description": "崩溃采集（client 专用；win/mac preset 只开本特性以避开 vcpkg 源码重建 Qt）",
+      "dependencies": [
         {
           "name": "crashpad",
           "$comment": "崩溃采集（Apache-2.0）：静态 client 库 + 独立 crashpad_handler 随产物；dump 只本地落盘（上报 URL 空＝不外发）"

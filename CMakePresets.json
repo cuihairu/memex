@@ -1,6 +1,10 @@
 {
   "version": 6,
-  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
@@ -20,7 +24,7 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
         "MEMEX_BUILD_CLIENT": "ON",
-        "VCPKG_MANIFEST_FEATURES": "client"
+        "VCPKG_MANIFEST_FEATURES": "client;crashpad"
       }
     },
     {
@@ -44,7 +48,7 @@
         "CMAKE_BUILD_TYPE": "Release",
         "MEMEX_BUILD_CLIENT": "ON",
         "MEMEX_BUILD_TESTS": "OFF",
-        "VCPKG_MANIFEST_FEATURES": "client"
+        "VCPKG_MANIFEST_FEATURES": "client;crashpad"
       }
     },
     {
@@ -55,7 +59,7 @@
       "cacheVariables": {
         "MEMEX_BUILD_SERVER": "OFF",
         "VCPKG_TARGET_TRIPLET": "x64-windows",
-        "VCPKG_MANIFEST_FEATURES": "",
+        "VCPKG_MANIFEST_FEATURES": "crashpad",
         "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed-win"
       }
     },
@@ -66,7 +70,7 @@
       "binaryDir": "${sourceDir}/build-client-mac",
       "cacheVariables": {
         "VCPKG_TARGET_TRIPLET": "arm64-osx",
-        "VCPKG_MANIFEST_FEATURES": "",
+        "VCPKG_MANIFEST_FEATURES": "crashpad",
         "VCPKG_INSTALLED_DIR": "${sourceDir}/vcpkg_installed-mac"
       }
     },
@@ -88,30 +92,55 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "MEMEX_BUILD_CLIENT": "ON",
-        "VCPKG_MANIFEST_FEATURES": "client",
+        "VCPKG_MANIFEST_FEATURES": "client;crashpad",
         "CMAKE_CXX_FLAGS": "--coverage"
       }
     }
   ],
   "buildPresets": [
-    { "name": "dev", "configurePreset": "dev" },
-    { "name": "server-release", "configurePreset": "server-release" },
-    { "name": "client-release", "configurePreset": "client-release" },
-    { "name": "client-release-win", "configurePreset": "client-release-win" },
-    { "name": "client-release-mac", "configurePreset": "client-release-mac" },
-    { "name": "server-release-mac", "configurePreset": "server-release-mac" },
-    { "name": "ci", "configurePreset": "ci" }
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    },
+    {
+      "name": "server-release",
+      "configurePreset": "server-release"
+    },
+    {
+      "name": "client-release",
+      "configurePreset": "client-release"
+    },
+    {
+      "name": "client-release-win",
+      "configurePreset": "client-release-win"
+    },
+    {
+      "name": "client-release-mac",
+      "configurePreset": "client-release-mac"
+    },
+    {
+      "name": "server-release-mac",
+      "configurePreset": "server-release-mac"
+    },
+    {
+      "name": "ci",
+      "configurePreset": "ci"
+    }
   ],
   "testPresets": [
     {
       "name": "dev",
       "configurePreset": "dev",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "ci",
       "configurePreset": "ci",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }
