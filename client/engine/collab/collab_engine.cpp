@@ -681,7 +681,11 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
                               {"department_path", m.department_path()},
                               {"manager", m.manager()},
                               {"role", m.role()},
-                              {"signature", m.signature()}});
+                              {"signature", m.signature()},
+                              // 需求批⑩ 在线时长：滚动窗并集秒数（界面侧展示）
+                              {"online_day_s", m.online_day_s()},
+                              {"online_week_s", m.online_week_s()},
+                              {"online_month_s", m.online_month_s()}});
     }
     j["policies"] = nlohmann::json::array();
     for (const auto& p : msg.org_data().policies()) {

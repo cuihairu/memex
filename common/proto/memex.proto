@@ -147,6 +147,12 @@ message OrgMember {
   string manager = 5;         // 直属上级账号（空=无；每人至多一名）
   string role = 6;            // 角色（admin／member）
   string signature = 7;       // 个性签名（需求批⑪；空=未设，上限 120 字）
+  // 在线时长（需求批⑩）：滚动 24h/7d/30d 窗内的在线秒数（查询时现算）。
+  // 语义=「任一端在线即在线」：多端并行区间取并集，不叠加；
+  // 服务端重启会把崩溃期悬空的在线段截断到重启点。
+  int64 online_day_s = 8;     // 滚动 24 小时窗
+  int64 online_week_s = 9;    // 滚动 7×24 小时窗
+  int64 online_month_s = 10;  // 滚动 30×24 小时窗
 }
 
 // 策略开关（T3.4）：按部门配置、全局兜底（department_path 空=全局默认）。

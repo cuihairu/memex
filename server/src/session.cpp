@@ -152,6 +152,21 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       om->set_manager(m.manager);
       om->set_role(m.role);
       om->set_signature(m.signature);
+      // 需求批⑩ 在线时长：滚动 24h/7d/30d 窗并集秒数随成员下发。组织
+      // 架构=内网量级，查询时现算可接受（流水表只有登录/登出量级的行）。
+      const auto& store = server_.store();
+      const std::int64_t now = now_ms();
+      om->set_online_day_s(
+          store.online_ms_between(m.account, now - 24LL * 3600 * 1000, now) /
+          1000);
+      om->set_online_week_s(
+          store.online_ms_between(m.account, now - 7LL * 24 * 3600 * 1000,
+                                  now) /
+          1000);
+      om->set_online_month_s(
+          store.online_ms_between(m.account, now - 30LL * 24 * 3600 * 1000,
+                                  now) /
+          1000);
     }
     // T3.4 策略开关随组织架构一并下发（客户端按本人部门解析生效行）
     for (const auto& p : server_.store().policy_list()) {

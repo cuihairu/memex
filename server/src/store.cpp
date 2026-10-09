@@ -94,6 +94,15 @@ bool ServerStore::ensure_schema() {
       "  ts_ms INTEGER NOT NULL);"
       "CREATE INDEX IF NOT EXISTS idx_login_records_account"
       "  ON login_records(account, ts_ms);"
+      // 需求批⑩ 在线时长：上下线事件流水（online/offline 配对扫掠求
+      // 并集时长，多端并行不叠加）
+      "CREATE TABLE IF NOT EXISTS presence_events ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  account TEXT NOT NULL,"
+      "  event TEXT NOT NULL,"
+      "  ts_ms INTEGER NOT NULL);"
+      "CREATE INDEX IF NOT EXISTS idx_presence_events_account"
+      "  ON presence_events(account, id);"
       // T3.3 设备台账：首登建档、责任人登记、启停（停用拒绝登录）
       "CREATE TABLE IF NOT EXISTS devices ("
       "  fingerprint TEXT PRIMARY KEY,"
@@ -1305,6 +1314,91 @@ std::vector<LoginRecord> ServerStore::login_records(const std::string& account,
   }
   sqlite3_finalize(st);
   return out;
+}
+
+// —— 需求批⑩ 在线时长：上下线事件流水 ——
+
+bool ServerStore::add_presence_event(const std::string& account,
+                                     const std::string& event,
+                                     std::int64_t ts_ms) {
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "INSERT INTO presence_events (account, event, ts_ms)"
+                         " VALUES (?, ?, ?);",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, event.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::int64_t ServerStore::online_ms_between(const std::string& account,
+                                            std::int64_t from_ms,
+                                            std::int64_t to_ms) const {
+  std::int64_t sum = 0;
+  if (to_ms <= from_ms) return sum;
+  // 全量事件按插入序（id）取——登记点单调递增，等价时间序
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT event, ts_ms FROM presence_events"
+                         " WHERE account = ? ORDER BY id ASC;",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return sum;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  // 深度扫掠：depth 0→正开段（起点=max(事件 ts, from)）、正→0 闭段
+  //（终点=min(事件 ts, to)）；depth>0 的 offline 只减一（多端并行去重），
+  // depth==0 的 offline 是脏数据直接忽略。末笔 online 未闭→计到窗尾。
+  std::int64_t depth = 0;
+  std::int64_t open_since = -1;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    const char* ev =
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    const std::int64_t ts = sqlite3_column_int64(st, 1);
+    const bool was_open = depth > 0;
+    if (ev && std::string(ev) == "online") {
+      ++depth;
+    } else if (depth > 0) {
+      --depth;
+    }
+    if (!was_open && depth > 0) {
+      if (ts < to_ms) open_since = std::max(ts, from_ms);
+    } else if (was_open && depth == 0) {
+      if (ts > from_ms && open_since >= 0) {
+        sum += std::min(ts, to_ms) - open_since;
+      }
+      open_since = -1;
+    }
+  }
+  if (depth > 0 && open_since >= 0) sum += to_ms - open_since;
+  sqlite3_finalize(st);
+  return sum;
+}
+
+void ServerStore::trim_dangling_online(std::int64_t ts_ms) {
+  // 末态 depth>0 的账号：online 计数多于 offline（断电/崩溃丢掉闭笔）
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT account, SUM(CASE WHEN event = 'online'"
+                         " THEN 1 ELSE -1 END) AS depth"
+                         " FROM presence_events GROUP BY account"
+                         " HAVING depth > 0;",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return;
+  }
+  std::vector<std::string> dangling;
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    dangling.emplace_back(
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 0)));
+  }
+  sqlite3_finalize(st);
+  for (const auto& acct : dangling) {
+    add_presence_event(acct, "offline", ts_ms);
+  }
 }
 
 // —— T3.3 设备台账 ——

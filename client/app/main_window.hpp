@@ -185,6 +185,9 @@ public:
   void apply_signature(const QString& signature);
   // 本人当前签名（org 数据缓存；空=未设/未登录）
   QString own_signature() const;
+  // —— 需求批⑩ 在线时长（验收面）——
+  // 本人在线时长展示串（org 数据缓存；空=未登录/数据未到）
+  QString own_online() const;
   // —— BUG-004 托盘激活（验收面）——
   // 单击/双击托盘 → 激活主界面（右键 Context 留给菜单，不接线）；
   // 测试用裸 QSystemTrayIcon 复用生产接线（发 activated 信号即走同一路径）。
@@ -325,6 +328,9 @@ private:
   // 成员签名缓存（需求批⑪）：账号 → 个性签名（org 数据到达即刷新；
   // 会话列表悬浮 tooltip 数据源，空=未设）
   QHash<QString, QString> member_signatures_;
+  // 成员在线时长缓存（需求批⑩）：账号 → 已格式化展示串（滚动 24h/7d/30d
+  // 并集时长，org 数据到达即刷新；会话列表 tooltip 与个人资料对话框共用）
+  QHash<QString, QString> member_online_;
   bool org_dialog_pending_{false}; // 已请求组织架构、等待弹窗
   bool anonymous_allowed_{true};   // T3.4 生效策略：允许免登录使用（默认宽松）
   bool cross_state_allowed_{true}; // T3.4 生效策略：允许与未登录设备通信

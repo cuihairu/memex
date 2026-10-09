@@ -227,6 +227,12 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
     std::cerr << "本地库打开失败：" << db_path << "\n";
     return 1;
   }
+  // 需求批⑩ 在线时长自愈：上次进程退出若非全部干净登出（断电/崩溃），
+  // 悬空的 online 段统一截断到本次启动点——关机期不计为在线。
+  store.trim_dangling_online(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
 
   try {
     asio::io_context io;

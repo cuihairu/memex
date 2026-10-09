@@ -296,6 +296,15 @@ int main(int argc, char** argv) {
     return window.own_signature() == QStringLiteral("今天也要专注交付");
   }, 8000));
 
+  // —— 需求批⑩ 在线时长：org 数据带出滚动窗并集秒数（在线中即累加），
+  //    缓存格式化串齐三窗（持久面断言——org 重拉后缓存即有，不依赖瞬态）——
+  CHECK(wait_until([&] {
+    return window.own_online().contains(QStringLiteral("在线时长"));
+  }, 8000));
+  CHECK(window.own_online().contains(QStringLiteral("今日")));
+  CHECK(window.own_online().contains(QStringLiteral("本周")));
+  CHECK(window.own_online().contains(QStringLiteral("本月")));
+
   // —— 协作会话：提示条切换为归档口径 ——
   window.open_collab_peer(QStringLiteral("bob"));
   CHECK(window.banner_text().contains(QStringLiteral("全量归档")));

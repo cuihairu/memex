@@ -165,6 +165,42 @@ int main() {
   }
   CHECK(sig_in_list);
 
+  // —— 库级：在线时长事件流水（需求批⑩）——online/offline 配对扫掠求
+  // 并集时长：多端并行不叠加、窗越界端点截断、悬空 online 计到窗尾、
+  // trim_dangling_online 启动自愈（补 offline 截断且幂等）
+  {
+    memex::server::ServerStore s;
+    CHECK(s.open(":memory:"));
+    CHECK(s.create_account("u1", "p", "u1"));
+    CHECK(s.create_account("u2", "p", "u2"));
+    CHECK(s.create_account("u3", "p", "u3"));
+    // 常规配对：在线段 [1000, 60000]，窗端点截断
+    CHECK(s.add_presence_event("u1", "online", 1000));
+    CHECK(s.add_presence_event("u1", "offline", 60000));
+    CHECK(s.online_ms_between("u1", 0, 120000) == 59000);
+    CHECK(s.online_ms_between("u1", 10000, 120000) == 50000); // 起点截断
+    CHECK(s.online_ms_between("u1", 70000, 120000) == 0);     // 窗在段后
+    CHECK(s.online_ms_between("u1", 0, 500) == 0);            // 窗在段前
+    // 并发双端：两台设备并行区间取并集 [1000, 60000]，计一次不叠加
+    CHECK(s.add_presence_event("u3", "online", 1000));
+    CHECK(s.add_presence_event("u3", "online", 2000));
+    CHECK(s.add_presence_event("u3", "offline", 30000));
+    CHECK(s.add_presence_event("u3", "offline", 60000));
+    CHECK(s.online_ms_between("u3", 0, 120000) == 59000);
+    // 悬空 online（断电/崩溃丢闭笔）：计到窗尾；trim 补 offline 截断
+    CHECK(s.add_presence_event("u2", "online", 5000));
+    CHECK(s.online_ms_between("u2", 0, 65000) == 60000);
+    s.trim_dangling_online(70000);
+    CHECK(s.online_ms_between("u2", 0, 70000) == 65000);
+    CHECK(s.online_ms_between("u2", 0, 80000) == 65000); // 闭段后不再计
+    // trim 幂等：再跑一遍无新增，配对完整的账号不受影响
+    s.trim_dangling_online(75000);
+    CHECK(s.online_ms_between("u1", 0, 80000) == 59000);
+    CHECK(s.online_ms_between("u3", 0, 80000) == 59000);
+    CHECK(s.online_ms_between("u2", 0, 80000) == 65000);
+    s.close();
+  }
+
   // —— 库级：批量导入（错误行校验拒绝）——
   std::vector<memex::server::OrgImportRow> rows;
   auto make_row = [&](int line_no, const std::string& a, const std::string& dept,
@@ -344,6 +380,28 @@ int main() {
       }
     }
     CHECK(sig_out);
+
+    // —— 需求批⑩：在线时长协议级——登录即入流水（在线中末笔 online
+    // 计到查询时点）；ORG_QUERY 现算滚动窗并集秒数随成员下发；从未登录
+    // 的成员三窗皆零 ——
+    std::this_thread::sleep_for(std::chrono::milliseconds(1200));
+    c.send(q);
+    const auto data3 = c.read();
+    CHECK(data3.type() == memex::protocol::v1::ORG_DATA);
+    bool alice_online = false, dave_zero = false;
+    for (const auto& m : data3.org_data().members()) {
+      if (m.account() == "alice") {
+        alice_online = m.online_day_s() >= 1 &&
+                       m.online_week_s() >= m.online_day_s() &&
+                       m.online_month_s() >= m.online_week_s();
+      }
+      if (m.account() == "dave") {
+        dave_zero = m.online_day_s() == 0 && m.online_week_s() == 0 &&
+                    m.online_month_s() == 0;
+      }
+    }
+    CHECK(alice_online); // 登录时长≥1s 且三窗单调包含
+    CHECK(dave_zero);
 
     io.stop();
     io_thread.join();

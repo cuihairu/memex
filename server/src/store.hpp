@@ -259,6 +259,26 @@ public:
                                          const std::string& fp_prefix = "",
                                          int limit = 200);
 
+  // —— 在线时长（需求批⑩）：上下线事件流水 ——
+  // 事件溯源式：在线区间由 online/offline 配对扫掠得出。聚合语义是
+  // 「任一端在线即在线」——并发多端的并行区间取并集计一次，不叠加。
+  // 登记点：register_online 记 'online'（顶替被踢的旧会话补 'offline'）、
+  // unregister_online 记 'offline'（登出与意外断开的唯一真实离线路径）。
+  bool add_presence_event(const std::string& account, const std::string& event,
+                          std::int64_t ts_ms);
+
+  // [from_ms, to_ms] 窗内的在线毫秒数：按时间序全量扫该账号事件做深度
+  // 计数（online +1 / offline -1），depth 从 0 变正即开段、归零即闭段；
+  // 窗起点前已开的段按计数延续；末笔 online 到窗尾仍未闭→计到窗尾
+  // （调用方保证 ts_ms 递增即可，同毫秒按插入序）。
+  std::int64_t online_ms_between(const std::string& account,
+                                 std::int64_t from_ms, std::int64_t to_ms) const;
+
+  // 服务端启动自愈：末态 depth>0（悬空 online，断电/崩溃所致）的账号
+  // 统一补一笔 offline（ts=start_ms）——把崩溃期的在线段截断到重启点，
+  // 防止关机期被持续计为在线。幂等：重启多次只补到当前笔数。
+  void trim_dangling_online(std::int64_t ts_ms);
+
   // —— 平台-2 Identity 模型补全 ——
   // Credential 独立：口令凭据迁出 accounts 行（建号双写、老库 open 时
   // 幂等迁移）；token/certificate/sso/device 类型随 schema 预留，当前

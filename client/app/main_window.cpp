@@ -257,6 +257,16 @@ QString day_label(qint64 ms) {
                       QStringLiteral("yyyy-MM-dd"))
                 : QStringLiteral("…");
 }
+// 需求批⑩ 在线时长秒数展示：服务端按秒计（滚动窗并集），四舍五入到
+// 分钟级可读量——秒级展示太抖（ORG_QUERY 每次现算都在涨）。
+QString format_online_s(qint64 seconds) {
+  if (seconds < 60) return QStringLiteral("不足 1 分钟");
+  const qint64 h = seconds / 3600;
+  const qint64 m = (seconds % 3600) / 60;
+  if (h <= 0) return QStringLiteral("%1 分钟").arg(m);
+  if (m <= 0) return QStringLiteral("%1 小时").arg(h);
+  return QStringLiteral("%1 小时 %2 分").arg(h).arg(m);
+}
 
 } // namespace
 
@@ -1132,6 +1142,8 @@ void MainWindow::wire_collab() {
             last_org_json_ = org_json;
             // 需求批⑪：成员签名入缓存（会话列表悬浮 tooltip 数据源）
             member_signatures_.clear();
+            // 需求批⑩：成员在线时长入缓存（tooltip 与个人资料展示面）
+            member_online_.clear();
             const nlohmann::json j = nlohmann::json::parse(
                 org_json.toStdString(), nullptr, false);
             if (!j.is_discarded() && j.contains("members")) {
@@ -1142,6 +1154,12 @@ void MainWindow::wire_collab() {
                   member_signatures_.insert(
                       a, QString::fromStdString(
                              m.value("signature", std::string{})));
+                  member_online_.insert(
+                      a, QStringLiteral("在线时长：今日 %1 · 本周 %2 · 本月 %3")
+                             .arg(format_online_s(m.value("online_day_s", 0)),
+                                  format_online_s(m.value("online_week_s", 0)),
+                                  format_online_s(
+                                      m.value("online_month_s", 0))));
                 }
               }
             }
@@ -3128,10 +3146,17 @@ void MainWindow::refresh_devices() {
                     QStringList{account, star.trimmed()}.join(
                         QLatin1Char('\n'))); // ⑨：账号精确/模糊皆命中
       // 需求批⑪：签名悬浮可见（空=未设不显）
+      QStringList tips;
       const QString sig = member_signatures_.value(account);
       if (!sig.isEmpty()) {
-        item->setToolTip(QStringLiteral("个性签名：%1").arg(sig));
+        tips << QStringLiteral("个性签名：%1").arg(sig);
       }
+      // 需求批⑩：在线时长悬浮可见（滚动 24h/7d/30d 并集时长）
+      const QString dur = member_online_.value(account);
+      if (!dur.isEmpty()) {
+        tips << dur;
+      }
+      if (!tips.isEmpty()) item->setToolTip(tips.join(QLatin1Char('\n')));
     }
   }
 
@@ -3780,6 +3805,11 @@ void MainWindow::show_profile_dialog() {
   auto* hint = new QLabel(
       QStringLiteral("签名在会话列表悬浮可见；留空保存＝清除。"), &dlg);
   layout->addWidget(hint);
+  // 需求批⑩：我的在线时长（滚动 24h/7d/30d 并集；org 数据到达即有值）
+  const QString my_online = member_online_.value(collab_engine_.account());
+  if (!my_online.isEmpty()) {
+    layout->addWidget(new QLabel(my_online, &dlg));
+  }
   auto* edit = new QLineEdit(&dlg);
   edit->setMaxLength(120); // 服务端同口径长度门
   edit->setText(member_signatures_.value(collab_engine_.account()));
@@ -3809,6 +3839,11 @@ void MainWindow::apply_signature(const QString& signature) {
 
 QString MainWindow::own_signature() const {
   return member_signatures_.value(collab_engine_.account());
+}
+
+// 需求批⑩：本人在线时长展示串（org 数据缓存；tooltip/资料对话框同源）
+QString MainWindow::own_online() const {
+  return member_online_.value(collab_engine_.account());
 }
 
 } // namespace memex::client

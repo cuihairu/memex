@@ -129,15 +129,23 @@ std::shared_ptr<Session> CollabServer::register_online(
   std::shared_ptr<Session> kicked;
   auto& by_kind = online_[account];
   const std::string new_device = session->device_name();
+  const std::int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::system_clock::now()
+                                   .time_since_epoch())
+                               .count();
   if (const auto it = by_kind.find(device_kind); it != by_kind.end()) {
     kicked = it->second;
     // 先顶替再踢：即使旧会话互踢下发失败，在线表也已指向新会话
     it->second = std::move(session);
+    // 需求批⑩：顶替＝被踢会话真实下线（它的断开清理走不到
+    // unregister 的当前会话守卫）——先记旧端 offline 再记新端 online
+    store_.add_presence_event(account, "offline", now);
     kicked->kick("单点在线：同账号在另一台" + kind_name(device_kind) + "登录",
                  new_device);
   } else {
     by_kind.emplace(device_kind, std::move(session));
   }
+  store_.add_presence_event(account, "online", now);
   broadcast_presence(); // 在线表变化即推送（新登录者也收到，含自己）
   return kicked;
 }
@@ -151,8 +159,14 @@ void CollabServer::unregister_online(const std::string& account,
   if (kit != it->second.end() && kit->second.get() == session) {
     it->second.erase(kit);
   } else {
-    return; // 不是当前在线会话——无变化，不推送
+    return; // 不是当前在线会话——无变化，不推送（被顶替的旧会话已记过）
   }
+  // 需求批⑩：登出与意外断开的唯一真实离线路径——记一笔 offline
+  store_.add_presence_event(account, "offline",
+                            std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now()
+                                    .time_since_epoch())
+                                .count());
   if (it->second.empty()) online_.erase(it);
   broadcast_presence(); // 登出／互踢旧会话退出／意外断开即推送
 }
