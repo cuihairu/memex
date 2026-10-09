@@ -9,8 +9,8 @@
 <p align="center">
   <a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov coverage" /></a>
-  <a href="https://cuihairu.github.io/memex/"><img src="https://img.shields.io/website?url=https%3A%2F%2Fcuihairu.github.io%2Fmemex%2F&up_message=%E5%9C%A8%E7%BA%BF&down_message=%E7%A6%BB%E7%BA%BF&label=%E6%96%87%E6%A1%A3%E7%AB%99&color=e16531" alt="Documentation site" /></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%E5%9B%BD%E4%BA%A7%20UOS%2F%E9%BA%92%E9%BA%9F%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-e16531" alt="Platform support" />
+  <a href="https://cuihairu.github.io/memex/"><img src="https://img.shields.io/website?url=https%3A%2F%2Fcuihairu.github.io%2Fmemex%2F&up_message=online&down_message=offline&label=docs&color=e16531" alt="Documentation site" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20(UOS%20%2F%20Kylin)%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-e16531" alt="Platform support" />
   <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
 </p>
