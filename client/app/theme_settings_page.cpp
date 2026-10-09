@@ -1,7 +1,12 @@
 #include "theme_settings_page.hpp"
 
+#include <QCheckBox>
+#include <QColorDialog>
+#include <QGridLayout>
+#include <QGroupBox>
 #include <QLabel>
 #include <QListWidget>
+#include <QPushButton>
 #include <QVBoxLayout>
 
 #include "theme.hpp"
@@ -10,7 +15,7 @@ namespace memex::client {
 namespace {
 
 // 模式名 → 界面文案（跟随系统排最前；⑬ 默认 20 套名字本身即可读中文，
-// 原样展示；未注册的扩展主题才加注）
+// 原样展示；自定义槽与未注册的扩展主题加注）
 QString mode_label(const QString& mode) {
   if (mode == QLatin1String(ThemeManager::kFollowSystem)) {
     return QStringLiteral("跟随系统");
@@ -20,6 +25,9 @@ QString mode_label(const QString& mode) {
   }
   if (mode == QLatin1String(ThemeManager::kDark)) {
     return QStringLiteral("暗色");
+  }
+  if (mode == ThemeManager::customThemeName()) {
+    return QStringLiteral("自定义（改色）");
   }
   if (ThemeManager::builtin_themes().contains(mode)) return mode;
   return QStringLiteral("%1（扩展主题）").arg(mode);
@@ -33,6 +41,20 @@ QString theme_label(const QString& theme) {
     return QStringLiteral("暗色");
   }
   return theme;
+}
+
+// ⑭ 放行令牌的界面文案（色钮 tooltip 与测试断言共用口径）
+QString token_label(const QString& token) {
+  static const QHash<QString, QString> labels = {
+      {QStringLiteral("surface"), QStringLiteral("窗口底色")},
+      {QStringLiteral("surface_alt"), QStringLiteral("侧栏／列表底")},
+      {QStringLiteral("surface_raised"), QStringLiteral("卡片／面板底")},
+      {QStringLiteral("border"), QStringLiteral("边框")},
+      {QStringLiteral("text"), QStringLiteral("主文字")},
+      {QStringLiteral("text_muted"), QStringLiteral("次要文字")},
+      {QStringLiteral("chat_bg"), QStringLiteral("聊天区底")},
+      {QStringLiteral("input_bg"), QStringLiteral("输入框底")}};
+  return labels.value(token);
 }
 
 }  // namespace
@@ -52,8 +74,8 @@ ThemeSettingsPage::ThemeSettingsPage(ThemeManager* manager, QWidget* parent)
   effective_label_->setObjectName(QStringLiteral("themeSettingsEffective"));
   layout->addWidget(effective_label_);
 
-  // 主题列表：23+ 项（跟随系统＋内置 22＋扩展主题），radio 群排不下，
-  // ⑬ 起改 QListWidget；item 的 UserRole 携带模式名
+  // 主题列表：24+ 项（跟随系统＋内置 22＋自定义槽＋扩展主题），radio 群
+  // 排不下，⑬ 起改 QListWidget；item 的 UserRole 携带模式名
   list_ = new QListWidget(this);
   list_->setObjectName(QStringLiteral("themeModes"));
   for (const QString& mode : manager_->modes()) {
@@ -67,6 +89,57 @@ ThemeSettingsPage::ThemeSettingsPage(ThemeManager* manager, QWidget* parent)
   swatch_->setObjectName(QStringLiteral("themeSettingsSwatch"));
   swatch_->setMinimumHeight(18);
   layout->addWidget(swatch_);
+
+  // —— ⑭ 面板改色：8 枚中性令牌（品牌橙与语义族锁死不放行）——
+  auto* color_box = new QGroupBox(QStringLiteral("面板改色（自定义）"), this);
+  color_box->setObjectName(QStringLiteral("customColorsBox"));
+  auto* grid = new QGridLayout(color_box);
+  grid->setContentsMargins(8, 8, 8, 8);
+  grid->setSpacing(6);
+  const QStringList tokens = ThemeManager::customizable_tokens();
+  for (int i = 0; i < tokens.size(); ++i) {
+    const QString& token = tokens.at(i);
+    auto* btn = new QPushButton(this);
+    btn->setObjectName(QStringLiteral("customColor_%1").arg(token));
+    btn->setToolTip(
+        QStringLiteral("%1（点击改色；品牌色与状态色不可改）")
+            .arg(token_label(token)));
+    btn->setMinimumSize(48, 22);
+    // 点色钮弹 QColorDialog；选定即走 apply_custom_color（与测试同路径）
+    connect(btn, &QPushButton::clicked, this, [this, token] {
+      const QColor initial = manager_->tokens().as_map().value(token);
+      const QColor picked =
+          QColorDialog::getColor(initial, this, token_label(token));
+      if (picked.isValid()) apply_custom_color(token, picked);
+    });
+    color_buttons_.insert(token, btn);
+    grid->addWidget(btn, i / 4, i % 4);
+  }
+  reset_colors_ = new QPushButton(QStringLiteral("恢复默认"), this);
+  reset_colors_->setObjectName(QStringLiteral("resetCustomColors"));
+  // 「恢复默认」＝清覆盖层并回到基线内置主题（ThemeManager 同路径）
+  connect(reset_colors_, &QPushButton::clicked, this, [this] {
+    manager_->clear_custom_overrides();
+    sync_from_manager();
+  });
+  grid->addWidget(reset_colors_, 2, 0, 1, 4);
+  layout->addWidget(color_box);
+
+  // —— ⑭ 毛玻璃特效：全局单开关（默认关；平台不支持自动降级不透明）——
+  auto* effect_box = new QGroupBox(QStringLiteral("特效"), this);
+  effect_box->setObjectName(QStringLiteral("effectsBox"));
+  auto* effect_layout = new QVBoxLayout(effect_box);
+  frosted_check_ = new QCheckBox(QStringLiteral("毛玻璃特效（Windows 亚克力／Mica）"),
+                                 this);
+  frosted_check_->setObjectName(QStringLiteral("frostedEffectCheck"));
+  // 复选框勾选走 set_frosted（与测试程序化驱动同路径）
+  connect(frosted_check_, &QCheckBox::toggled, this,
+          [this](bool on) { set_frosted(on); });
+  effect_layout->addWidget(frosted_check_);
+  frosted_hint_ = new QLabel(this);
+  frosted_hint_->setObjectName(QStringLiteral("frostedEffectHint"));
+  effect_layout->addWidget(frosted_hint_);
+  layout->addWidget(effect_box);
 
   layout->addStretch(1);
 
@@ -96,6 +169,43 @@ void ThemeSettingsPage::sync_from_manager() {
   swatch_->setStyleSheet(
       QStringLiteral("background: %1; border-radius: 4px;")
           .arg(manager_->tokens().brand.name()));
+  // ⑭ 色钮显示当前生效色（基线或覆盖后的值），恢复默认可用性随覆盖层
+  const QHash<QString, QColor> live = manager_->tokens().as_map();
+  for (auto it = color_buttons_.constBegin(); it != color_buttons_.constEnd();
+       ++it) {
+    it.value()->setStyleSheet(
+        QStringLiteral("background: %1; border: 1px solid %2;")
+            .arg(live.value(it.key()).name())
+            .arg(manager_->tokens().border.name()));
+  }
+  reset_colors_->setEnabled(manager_->has_custom_overrides());
+  // ⑭ 毛玻璃：勾选态回灌（blockSignals 防 toggled 回灌 set_frosted）；
+  // 不支持平台的降级提示走生效态而非开关态
+  frosted_check_->blockSignals(true);
+  frosted_check_->setChecked(manager_->frosted_effect_enabled());
+  frosted_check_->blockSignals(false);
+  if (!manager_->frosted_effect_enabled()) {
+    frosted_hint_->setText(
+        QStringLiteral("默认关闭；开启后需系统支持（Windows 11）"));
+  } else if (manager_->frosted_effect_active()) {
+    frosted_hint_->setText(QStringLiteral("已启用"));
+  } else {
+    frosted_hint_->setText(
+        QStringLiteral("当前系统不支持，已降级为不透明背景"));
+  }
+}
+
+bool ThemeSettingsPage::apply_custom_color(const QString& token,
+                                           const QColor& color) {
+  const bool ok = manager_->set_custom_override(token, color);
+  sync_from_manager();
+  return ok;
+}
+
+bool ThemeSettingsPage::set_frosted(bool enabled) {
+  const bool active = manager_->set_frosted_effect_enabled(enabled);
+  sync_from_manager();
+  return active;
 }
 
 bool ThemeSettingsPage::select_mode(const QString& mode) {
