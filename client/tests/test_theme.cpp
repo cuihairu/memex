@@ -9,9 +9,15 @@
 //    选择持久化往返、离屏渲染像素差（另可 MEMEX_THEME_SHOT_DIR 落实截）；
 // ⑦ 应用级落地：调色板色与令牌一致、系统亮暗变化仅在跟随模式下重应用；
 // ⑧ 设置页交互：列表点选暗色／⑬ 默认主题／跟随系统即时生效并回灌选中态；
+//    ⑭ 面板改色（改色→自定义槽＋恢复默认）与毛玻璃开关（降级提示）；
 // ⑨ 主窗接线：控件样式里的颜色全部来自令牌（零字面量）、主题切换后
-//    控件样式与聊天区富文本同步重渲、「设置 → 主题…」菜单入口存在。
+//    控件样式与聊天区富文本同步重渲、「设置 → 主题…」菜单入口存在；
+// ⑩ 自定义主题（⑭）：8 枚中性令牌放行面、品牌／语义拒绝、基线锁定＋
+//    自动切槽、重启往返、恢复默认回基线、覆盖层丢失回落、纵深防御；
+// ⑪ 毛玻璃特效（⑭）：默认关、开↔关落盘往返、不支持平台降级（生效态恒
+//    false）、支持腿探针注入、apply 后不崩。
 #include <QApplication>
+#include <QCheckBox>
 #include <QDir>
 #include <QLabel>
 #include <QListWidget>
@@ -445,7 +451,7 @@ void test_apply_to_app(QApplication& app) {
   app.setStyleSheet(app_qss_before);
 }
 
-// —— ⑧ 设置页交互：列表点选即时生效并回灌选中态 ——
+// —— ⑧ 设置页交互：列表点选即时生效并回灌选中态；⑭ 面板改色与特效开关 ——
 void test_settings_page(QApplication& app) {
   ThemeManager manager;
   manager.set_system_dark_probe([] { return false; });
@@ -454,10 +460,11 @@ void test_settings_page(QApplication& app) {
   ThemeSettingsPage page(&manager);
   CHECK(page.effective_theme() == QString::fromUtf8(ThemeManager::kLight));
 
-  // ⑬ 起 23+ 项（跟随系统＋内置 22）走 QListWidget，item UserRole 携带模式名
+  // ⑬ 起 23+ 项（跟随系统＋内置 22＋⑭ 自定义槽）走 QListWidget，
+  // item UserRole 携带模式名
   auto* list = page.findChild<QListWidget*>(QStringLiteral("themeModes"));
   CHECK(list != nullptr);
-  CHECK(list->count() == 23);
+  CHECK(list->count() == 24);
   const auto row_of = [&](QListWidget* widget, const QString& mode) {
     for (int i = 0; i < widget->count(); ++i) {
       if (widget->item(i)->data(Qt::UserRole).toString() == mode) return i;
@@ -517,6 +524,44 @@ void test_settings_page(QApplication& app) {
   CHECK(page2.select_mode(QStringLiteral("deepsea")));
   CHECK(manager.effective_theme() == QStringLiteral("deepsea"));
   CHECK(!page2.select_mode(QStringLiteral("nope")));
+
+  // —— ⑭ 面板改色（UI 路径）：改色→自动切自定义槽＋恢复默认回基线 ——
+  auto* reset_btn =
+      page2.findChild<QPushButton*>(QStringLiteral("resetCustomColors"));
+  CHECK(reset_btn != nullptr);
+  CHECK(reset_btn && !reset_btn->isEnabled());  // 无覆盖＝不可用
+  CHECK(page2.apply_custom_color(QStringLiteral("surface"),
+                                 QColor(QStringLiteral("#112233"))));
+  CHECK(manager.mode() == ThemeManager::customThemeName());
+  CHECK(manager.tokens().surface.name() == QStringLiteral("#112233"));
+  CHECK(reset_btn && reset_btn->isEnabled());  // 有覆盖＝可用
+  // 品牌／语义令牌不放行（UI 同径拒绝）
+  CHECK(!page2.apply_custom_color(QStringLiteral("brand"),
+                                  QColor(QStringLiteral("#ff0000"))));
+  CHECK(!page2.apply_custom_color(QStringLiteral("success"),
+                                  QColor(QStringLiteral("#00ff00"))));
+  // 恢复默认：回基线（deepsea 改色前所在）……实际基线＝首个改色时锁定的
+  // 生效主题（deepsea，已注册扩展主题也可作基线）
+  CHECK(manager.custom_theme_base() == QStringLiteral("deepsea"));
+  reset_btn->click();
+  CHECK(!manager.has_custom_overrides());
+  CHECK(manager.mode() == QStringLiteral("deepsea"));
+  CHECK(manager.tokens().surface.name() == QStringLiteral("#101820"));
+
+  // —— ⑭ 毛玻璃开关（UI 路径）：本机不支持＝开而降级，提示语如实 ——
+  auto* frosted =
+      page2.findChild<QCheckBox*>(QStringLiteral("frostedEffectCheck"));
+  auto* hint = page2.findChild<QLabel*>(QStringLiteral("frostedEffectHint"));
+  CHECK(frosted != nullptr);
+  CHECK(hint != nullptr);
+  if (frosted && hint) {
+    frosted->setChecked(true);  // 与用户勾选同路径（toggled→set_frosted）
+    CHECK(manager.frosted_effect_enabled());
+    CHECK(!manager.frosted_effect_active());  // Linux 恒不支持＝降级
+    CHECK(hint->text().contains(QStringLiteral("不支持")));
+    frosted->setChecked(false);
+    CHECK(!manager.frosted_effect_enabled());
+  }
 }
 
 // —— ⑨ 主窗接线：控件样式走令牌、切换即重渲、菜单入口可达 ——
@@ -634,6 +679,164 @@ void test_main_window_wiring(QApplication& app) {
   window.close();
 }
 
+// —— ⑩ 需求批⑭：自定义主题（面板改色覆盖层）——
+void test_custom_theme() {
+  QTemporaryDir tmp;
+  CHECK(tmp.isValid());
+  QSettings::setDefaultFormat(QSettings::IniFormat);
+  QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmp.path());
+
+  // 放行面＝8 枚核心中性令牌；品牌橙与语义族名一律拒绝（不落盘）
+  const QStringList allowed = ThemeManager::customizable_tokens();
+  CHECK(allowed.size() == 8);
+  for (const char* expect :
+       {"surface", "surface_alt", "surface_raised", "border", "text",
+        "text_muted", "chat_bg", "input_bg"}) {
+    CHECK(allowed.contains(QLatin1String(expect)));
+  }
+  for (const char* locked : {"brand", "brand_hover", "brand_text", "on_brand",
+                             "brand_tint", "brand_wash", "brand_wash_text",
+                             "success", "success_wash", "success_text",
+                             "warning", "danger", "disabled_bg", "bubble_out",
+                             "bubble_out_text", "bubble_in", "bubble_in_text",
+                             "selection"}) {
+    CHECK(!allowed.contains(QLatin1String(locked)));
+  }
+
+  ThemeManager manager;
+  manager.set_system_dark_probe([] { return false; });
+  manager.set_mode(QString::fromUtf8(ThemeManager::kLight));
+  CHECK(!manager.has_custom_overrides());
+  CHECK(!manager.set_custom_override(QStringLiteral("brand"),
+                                     QColor(QStringLiteral("#ff0000"))));
+  CHECK(!manager.set_custom_override(QStringLiteral("success"),
+                                     QColor(QStringLiteral("#00ff00"))));
+  CHECK(!manager.set_custom_override(QStringLiteral("nope"),
+                                     QColor(QStringLiteral("#123456"))));
+  CHECK(!manager.has_custom_overrides());  // 拒绝＝零副作用
+
+  // 首个改色：基线锁定当前主题＋自动切自定义槽＋未覆盖令牌走基线
+  const ThemeTokens light = ThemeManager::tokens_for(
+      QString::fromUtf8(ThemeManager::kLight));
+  CHECK(manager.set_custom_override(QStringLiteral("surface"),
+                                    QColor(QStringLiteral("#112233"))));
+  CHECK(manager.mode() == ThemeManager::customThemeName());
+  CHECK(manager.effective_theme() == ThemeManager::customThemeName());
+  CHECK(manager.custom_theme_base() == QString::fromUtf8(ThemeManager::kLight));
+  CHECK(manager.tokens().surface.name() == QStringLiteral("#112233"));
+  CHECK(manager.tokens().text.name() == light.text.name());  // 未覆盖走基线
+  CHECK(manager.tokens().brand.name() == QStringLiteral("#e16531"));  // 品牌恒同
+  CHECK(manager.tokens().is_complete());
+  // 自定义槽不随系统亮暗漂移（手动选择优先；基线已锁定）
+  manager.set_system_dark_probe([] { return true; });
+  CHECK(manager.tokens().surface.name() == QStringLiteral("#112233"));
+  manager.set_system_dark_probe([] { return false; });
+
+  // apply_overrides 纵深防御：外部构造的覆盖表带品牌／语义名也不放行
+  QHash<QString, QColor> hostile;
+  hostile.insert(QStringLiteral("brand"), QColor(QStringLiteral("#ff0000")));
+  hostile.insert(QStringLiteral("success"), QColor(QStringLiteral("#00ff00")));
+  hostile.insert(QStringLiteral("danger"), QColor(QStringLiteral("#0000ff")));
+  const ThemeTokens defended =
+      ThemeManager::apply_overrides(light, hostile);
+  CHECK(defended.brand.name() == QStringLiteral("#e16531"));
+  CHECK(defended.success.name() == light.success.name());
+  CHECK(defended.danger.name() == light.danger.name());
+  CHECK(defended.surface.name() == light.surface.name());  // 无放行覆盖＝原样
+
+  // 重启往返：新实例读回覆盖层＋基线＋自定义态；在槽上继续改色基线不变
+  {
+    ThemeManager m2;
+    m2.set_system_dark_probe([] { return false; });
+    CHECK(m2.mode() == ThemeManager::customThemeName());
+    CHECK(m2.custom_theme_base() == QString::fromUtf8(ThemeManager::kLight));
+    CHECK(m2.tokens().surface.name() == QStringLiteral("#112233"));
+    CHECK(m2.set_custom_override(QStringLiteral("text"),
+                                  QColor(QStringLiteral("#fedcba"))));
+    CHECK(m2.custom_theme_base() == QString::fromUtf8(ThemeManager::kLight));
+    CHECK(m2.tokens().text.name() == QStringLiteral("#fedcba"));
+    CHECK(m2.custom_overrides().size() == 2);
+    CHECK(m2.custom_overrides().value(QStringLiteral("surface")) ==
+          QColor(QStringLiteral("#112233")));
+  }
+
+  // 恢复默认：清覆盖＋回基线；重启后仍在基线（覆盖层与槽名皆不残留）
+  {
+    ThemeManager m3;
+    m3.clear_custom_overrides();
+    CHECK(!m3.has_custom_overrides());
+    CHECK(m3.mode() == QString::fromUtf8(ThemeManager::kLight));
+    CHECK(m3.tokens().surface.name() == light.surface.name());
+  }
+  {
+    ThemeManager m4;
+    CHECK(m4.mode() == QString::fromUtf8(ThemeManager::kLight));
+    CHECK(!m4.has_custom_overrides());
+    CHECK(m4.custom_overrides().isEmpty());
+  }
+
+  // 覆盖层丢了（换机后只剩槽名）：read_persisted_mode 回落基线不悬空
+  {
+    QSettings wipe;  // setPath 已指到本节 tmp；默认构造＝同一路径
+    wipe.remove(QStringLiteral("appearance/custom_colors"));
+    ThemeManager m5;
+    CHECK(m5.mode() == QString::fromUtf8(ThemeManager::kLight));
+    CHECK(!m5.has_custom_overrides());
+  }
+}
+
+// —— ⑪ 需求批⑭：毛玻璃特效开关（默认关；不支持平台降级不透明）——
+void test_frosted_effect(QApplication& app) {
+  QTemporaryDir tmp;
+  CHECK(tmp.isValid());
+  QSettings::setDefaultFormat(QSettings::IniFormat);
+  QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmp.path());
+
+  ThemeManager manager;
+  manager.set_system_dark_probe([] { return false; });
+
+  // 默认关；本机（Linux）平台恒不支持
+  CHECK(!manager.frosted_effect_enabled());
+  CHECK(!manager.frosted_effect_active());
+  CHECK(!ThemeManager::frosted_effect_supported());
+
+  // 开↔关往返＋落盘：不支持时开关可置位（切支持平台即生效）但生效态恒 false
+  CHECK(!manager.set_frosted_effect_enabled(true));  // 返回 false＝降级未生效
+  CHECK(manager.frosted_effect_enabled());
+  CHECK(!manager.frosted_effect_active());
+  {
+    ThemeManager m2;
+    CHECK(m2.frosted_effect_enabled());  // 重启读回开
+  }
+  CHECK(!manager.set_frosted_effect_enabled(false));
+  CHECK(!manager.frosted_effect_enabled());
+  {
+    ThemeManager m3;
+    CHECK(!m3.frosted_effect_enabled());  // 重启读回关
+  }
+
+  // 支持腿（探针注入＝模拟 Windows）：开且支持＝生效；关＝不生效
+  manager.set_frosted_support_probe([] { return true; });
+  CHECK(!manager.frosted_effect_active());  // 开关仍关
+  CHECK(manager.set_frosted_effect_enabled(true));  // 返回 true＝真生效
+  CHECK(manager.frosted_effect_active());
+
+  // apply 到应用（离屏）：不崩、样式正常（无原生窗口句柄＝跳过特效路径）；
+  // 运行中失去平台支持→立即降级（生效态 false，不花屏不崩）
+  manager.apply(&app);
+  CHECK(manager.applied());
+  CHECK(!app.styleSheet().isEmpty());
+  manager.set_frosted_support_probe([] { return false; });
+  CHECK(!manager.frosted_effect_active());
+  manager.set_frosted_support_probe([] { return true; });
+  CHECK(manager.frosted_effect_active());
+
+  // 收尾：关掉并复位（避免影响后续用例）
+  manager.set_frosted_support_probe(nullptr);
+  manager.set_frosted_effect_enabled(false);
+  CHECK(!manager.frosted_effect_active());
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -659,6 +862,8 @@ int main(int argc, char** argv) {
   test_apply_to_app(app);
   test_settings_page(app);
   test_main_window_wiring(app);
+  test_custom_theme();
+  test_frosted_effect(app);
 
   if (g_failures == 0) {
     qInfo("test_theme: ALL PASS");
