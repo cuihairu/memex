@@ -16,12 +16,14 @@
 
 内网物理隔离环境下的办公即时通讯系统，参照企业微信的功能范围，覆盖沟通、办公、组织与归档检索能力。业务层全部自写，底座采用开源组件：Qt 6、asio、protobuf、SQLite、OpenSSL、AWS SDK（S3 接口，对接 RustFS），清单与许可见 [third_party/](third_party/README.md)；不基于任何开源 IM 二次开发，不集成 AGPL／SSPL 等强传染性许可组件。桌面客户端 C++17 + Qt；手机端 Android（Kotlin，已落地）／iOS（Swift，代码-only＋CI 验证）；服务端 C++17 单进程单库。
 
+## 文档
+
+- 文档站（GitHub Pages）：<https://cuihairu.github.io/memex/> ——界面预览、快速预览、架构与合规；源码在 `docs/`（VitePress，构建 `pnpm docs:build`）
+- 产品定位一页纸：<https://cuihairu.github.io/memex/guide/product> · 源 [docs/src/guide/product.md](docs/src/guide/product.md)
+- 评审组决策清单（十五项 + 一项可选）：<https://cuihairu.github.io/memex/guide/decisions> · 源 [docs/src/guide/decisions.md](docs/src/guide/decisions.md)
+- 界面预览（实况截图；桌面 7 屏 + 移动 4 屏）：<https://cuihairu.github.io/memex/guide/prototypes> · 原型源 [docs/design/prototypes/](docs/design/prototypes/)
 - 产品定义与分期依据：[docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
-- 产品定位一页纸：[docs/src/guide/product.md](docs/src/guide/product.md)
 - 需求与任务清单（R1–R19 主线、R23–R27 追加批次、四期拆解、验收口径）：[todo.md](todo.md)
-- 评审组决策清单（十五项 + 一项可选）：[docs/src/guide/decisions.md](docs/src/guide/decisions.md)
-- 文档站（界面预览、快速预览、架构与合规）：`docs/`（VitePress，构建 `pnpm docs:build`，部署于 GitHub Pages `/memex/`）
-- 原型设计稿：`docs/design/prototypes/`（桌面 7 屏 + 移动 4 屏），截图 `docs/src/public/screenshots/`
 
 ## 产品形态
 

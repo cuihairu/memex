@@ -16,12 +16,14 @@
 
 An office instant messaging system for physically isolated intranet environments, modeled on the functional scope of WeCom (Enterprise WeChat) and covering communication, office collaboration, organization, and archive search. The business layer is written entirely in-house, while the foundation uses open-source components: Qt 6, asio, protobuf, SQLite, OpenSSL, and the AWS SDK (S3 interface, paired with RustFS); the inventory and licenses are listed in [third_party/](third_party/README.md). The system is not built on top of any open-source IM project, and it integrates no components under strong-copyleft licenses such as AGPL or SSPL. Desktop clients are C++17 + Qt; mobile clients are Android (Kotlin, shipped) and iOS (Swift, code-only with CI verification); the server is C++17, a single process on a single database.
 
+## Documentation
+
+- Documentation site (GitHub Pages): <https://cuihairu.github.io/memex/> — UI previews, quick tour, architecture and compliance; source under `docs/` (VitePress, build with `pnpm docs:build`)
+- Product positioning: <https://cuihairu.github.io/memex/guide/product> · source [docs/src/guide/product.md](docs/src/guide/product.md)
+- Review panel decision list (fifteen items + one optional): <https://cuihairu.github.io/memex/guide/decisions> · source [docs/src/guide/decisions.md](docs/src/guide/decisions.md)
+- UI previews (live screenshots; 7 desktop screens + 4 mobile screens): <https://cuihairu.github.io/memex/guide/prototypes> · prototype sources [docs/design/prototypes/](docs/design/prototypes/)
 - Product definition and phase basis: [docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
-- One-page product positioning: [docs/src/guide/product.md](docs/src/guide/product.md)
 - Requirements and task list (R1–R19 mainline, R23–R27 additional batches, four-phase breakdown, acceptance criteria): [todo.md](todo.md)
-- Review panel decision list (fifteen items + one optional): [docs/src/guide/decisions.md](docs/src/guide/decisions.md)
-- Documentation site (UI previews, quick tour, architecture and compliance): `docs/` (VitePress; build with `pnpm docs:build`, deployed on GitHub Pages at `/memex/`)
-- Prototype designs: `docs/design/prototypes/` (7 desktop screens + 4 mobile screens); screenshots in `docs/src/public/screenshots/`
 
 ## Product Form
 
