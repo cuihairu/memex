@@ -413,6 +413,9 @@ int main() {
   //     双人审批（一人不得自批自清）、清除落 purged 事件＋台账＋审计、
   //     重建跳过已清除（清除可重现而非无痕） ——
   {
+    // 内置默认：未配置任何策略时生效留存期＝6 个月（180 天，2026-10-10 拍板
+    // 决策 #6；配置化可改——retention set 覆盖）
+    CHECK(store.retention_resolve("nobody-挂档").retention_days == 180);
     // 策略面：白名单外拒（45 天不在 30/180/365/1095/indefinite）
     CHECK(!store.retention_set(45, "", "admin1", 1));
     CHECK(store.retention_set(0, "", "admin1", 1)); // 全局 Indefinite

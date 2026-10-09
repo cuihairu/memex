@@ -1892,7 +1892,10 @@ ServerStore::RetentionPolicy ServerStore::retention_resolve(
   }
   const auto g = by_path.find("");
   if (g != by_path.end()) return g->second;
-  RetentionPolicy fallback; // 内置默认：Indefinite（现状口径）
+  RetentionPolicy fallback;
+  // 内置默认：6 个月（180 天）——2026-10-10 评审组拍板决策 #6（授权代拍、
+  // 效果后审）；配置化可改：retention set <days|indefinite> 覆盖（部门链/全局）
+  fallback.retention_days = 180;
   return fallback;
 }
 
