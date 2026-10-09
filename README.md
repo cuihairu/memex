@@ -21,7 +21,7 @@ An office instant messaging system for physically isolated intranet environments
 - Documentation site (GitHub Pages): <https://cuihairu.github.io/memex/> — UI previews, quick tour, architecture and compliance; source under `docs/` (VitePress, build with `pnpm docs:build`)
 - Product positioning: <https://cuihairu.github.io/memex/guide/product> · source [docs/src/guide/product.md](docs/src/guide/product.md)
 - Review panel decision list (fifteen items + one optional): <https://cuihairu.github.io/memex/guide/decisions> · source [docs/src/guide/decisions.md](docs/src/guide/decisions.md)
-- UI previews (live screenshots; 7 desktop screens + 4 mobile screens): <https://cuihairu.github.io/memex/guide/prototypes> · prototype sources [docs/design/prototypes/](docs/design/prototypes/)
+- UI previews (live screenshots; 8 desktop screens + 4 mobile screens): <https://cuihairu.github.io/memex/guide/prototypes> · prototype sources [docs/design/prototypes/](docs/design/prototypes/)
 - Product definition and phase basis: [docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
 - Requirements and task list (R1–R19 mainline, R23–R27 additional batches, four-phase breakdown, acceptance criteria): [todo.md](todo.md)
 

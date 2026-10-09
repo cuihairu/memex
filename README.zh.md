@@ -21,7 +21,7 @@
 - 文档站（GitHub Pages）：<https://cuihairu.github.io/memex/> ——界面预览、快速预览、架构与合规；源码在 `docs/`（VitePress，构建 `pnpm docs:build`）
 - 产品定位一页纸：<https://cuihairu.github.io/memex/guide/product> · 源 [docs/src/guide/product.md](docs/src/guide/product.md)
 - 评审组决策清单（十五项 + 一项可选）：<https://cuihairu.github.io/memex/guide/decisions> · 源 [docs/src/guide/decisions.md](docs/src/guide/decisions.md)
-- 界面预览（实况截图；桌面 7 屏 + 移动 4 屏）：<https://cuihairu.github.io/memex/guide/prototypes> · 原型源 [docs/design/prototypes/](docs/design/prototypes/)
+- 界面预览（实况截图；桌面 8 屏 + 移动 4 屏）：<https://cuihairu.github.io/memex/guide/prototypes> · 原型源 [docs/design/prototypes/](docs/design/prototypes/)
 - 产品定义与分期依据：[docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
 - 需求与任务清单（R1–R19 主线、R23–R27 追加批次、四期拆解、验收口径）：[todo.md](todo.md)
 
