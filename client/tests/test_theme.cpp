@@ -1,25 +1,30 @@
-// T4.9 主题切换验收（R19）：
+// T4.9 主题切换验收（R19）＋需求批⑬ 默认 20 套：
 // ① 令牌完备性与品牌橙恒定、亮暗两套关键面明显不同；
 // ② 跟随系统解析：系统亮暗 → light／dark，手动选择覆盖系统；
 // ③ 持久化往返：手动选择落盘，新实例读回（重启后保持）；
 // ④ 令牌化 QSS 生成：占位符零残留、关键选择器齐、切换后样式变化（即时生效）；
 // ⑤ 多主题扩展位：只注册一套令牌即可被选中／解析／落盘；
-// ⑥ 应用级落地：调色板色与令牌一致、系统亮暗变化仅在跟随模式下重应用；
-// ⑦ 设置页交互：点选暗色／跟随系统即时生效并回灌选中态；
-// ⑧ 主窗接线：控件样式里的颜色全部来自令牌（零字面量）、主题切换后
+// ⑥ 默认 20 套（⑬）：22 套 builtin 全部令牌/排版完备、对比度门槛过、
+//    品牌橙恒同、底色互异、字体/密度成套、tokens_for 出真令牌、
+//    选择持久化往返、离屏渲染像素差（另可 MEMEX_THEME_SHOT_DIR 落实截）；
+// ⑦ 应用级落地：调色板色与令牌一致、系统亮暗变化仅在跟随模式下重应用；
+// ⑧ 设置页交互：列表点选暗色／⑬ 默认主题／跟随系统即时生效并回灌选中态；
+// ⑨ 主窗接线：控件样式里的颜色全部来自令牌（零字面量）、主题切换后
 //    控件样式与聊天区富文本同步重渲、「设置 → 主题…」菜单入口存在。
 #include <QApplication>
+#include <QDir>
 #include <QLabel>
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
 #include <QPalette>
 #include <QPushButton>
-#include <QRadioButton>
+#include <QSet>
 #include <QSettings>
 #include <QStyleHints>
 #include <QTemporaryDir>
 #include <QTextBrowser>
+#include <QWidget>
 #include <QRegularExpression>
 
 #include <algorithm>
@@ -63,11 +68,15 @@ double contrast(const QColor& a, const QColor& b) {
   return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
 }
 
-// QSS 里有未替换的令牌占位符即视为漏色（颜色又散落回字面量的信号）
+// QSS 里有未替换的令牌占位符即视为漏色（颜色又散落回字面量的信号）；
+// ⑬ 后字体/密度五槽位同口径（漏替换＝排版取值散落）
 bool has_placeholder(const QString& qss) {
-  return qss.contains(QStringLiteral("%text%")) ||
-         qss.contains(QStringLiteral("%surface%")) ||
-         qss.contains(QStringLiteral("%brand%"));
+  for (const char* token :
+       {"%text%", "%surface%", "%brand%", "%font_family%", "%font_pt%",
+        "%radius%", "%pad_sm%", "%pad_md%"}) {
+    if (qss.contains(QLatin1String(token))) return true;
+  }
+  return false;
 }
 
 // 抓样式里的十六进制字面量：#rgb／#rrggbb（排除锚点 # 之外的都算色值）
@@ -235,7 +244,165 @@ void test_theme_extension() {
             .contains(QStringLiteral("#0b1020")));
 }
 
-// —— ⑥ 应用级落地：调色板＋系统变化仅跟随模式重应用 ——
+// —— ⑥ 需求批⑬：默认 20 套主题全链 ——
+void test_default_themes() {
+  const QStringList builtins = ThemeManager::builtin_themes();
+  CHECK(builtins.size() == 22);  // light/dark 锚点＋20 套默认
+  CHECK(builtins.contains(QString::fromUtf8(ThemeManager::kLight)));
+  CHECK(builtins.contains(QString::fromUtf8(ThemeManager::kDark)));
+  CHECK(builtins.contains(QStringLiteral("晨雾·亮")));
+  CHECK(builtins.contains(QStringLiteral("曜石·暗")));
+
+  QSet<QString> surfaces;   // 底色三元组互异：套间真实可辨，非换皮同色
+  QSet<QString> fonts;      // 字体族 ≥3
+  QSet<int> font_pts;       // 字号 ≥2
+  QSet<QString> densities;  // 圆角×边距组合 ≥3（密度成套）
+  for (const QString& name : builtins) {
+    const ThemeTokens t = ThemeManager::tokens_for(name);
+    CHECK(t.is_complete());
+    CHECK(t.is_typography_valid());
+    // 品牌橙 #e16531 恒同：20 套默认与 light/dark 锚点一致
+    CHECK(t.brand.name() == QStringLiteral("#e16531"));
+    // 每套都要过对比度门槛（WCAG 口径与 ① 一致）
+    CHECK(contrast(t.text, t.surface) > 4.5);
+    CHECK(contrast(t.text_muted, t.surface_alt) > 3.0);
+    CHECK(contrast(t.bubble_in_text, t.bubble_in) > 4.5);
+    CHECK(contrast(t.on_brand, t.brand) > 3.0);
+    CHECK(contrast(t.bubble_out_text, t.bubble_out) > 3.0);
+    check_new_token_contrast(t, name);
+    // 名实相符：亮套底必亮、暗套底必暗
+    if (name.endsWith(QStringLiteral("·亮"))) {
+      CHECK(luminance(t.surface) > 0.5);
+    }
+    if (name.endsWith(QStringLiteral("·暗"))) {
+      CHECK(luminance(t.surface) < 0.2);
+    }
+    surfaces.insert(QStringLiteral("%1/%2/%3")
+                        .arg(t.surface.name(), t.surface_alt.name(),
+                             t.surface_raised.name()));
+    fonts.insert(t.font_family);
+    font_pts.insert(t.font_pt);
+    densities.insert(QStringLiteral("%1/%2/%3")
+                         .arg(t.radius)
+                         .arg(t.pad_sm)
+                         .arg(t.pad_md));
+
+    // 每套 QSS：占位符零残留、hex 全是本套令牌值、字体/密度确实进场
+    const QString qss = ThemeManager::stylesheet_for(t);
+    CHECK(!has_placeholder(qss));
+    QList<QString> allowed;
+    const QHash<QString, QColor> token_map = t.as_map();
+    for (const QColor& c : token_map.values()) allowed << c.name();
+    for (const QString& color : hex_literals(qss)) {
+      if (!allowed.contains(color)) {
+        qCritical("主题 %s QSS 含非令牌色 %s", qPrintable(name),
+                  qPrintable(color));
+        CHECK(false);
+      }
+    }
+    CHECK(qss.contains(t.font_family));
+    CHECK(qss.contains(QStringLiteral("font-size: %1pt").arg(t.font_pt)));
+    CHECK(qss.contains(QStringLiteral("border-radius: %1px").arg(t.radius)));
+    CHECK(qss.contains(
+        QStringLiteral("padding: %1px %2px").arg(t.pad_sm).arg(t.pad_md)));
+  }
+  CHECK(surfaces.size() == builtins.size());
+  CHECK(fonts.size() >= 3);
+  CHECK(font_pts.size() >= 2);
+  CHECK(densities.size() >= 3);
+
+  // tokens_for 出真令牌：默认主题不得静默回落 light
+  CHECK(ThemeManager::tokens_for(QStringLiteral("晨雾·亮")).surface.name() !=
+        ThemeManager::tokens_for(QString::fromUtf8(ThemeManager::kLight))
+            .surface.name());
+  CHECK(ThemeManager::tokens_for(QStringLiteral("曜石·暗")).surface.name() !=
+        ThemeManager::tokens_for(QString::fromUtf8(ThemeManager::kLight))
+            .surface.name());
+
+  // has_theme/modes/set_mode 全链认得默认主题（非实例注册也可达）
+  ThemeManager manager;
+  manager.set_system_dark_probe([] { return false; });
+  CHECK(manager.has_theme(QStringLiteral("晨雾·亮")));
+  CHECK(manager.modes().contains(QStringLiteral("晨雾·亮")));
+  manager.set_mode(QStringLiteral("晨雾·亮"));
+  CHECK(manager.mode() == QStringLiteral("晨雾·亮"));
+  CHECK(manager.effective_theme() == QStringLiteral("晨雾·亮"));
+  CHECK(manager.tokens().surface.name() ==
+        ThemeManager::tokens_for(QStringLiteral("晨雾·亮")).surface.name());
+
+  // 持久化往返：选 ⑬ 默认主题名，重启后仍在（read_persisted_mode 认 builtin）
+  QTemporaryDir tmp;
+  CHECK(tmp.isValid());
+  QSettings::setDefaultFormat(QSettings::IniFormat);
+  QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, tmp.path());
+  {
+    ThemeManager m1;
+    m1.set_system_dark_probe([] { return false; });
+    m1.set_mode(QStringLiteral("曜石·暗"));
+    CHECK(m1.effective_theme() == QStringLiteral("曜石·暗"));
+  }
+  {
+    ThemeManager m2;
+    m2.set_system_dark_probe([] { return false; });
+    CHECK(m2.mode() == QStringLiteral("曜石·暗"));
+    CHECK(m2.effective_theme() == QStringLiteral("曜石·暗"));
+    CHECK(m2.tokens().surface.name() ==
+          ThemeManager::tokens_for(QStringLiteral("曜石·暗")).surface.name());
+    m2.set_mode(QString::fromUtf8(ThemeManager::kFollowSystem));
+  }
+
+  // 离屏渲染像素差：一亮一暗两套新主题真实出图不同（非字符串层面成立）；
+  // MEMEX_THEME_SHOT_DIR 指定时顺带落 PNG（xvfb 实截验收用，常规跑无副作用）。
+  // probe 用 QLabel：裸 QWidget 不画 stylesheet background（WA_StyledBackground
+  // 缺省关），grab 只会出默认色——曾误判为「三张图全同」。
+  QLabel probe;
+  probe.resize(240, 120);
+  probe.show();
+  QApplication::processEvents();
+  const QStringList shots{QStringLiteral("晨雾·亮"), QStringLiteral("暖砂·亮"),
+                          QStringLiteral("曜石·暗")};
+  QList<QImage> images;
+  for (const QString& name : shots) {
+    const ThemeTokens t = ThemeManager::tokens_for(name);
+    probe.setStyleSheet(
+        QStringLiteral("background: %1;").arg(t.surface.name()));
+    QApplication::processEvents();
+    const QImage img = probe.grab().toImage();
+    // 本套主题底色确实落到了像素上（不靠图间差异，单图自证）
+    CHECK(img.pixelColor(4, 4).name() == t.surface.name());
+    images << img;
+  }
+  CHECK(images.size() == shots.size());
+  for (const QImage& img : images) {
+    CHECK(img.size() == QSize(240, 120));
+  }
+  const auto diff_pixels = [](const QImage& a, const QImage& b) {
+    int diff = 0;
+    for (int y = 0; y < b.height() && y < a.height(); ++y) {
+      for (int x = 0; x < b.width() && x < a.width(); ++x) {
+        if (a.pixel(x, y) != b.pixel(x, y)) ++diff;
+      }
+    }
+    return diff;
+  };
+  const int total = 240 * 120;
+  CHECK(diff_pixels(images[0], images[2]) > total / 4);  // 亮 vs 暗：大面积差
+  CHECK(diff_pixels(images[0], images[1]) > total / 10);  // 两套亮：底色色相差
+  const QString shot_dir = qEnvironmentVariable("MEMEX_THEME_SHOT_DIR");
+  if (!shot_dir.isEmpty()) {
+    QDir().mkpath(shot_dir);
+    for (int i = 0; i < images.size(); ++i) {
+      images[i].save(QDir(shot_dir).filePath(
+          QStringLiteral("%1.png")
+              .arg(QString(shots[i]).replace(QChar(0x00b7), QLatin1Char('-')))));
+    }
+  }
+  probe.hide();
+
+  manager.set_mode(QString::fromUtf8(ThemeManager::kFollowSystem));
+}
+
+// —— ⑦ 应用级落地：调色板＋系统变化仅跟随模式重应用 ——
 void test_apply_to_app(QApplication& app) {
   const QString app_qss_before = app.styleSheet();
 
@@ -278,7 +445,7 @@ void test_apply_to_app(QApplication& app) {
   app.setStyleSheet(app_qss_before);
 }
 
-// —— ⑦ 设置页交互：点选即时生效并回灌选中态 ——
+// —— ⑧ 设置页交互：列表点选即时生效并回灌选中态 ——
 void test_settings_page(QApplication& app) {
   ThemeManager manager;
   manager.set_system_dark_probe([] { return false; });
@@ -287,40 +454,72 @@ void test_settings_page(QApplication& app) {
   ThemeSettingsPage page(&manager);
   CHECK(page.effective_theme() == QString::fromUtf8(ThemeManager::kLight));
 
-  auto* dark_radio = page.findChild<QRadioButton*>(
-      QStringLiteral("themeMode_dark"));
-  CHECK(dark_radio != nullptr);
-  if (dark_radio) {
-    dark_radio->click();  // 真点选：与用户操作同路径
+  // ⑬ 起 23+ 项（跟随系统＋内置 22）走 QListWidget，item UserRole 携带模式名
+  auto* list = page.findChild<QListWidget*>(QStringLiteral("themeModes"));
+  CHECK(list != nullptr);
+  CHECK(list->count() == 23);
+  const auto row_of = [&](QListWidget* widget, const QString& mode) {
+    for (int i = 0; i < widget->count(); ++i) {
+      if (widget->item(i)->data(Qt::UserRole).toString() == mode) return i;
+    }
+    return -1;
+  };
+
+  const int dark_row = row_of(list, QString::fromUtf8(ThemeManager::kDark));
+  CHECK(dark_row >= 0);
+  if (dark_row >= 0) {
+    list->itemClicked(list->item(dark_row));  // 真点选：与用户操作同路径
     CHECK(manager.mode() == QString::fromUtf8(ThemeManager::kDark));
     CHECK(page.effective_theme() == QString::fromUtf8(ThemeManager::kDark));
-    CHECK(dark_radio->isChecked());
+    CHECK(list->currentRow() == dark_row);  // 选中态回灌
   }
 
-  auto* system_radio = page.findChild<QRadioButton*>(
-      QStringLiteral("themeMode_system"));
-  CHECK(system_radio != nullptr);
-  if (system_radio) {
-    system_radio->click();
+  // ⑬ 默认主题同样可点选即时生效
+  const int mist_row = row_of(list, QStringLiteral("晨雾·亮"));
+  CHECK(mist_row >= 0);
+  if (mist_row >= 0) {
+    list->itemClicked(list->item(mist_row));
+    CHECK(manager.mode() == QStringLiteral("晨雾·亮"));
+    CHECK(page.effective_theme() == QStringLiteral("晨雾·亮"));
+    CHECK(list->currentRow() == mist_row);
+  }
+
+  const int system_row =
+      row_of(list, QString::fromUtf8(ThemeManager::kFollowSystem));
+  CHECK(system_row >= 0);
+  if (system_row >= 0) {
+    list->itemClicked(list->item(system_row));
     CHECK(manager.mode() == QString::fromUtf8(ThemeManager::kFollowSystem));
     CHECK(manager.effective_theme() == QString::fromUtf8(ThemeManager::kLight));
-    CHECK(system_radio->isChecked());
+    CHECK(list->currentRow() == system_row);
   }
 
-  // 注册扩展主题后设置页立即出现对应选项（只新增令牌这一件事就够）
+  // 注册扩展主题后设置页立即出现对应选项（只新增令牌这一件事就够），
+  // 且带「（扩展主题）」标注；⑬ 内置主题不标注
   ThemeTokens extra = ThemeManager::tokens_for(
       QString::fromUtf8(ThemeManager::kDark));
   extra.surface = QColor(QStringLiteral("#101820"));
   manager.register_theme(QStringLiteral("deepsea"), extra);
   ThemeSettingsPage page2(&manager);
-  CHECK(page2.findChild<QRadioButton*>(QStringLiteral("themeMode_deepsea")) !=
-        nullptr);
+  auto* list2 = page2.findChild<QListWidget*>(QStringLiteral("themeModes"));
+  CHECK(list2 != nullptr);
+  const int deepsea_row = list2 ? row_of(list2, QStringLiteral("deepsea")) : -1;
+  CHECK(deepsea_row >= 0);
+  if (list2 && deepsea_row >= 0) {
+    CHECK(list2->item(deepsea_row)->text().contains(
+        QStringLiteral("扩展主题")));
+    const int builtin_row = row_of(list2, QStringLiteral("晨雾·亮"));
+    CHECK(builtin_row >= 0);
+    if (builtin_row >= 0) {
+      CHECK(list2->item(builtin_row)->text() == QStringLiteral("晨雾·亮"));
+    }
+  }
   CHECK(page2.select_mode(QStringLiteral("deepsea")));
   CHECK(manager.effective_theme() == QStringLiteral("deepsea"));
   CHECK(!page2.select_mode(QStringLiteral("nope")));
 }
 
-// —— ⑧ 主窗接线：控件样式走令牌、切换即重渲、菜单入口可达 ——
+// —— ⑨ 主窗接线：控件样式走令牌、切换即重渲、菜单入口可达 ——
 // 真起一个 MainWindow（生产路径：ThemeManager::instance()——main.cpp
 // 起窗前 apply、设置页与主窗重刷都接在 instance 上，测试驱动同一实例）。
 // 「颜色全部来自令牌」的运行时口径：样式里的每个十六进制值都必须是
@@ -456,6 +655,7 @@ int main(int argc, char** argv) {
   test_persistence();
   test_stylesheet();
   test_theme_extension();
+  test_default_themes();
   test_apply_to_app(app);
   test_settings_page(app);
   test_main_window_wiring(app);
