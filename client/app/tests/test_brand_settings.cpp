@@ -89,22 +89,47 @@ int main(int argc, char** argv) {
              QStringLiteral("org-admin"), QStringLiteral("--by"),
              QStringLiteral("owner1"), QStringLiteral("--db"), db}) == 0);
 
-  const quint16 files_port = free_port();
+  // 双端口 free_port() + 重试整个 server 启动（最多 3 次，与
+  // test_approval_dialog 同构）：吸收 CI 共享 runner 竞态——free_port
+  // 探活与 serve bind 之间端口可被抢占，文件面 bind 失败即全腿级联
+  quint16 files_port = 0;
   QProcess server;
-  server.setProcessChannelMode(QProcess::ForwardedChannels);
-  server.start(server_bin,
-               {QStringLiteral("serve"), QStringLiteral("--db"), db,
-                QStringLiteral("--port"), QString::number(free_port()),
-                QStringLiteral("--webhook-port"), QStringLiteral("0"),
-                QStringLiteral("--files-port"),
-                QString::number(files_port)});
-  CHECK(server.waitForStarted(5000));
-  CHECK(wait_until([&] {
-    QTcpServer probe;
-    return probe.listen(QHostAddress::LocalHost, files_port)
-               ? (probe.close(), false)
-               : true;
-  }, 8000));
+  bool server_ok = false;
+  for (int attempt = 0; attempt < 3 && !server_ok; ++attempt) {
+    files_port = free_port();
+    if (files_port == 0) {
+      QThread::msleep(100);
+      continue;
+    }
+    server.setProcessChannelMode(QProcess::ForwardedChannels);
+    server.start(server_bin,
+                 {QStringLiteral("serve"), QStringLiteral("--db"), db,
+                  QStringLiteral("--port"), QString::number(free_port()),
+                  QStringLiteral("--webhook-port"), QStringLiteral("0"),
+                  QStringLiteral("--files-port"),
+                  QString::number(files_port)});
+    if (!server.waitForStarted(5000)) {
+      qCritical("FAIL server 启动超时（尝试 %d/3）", attempt + 1);
+      continue;
+    }
+    if (wait_until([&] {
+          QTcpServer probe;
+          return probe.listen(QHostAddress::LocalHost, files_port)
+                     ? (probe.close(), false)
+                     : true;
+        }, 15000)) {
+      server_ok = true;
+      break;
+    }
+    qCritical("FAIL files_port %u 探活超时（尝试 %d/3），重试", files_port,
+              attempt + 1);
+    server.kill();
+    server.waitForFinished(3000);
+  }
+  if (!server_ok) {
+    qCritical("FAIL server 启动重试耗尽");
+    return 1;
+  }
 
   BrandSettingsDialog dlg;
   CHECK(!dlg.is_connected());
