@@ -33,6 +33,7 @@
 #include "notify_center.hpp"
 #include "task_provider_settings.hpp"
 #include "task_provider_store.hpp"
+#include "task_template_settings.hpp"
 
 namespace memex::client {
 namespace {
@@ -155,16 +156,13 @@ void TaskDialog::build_ui() {
   form2->addWidget(assignee_, 1);
   layout->addLayout(form2);
 
-  // 外部任务登记区（R27-2）：provider（内置 L1 预设）＋键（「project#键」
-  // 或完整链接）。登记前本地解析 detail URL——解析不出不发网不落库。
+  // 外部任务登记区（R27-2）：provider（内置 L1 预设＋自定义模板）＋键
+  //（「project#键」或完整链接）。登记前本地解析 detail URL——解析不出
+  // 不发网不落库。
   auto* form3 = new QHBoxLayout;
   form3->addWidget(new QLabel(QStringLiteral("外部任务"), this));
   ext_provider_ = new QComboBox(this);
-  for (const auto* p : providers_.providers()) {
-    ext_provider_->addItem(p->name(), p->id());
-  }
-  const int url_idx = ext_provider_->findData(QStringLiteral("url"));
-  if (url_idx >= 0) ext_provider_->setCurrentIndex(url_idx); // 粘贴链接即登记
+  refresh_ext_combo();
   ext_key_ = new QLineEdit(this);
   ext_key_->setPlaceholderText(
       QStringLiteral("仓库/站点#键 或完整链接（如 org/repo#12）"));
@@ -197,9 +195,11 @@ void TaskDialog::build_ui() {
   pull_provider_->setMinimumWidth(150);
   btn_pull_ = new QPushButton(QStringLiteral("拉取"), this);
   btn_settings_ = new QPushButton(QStringLiteral("任务设置…"), this);
+  btn_templates_ = new QPushButton(QStringLiteral("模板…"), this);
   form4->addWidget(pull_provider_);
   form4->addWidget(btn_pull_);
   form4->addWidget(btn_settings_);
+  form4->addWidget(btn_templates_);
   form4->addStretch(1);
   layout->addLayout(form4);
 
@@ -244,6 +244,16 @@ void TaskDialog::build_ui() {
     dlg->setAttribute(Qt::WA_DeleteOnClose);
     dlg->show();
   });
+  connect(btn_templates_, &QPushButton::clicked, this, [this] {
+    auto* dlg = new TaskTemplateSettingsDialog(this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->show();
+    // 保存即持久化；本窗注册表重挂＋登记下拉刷新（自定义模板进登记面）
+    connect(dlg, &QDialog::finished, this, [this](int) {
+      providers_.reload_custom();
+      refresh_ext_combo();
+    });
+  });
   connect(list_, &QListWidget::itemDoubleClicked, this,
           [this](QListWidgetItem* it) {
             // 外部行双击=跳外部详情（外部行的主语义）；本地行双击=勾完成
@@ -260,6 +270,18 @@ void TaskDialog::build_ui() {
 TaskDialog::~TaskDialog() {
   qDeleteAll(live_);
   if (http_owned_) delete http_;
+}
+
+void TaskDialog::refresh_ext_combo() {
+  const QString prev = ext_provider_->currentData().toString();
+  ext_provider_->clear();
+  for (const auto* p : providers_.providers()) {
+    ext_provider_->addItem(p->name(), p->id());
+  }
+  const int url_idx = ext_provider_->findData(QStringLiteral("url"));
+  if (url_idx >= 0) ext_provider_->setCurrentIndex(url_idx); // 粘贴链接即登记
+  const int prev_idx = ext_provider_->findData(prev);
+  if (prev_idx >= 0) ext_provider_->setCurrentIndex(prev_idx);
 }
 
 void TaskDialog::connect_to(const QString& host, quint16 files_port,
@@ -345,6 +367,8 @@ QString TaskDialog::selected_detail_url() const {
   const auto* item = list_->currentItem();
   return item ? item->data(Qt::UserRole + 5).toString() : QString();
 }
+
+int TaskDialog::ext_combo_count() const { return ext_provider_->count(); }
 
 bool TaskDialog::toggle_selected_done() {
   if (selected_row_pulled()) {

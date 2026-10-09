@@ -114,18 +114,39 @@ class UrlPassthroughProvider : public TaskProvider {
                      const QString& project = QString()) const override;
 };
 
+// 自定义模板（设置页录入、加密面之外的普通 QSettings 持久化——模板非
+// 凭据，明文可存；id 须避开内置预设，模板须含 {key} 槽）
+struct CustomTemplate {
+  QString id;
+  QString name;
+  QString url_template;
+};
+
+// 自定义模板持久化（设置面与注册表共用；QSettings 显式构造，同
+// TaskProviderStore 口径；org/app 可注入供测试隔离）
+QVector<CustomTemplate> custom_templates(
+    const QString& org = QStringLiteral("memex"),
+    const QString& app = QStringLiteral("task-providers"));
+void save_custom_templates(const QVector<CustomTemplate>& list,
+                           const QString& org = QStringLiteral("memex"),
+                           const QString& app = QStringLiteral("task-providers"));
+
 // Provider 注册表：内置 L1 预设（GitHub Issue/PR、GitLab、Jira、Linear、
 // 直通链接）＋ add() 挂自定义模板/后续真 provider（设置页与凭据面随
 // R27-3 落地时接）。登记键的书写约定：「project#键」或完整链接
 //（无 # = 整串为键），解析归调用方。
 class TaskProviderRegistry {
  public:
-  TaskProviderRegistry(); // 装配内置预设
+  TaskProviderRegistry(); // 装配内置预设＋已存自定义模板
   ~TaskProviderRegistry();
   TaskProviderRegistry(const TaskProviderRegistry&) = delete;
   TaskProviderRegistry& operator=(const TaskProviderRegistry&) = delete;
 
   void add(TaskProvider* p); // 接管所有权
+  // 设置面增删后调用：按 store 重挂自定义模板（旧自定义件先回收）。
+  // org/app 可注入供测试隔离（缺省=真配置面）
+  void reload_custom(const QString& org = QStringLiteral("memex"),
+                     const QString& app = QStringLiteral("task-providers"));
   const TaskProvider* provider(const QString& id) const; // 未知=nullptr
   QVector<const TaskProvider*> providers() const;        // 装配序
   // 便利：id＋键（＋可选 project）直解 URL；provider 未知/无跳转/
@@ -135,6 +156,7 @@ class TaskProviderRegistry {
 
  private:
   QVector<TaskProvider*> items_;
+  QVector<TaskProvider*> custom_items_; // 自定义模板件（reload 时回收）
 };
 
 } // namespace memex::client

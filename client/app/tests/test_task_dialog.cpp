@@ -9,6 +9,7 @@
 #include <QDateTime>
 #include <QListWidget>
 #include <QProcess>
+#include <QPushButton>
 #include <QSettings>
 #include <QTcpServer>
 #include <QTemporaryDir>
@@ -19,6 +20,7 @@
 #include <app/notify_center.hpp>
 #include <app/task_dialog.hpp>
 #include <app/task_provider_store.hpp>
+#include <app/task_template_settings.hpp>
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
 #include <engine/task/task_http.hpp>
@@ -28,6 +30,7 @@ using memex::client::TaskDialog;
 using memex::client::LocalStore;
 using memex::client::NotificationCenter;
 using memex::client::TaskProviderStore;
+using memex::client::TaskTemplateSettingsDialog;
 
 #ifndef MEMEX_SERVER_BIN
 #error "MEMEX_SERVER_BIN 未定义（应传入 $<TARGET_FILE:memex_server>）"
@@ -417,6 +420,20 @@ int main(int argc, char** argv) {
   CHECK(!dlg_pull.pull_provider_ids().contains(
       QStringLiteral("dingtalk-todo")));
   tcleanup();
+
+  // R27-2 模板设置面接线：模板…按钮弹设置窗（非模态 WA_DeleteOnClose），
+  // 关窗 finished→reload_custom＋登记下拉刷新（默认 org 只读不写配置）
+  {
+    const int combo_before = dlg_pull.ext_combo_count();
+    dlg_pull.btn_templates()->click();
+    auto* tdlg = dlg_pull.findChild<TaskTemplateSettingsDialog*>();
+    CHECK(tdlg != nullptr);
+    if (tdlg != nullptr) {
+      tdlg->close(); // 触发 finished→reload_custom＋refresh_ext_combo
+      CHECK(dlg_pull.ext_combo_count() == combo_before); // 无配置=不变
+    }
+  }
+  qApp->processEvents(); // WA_DeleteOnClose 收尾防悬垂
 
   server.kill();
   server.waitForFinished(3000);

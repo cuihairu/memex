@@ -107,6 +107,8 @@ qt_add_executable(memex_client
   app/task_provider_store.hpp
   app/task_provider_settings.cpp
   app/task_provider_settings.hpp
+  app/task_template_settings.cpp
+  app/task_template_settings.hpp
   app/group_vault_dialog.cpp
   app/group_vault_dialog.hpp)
 target_include_directories(memex_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -425,6 +427,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
+    app/task_template_settings.cpp
     app/group_vault_crypto.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp)
@@ -561,6 +564,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
+    app/task_template_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -715,6 +719,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
+    app/task_template_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -778,6 +783,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
+    app/task_template_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -838,6 +844,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
+    app/task_template_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -920,6 +927,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
+    app/task_template_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -981,6 +989,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
+    app/task_template_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -1040,6 +1049,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
+    app/task_template_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -1102,6 +1112,7 @@ if(MEMEX_BUILD_TESTS)
     app/task_dialog.cpp
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
+    app/task_template_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -1183,6 +1194,22 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(task_provider_settings PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 120)
+
+  # R27-2 自定义模板设置面冒烟（不起服务端）：增删校验（必填/{key} 槽/
+  # 撞内置/重名）、注册表重挂与拒挂、删后回收、URL 槽解析。org 独立
+  # 命名隔离（不碰真配置）
+  add_executable(test_task_template_settings
+    app/tests/test_task_template_settings.cpp
+    app/task_template_settings.cpp
+    engine/task/task_provider.cpp)
+  target_include_directories(test_task_template_settings PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_task_template_settings PRIVATE
+    Qt6::Widgets)
+  add_test(NAME task_template_settings COMMAND test_task_template_settings)
+  set_tests_properties(task_template_settings PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 30)
 
   # R27-3 GitHub Issues provider 验收（假传输回放不打外网）：L1 键校验、
   # L2 拉列表解析滤 PR、L3 建单/关单、认证头与 API 形态断言、错误腿

@@ -83,9 +83,13 @@ class TaskDialog : public QDialog {
   qint64 selected_id() const;
   // 选中条目的外部详情 URL（本地任务/未选中/解析不出=空串）
   QString selected_detail_url() const;
+  // 登记下拉条数与模板设置按钮（接线面测试共用）
+  int ext_combo_count() const;
+  QPushButton* btn_templates() const { return btn_templates_; }
 
  private:
   void build_ui();
+  void refresh_ext_combo(); // 登记下拉（预设＋自定义模板）
   void populate(const QJsonArray& mine, const QJsonArray& assigned);
   // 会话缓存的外部拉取行渲染（⇣ 行；UserRole+6=true 只读标记）
   void render_ext_rows();
@@ -121,6 +125,7 @@ class TaskDialog : public QDialog {
   QPushButton* btn_add_ext_;
   QPushButton* btn_pull_;
   QPushButton* btn_settings_;
+  QPushButton* btn_templates_;
   QPushButton* btn_toggle_;
   QPushButton* btn_delete_;
   QPushButton* btn_refresh_;
