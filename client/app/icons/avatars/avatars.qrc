@@ -1,0 +1,12 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <!-- 内置默认头像组（需求批⑫）：纯几何自绘（品牌橙 #e16531 同源配色，
+       生成命令见 README.md），未设置头像的账号按账号 hash 稳定取一张，
+       统一引用 :/avatars/avatar-<N>.png -->
+  <qresource prefix="/avatars">
+    <file>avatar-1.png</file>
+    <file>avatar-2.png</file>
+    <file>avatar-3.png</file>
+    <file>avatar-4.png</file>
+  </qresource>
+</RCC>
