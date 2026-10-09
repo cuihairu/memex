@@ -1,6 +1,9 @@
 #include "crash_report.hpp"
 
 #include <QCoreApplication>
+
+#ifdef MEMEX_HAVE_CRASHPAD
+
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>
@@ -93,3 +96,17 @@ bool init_crash_reporting() {
 }
 
 }  // namespace memex::client
+
+#else  // MEMEX_HAVE_CRASHPAD
+
+// 无 crashpad 平台（鸿蒙 OHOS：上游无此依赖）编译桩——调用点 main.cpp 不带
+// 条件编译，崩溃采集在该平台静默停用。
+namespace memex::client {
+
+bool init_crash_reporting() {
+  return false;
+}
+
+}  // namespace memex::client
+
+#endif  // MEMEX_HAVE_CRASHPAD

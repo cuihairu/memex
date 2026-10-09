@@ -4,9 +4,14 @@ qt_standard_project_setup()
 # R24-3 密码箱客户端面：PBKDF2/AES-256-GCM 本地解锁派生（与服务端同 libcrypto）
 find_package(OpenSSL CONFIG REQUIRED)
 
-# 崩溃采集（Crashpad）：vcpkg manifest client feature（静态 client 库 + 独立
-# crashpad_handler，config 导出 crashpad::crashpad 界面库）
-find_package(crashpad CONFIG REQUIRED)
+# 崩溃采集（Crashpad）：vcpkg manifest crashpad feature（静态 client 库 + 独立
+# crashpad_handler，config 导出 crashpad::crashpad 界面库）。平台闸：crashpad
+# 上游无 OHOS 支持，鸿蒙交叉构建（client-release-ohos preset）置 OFF——
+# crash_report.cpp 侧编译桩兜底，调用点不分支。
+option(MEMEX_ENABLE_CRASHPAD "启用 crashpad 崩溃采集（无此依赖平台置 OFF）" ON)
+if(MEMEX_ENABLE_CRASHPAD)
+  find_package(crashpad CONFIG REQUIRED)
+endif()
 
 # 共享内核：本地库、会话、联系人（T1.2 起：LocalStore）
 add_library(memex_core STATIC
@@ -112,11 +117,15 @@ target_link_libraries(memex_client PRIVATE
   memex_engine_collab
   Qt6::Widgets
   Qt6::Sql
-  OpenSSL::Crypto
-  crashpad::crashpad)
+  OpenSSL::Crypto)
+if(MEMEX_ENABLE_CRASHPAD)
+  target_link_libraries(memex_client PRIVATE crashpad::crashpad)
+  target_compile_definitions(memex_client PRIVATE MEMEX_HAVE_CRASHPAD=1)
+endif()
 
 # 崩溃采集（Crashpad）：crashpad_handler 独立可执行随包——构建后拷到
 # memex_client 同目录（分发体口径，运行时按「可执行同目录→PATH」探寻）。
+if(MEMEX_ENABLE_CRASHPAD)
 find_program(CRASHPAD_HANDLER_EXE crashpad_handler
   PATHS "${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/tools/crashpad_handler")
 if(CRASHPAD_HANDLER_EXE)
@@ -128,6 +137,7 @@ if(CRASHPAD_HANDLER_EXE)
 else()
   message(WARNING "crashpad_handler not found — 崩溃采集 handler 将不在产物旁"
                   "（运行时仅 PATH 兜底）")
+endif()
 endif()
 
 # 分发体属性：Windows GUI 子系统（双击启动不弹控制台；--version 等控制台面经
@@ -1147,7 +1157,9 @@ if(MEMEX_BUILD_TESTS)
 
   # 崩溃采集验收（Crashpad 真链路）：真客户端 MEMEX_CRASH_TEST=1 故意崩溃 →
   # handler 接管 → XDG 隔离目录落 .dmp（dump_syms/minidump_stackwalk 符号化
-  # 为开发机侧手工步骤，见 docs/src/guide/crash-reporting.md 实现段）
+  # 为开发机侧手工步骤，见 docs/src/guide/crash-reporting.md 实现段）。
+  # 随 MEMEX_ENABLE_CRASHPAD 闸（无 crashpad 平台无 handler 可验）
+  if(MEMEX_ENABLE_CRASHPAD)
   add_executable(test_crash tests/test_crash.cpp)
   target_compile_definitions(test_crash PRIVATE
     MEMEX_CLIENT_BIN="$<TARGET_FILE:memex_client>")
@@ -1156,4 +1168,5 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(crash PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 60)
+  endif()
 endif()
