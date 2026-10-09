@@ -1,7 +1,9 @@
-// 主题设置页（R19 · T4.9；⑬ 默认 20 套；⑭ 面板改色＋毛玻璃开关）：
-// 跟随系统＋内置 22＋自定义槽（＋已注册扩展主题）列表点选，即时生效并
-// 落盘。⑭ 在列表下加面板改色（8 枚中性令牌 QColorDialog 改色→自定义槽；
-// 品牌／语义色不放行）与毛玻璃特效开关（默认关，平台不支持自动降级）。
+// 主题设置页（R19 · T4.9；⑬ 默认 20 套；⑭ 面板改色＋毛玻璃开关；
+// ⑮ 皮肤包导入导出）：跟随系统＋内置 22＋自定义槽（＋已注册扩展主题
+// ＋皮肤包主题）列表点选，即时生效并落盘。⑭ 在列表下加面板改色
+// （8 枚中性令牌 QColorDialog 改色→自定义槽；品牌／语义色不放行）与
+// 毛玻璃特效开关（默认关，平台不支持自动降级）。⑮ 加「导入皮肤包…」
+// 「导出当前皮肤…」两钮与结果状态行，导入成功自动选中新主题。
 #pragma once
 
 #include <QHash>
@@ -34,6 +36,10 @@ class ThemeSettingsPage : public QWidget {
   // ⑭ 毛玻璃开关（与复选框 toggled 同一路径；返回是否真生效——不支持
   // 平台返回 false 即降级提示）
   bool set_frosted(bool enabled);
+  // ⑮ 皮肤包导入／导出（与两按钮「选定文件后」同一路径，免 QFileDialog
+  // 可程序化驱动；返回是否成功，结果文案落 skinStatus 状态行）
+  bool import_skin_from_path(const QString& path);
+  bool export_skin_to_path(const QString& path);
 
  private:
   void sync_from_manager();
@@ -48,6 +54,10 @@ class ThemeSettingsPage : public QWidget {
   // ⑭ 毛玻璃开关与降级提示
   QCheckBox* frosted_check_ = nullptr;
   QLabel* frosted_hint_ = nullptr;
+  // ⑮ 皮肤包导入／导出与结果状态行
+  QPushButton* import_skins_ = nullptr;
+  QPushButton* export_skins_ = nullptr;
+  QLabel* skin_status_ = nullptr;
 };
 
 }  // namespace memex::client

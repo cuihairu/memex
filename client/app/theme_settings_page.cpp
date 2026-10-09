@@ -1,12 +1,20 @@
 #include "theme_settings_page.hpp"
 
+#include <algorithm>
+
 #include <QCheckBox>
 #include <QColorDialog>
+#include <QCoreApplication>
+#include <QFile>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
+#include <QSettings>
 #include <QVBoxLayout>
 
 #include "theme.hpp"
@@ -14,9 +22,17 @@
 namespace memex::client {
 namespace {
 
+// ⑮ 皮肤包对话框记忆目录（此前仓库无文件对话框目录记忆惯例，⑮ 自建）
+constexpr auto kSkinDirKey = "ui/skin_pack_dir";
+
+QSettings app_settings() {
+  return QSettings(QCoreApplication::organizationName(),
+                   QCoreApplication::applicationName());
+}
+
 // 模式名 → 界面文案（跟随系统排最前；⑬ 默认 20 套名字本身即可读中文，
-// 原样展示；自定义槽与未注册的扩展主题加注）
-QString mode_label(const QString& mode) {
+// 原样展示；自定义槽与未注册的扩展主题加注；⑮ 皮肤包主题加注）
+QString mode_label(const QString& mode, const ThemeManager* manager) {
   if (mode == QLatin1String(ThemeManager::kFollowSystem)) {
     return QStringLiteral("跟随系统");
   }
@@ -30,6 +46,9 @@ QString mode_label(const QString& mode) {
     return QStringLiteral("自定义（改色）");
   }
   if (ThemeManager::builtin_themes().contains(mode)) return mode;
+  if (manager && manager->skin_pack_themes().contains(mode)) {
+    return QStringLiteral("%1（皮肤包）").arg(mode);
+  }
   return QStringLiteral("%1（扩展主题）").arg(mode);
 }
 
@@ -74,12 +93,12 @@ ThemeSettingsPage::ThemeSettingsPage(ThemeManager* manager, QWidget* parent)
   effective_label_->setObjectName(QStringLiteral("themeSettingsEffective"));
   layout->addWidget(effective_label_);
 
-  // 主题列表：24+ 项（跟随系统＋内置 22＋自定义槽＋扩展主题），radio 群
-  // 排不下，⑬ 起改 QListWidget；item 的 UserRole 携带模式名
+  // 主题列表：24+ 项（跟随系统＋内置 22＋自定义槽＋扩展主题＋皮肤包），
+  // radio 群排不下，⑬ 起改 QListWidget；item 的 UserRole 携带模式名
   list_ = new QListWidget(this);
   list_->setObjectName(QStringLiteral("themeModes"));
   for (const QString& mode : manager_->modes()) {
-    auto* item = new QListWidgetItem(mode_label(mode), list_);
+    auto* item = new QListWidgetItem(mode_label(mode, manager_), list_);
     item->setData(Qt::UserRole, mode);
   }
   layout->addWidget(list_);
@@ -141,6 +160,46 @@ ThemeSettingsPage::ThemeSettingsPage(ThemeManager* manager, QWidget* parent)
   effect_layout->addWidget(frosted_hint_);
   layout->addWidget(effect_box);
 
+  // —— ⑮ 皮肤包：导入／导出（对话框记忆目录自建 ui/skin_pack_dir）——
+  auto* skin_box = new QGroupBox(QStringLiteral("皮肤包"), this);
+  skin_box->setObjectName(QStringLiteral("skinPackBox"));
+  auto* skin_layout = new QVBoxLayout(skin_box);
+  auto* skin_row = new QHBoxLayout();
+  import_skins_ = new QPushButton(QStringLiteral("导入皮肤包…"), this);
+  import_skins_->setObjectName(QStringLiteral("importSkinButton"));
+  export_skins_ = new QPushButton(QStringLiteral("导出当前皮肤…"), this);
+  export_skins_->setObjectName(QStringLiteral("exportSkinButton"));
+  skin_row->addWidget(import_skins_);
+  skin_row->addWidget(export_skins_);
+  skin_layout->addLayout(skin_row);
+  skin_status_ = new QLabel(this);
+  skin_status_->setObjectName(QStringLiteral("skinStatus"));
+  skin_status_->setWordWrap(true);
+  skin_layout->addWidget(skin_status_);
+  connect(import_skins_, &QPushButton::clicked, this, [this] {
+    const QString dir =
+        app_settings().value(QString::fromUtf8(kSkinDirKey)).toString();
+    const QString path = QFileDialog::getOpenFileName(
+        this, QStringLiteral("导入皮肤包"), dir,
+        QStringLiteral("皮肤包 (*.zip)"));
+    if (!path.isEmpty()) import_skin_from_path(path);
+  });
+  connect(export_skins_, &QPushButton::clicked, this, [this] {
+    const QString dir =
+        app_settings().value(QString::fromUtf8(kSkinDirKey)).toString();
+    const SkinPackManifest manifest = manager_->current_skin_manifest();
+    const QString suggested =
+        dir.isEmpty()
+            ? QStringLiteral("%1-%2.zip").arg(manifest.name, manifest.version)
+            : QStringLiteral("%1/%2-%3.zip")
+                  .arg(dir, manifest.name, manifest.version);
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("导出当前皮肤"), suggested,
+        QStringLiteral("皮肤包 (*.zip)"));
+    if (!path.isEmpty()) export_skin_to_path(path);
+  });
+  layout->addWidget(skin_box);
+
   layout->addStretch(1);
 
   // 点选即刻切换：ThemeManager 落盘并重应用，随后 theme_changed 回灌选中态
@@ -157,6 +216,22 @@ ThemeSettingsPage::ThemeSettingsPage(ThemeManager* manager, QWidget* parent)
 
 void ThemeSettingsPage::sync_from_manager() {
   const QString mode = manager_->mode();
+  // ⑮ 皮肤包安装会扩展 modes()：列表与注册表对不上时整体重建（QHash
+  // 无序，比较用集合不用顺序）
+  const QStringList modes = manager_->modes();
+  QSet<QString> listed;
+  for (int i = 0; i < list_->count(); ++i) {
+    listed.insert(list_->item(i)->data(Qt::UserRole).toString());
+  }
+  if (listed.size() != modes.size() ||
+      std::any_of(modes.cbegin(), modes.cend(),
+                  [&listed](const QString& m) { return !listed.contains(m); })) {
+    list_->clear();
+    for (const QString& m : modes) {
+      auto* item = new QListWidgetItem(mode_label(m, manager_), list_);
+      item->setData(Qt::UserRole, m);
+    }
+  }
   for (int i = 0; i < list_->count(); ++i) {
     if (list_->item(i)->data(Qt::UserRole).toString() == mode) {
       // setCurrentRow 不发 itemClicked，不会回灌 set_mode
@@ -206,6 +281,61 @@ bool ThemeSettingsPage::set_frosted(bool enabled) {
   const bool active = manager_->set_frosted_effect_enabled(enabled);
   sync_from_manager();
   return active;
+}
+
+// —— 需求批⑮：皮肤包导入／导出 ——
+
+bool ThemeSettingsPage::import_skin_from_path(const QString& path) {
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly)) {
+    skin_status_->setText(
+        QStringLiteral("无法读取皮肤包文件：%1").arg(path));
+    return false;
+  }
+  QString error;
+  const bool ok = manager_->install_skin_pack(file.readAll(), &error);
+  if (ok) {
+    // 导入成功即选中新主题（install_skin_pack 内已 set_mode），状态行报包名
+    skin_status_->setText(
+        QStringLiteral("皮肤包导入成功：%1").arg(manager_->mode()));
+    app_settings().setValue(QString::fromUtf8(kSkinDirKey),
+                            QFileInfo(path).absolutePath());
+  } else {
+    skin_status_->setText(error);
+  }
+  sync_from_manager();
+  return ok;
+}
+
+bool ThemeSettingsPage::export_skin_to_path(const QString& path) {
+  QString error;
+  const SkinPackManifest manifest = manager_->current_skin_manifest(&error);
+  if (!error.isEmpty()) {
+    skin_status_->setText(error);
+    return false;
+  }
+  QString export_error;
+  const QByteArray bytes = export_skin_pack(manifest, &export_error);
+  if (bytes.isEmpty()) {
+    skin_status_->setText(export_error);
+    return false;
+  }
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    skin_status_->setText(
+        QStringLiteral("无法写入目标文件：%1").arg(path));
+    return false;
+  }
+  if (file.write(bytes) != bytes.size()) {
+    skin_status_->setText(
+        QStringLiteral("写入皮肤包不完整：%1").arg(path));
+    return false;
+  }
+  app_settings().setValue(QString::fromUtf8(kSkinDirKey),
+                          QFileInfo(path).absolutePath());
+  skin_status_->setText(QStringLiteral("已导出皮肤包：%1（%2 v%3）")
+                            .arg(path, manifest.name, manifest.version));
+  return true;
 }
 
 bool ThemeSettingsPage::select_mode(const QString& mode) {
