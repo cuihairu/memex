@@ -71,3 +71,16 @@
   - 覆盖面核对：ChatActivity 发送（原报路径）＋MainActivity 退出登录（logout 同险同类，一并修）；文件助手（FilesClient/UplinkClient）经查为 HTTP 面且已在自身 executor 上调（FileAssistantActivity/LoginActivity 既有后台线程模式），无主线程网络，BUG-006 影响面中「共用 sendText 的入口」实查不存在。
   - 回归：新增 `ChatSessionTest.发送不阻塞调用线程（外发帧走会话发送线程）`——假服务端回完 LOGIN_RESULT 后装死不再读，3MiB 消息塞满发送缓冲，同步写实现＝TimeoutException 红灯、异步实现即返回（对修复前实现实测红、修复后绿，真咬合）；`./gradlew test` 双变体 83/84 绿（唯一红＝`MemexClientTest.域名无法解析→连不上`，BUG-005 已登记的环境 DNS 项——本机 127.0.0.53 fake-IP 通配解析 `.invalid` 假域名致 connect 成功后对端即关，净树（无本修改动）复跑同红，与本修无关、按已知偶发处理）；assembleDebug 产出。
   - 真机走查（2026-10-09，模拟器 android-34＋本机 serve 24370 新库）：登录 zhangsan→发起会话 lisi→发送文本——不再崩、气泡本地即渲染、输入框清空（seq>0 成功路径）；服务端 `messages` 表归档收到 TEXT（zhangsan→lisi，msg_id 已分配，lisi 离线入 `offline_messages` 队列＝受理回执链走通）；logcat crash buffer 0 条 NetworkOnMainThreadException；退出登录回登录页无崩溃。截图 `walkthrough-12-chat-sent.png`／`walkthrough-13-sessions-sent.png` 入档。
+
+## 2026-10-09 聊天实况补摄轮发现（BUG×1）
+
+- [ ] BUG-007 服务端 msg_id 用 sha256(from+":"+seq)，客户端 seq 每连接重置——同账号重登后与旧档撞 msg_id 的新消息被静默吞档（投递可达、归档丢失、发送方仍收 ACK）
+  现象（2026-10-09 走查实录，两起独立复证）：同一账号 zhangsan 第二次登录后发的文本，服务端日志「收到 text」照记、发送方 ACK 照收、本端气泡照渲染，但服务端 SQLite `messages` 归档表无此行。①22:18 zhangsan 发 2 条（日志 ×2），归档仅 +1（"lisi hello, this is zhangsan" 消失，lisi 未读数与离线队列消费数均与之吻合）；②22:39 zhangsan 再发 1 条，归档零增长、离线队列正常入队（lisi 照常收到）。
+  定位（源码三环闭合，2026-10-09）：
+  - `session.cpp`（v1::TEXT）：`msg_id = sha256_hex(msg.from() + ":" + std::to_string(msg.seq()))`——msg_id 只由发送方账号＋seq 决定；
+  - Android `ChatSession.kt`：`seqGen = AtomicLong(1)` 为实例字段，每次登录新建 ChatSession → seq 每连接从 1 重来 → 同账号重登后 (from, seq) 必然复用 → msg_id 必然重复；
+  - `store.cpp`：归档 `INSERT OR IGNORE INTO messages(msg_id, …)`（行存在即静默忽略、返回 false）、离线队列 `INSERT OR IGNORE INTO offline_messages(msg_id, to_account, …)`，而 `session.cpp` 对 store_message 的返回值不检查、`ACK(seq)` 无条件回发。
+  恒等式实测：`sha256("zhangsan:1") = 9c16750e…95ec1` = 21:29 首登那条的归档 msg_id = 22:39 新消息的入队 msg_id——同一 msg_id 双用坐实。
+  影响面：同账号重登（或 seq 回绕）后，与旧连接 seq 重叠的每条发送——对端能收到（离线槽被消费后 `INSERT OR IGNORE` 可再入队、在线即投不走归档判重），但服务端归档永久缺行（审计/漫游/历史查询口径失真），且发送方获得「受理成功」假象；群消息扇出同险（同一 msg_id 归档一次的口径会连带影响重投语义）。
+  平台：服务端（C++），触发源在客户端 seq 生命周期与服务端 msg_id 生成规则的组合；桌面端 Qt 客户端 seq 生命周期需修复时一并核对。
+  备注：按「只登记不修」挂起。修复方向提示（不动手）：msg_id 加入服务端单调成分或时间戳（保持幂等去重语义需同步调整接收端按 msg_id 去重的重投口径），或客户端 seq 持久化跨连接——两路均牵 ACK/去重/归档三面，须整体设计。登记时发现走查环境还有一桩模拟器 NAT 单连接停滞（guest 发送缓冲字节滞留、服务端与应用双无责，重启 app 恢复，详见 todo.md 文档站持续更新行），与本条无关，仅留痕备查。
