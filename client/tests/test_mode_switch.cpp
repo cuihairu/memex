@@ -252,11 +252,14 @@ int main(int argc, char** argv) {
       {
         auto& tm = memex::client::ThemeManager::instance();
         tm.apply(qApp);
-        const QString prev_mode = tm.mode();
         tm.set_mode(QStringLiteral("dark"));
         CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
                                  QStringLiteral("/layout-chat-dark.png")));
-        tm.set_mode(prev_mode); // 还原（持久面随原值，重跑与后续腿不受扰）
+        // 还原须显式回 light：system 档的判暗兜底读的是「当前」调色板，
+        // 深色推过后已染暗，set_mode(system) 会再解析回深色（2026-10-10
+        // 浅深配平轮实测：好友列表浅图因此带暗入库）。测试基线＝浅色，
+        // 显式回亮让后续腿与后续抓图回到基线
+        tm.set_mode(QStringLiteral("light"));
       }
 
       // —— 需求批⑨ 查找：昵称/账号(设备 id)/IP 多字段，模糊+精确 ——
@@ -354,6 +357,17 @@ int main(int argc, char** argv) {
       CHECK(!window.chat_panel_visible());
       CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
                                QStringLiteral("/layout-friends.png")));
+      // 深色随需补摄（2026-10-10 浅深配平轮）：同一列表态切暗再抓一张，
+      // 随后显式回亮色（同 layout-chat-dark 还原法——system 档判暗会回读
+      // 已被染暗的调色板再落回深色）
+      {
+        auto& tm = memex::client::ThemeManager::instance();
+        tm.apply(qApp);
+        tm.set_mode(QStringLiteral("dark"));
+        CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
+                                 QStringLiteral("/layout-friends-dark.png")));
+        tm.set_mode(QStringLiteral("light"));
+      }
     }
   }
 

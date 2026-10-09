@@ -32,13 +32,17 @@
 
 ### 好友列表
 
-实况截图（协作态列表态，2026-10-09 补摄）：登录协作态、未开会话＝「左菜单＋
+实况截图（协作态列表态，2026-10-09 补摄、2026-10-10 浅色重摄＋深色补齐）：登录协作态、未开会话＝「左菜单＋
 好友列表」长方形列表态（不摆聊天面板）——局域网设备分组（在线数统计）＋
 「协作会话 · 服务端归档」分组（未读／在线标识、星标置顶随常用联系人）；
 搜索栏按昵称／账号／IP／群名过滤；点好友展开对话、再点当前好友或 ✕ 关回
-列表态（真实客户端窗口，`test_mode_switch` 布局腿程序化抓取）。
+列表态（真实客户端窗口，`test_mode_switch` 布局腿程序化抓取）。**如实更正**：
+2026-10-09 首轮入库的「浅色」实为深色抓图——测试切暗腿的还原缺陷（system
+档判暗兜底回读已被染暗的调色板，还原又落回深色），浅图带暗入库；本轮修
+抓取机制（还原改显式回亮色）后浅色重摄、深色一并补齐。
 
 ![桌面端好友列表（浅色·实况）](/screenshots/layout-friends.png)
+![桌面端好友列表（深色·实况）](/screenshots/layout-friends-dark.png)
 
 原型稿：浅色与深色各一（协作态好友列表设计稿，保留备查）。
 
@@ -151,4 +155,4 @@ BUGS.md。
 - 桌面端：[desktop-direct](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct.html)（列表态：无对话不摆聊天面板）· [desktop-direct-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct-chat.html)（点好友后对话展开）· [desktop-friends](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-friends.html)（协作态好友列表·列表态）· [desktop-collab](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-collab.html) · [desktop-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-chat.html) · [desktop-group](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-group.html) · [desktop-org](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-org.html) · [desktop-files](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-files.html) · [desktop-search](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-search.html)
 - 手机端：[mobile-init](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-init.html) · [mobile-sessions](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-sessions.html) · [mobile-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-chat.html) · [mobile-me](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-me.html)
 
-功能实现后，本页截图将逐步替换为客户端实况截图。当前进度（2026-10-09 走查轮更新）：桌面端七屏已全部替换为实况截图（浅／深各一，真实客户端在 Xvfb 下拍摄，逐张目检非原型稿）；未登录直连态已随布局令（2026-10-08）重摄为「列表态」实况（浅／深各一，Xvfb 双实例互发现拍摄），「会话展开态」实况浅／深各一补齐（点好友后，`test_mode_switch` 布局腿程序化抓取，深色本轮切暗补摄）；好友列表屏本轮换实况（协作态列表态，登录后经生产 ✕ 路径关回列表态抓取——局域网设备＋「协作会话·服务端归档」两分组，浅色一张，`test_mode_switch` 布局腿程序化抓取；深色随需再补）；手机端初始化向导与登录成功主界面为 Android 实况（T6.3 模拟器走查，与 `apps/android/docs/walkthrough-0*.png` 同源；深色随 2026-10-10 深色主题走查补齐，`walkthrough-18/19` 同源）；会话列表屏与聊天屏本轮补 Android 实况浅／深各一（2026-10-09 模拟器 android-34＋本机 serve 走查，与 `walkthrough-08/09/10/11` 同源）——**如实边界**：聊天屏实况的对端为服务端「通知」发送方（webhook 真实下发镜像，会话列表未读角标亦由此而来），人对人发送路径本轮走查点击即崩溃（主线程网络 `NetworkOnMainThreadException`，已登记 `BUGS.md` BUG-006 挂起不修），对端气泡／撤回／长按复制等富交互实况待其修复后补摄；「我」屏 Android 未建、iOS 代码-only——暂仍为原型稿并如实标注。鸿蒙端（T6.2 桌面矩阵项，工具链/证书/真机未备受阻；鸿蒙手机版 T6.6 代码-only＋CI，编译腿待 OHOS 工具链）不为其承诺实况截图。
+功能实现后，本页截图将逐步替换为客户端实况截图。当前进度（2026-10-10 走查轮更新）：桌面端七屏已全部替换为实况截图（浅／深各一，真实客户端在 Xvfb 下拍摄，逐张目检非原型稿）；未登录直连态已随布局令（2026-10-08）重摄为「列表态」实况（浅／深各一，Xvfb 双实例互发现拍摄），「会话展开态」实况浅／深各一补齐（点好友后，`test_mode_switch` 布局腿程序化抓取，深色本轮切暗补摄）；好友列表屏实况浅／深各一（协作态列表态，登录后经生产 ✕ 路径关回列表态抓取——局域网设备＋「协作会话·服务端归档」两分组，`test_mode_switch` 布局腿程序化抓取；浅色 2026-10-10 重摄更正——2026-10-09 首轮入库误为深色抓图，抓取机制还原缺陷已修，深色同轮补齐）；手机端初始化向导与登录成功主界面为 Android 实况（T6.3 模拟器走查，与 `apps/android/docs/walkthrough-0*.png` 同源；深色随 2026-10-10 深色主题走查补齐，`walkthrough-18/19` 同源）；会话列表屏与聊天屏本轮补 Android 实况浅／深各一（2026-10-09 模拟器 android-34＋本机 serve 走查，与 `walkthrough-08/09/10/11` 同源）——聊天屏实况 2026-10-09 第二轮已换真实人对人互发（离线投递→登录送达→在线回复全链，BUG-006 修复后实测不崩；长按复制富交互入档，`walkthrough-14/15/16` 同源，详见上「聊天」小节）；「我」屏 Android 未建、iOS 代码-only——暂仍为原型稿并如实标注。鸿蒙端（T6.2 桌面矩阵项，工具链/证书/真机未备受阻；鸿蒙手机版 T6.6 代码-only＋CI，编译腿待 OHOS 工具链）不为其承诺实况截图。
