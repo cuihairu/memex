@@ -9,7 +9,6 @@
 <p align="center">
   <a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov coverage" /></a>
-  <a href="https://cuihairu.github.io/memex/"><img src="https://img.shields.io/website?url=https%3A%2F%2Fcuihairu.github.io%2Fmemex%2F&up_message=online&down_message=offline&label=docs&color=e16531" alt="Documentation site" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20(UOS%20%2F%20Kylin)%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-e16531" alt="Platform support" />
   <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
