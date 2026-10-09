@@ -291,6 +291,15 @@ bool ServerStore::ensure_schema() {
       "  manager TEXT NOT NULL DEFAULT '',"
       "  updated_ms INTEGER NOT NULL,"
       "  signature TEXT NOT NULL DEFAULT '');"
+      // 需求批⑫ 用户头像：每账号四档（32/64/128/256），(account,size) 主键
+      // upsert 覆盖；版本戳=MAX(ts_ms) 随行生灭（见 store.hpp 注）
+      "CREATE TABLE IF NOT EXISTS member_avatars ("
+      "  account TEXT NOT NULL,"
+      "  size INTEGER NOT NULL,"
+      "  mime TEXT NOT NULL,"
+      "  bytes BLOB NOT NULL,"
+      "  ts_ms INTEGER NOT NULL,"
+      "  PRIMARY KEY(account, size));"
       // T3.2 查阅日志：检索／导出动作逐次落一条（只附加，不删改）
       "CREATE TABLE IF NOT EXISTS audit_reads ("
       "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -4373,6 +4382,99 @@ bool ServerStore::emoji_delete(std::int64_t id, const std::string& account) {
   const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
   sqlite3_finalize(st);
   return ok;
+}
+
+// —— 需求批⑫ 用户头像 ——
+
+bool ServerStore::avatar_size_valid(int size) {
+  for (const int s : kAvatarSizes) {
+    if (s == size) return true;
+  }
+  return false;
+}
+
+bool ServerStore::avatar_put(const std::string& account, int size,
+                             const std::string& mime,
+                             const std::vector<unsigned char>& bytes,
+                             std::int64_t ts_ms) {
+  if (!avatar_size_valid(size) || account.empty() || bytes.empty()) {
+    return false;
+  }
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "INSERT INTO member_avatars(account, size, mime,"
+                         " bytes, ts_ms) VALUES(?1, ?2, ?3, ?4, ?5)"
+                         " ON CONFLICT(account, size) DO UPDATE SET"
+                         " mime = excluded.mime, bytes = excluded.bytes,"
+                         " ts_ms = excluded.ts_ms;",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 2, size);
+  sqlite3_bind_text(st, 3, mime.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_blob(st, 4, bytes.data(), static_cast<int>(bytes.size()),
+                    SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::avatar_bytes(const std::string& account, int size,
+                               std::vector<unsigned char>& out,
+                               std::string& mime_out) {
+  out.clear();
+  mime_out.clear();
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT mime, bytes FROM member_avatars"
+                         " WHERE account = ?1 AND size = ?2;",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 2, size);
+  const bool hit = sqlite3_step(st) == SQLITE_ROW;
+  if (hit) {
+    mime_out = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    const auto* p = static_cast<const unsigned char*>(
+        sqlite3_column_blob(st, 1));
+    const int n = sqlite3_column_bytes(st, 1);
+    out.assign(p, p + n);
+  }
+  sqlite3_finalize(st);
+  return hit;
+}
+
+bool ServerStore::avatar_clear(const std::string& account) {
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "DELETE FROM member_avatars WHERE account = ?1;",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+std::int64_t ServerStore::avatar_ver(const std::string& account) const {
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT MAX(ts_ms) FROM member_avatars"
+                         " WHERE account = ?1;",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return 0;
+  }
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  std::int64_t ver = 0;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    ver = sqlite3_column_int64(st, 0); // 无行/全 NULL → 0
+  }
+  sqlite3_finalize(st);
+  return ver;
 }
 
 // —— 二期·办公室位置图（设计稿 docs/design/办公室位置图.md）——

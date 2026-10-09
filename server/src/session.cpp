@@ -167,6 +167,8 @@ void Session::handle_message(const memex::protocol::Message& msg) {
           store.online_ms_between(m.account, now - 30LL * 24 * 3600 * 1000,
                                   now) /
           1000);
+      // 需求批⑫：头像版本戳随成员下发（0=未设置；字节走文件面按需取）
+      om->set_avatar_ver(store.avatar_ver(m.account));
     }
     // T3.4 策略开关随组织架构一并下发（客户端按本人部门解析生效行）
     for (const auto& p : server_.store().policy_list()) {

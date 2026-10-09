@@ -119,6 +119,13 @@ if(MEMEX_BUILD_TESTS)
   add_test(NAME emoji COMMAND test_emoji)
   set_tests_properties(emoji PROPERTIES TIMEOUT 60)
 
+  # 用户头像（需求批⑫，服务端面）：member_avatars 四档 BLOB——上传 magic/
+  # 1MiB/档位校验、他人 403、下载字节往返（组织内互见）、删除归零回落默认
+  add_executable(test_avatar tests/test_avatar.cpp)
+  target_link_libraries(test_avatar PRIVATE memex_server_core)
+  add_test(NAME avatar COMMAND test_avatar)
+  set_tests_properties(avatar PROPERTIES TIMEOUT 60)
+
   # T4.6 通讯录可见性验收（A20）：库级过滤／脱敏／上级引用抹除／落盘重开＋
   # CLI 配置面（org hide|fields|allow|visibility list）＋协议级 ORG_QUERY
   # 按查询者过滤（被隐藏者不可见不可搜——数据不出服务端）

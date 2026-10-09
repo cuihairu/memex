@@ -153,6 +153,9 @@ message OrgMember {
   int64 online_day_s = 8;     // 滚动 24 小时窗
   int64 online_week_s = 9;    // 滚动 7×24 小时窗
   int64 online_month_s = 10;  // 滚动 30×24 小时窗
+  // 头像版本戳（需求批⑫）：各档头像行 MAX(ts_ms)；0=未设置（客户端按
+  // 账号 hash 稳定取内置默认头像）。字节经文件面 /files/avatar 按需取。
+  int64 avatar_ver = 11;
 }
 
 // 策略开关（T3.4）：按部门配置、全局兜底（department_path 空=全局默认）。

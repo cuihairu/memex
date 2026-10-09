@@ -881,6 +881,25 @@ public:
   // 删除：仅属主（非属主/不存在 false）
   bool emoji_delete(std::int64_t id, const std::string& account);
 
+  // —— 用户头像（需求批⑫）：每账号四档尺寸（32/64/128/256）——
+  // 独立成表不并入 member_profiles：BLOB 行不跟资料行一起被 ORG_QUERY
+  // 全量扫读；版本戳=该账号各档行的 MAX(ts_ms)（无行=0，删除行即回落
+  // 默认头像，缓存失效语义随行生灭，无需另立 ver 列与迁移）。
+  // 上传（裁剪+四档生成在客户端完成，服务端只验 magic/上限/档位）与
+  // 删除＝本人属主裁决；读面＝登录成员可读（组织内互见，同资料面口径）。
+  static constexpr int kAvatarSizes[] = {32, 64, 128, 256};
+  static bool avatar_size_valid(int size);
+  // 写入/覆盖一档（INSERT OR REPLACE）；ts_ms 同时是该档的版本成分
+  bool avatar_put(const std::string& account, int size, const std::string& mime,
+                  const std::vector<unsigned char>& bytes, std::int64_t ts_ms);
+  // 取字节（登录成员可读口径由路由层判权，存储层不问来者）
+  bool avatar_bytes(const std::string& account, int size,
+                    std::vector<unsigned char>& out, std::string& mime_out);
+  // 清除全部档位（真删了行才 true——无头像可删 false，路由层回 404）
+  bool avatar_clear(const std::string& account);
+  // 头像版本戳：各档行 MAX(ts_ms)，无行=0（ORG_QUERY 逐成员带出）
+  std::int64_t avatar_ver(const std::string& account) const;
+
   // —— 二期·办公室位置图（设计稿 docs/design/办公室位置图.md）——
   // 抽象平面（网格归一化坐标 0~1，不画真实底图）；工位即楼层归属
   //（本人楼层=本人占用工位所在楼层，不从部门推导）；编辑权 org-admin

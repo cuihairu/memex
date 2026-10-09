@@ -755,6 +755,9 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     } else if (path_ == "/files/emoji/upload") {
       // 表情素材（需求批②）：GIF 动图放宽到 1MiB（上限校验在路由层）
       body_cap_ = kEmojiAssetMax + 64 * 1024;
+    } else if (path_ == "/files/avatar/upload") {
+      // 头像（需求批⑫）：与表情同口径 1MiB（语义化 413 在路由层，同上）
+      body_cap_ = kEmojiAssetMax + 64 * 1024;
     } else {
       body_cap_ = kMaxJsonBody;
     }
@@ -934,6 +937,17 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/emoji/delete" && method_ == "POST") {
       return route_emoji_delete(body);
+    }
+    // 用户头像（需求批⑫）：写两（上传/删除）本人属主裁决（他人 403），
+    // 读面＝登录成员可读（组织内互见，同资料面口径）
+    if (path_ == "/files/avatar/upload" && method_ == "POST") {
+      return route_avatar_upload(body);
+    }
+    if (path_ == "/files/avatar/download" && method_ == "GET") {
+      return route_avatar_download();
+    }
+    if (path_ == "/files/avatar/delete" && method_ == "POST") {
+      return route_avatar_delete(body);
     }
     // 远程协助（二期）：生命周期＋台账＋媒体中继（模型层平台-11 在 store）
     if (path_ == "/files/assist/request" && method_ == "POST") {
@@ -2281,6 +2295,104 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     std::cout << "[MEMEX] files emoji delete by=" << account << " id=" << id
               << std::endl;
     respond_json(200, {{"ok", true}});
+  }
+
+  // —— 用户头像（需求批⑫）：四档 32/64/128/256，客户端裁剪并逐档编码 ——
+  // 上传：?size=32|64|128|256；raw-bytes POST。判权＝本人属主（目标账号
+  // 可显式指定但必须与本人一致——他人 403；缺省即本人）。
+  void route_avatar_upload(const std::string& body) {
+    const std::string me = account_or_respond();
+    if (me.empty()) return;
+    const std::string target = query_param(query_, "account");
+    if (!target.empty() && target != me) {
+      respond_json(403, {{"ok", false},
+                         {"error", "头像仅限本人设置（他人 403）"}});
+      return;
+    }
+    const std::string account = me;
+    const int size =
+        std::atoi(query_param(query_, "size").c_str());
+    if (size == 0) {
+      respond_json(400, {{"ok", false}, {"error", "缺少档位（?size=）"}});
+      return;
+    }
+    if (!impl_.store.avatar_size_valid(size)) {
+      respond_json(400, {{"ok", false},
+                         {"error", "档位仅支持 32/64/128/256"}});
+      return;
+    }
+    if (body.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "头像字节不可空"}});
+      return;
+    }
+    const auto [status, err] = emoji_asset_check(body);
+    if (status != 0) {
+      respond_json(status, {{"ok", false}, {"error", err}});
+      return;
+    }
+    const std::vector<unsigned char> bytes(body.begin(), body.end());
+    const std::string mime =
+        emoji_content_type(std::string(bytes.begin(), bytes.end()));
+    if (!impl_.store.avatar_put(account, size, mime, bytes, now_ms())) {
+      respond_json(500, {{"ok", false}, {"error", "头像写入失败"}});
+      return;
+    }
+    std::cout << "[MEMEX] files avatar upload by=" << account
+              << " size=" << size << " bytes=" << body.size() << std::endl;
+    respond_json(200, {{"ok", true}, {"size", size},
+                       {"ver", impl_.store.avatar_ver(account)}});
+  }
+
+  // 读（登录成员可读＝组织内互见）：?account=＋?size=
+  void route_avatar_download() {
+    const std::string me = account_or_respond();
+    if (me.empty()) return;
+    const std::string target = query_param(query_, "account");
+    const std::string want = target.empty() ? me : target;
+    const int size = std::atoi(query_param(query_, "size").c_str());
+    if (!impl_.store.avatar_size_valid(size)) {
+      respond_json(400, {{"ok", false},
+                         {"error", "档位仅支持 32/64/128/256"}});
+      return;
+    }
+    std::vector<unsigned char> bytes;
+    std::string mime;
+    if (!impl_.store.avatar_bytes(want, size, bytes, mime)) {
+      respond_json(404, {{"ok", false}, {"error", "该账号未设置头像"}});
+      return;
+    }
+    respond_image(200, mime.empty() ? "image/png" : mime.c_str(), bytes);
+  }
+
+  // 删除：仅本人（body {"account": X} 缺省=本人；他人 403）；
+  // 无头像可删 404（与 emoji 面同口径）
+  void route_avatar_delete(const std::string& body) {
+    const std::string me = account_or_respond();
+    if (me.empty()) return;
+    std::string target;
+    if (!body.empty()) {
+      json j;
+      try {
+        j = json::parse(body);
+      } catch (const std::exception&) {
+        respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+        return;
+      }
+      if (j.is_object() && j.contains("account") && j["account"].is_string()) {
+        target = j["account"].get<std::string>();
+      }
+    }
+    if (!target.empty() && target != me) {
+      respond_json(403, {{"ok", false},
+                         {"error", "头像仅限本人删除（他人 403）"}});
+      return;
+    }
+    if (!impl_.store.avatar_clear(me)) {
+      respond_json(404, {{"ok", false}, {"error", "无头像可删"}});
+      return;
+    }
+    std::cout << "[MEMEX] files avatar delete by=" << me << std::endl;
+    respond_json(200, {{"ok", true}, {"ver", 0}});
   }
 
   void route_branding_get() {
