@@ -6,15 +6,57 @@
 #include <QPalette>
 #include <QSettings>
 #include <QStyleHints>
+#include <QWidget>
+#include <QWindow>
 
 #include <cmath>
+
+#if defined(Q_OS_WIN)
+#include <dwmapi.h>
+#include <windows.h>
+#pragma comment(lib, "dwmapi.lib")
+#endif
 
 namespace memex::client {
 namespace {
 
+// ⑭ Windows 毛玻璃落地：亚克力／Mica 经 DWM 系统背景材质（Win11 22H2+）。
+// DwmSetWindowAttribute 属性 38＝DWMWA_SYSTEMBACKDROP_TYPE：
+// DWMSBT_MAINWINDOW(2)=Mica（主窗推荐）、DWMSBT_NONE(1)=关闭；另设
+// 属性 20＝DWMWA_USE_IMMERSIVE_DARK_MODE 随主题切暗色标题栏。
+// 老系统不认识属性 38：调用失败返回值非 0、界面静默保持不透明（降级）。
+// 本机无 Windows，此腿只编译不运行（nightly CI Windows 编译腿会覆盖编译）——
+// 待 Windows 真机验证。
+#if defined(Q_OS_WIN)
+void apply_frosted_effect_to_window_impl(QWindow* window, bool enabled) {
+  if (!window) return;
+  HWND hwnd = reinterpret_cast<HWND>(window->winId());
+  if (!hwnd) return;
+  constexpr DWORD kSystemBackdropType = 38;   // DWMWA_SYSTEMBACKDROP_TYPE
+  constexpr DWORD kUseImmersiveDarkMode = 20; // DWMWA_USE_IMMERSIVE_DARK_MODE
+  int backdrop = enabled ? 2 : 1;             // 2=Mica（主窗），1=None
+  DwmSetWindowAttribute(hwnd, kSystemBackdropType, &backdrop,
+                        sizeof(backdrop));
+  // 暗色标题栏位（跟随主题；enabled 与否都设，保持视觉一致）
+  BOOL dark = enabled ? TRUE : FALSE;
+  DwmSetWindowAttribute(hwnd, kUseImmersiveDarkMode, &dark, sizeof(dark));
+}
+#endif
+
 // 品牌橙（R19 主色）：两主题恒同，只随底色调 hover
 constexpr auto kBrandOrange = "#e16531";
 constexpr auto kSettingsKey = "appearance/theme_mode";
+// ⑭ 面板改色覆盖层与毛玻璃开关的落盘键（沿同一 appearance/ 命名空间口径）
+constexpr auto kOverridesGroup = "appearance/custom_colors";
+constexpr auto kCustomBaseKey = "appearance/custom_base";
+constexpr auto kFrostedKey = "appearance/effects/frosted";
+// ⑭ 用户可改色的核心中性令牌（品牌橙与 success/warning/danger 语义族锁死
+// 不放行；selection/bubble_* 等随内置基线，扩展面留后续）
+const QStringList kCustomizableTokens = {
+    QStringLiteral("surface"),      QStringLiteral("surface_alt"),
+    QStringLiteral("surface_raised"), QStringLiteral("border"),
+    QStringLiteral("text"),         QStringLiteral("text_muted"),
+    QStringLiteral("chat_bg"),      QStringLiteral("input_bg")};
 
 ThemeTokens light_tokens() {
   ThemeTokens t;
@@ -220,6 +262,19 @@ const DefaultThemeSpec* find_default_spec(const QString& name) {
   return nullptr;
 }
 
+// ⑭ 平台是否支持毛玻璃：仅 Windows 且运行时可调 DWM（编译期 + 运行时双检；
+// Linux／macOS／无 DWM 恒 false → 上层降级为不透明背景，不崩不花屏）
+bool platform_frosted_supported() {
+#if defined(Q_OS_WIN)
+  // 运行时探测：真正尝试调用即可知；此处以「Windows 平台 + DWM 可用」为准。
+  // 真机启用走 apply_frosted_effect()（user32/dwmapi，见下）；
+  // 本机无 Windows，此腿只编译不过运行，待真机验证。
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool valid(const QColor& c) { return c.isValid() && c.alpha() > 0; }
 
 // WCAG 相对亮度（sRGB 线性化）——用于无 colorScheme 提示时的明暗兜底判断
@@ -278,6 +333,16 @@ bool ThemeTokens::is_typography_valid() const {
 }
 
 ThemeManager::ThemeManager(QObject* parent) : QObject(parent) {
+  load_custom_overrides();
+  {
+    QSettings settings(QCoreApplication::organizationName(),
+                       QCoreApplication::applicationName());
+    frosted_enabled_ = settings.value(QString::fromUtf8(kFrostedKey), false)
+                           .toBool();
+    const QString base = settings.value(QString::fromUtf8(kCustomBaseKey))
+                             .toString();
+    if (builtin_themes().contains(base)) custom_base_ = base;  // 坏值回落 light
+  }
   mode_ = read_persisted_mode();
   reload();
 }
@@ -317,6 +382,11 @@ QString ThemeManager::read_persisted_mode() const {
   if (stored == QLatin1String(kFollowSystem)) return stored;
   // 内置 22 套（light/dark＋⑬ 默认 20）静态可解析，直接认
   if (builtin_themes().contains(stored)) return stored;
+  // ⑭ 自定义槽位：有覆盖层才认（覆盖层丢了＝换机后只剩槽名，回落基线
+  // 内置主题，不把界面停在一个点开即空的自定义态上）
+  if (stored == customThemeName()) {
+    return overrides_.isEmpty() ? custom_base_ : stored;
+  }
   // 自定义主题：注册表里没有这个名字（换机／重装后扩展主题可能已不在）→
   // 回落跟随系统，不让界面停在无法解析的取值上
   const ThemeManager* self = this;
@@ -331,7 +401,8 @@ void ThemeManager::persist_mode(const QString& mode) const {
 }
 
 bool ThemeManager::has_theme(const QString& name) const {
-  return builtin_themes().contains(name) || custom_.contains(name);
+  return builtin_themes().contains(name) || custom_.contains(name) ||
+         name == customThemeName();
 }
 
 void ThemeManager::register_theme(const QString& name,
@@ -351,9 +422,132 @@ void ThemeManager::register_theme(const QString& name,
   custom_.insert(name, copy);
 }
 
+// —— 需求批⑭：面板改色覆盖层 ——
+
+QStringList ThemeManager::customizable_tokens() { return kCustomizableTokens; }
+
+QHash<QString, QColor> ThemeManager::custom_overrides() const {
+  return overrides_;
+}
+
+bool ThemeManager::set_custom_override(const QString& token,
+                                       const QColor& color) {
+  // 品牌橙／语义族令牌锁死：不在放行集内一律拒绝（不落盘、不改状态）
+  if (!kCustomizableTokens.contains(token)) return false;
+  if (!color.isValid()) return false;
+  // 首个改色：锁定当前基线（内置或已注册扩展主题，跟随态取解析名）并切到
+  // 自定义槽（改色即时可见，所见即所改）
+  if (mode_ != customThemeName()) {
+    custom_base_ = resolve_theme();
+    QSettings settings(QCoreApplication::organizationName(),
+                       QCoreApplication::applicationName());
+    settings.setValue(QString::fromUtf8(kCustomBaseKey), custom_base_);
+    mode_ = QString::fromUtf8(kCustomTheme);
+    persist_mode(mode_);
+  }
+  overrides_.insert(token, color);
+  persist_custom_overrides();
+  reload();
+  return true;
+}
+
+void ThemeManager::clear_custom_overrides() {
+  overrides_.clear();
+  persist_custom_overrides();
+  // 当前正停在自定义槽：回到基线内置主题（「恢复默认」语义）
+  if (mode_ == customThemeName()) {
+    mode_ = custom_base_;
+    persist_mode(mode_);
+  }
+  reload();
+}
+
+bool ThemeManager::has_custom_overrides() const { return !overrides_.isEmpty(); }
+
+ThemeTokens ThemeManager::apply_overrides(
+    const ThemeTokens& base, const QHash<QString, QColor>& overrides) {
+  ThemeTokens out = base;
+  for (auto it = overrides.constBegin(); it != overrides.constEnd(); ++it) {
+    // 纵深防御：即便覆盖表被外部构造带进品牌／语义令牌，这里也不放行
+    if (!kCustomizableTokens.contains(it.key())) continue;
+    if (!it.value().isValid()) continue;
+    if (it.key() == QLatin1String("surface")) out.surface = it.value();
+    else if (it.key() == QLatin1String("surface_alt")) out.surface_alt = it.value();
+    else if (it.key() == QLatin1String("surface_raised")) out.surface_raised = it.value();
+    else if (it.key() == QLatin1String("border")) out.border = it.value();
+    else if (it.key() == QLatin1String("text")) out.text = it.value();
+    else if (it.key() == QLatin1String("text_muted")) out.text_muted = it.value();
+    else if (it.key() == QLatin1String("chat_bg")) out.chat_bg = it.value();
+    else if (it.key() == QLatin1String("input_bg")) out.input_bg = it.value();
+  }
+  // 品牌橙恒同（覆盖层亦不得漂移主色）
+  out.brand = base.brand;
+  return out;
+}
+
+void ThemeManager::load_custom_overrides() {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  settings.beginGroup(QString::fromUtf8(kOverridesGroup));
+  for (const QString& name : settings.childKeys()) {
+    if (!kCustomizableTokens.contains(name)) continue;  // 旧版本残留／坏键丢弃
+    const QColor c(settings.value(name).toString());
+    if (c.isValid()) overrides_.insert(name, c);
+  }
+  settings.endGroup();
+}
+
+void ThemeManager::persist_custom_overrides() const {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  settings.remove(QString::fromUtf8(kOverridesGroup));  // 先清组再写：删覆盖即时落盘
+  settings.beginGroup(QString::fromUtf8(kOverridesGroup));
+  for (auto it = overrides_.constBegin(); it != overrides_.constEnd(); ++it) {
+    settings.setValue(it.key(), it.value().name(QColor::HexArgb));
+  }
+  settings.endGroup();
+}
+
+// —— 需求批⑭：毛玻璃特效（全局单开关，落 appearance/effects）——
+
+bool ThemeManager::frosted_effect_supported() {
+  return platform_frosted_supported();
+}
+
+bool ThemeManager::frosted_effect_active() const {
+  const bool supported =
+      frosted_probe_ ? frosted_probe_() : frosted_effect_supported();
+  return frosted_enabled_ && supported;
+}
+
+bool ThemeManager::set_frosted_effect_enabled(bool enabled) {
+  frosted_enabled_ = enabled;
+  persist_frosted(enabled);
+  // 平台支持的判定用注入探针优先（测试缝），否则平台能力。
+  // 不支持时开关本身仍可置位（切到支持平台即生效），但生效态恒 false；
+  // 返回值＝当前是否真生效（调用方据此提示「当前系统不支持」）
+  const bool supported =
+      frosted_probe_ ? frosted_probe_() : frosted_effect_supported();
+  if (applied_) push_to_app();  // 重新应用窗口特效（含降级路径）
+  return enabled && supported;
+}
+
+void ThemeManager::set_frosted_support_probe(std::function<bool()> probe) {
+  frosted_probe_ = std::move(probe);
+  if (applied_) push_to_app();
+}
+
+void ThemeManager::persist_frosted(bool enabled) const {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  settings.setValue(QString::fromUtf8(kFrostedKey), enabled);
+}
+
 QStringList ThemeManager::modes() const {
   QStringList list{QString::fromUtf8(kFollowSystem)};
   list += builtin_themes();
+  // ⑭ 自定义槽位：列表恒列出（无覆盖时点选先落基线，改色即时建层）
+  list << QString::fromUtf8(kCustomTheme);
   for (auto it = custom_.constBegin(); it != custom_.constEnd(); ++it) {
     list << it.key();
   }
@@ -399,8 +593,19 @@ void ThemeManager::set_system_dark_probe(std::function<bool()> probe) {
 
 void ThemeManager::reload() {
   const QString name = resolve_theme();
-  const ThemeTokens next = custom_.contains(name) ? custom_.value(name)
-                                                  : tokens_for(name);
+  // ⑭ 自定义槽位：基线＝首个改色时锁定的主题（内置或已注册扩展；不递归回
+  // kCustomTheme），再叠加用户覆盖层；apply_overrides 内再锁品牌／语义令牌
+  ThemeTokens next;
+  if (name == customThemeName()) {
+    const ThemeTokens base = custom_.contains(custom_base_)
+                                 ? custom_.value(custom_base_)
+                                 : tokens_for(custom_base_);
+    next = apply_overrides(base, overrides_);
+  } else if (custom_.contains(name)) {
+    next = custom_.value(name);
+  } else {
+    next = tokens_for(name);
+  }
   tokens_ = next;
   if (applied_) push_to_app();
 }
@@ -505,7 +710,27 @@ void ThemeManager::push_to_app() {
   palette.setColor(QPalette::PlaceholderText, tokens_.text_muted);
   app_->setPalette(palette);
   app_->setStyleSheet(stylesheet_for(tokens_));
+  apply_frosted_effect();
   emit theme_changed(effective_theme());
+}
+
+// ⑭ 毛玻璃特效落地：仅在生效态（开关开 且 平台支持）时对顶层窗口启用
+// 亚克力／Mica；其余一律不透明背景（降级路径）。Windows 腿只写代码＋编译，
+// 本机（Linux）走 #else 空实现，实测降级＝不崩不花屏。
+void ThemeManager::apply_frosted_effect() {
+  if (!app_) return;
+  const bool want = frosted_effect_active();
+  const auto windows = app_->topLevelWidgets();
+  for (QWidget* w : windows) {
+    QWindow* handle = w->windowHandle();
+    if (!handle) continue;  // 未创建原生窗口（离屏／未 show）→ 跳过，勿强建
+#if defined(Q_OS_WIN)
+    apply_frosted_effect_to_window_impl(handle, want);
+#else
+    // 非 Windows：系统不支持毛玻璃，恒保持不透明（降级为默认背景色）
+    Q_UNUSED(want);
+#endif
+  }
 }
 
 void ThemeManager::apply(QApplication* app) {

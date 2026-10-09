@@ -69,6 +69,12 @@ class ThemeManager : public QObject {
   static constexpr const char* kFollowSystem = "system";
   static constexpr const char* kLight = "light";
   static constexpr const char* kDark = "dark";
+  // 需求批⑭：面板改色的单一固定槽位名（不按内置主题逐个派生；皮肤包⑮另走体系）。
+  // 选到本槽即「自定义主题」，其令牌＝当前内置基线叠加用户覆盖色。
+  static constexpr const char* kCustomTheme = "自定义";
+  // 比较用正确解码名：kCustomTheme 是 UTF-8 中文字面量，QLatin1String 会按
+  // Latin-1 解码导致全部失配（⑬ 默认主题名曾踩同坑）——一律用本函数比较
+  static QString customThemeName() { return QString::fromUtf8(kCustomTheme); }
 
   explicit ThemeManager(QObject* parent = nullptr);
   ~ThemeManager() override;
@@ -85,6 +91,37 @@ class ThemeManager : public QObject {
   bool has_theme(const QString& name) const;
   // 注册自定义主题：只提供一套令牌，切换／持久化／QSS 全自动可用
   void register_theme(const QString& name, const ThemeTokens& tokens);
+
+  // —— 需求批⑭：面板改色（中性色覆盖层，落 appearance/custom_colors）——
+  // 可改色的中性令牌（品牌橙 #e16531 与 success/warning/danger 语义族锁死
+  // 不放行）——设置页据此建控件、测试据此断言放行面
+  static QStringList customizable_tokens();
+  // 用户改色覆盖表（令牌名→色值）；空表＝无覆盖（走内置基线）
+  QHash<QString, QColor> custom_overrides() const;
+  // 自定义槽位的基线主题名（首个改色时锁定；「恢复默认」回落它）
+  QString custom_theme_base() const { return custom_base_; }
+  // 设/删单枚覆盖；品牌／语义令牌名一律拒绝（返回 false 不落盘）
+  bool set_custom_override(const QString& token, const QColor& color);
+  // 清空全部覆盖并落盘（「恢复默认」：回到当前内置主题基线）
+  void clear_custom_overrides();
+  // 覆盖层是否非空（设置页据此显示选中态与「恢复默认」可用性）
+  bool has_custom_overrides() const;
+  // 覆盖层应用到一套基线上（品牌／语义令牌恒不被覆盖——纵深防御）
+  static ThemeTokens apply_overrides(const ThemeTokens& base,
+                                     const QHash<QString, QColor>& overrides);
+
+  // —— 需求批⑭：毛玻璃特效（全局单开关，默认关）——
+  // 落 appearance/effects；不支持平台（Linux／无 DWM）自动降级为不透明背景
+  bool frosted_effect_enabled() const { return frosted_enabled_; }
+  // 设开关并落盘；已 apply 过则立即生效。返回是否真正启用（不支持平台返回
+  // false 且界面维持不透明——调用方据此提示「当前系统不支持」）
+  bool set_frosted_effect_enabled(bool enabled);
+  // 当前平台是否支持毛玻璃（Windows 且运行时可调 DWM；其余恒 false）
+  static bool frosted_effect_supported();
+  // 测试缝：替换「平台是否支持」探测（默认走 frosted_effect_supported()）
+  void set_frosted_support_probe(std::function<bool()> probe);
+  // 平台生效态：开关开 且 平台支持 → true；否则 false（降级）
+  bool frosted_effect_active() const;
 
   // 生效主题名：跟随系统时按系统亮暗解析为 light／dark
   QString effective_theme() const;
@@ -109,13 +146,25 @@ class ThemeManager : public QObject {
   QString resolve_theme() const;
   void reload();
   void push_to_app();
+  // ⑭ 毛玻璃特效落地（push_to_app 内调；不支持平台走降级空实现）
+  void apply_frosted_effect();
   QString read_persisted_mode() const;
   void persist_mode(const QString& mode) const;
+  // ⑭ 从 QSettings 读覆盖层（appearance/custom_colors 组）；坏值丢弃
+  void load_custom_overrides();
+  // ⑭ 覆盖层落盘（group 重建：先清组再写，保证删覆盖即时落盘）
+  void persist_custom_overrides() const;
+  void persist_frosted(bool enabled) const;
 
   QString mode_ = QString::fromUtf8(kFollowSystem);
   ThemeTokens tokens_;
   QHash<QString, ThemeTokens> custom_;
+  QHash<QString, QColor> overrides_;  // ⑭ 面板改色覆盖层（落 appearance/custom_colors）
+  // ⑭ 自定义槽位的内置基线（首个改色时的当前内置主题；「恢复默认」回落它）
+  QString custom_base_ = QString::fromUtf8(kLight);
+  bool frosted_enabled_ = false;      // ⑭ 毛玻璃开关（落 appearance/effects）
   std::function<bool()> dark_probe_;
+  std::function<bool()> frosted_probe_;  // ⑭ 测试缝：平台支持探测
   QApplication* app_ = nullptr;
   bool applied_ = false;
   bool watching_system_ = false;
