@@ -15,6 +15,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMessageBox>
+#include <QNetworkAccessManager>
 #include <QPalette>
 #include <QPushButton>
 #include <QSettings>
@@ -22,19 +23,41 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
+#include <QtAlgorithms>
+
 #include "engine/collab/files_client.hpp"
+#include "engine/task/dingtalk_provider.hpp"
+#include "engine/task/feishu_provider.hpp"
+#include "engine/task/github_provider.hpp"
+#include "engine/task/task_http.hpp"
 #include "notify_center.hpp"
+#include "task_provider_settings.hpp"
+#include "task_provider_store.hpp"
 
 namespace memex::client {
 namespace {
 constexpr int kPollMs = 30000; // 开窗期间 30s 轮询（到期待办检查）
 } // namespace
 
-TaskDialog::TaskDialog(QWidget* parent) : QDialog(parent) {
+TaskDialog::TaskDialog(QWidget* parent, TaskHttp* http,
+                       TaskProviderStore* store)
+    : QDialog(parent) {
   setWindowTitle(QStringLiteral("任务清单"));
   resize(560, 520);
   client_ = new FilesClient(this);
+  if (http != nullptr) {
+    http_ = http; // 测试注入（非拥有，调用方保存续）
+  } else {
+    http_ = new QtNetworkTaskHttp(new QNetworkAccessManager(this));
+    http_owned_ = true;
+  }
+  store_ = store != nullptr ? store : &TaskProviderStore::instance();
   build_ui();
+
+  // 凭据变更（设置面保存/清除/换口令）→ live provider 重建＋下拉刷新
+  connect(store_, &TaskProviderStore::changed, this,
+          [this] { rebuild_live_providers(); });
+  rebuild_live_providers();
 
   // 登录回执：成功即拉列表＋起轮询；失败给状态行
   connect(client_, &FilesClient::logged_in, this, [this] {
@@ -166,6 +189,20 @@ void TaskDialog::build_ui() {
   ops->addStretch(1);
   layout->addLayout(ops);
 
+  // R27-3 拉取行：已配置凭据且声明 L2 的 provider 直拉外部任务（不经
+  // memex 服务端，断连也可用）；⚙ 进设置面（凭据录入/加密落盘）
+  auto* form4 = new QHBoxLayout;
+  form4->addWidget(new QLabel(QStringLiteral("拉取外部"), this));
+  pull_provider_ = new QComboBox(this);
+  pull_provider_->setMinimumWidth(150);
+  btn_pull_ = new QPushButton(QStringLiteral("拉取"), this);
+  btn_settings_ = new QPushButton(QStringLiteral("任务设置…"), this);
+  form4->addWidget(pull_provider_);
+  form4->addWidget(btn_pull_);
+  form4->addWidget(btn_settings_);
+  form4->addStretch(1);
+  layout->addLayout(form4);
+
   status_ = new QLabel(this);
   layout->addWidget(status_);
 
@@ -199,6 +236,14 @@ void TaskDialog::build_ui() {
     if (ret == QMessageBox::Yes) delete_selected();
   });
   connect(btn_refresh_, &QPushButton::clicked, this, [this] { refresh(); });
+  connect(btn_pull_, &QPushButton::clicked, this, [this] {
+    pull_external(pull_provider_->currentData().toString());
+  });
+  connect(btn_settings_, &QPushButton::clicked, this, [this] {
+    auto* dlg = new TaskProviderSettingsDialog(store_, this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->show();
+  });
   connect(list_, &QListWidget::itemDoubleClicked, this,
           [this](QListWidgetItem* it) {
             // 外部行双击=跳外部详情（外部行的主语义）；本地行双击=勾完成
@@ -210,6 +255,11 @@ void TaskDialog::build_ui() {
             }
             toggle_selected_done();
           });
+}
+
+TaskDialog::~TaskDialog() {
+  qDeleteAll(live_);
+  if (http_owned_) delete http_;
 }
 
 void TaskDialog::connect_to(const QString& host, quint16 files_port,
@@ -297,6 +347,12 @@ QString TaskDialog::selected_detail_url() const {
 }
 
 bool TaskDialog::toggle_selected_done() {
+  if (selected_row_pulled()) {
+    // ⇣ 行是外部现态只读镜像：回写是 L3（complete），清单标记须先登记
+    set_status(QStringLiteral("外部拉取行只读——登记后才能在清单标记完成"),
+               true);
+    return false;
+  }
   const qint64 id = selected_id();
   if (id < 0) {
     set_status(QStringLiteral("先选中一条任务"), true);
@@ -310,6 +366,11 @@ bool TaskDialog::toggle_selected_done() {
 }
 
 bool TaskDialog::delete_selected() {
+  if (selected_row_pulled()) {
+    set_status(QStringLiteral("外部拉取行只读——外部清单不由 memex 撤回"),
+               true);
+    return false;
+  }
   const qint64 id = selected_id();
   if (id < 0) {
     set_status(QStringLiteral("先选中一条任务"), true);
@@ -321,6 +382,120 @@ bool TaskDialog::delete_selected() {
 
 void TaskDialog::refresh() {
   if (is_connected()) client_->list_tasks();
+}
+
+// —— R27-3 拉取接线：凭据 store → live provider → 直拉外部列表 ——
+void TaskDialog::rebuild_live_providers() {
+  qDeleteAll(live_);
+  live_.clear();
+  if (store_ != nullptr && store_->is_unlocked()) {
+    if (store_->contains(QStringLiteral("github-issue"))) {
+      const QJsonObject c = store_->config(QStringLiteral("github-issue"));
+      live_.insert(QStringLiteral("github-issue"),
+                   new GitHubIssuesProvider(
+                       c.value(QStringLiteral("repo")).toString(),
+                       c.value(QStringLiteral("token")).toString(), http_));
+    }
+    if (store_->contains(QStringLiteral("dingtalk-todo"))) {
+      const QJsonObject c = store_->config(QStringLiteral("dingtalk-todo"));
+      live_.insert(QStringLiteral("dingtalk-todo"),
+                   new DingtalkTodoProvider(
+                       c.value(QStringLiteral("app_key")).toString(),
+                       c.value(QStringLiteral("app_secret")).toString(),
+                       // unionId 获取流程属设置页后续件；空按未取到用户走
+                       c.value(QStringLiteral("union_id")).toString(),
+                       http_));
+    }
+    if (store_->contains(QStringLiteral("feishu-task"))) {
+      const QJsonObject c = store_->config(QStringLiteral("feishu-task"));
+      live_.insert(QStringLiteral("feishu-task"),
+                   new FeishuTaskProvider(
+                       c.value(QStringLiteral("app_id")).toString(),
+                       c.value(QStringLiteral("app_secret")).toString(),
+                       http_));
+    }
+  }
+  // 拉取下拉只收已配置且声明 L2 的（重新装配保持选择尽量不跳）
+  const QString prev = pull_provider_->currentData().toString();
+  pull_provider_->clear();
+  QStringList ids;
+  for (auto it = live_.constBegin(); it != live_.constEnd(); ++it) {
+    if (it.value()->can_read()) ids << it.key();
+  }
+  ids.sort();
+  for (const QString& id : ids) {
+    pull_provider_->addItem(live_.value(id)->name(), id);
+  }
+  const int idx = pull_provider_->findData(prev);
+  if (idx >= 0) pull_provider_->setCurrentIndex(idx);
+  btn_pull_->setEnabled(!ids.isEmpty());
+}
+
+QStringList TaskDialog::pull_provider_ids() const {
+  QStringList out;
+  for (int i = 0; i < pull_provider_->count(); ++i) {
+    out << pull_provider_->itemData(i).toString();
+  }
+  return out;
+}
+
+void TaskDialog::pull_external(const QString& provider_id) {
+  auto* p = live_.value(provider_id, nullptr);
+  if (p == nullptr || !p->can_read()) {
+    set_status(QStringLiteral("该 provider 未配置或未声明只读能力"
+                              "（任务设置里配置凭据）"),
+               true);
+    return;
+  }
+  set_status(QStringLiteral("拉取外部任务中（%1）…").arg(p->name()));
+  p->list([this, provider_id](bool ok, const QVector<ExternalTask>& items,
+                              const QString& err) {
+    if (ok) {
+      ext_cache_.insert(provider_id, items);
+      render_ext_rows();
+      set_status(QStringLiteral("外部任务已拉取（%1 %2 项）")
+                     .arg(live_.value(provider_id) != nullptr
+                              ? live_.value(provider_id)->name()
+                              : provider_id,
+                          QString::number(items.size())));
+    } else {
+      set_status(
+          QStringLiteral("拉取失败（%1：%2）").arg(provider_id, err), true);
+    }
+  });
+}
+
+void TaskDialog::render_ext_rows() {
+  // 旧 ⇣ 行移除（UserRole+6 拉取行标记）后整批重挂
+  for (int i = list_->count() - 1; i >= 0; --i) {
+    if (list_->item(i)->data(Qt::UserRole + 6).toBool()) {
+      delete list_->takeItem(i);
+    }
+  }
+  for (auto it = ext_cache_.constBegin(); it != ext_cache_.constEnd(); ++it) {
+    const auto* lp = live_.value(it.key());
+    const auto* rp = providers_.provider(it.key());
+    const QString pname = lp != nullptr ? lp->name()
+                          : rp != nullptr ? rp->name()
+                                          : it.key();
+    for (const ExternalTask& t : it.value()) {
+      auto* item = new QListWidgetItem(QString(), list_);
+      item->setData(Qt::UserRole, -1); // 无服务端 id（动作被只读守卫拦）
+      item->setData(Qt::UserRole + 1, t.done);
+      item->setData(Qt::UserRole + 5, t.detail_url); // 双击跳外部详情
+      item->setData(Qt::UserRole + 6, true);
+      item->setText(QStringLiteral("%1⇣ %2·%3  %4")
+                        .arg(t.done ? QStringLiteral("[x] ")
+                                    : QStringLiteral("[ ] "),
+                             pname, t.key, t.title));
+      if (t.done) item->setForeground(Qt::gray);
+    }
+  }
+}
+
+bool TaskDialog::selected_row_pulled() const {
+  const auto* item = list_->currentItem();
+  return item != nullptr && item->data(Qt::UserRole + 6).toBool();
 }
 
 void TaskDialog::check_due() {
@@ -417,6 +592,8 @@ void TaskDialog::populate(const QJsonArray& mine, const QJsonArray& assigned) {
     // 派出行不可在本人侧勾完成/提醒（服务端也会拒——owner 才是动作主体）
     item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
   }
+  // 外部拉取会话缓存行（⇣ 只读镜像）缀尾，随每次重渲染对齐外部现态
+  render_ext_rows();
   set_status(QStringLiteral("清单已刷新（%1 项）").arg(mine.size()));
 }
 

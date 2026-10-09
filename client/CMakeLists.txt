@@ -103,6 +103,10 @@ qt_add_executable(memex_client
   app/group_server_dialog.hpp
   app/group_vault_crypto.cpp
   app/group_vault_crypto.hpp
+  app/task_provider_store.cpp
+  app/task_provider_store.hpp
+  app/task_provider_settings.cpp
+  app/task_provider_settings.hpp
   app/group_vault_dialog.cpp
   app/group_vault_dialog.hpp)
 target_include_directories(memex_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -419,10 +423,13 @@ if(MEMEX_BUILD_TESTS)
     engine/task/github_provider.cpp
     engine/task/dingtalk_provider.cpp
     engine/task/feishu_provider.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
+    app/group_vault_crypto.cpp
     app/notify_center.cpp
     app/notify_prefs.cpp)
   target_link_libraries(test_task_dialog PRIVATE
-    memex_engine_collab Qt6::Widgets)
+    memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
   target_include_directories(test_task_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_task_dialog PRIVATE
@@ -552,6 +559,8 @@ if(MEMEX_BUILD_TESTS)
     app/emoji_pack_dialog.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -704,6 +713,8 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -765,6 +776,8 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -823,6 +836,8 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -903,6 +918,8 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -962,6 +979,8 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -1019,6 +1038,8 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -1079,6 +1100,8 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -1127,6 +1150,39 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(task_provider PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 30)
+
+  # R27-3 provider 凭据存储单测：首建/解锁/上锁/换口令/跨实例重开/错
+  # 口令拒/未解锁拒写/落盘四键无明文。QSettings setPath(INI) 重定向
+  # 临时目录隔离，不碰真配置；加密原语复用密码箱件（OpenSSL）
+  add_executable(test_task_provider_store
+    app/tests/test_task_provider_store.cpp
+    app/task_provider_store.cpp
+    app/group_vault_crypto.cpp)
+  target_include_directories(test_task_provider_store PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_task_provider_store PRIVATE
+    Qt6::Core OpenSSL::Crypto)
+  add_test(NAME task_provider_store COMMAND test_task_provider_store)
+  set_tests_properties(task_provider_store PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 120) # PBKDF2 600k 轮多次派生，本机实测 26s（CI 更慢防假红）
+
+  # R27-3 任务设置面冒烟（不起服务端）：口令首建/解锁、三 provider 凭据
+  # 保存与回填、必填校验、清除、换口令旧口令失效。QSettings setPath(INI)
+  # 临时目录隔离
+  add_executable(test_task_provider_settings
+    app/tests/test_task_provider_settings.cpp
+    app/task_provider_settings.cpp
+    app/task_provider_store.cpp
+    app/group_vault_crypto.cpp)
+  target_include_directories(test_task_provider_settings PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_task_provider_settings PRIVATE
+    Qt6::Widgets OpenSSL::Crypto)
+  add_test(NAME task_provider_settings COMMAND test_task_provider_settings)
+  set_tests_properties(task_provider_settings PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 120)
 
   # R27-3 GitHub Issues provider 验收（假传输回放不打外网）：L1 键校验、
   # L2 拉列表解析滤 PR、L3 建单/关单、认证头与 API 形态断言、错误腿

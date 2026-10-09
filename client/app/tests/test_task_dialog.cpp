@@ -9,6 +9,7 @@
 #include <QDateTime>
 #include <QListWidget>
 #include <QProcess>
+#include <QSettings>
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QThread>
@@ -17,13 +18,16 @@
 
 #include <app/notify_center.hpp>
 #include <app/task_dialog.hpp>
+#include <app/task_provider_store.hpp>
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
+#include <engine/task/task_http.hpp>
 
 using memex::client::CollabEngine;
 using memex::client::TaskDialog;
 using memex::client::LocalStore;
 using memex::client::NotificationCenter;
+using memex::client::TaskProviderStore;
 
 #ifndef MEMEX_SERVER_BIN
 #error "MEMEX_SERVER_BIN 未定义（应传入 $<TARGET_FILE:memex_server>）"
@@ -59,6 +63,23 @@ quint16 free_port() {
   probe.close();
   return port;
 }
+
+// R27-3 拉取腿假传输：回放固定响应并记请求形态（同 provider 单测口径）
+class FakeHttp : public memex::client::TaskHttp {
+ public:
+  QString method, err;
+  QUrl url;
+  int next_status = 200;
+  QByteArray next_body = "{}";
+
+  void request(const QString& m, const QUrl& u,
+               const QList<QPair<QByteArray, QByteArray>>&,
+               const QByteArray&, const memex::client::HttpFn& done) override {
+    method = m;
+    url = u;
+    done(next_status, next_body, err);
+  }
+};
 
 } // namespace
 
@@ -328,6 +349,74 @@ int main(int argc, char** argv) {
     }
     return false;
   }, 8000));
+
+  // —— R27-3 拉取接线：独立 org 存储注入 → GitHub 凭据 → 拉取渲染 ⇣ 行
+  //     （PR 滤除/详情解析/只读守卫/401 错误腿）；外部拉取不经文件面，
+  //     断连态可用 ——
+  const QString torg = QStringLiteral("memex-selftest-%1")
+                           .arg(QCoreApplication::applicationPid());
+  auto tcleanup = [&] {
+    QSettings(torg, QStringLiteral("task-providers")).clear();
+  };
+  TaskProviderStore tstore(torg);
+  CHECK(tstore.create(QStringLiteral("pass-1")));
+  QJsonObject gh;
+  gh.insert(QStringLiteral("repo"), QStringLiteral("cuihairu/memex"));
+  gh.insert(QStringLiteral("token"), QStringLiteral("ghp-test"));
+  tstore.save(QStringLiteral("github-issue"), gh);
+
+  FakeHttp fake;
+  TaskDialog dlg_pull(nullptr, &fake, &tstore);
+  CHECK(dlg_pull.pull_provider_ids().contains(QStringLiteral("github-issue")));
+  fake.next_status = 200;
+  fake.next_body =
+      "[{\"number\":7,\"title\":\"修部署重试\",\"state\":\"open\","
+      "\"html_url\":\"https://github.com/cuihairu/memex/issues/7\"},"
+      "{\"number\":8,\"title\":\"pr 项\",\"state\":\"open\","
+      "\"html_url\":\"https://github.com/cuihairu/memex/pull/8\","
+      "\"pull_request\":{\"url\":\"x\"}}]";
+  dlg_pull.pull_external(QStringLiteral("github-issue"));
+  CHECK(wait_until([&] {
+    for (int i = 0; i < dlg_pull.list()->count(); ++i) {
+      if (dlg_pull.list()->item(i)->text().contains(QStringLiteral("⇣"))) {
+        return true;
+      }
+    }
+    return false;
+  }, 8000));
+  int pull_row = -1;
+  for (int i = 0; i < dlg_pull.list()->count(); ++i) {
+    if (dlg_pull.list()->item(i)->text().contains(
+            QStringLiteral("修部署重试"))) {
+      pull_row = i;
+      break;
+    }
+  }
+  CHECK(pull_row >= 0);
+  // PR 行已滤（同 provider 单测口径）
+  CHECK(!dlg_pull.list()->item(pull_row)->text().contains(
+      QStringLiteral("pr 项")));
+  dlg_pull.list()->setCurrentRow(pull_row);
+  CHECK(dlg_pull.selected_detail_url() ==
+        QStringLiteral("https://github.com/cuihairu/memex/issues/7"));
+  // 只读守卫：勾完成/撤回被拦（外部行无服务端 id，列表条数不变）
+  const int pull_count = dlg_pull.list()->count();
+  CHECK(!dlg_pull.toggle_selected_done());
+  CHECK(dlg_pull.status_text().contains(QStringLiteral("只读")));
+  CHECK(!dlg_pull.delete_selected());
+  CHECK(dlg_pull.list()->count() == pull_count);
+  // 401 错误腿：状态行明示拉取失败
+  fake.next_status = 401;
+  dlg_pull.pull_external(QStringLiteral("github-issue"));
+  CHECK(wait_until(
+      [&] {
+        return dlg_pull.status_text().contains(QStringLiteral("拉取失败"));
+      },
+      8000));
+  // 未配置凭据的 provider 不进拉取下拉
+  CHECK(!dlg_pull.pull_provider_ids().contains(
+      QStringLiteral("dingtalk-todo")));
+  tcleanup();
 
   server.kill();
   server.waitForFinished(3000);

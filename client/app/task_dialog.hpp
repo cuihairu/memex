@@ -2,11 +2,16 @@
 // 「同群/同部门才能互派」判权）。独立文件面会话（与 R23-3 文件助手同构：
 // 协作面同源账号、文件面独立端口）。提醒=到期待办经通知中心强提醒，
 // 回执落服务端只提醒一次；开窗期间 30s 自动轮询。
+// R27-3 拉取接线：已配置凭据（设置面→TaskProviderStore 加密落盘）的
+// L2 provider 直拉外部任务列表展示（⇣ 行，只读——登记后才能在清单标记）；
+// 外部拉取不经 memex 服务端，断连也可用。
 #pragma once
 
 #include <QDialog>
+#include <QHash>
 #include <QJsonArray>
 #include <QString>
+#include <QStringList>
 
 #include <QtGlobal>
 
@@ -23,11 +28,16 @@ class QPushButton;
 namespace memex::client {
 
 class FilesClient;
+class TaskHttp;
+class TaskProviderStore;
 
 class TaskDialog : public QDialog {
   Q_OBJECT
  public:
-  explicit TaskDialog(QWidget* parent = nullptr);
+  // http/store 测试注入点（缺省=QtNetworkTaskHttp＋单例存储）
+  explicit TaskDialog(QWidget* parent = nullptr, TaskHttp* http = nullptr,
+                      TaskProviderStore* store = nullptr);
+  ~TaskDialog() override;
 
   // 连接文件面（连接按钮与测试共用同一入口）
   void connect_to(const QString& host, quint16 files_port,
@@ -56,6 +66,15 @@ class TaskDialog : public QDialog {
   // 执（只提醒一次）。轮询定时器与测试共用同一入口。
   void check_due();
 
+  // —— R27-3 拉取接线 ——
+  // 凭据 store 重建 live provider（已配置且可读者入拉取下拉）
+  void rebuild_live_providers();
+  // 拉取指定 provider 的外部任务（按钮与测试共用同一入口）；结果进
+  // 会话缓存并渲染 ⇣ 只读行
+  void pull_external(const QString& provider_id);
+  // 可拉取 provider id（live 已配置＋声明 L2）
+  QStringList pull_provider_ids() const;
+
   // —— 走查/测试观察点 ——
   QString status_text() const;
   int task_count() const;      // 列表总条数（我的清单＋我派出的）
@@ -68,6 +87,9 @@ class TaskDialog : public QDialog {
  private:
   void build_ui();
   void populate(const QJsonArray& mine, const QJsonArray& assigned);
+  // 会话缓存的外部拉取行渲染（⇣ 行；UserRole+6=true 只读标记）
+  void render_ext_rows();
+  bool selected_row_pulled() const;
   void set_status(const QString& text, bool error = false);
   // 登记键原文 → （project, key）——「project#键」或整串为键
   static void split_ext_key(const QString& raw, QString& project,
@@ -76,6 +98,11 @@ class TaskDialog : public QDialog {
   FilesClient* client_;
   QString account_;
   TaskProviderRegistry providers_;
+  TaskHttp* http_{nullptr};       // 非拥有则注入；自建则随窗同亡
+  bool http_owned_{false};
+  TaskProviderStore* store_;
+  QHash<QString, TaskProvider*> live_; // 凭据重建的 live provider（本窗拥有）
+  QHash<QString, QVector<ExternalTask>> ext_cache_; // 拉取会话缓存
   QLineEdit* host_;
   QLineEdit* port_;
   QLineEdit* account_box_;
@@ -88,9 +115,12 @@ class TaskDialog : public QDialog {
   QComboBox* assignee_;
   QComboBox* ext_provider_;
   QLineEdit* ext_key_;
+  QComboBox* pull_provider_;
   QPushButton* btn_connect_;
   QPushButton* btn_add_;
   QPushButton* btn_add_ext_;
+  QPushButton* btn_pull_;
+  QPushButton* btn_settings_;
   QPushButton* btn_toggle_;
   QPushButton* btn_delete_;
   QPushButton* btn_refresh_;
