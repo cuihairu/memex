@@ -1,6 +1,6 @@
 # 合规与命名一致性（T5.3）
 
-> 对应验收项 A22（组件许可清单）与 A23（系统标识一致性）。核验日期：2026-10-03；2026-10-04 增补（R23 存储抽象层引入 aws-sdk-cpp:s3，manifest 服务端依赖 sqlite3／openssl 一并登记，见 `third_party/组件清单.md`）。
+> 对应验收项 A22（组件许可清单）与 A23（系统标识一致性）。核验日期：2026-10-03；2026-10-04 增补（R23 存储抽象层引入 aws-sdk-cpp:s3，manifest 服务端依赖 sqlite3／openssl 一并登记，见 `third_party/组件清单.md`）；2026-10-10 vite 三公告闭环复核＋引入日期补注（见下表与考证行）。
 
 ## A22 组件许可核验记录
 
@@ -23,9 +23,11 @@
 | 公告 | 包 | 处置 |
 | --- | --- | --- |
 | GHSA-67mh-4wv8-2f99（esbuild ≤0.24.2） | esbuild 0.21.5 | 已修：`docs/package.json` 加 `pnpm.overrides.esbuild ^0.25.0` → 0.25.12，`docs:build` 绿 |
-| GHSA-4w7w-66w2-5vf9 / GHSA-fx2h-pf6j-xcff / GHSA-v6wh-96g9-6wx3（vite ≤6.4.1/≤6.4.2） | vite 5.4.21 | 受理降级：三条均为 dev server 专属（开发时 `vitepress dev` 的 CORS／文件访问），线上产物是 GitHub Pages 静态文件，不携带 dev server；升级需 vitepress 2.0 alpha（vite ^8），暂不盲跟 alpha。待 vitepress 稳定版升 vite 6+ 再跟进 |
+| GHSA-4w7w-66w2-5vf9 / GHSA-fx2h-pf6j-xcff / GHSA-v6wh-96g9-6wx3（vite ≤6.4.1/≤6.4.2） | vite 5.4.21（文档站初版内嵌件） | 已修（2026-10-04 `1747f69`）：`pnpm.overrides.vite ^6.4.3` 即统一——vitepress 1.x 内嵌件一并钉版，lockfile 仅剩 6.4.3 一处，`docs:build` 全站 15 页过；dependabot 三条状态=fixed（2026-10-10 复核）。原「升级需 vitepress 2.0 alpha（vite ^8）」评估不成立（override 无需动 vitepress）；「dev server 专属、静态产物不携带」的降级理由仍成立，但已无需降级 |
 
 复审周期：每季度或 vitepress 正式版发版时重核。
+
+引入日期考证（2026-10-10 补注，与 `third_party/组件清单.md` 引入日期列同源）：VitePress 2026-10-02 随文档站引入（`9cf6f72`，devDep 仅 vitepress，vite 以内嵌传递件 5.4.21 同日入库）；vite 2026-10-04 起为直连 devDep（`1747f69`，升 6.4.3＋overrides 钉版）。
 
 ## A23 系统标识一致性核查
 
