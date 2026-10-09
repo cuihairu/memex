@@ -50,6 +50,9 @@ constexpr auto kSettingsKey = "appearance/theme_mode";
 constexpr auto kOverridesGroup = "appearance/custom_colors";
 constexpr auto kCustomBaseKey = "appearance/custom_base";
 constexpr auto kFrostedKey = "appearance/effects/frosted";
+// ⑮ 皮肤包注册表落盘组：appearance/skins/<包名>/manifest（清单 JSON；
+// 签名不落盘——重装时以清单重签即可，签名只在 zip 链路有意义）
+constexpr auto kSkinsGroup = "appearance/skins";
 // ⑭ 用户可改色的核心中性令牌（品牌橙与 success/warning/danger 语义族锁死
 // 不放行；selection/bubble_* 等随内置基线，扩展面留后续）
 const QStringList kCustomizableTokens = {
@@ -343,6 +346,7 @@ ThemeManager::ThemeManager(QObject* parent) : QObject(parent) {
                              .toString();
     if (builtin_themes().contains(base)) custom_base_ = base;  // 坏值回落 light
   }
+  load_skin_packs();  // ⑮ 先注册皮肤包，持久化的包主题名才能在下一步被认出
   mode_ = read_persisted_mode();
   reload();
 }
@@ -541,6 +545,124 @@ void ThemeManager::persist_frosted(bool enabled) const {
   QSettings settings(QCoreApplication::organizationName(),
                      QCoreApplication::applicationName());
   settings.setValue(QString::fromUtf8(kFrostedKey), enabled);
+}
+
+// —— 需求批⑮：皮肤包体系 ——
+
+bool ThemeManager::install_skin_pack(const QByteArray& zip_bytes,
+                                     QString* error) {
+  auto fail = [error](const QString& msg) {
+    if (error) *error = msg;
+    return false;
+  };
+  // 导入链（zip→验签→清单→覆盖面）全部由 import_skin_pack 完成
+  const SkinPackImport imported = import_skin_pack(zip_bytes);
+  if (!imported.ok) {
+    return fail(imported.error);
+  }
+  const SkinPackManifest& manifest = imported.manifest;
+  // 同包名重复导入＝版本比较：包内版本须严格更高，否则语义化拒绝（如实
+  // 注明：同版本重装也拒，不静默覆盖）
+  if (skins_.contains(manifest.name)) {
+    const QString installed = skins_.value(manifest.name).version;
+    if (compare_skin_versions(manifest.version, installed) <= 0) {
+      return fail(QStringLiteral(
+                      "已安装版本 %1 不低于包内版本 %2，拒绝覆盖安装"
+                      "（重复导入须更高版本）")
+                      .arg(installed, manifest.version));
+    }
+  } else if (custom_.contains(manifest.name)) {
+    // 与既有扩展主题（非皮肤包来源）撞名：拒绝，不覆盖注册表
+    return fail(QStringLiteral("主题名已被扩展主题占用：%1")
+                    .arg(manifest.name));
+  }
+  // 全部校验通过才落盘＋注册＋选中（失败路径零副作用）
+  persist_skin(manifest);
+  register_theme(manifest.name,
+                 apply_overrides(tokens_for(manifest.base),
+                                 manifest.overrides));
+  skins_.insert(manifest.name, manifest);
+  if (mode_ == manifest.name) {
+    reload();  // 替换安装且正选中该包：同名 set_mode 会早退，须手动刷新令牌
+  } else {
+    set_mode(manifest.name);
+  }
+  return true;
+}
+
+QStringList ThemeManager::skin_pack_themes() const {
+  QStringList names = skins_.keys();
+  names.sort();
+  return names;
+}
+
+SkinPackManifest ThemeManager::current_skin_manifest(QString* error) const {
+  auto fail = [error](const QString& msg) {
+    if (error) *error = msg;
+    return SkinPackManifest{};
+  };
+  // 皮肤包主题：原样导出原清单（可再导入，往返一致）
+  if (skins_.contains(mode_)) {
+    return skins_.value(mode_);
+  }
+  // 自定义槽：「<基线>·改色」带当前覆盖表（基线为皮肤包时导出侧校验
+  // 会给语义化错误——皮肤包基线不作为包基线放行）
+  if (mode_ == customThemeName()) {
+    SkinPackManifest manifest;
+    manifest.name = custom_base_ + QStringLiteral("·改色");
+    manifest.version = QStringLiteral("1.0.0");
+    manifest.author = QStringLiteral("memex");
+    manifest.base = custom_base_;
+    manifest.overrides = overrides_;
+    return manifest;
+  }
+  // 内置主题（含跟随系统解析后的 light/dark）：「<名>·皮肤」无覆盖导出
+  const QString resolved = resolve_theme();
+  if (builtin_themes().contains(resolved)) {
+    SkinPackManifest manifest;
+    manifest.name = resolved + QStringLiteral("·皮肤");
+    manifest.version = QStringLiteral("1.0.0");
+    manifest.author = QStringLiteral("memex");
+    manifest.base = resolved;
+    return manifest;
+  }
+  return fail(QStringLiteral("当前主题无法导出为皮肤包（非内置主题或"
+                             "皮肤包来源）：%1")
+                  .arg(mode_));
+}
+
+void ThemeManager::load_skin_packs() {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  settings.beginGroup(QString::fromUtf8(kSkinsGroup));
+  const QStringList groups = settings.childGroups();
+  for (const QString& group : groups) {
+    const QString json =
+        settings.value(group + QLatin1Char('/') + QStringLiteral("manifest"))
+            .toString();
+    QString err;
+    const SkinPackManifest manifest =
+        parse_skin_manifest(json.toUtf8(), &err);
+    // 坏包跳过（组残留不注册、不阻断其余）；name 与组名不符同判坏
+    if (!err.isEmpty() || manifest.name != group) continue;
+    skins_.insert(group, manifest);
+    register_theme(manifest.name,
+                   apply_overrides(tokens_for(manifest.base),
+                                   manifest.overrides));
+  }
+  settings.endGroup();
+}
+
+void ThemeManager::persist_skin(const SkinPackManifest& manifest) const {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  settings.beginGroup(QString::fromUtf8(kSkinsGroup));
+  settings.remove(manifest.name);  // 先清同名组再写：替换安装不残留旧键
+  settings.beginGroup(manifest.name);
+  settings.setValue(QStringLiteral("manifest"),
+                    QString::fromUtf8(skin_manifest_json(manifest)));
+  settings.endGroup();
+  settings.endGroup();
 }
 
 QStringList ThemeManager::modes() const {

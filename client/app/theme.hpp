@@ -11,6 +11,8 @@
 
 #include <functional>
 
+#include "theme_pack.hpp"
+
 class QApplication;
 
 namespace memex::client {
@@ -123,6 +125,19 @@ class ThemeManager : public QObject {
   // 平台生效态：开关开 且 平台支持 → true；否则 false（降级）
   bool frosted_effect_active() const;
 
+  // —— 需求批⑮：皮肤包体系 ——
+  // 导入皮肤包（.zip 字节）：zip 结构→验签→清单校验→版本比较（同名重装
+  // 须更高版本，否则语义化拒绝）→注册为扩展主题并选中持久化。任何失败
+  // 只给语义化文案，不写盘、不改现有主题。
+  bool install_skin_pack(const QByteArray& zip_bytes,
+                         QString* error = nullptr);
+  // 已安装皮肤包的主题名（设置页列表据此标注「（皮肤包）」）
+  QStringList skin_pack_themes() const;
+  // 当前主题导出为皮肤包清单：皮肤包主题原样导出；内置主题「<名>·皮肤」
+  // （无覆盖、版本 1.0.0）；自定义槽「<基线>·改色」带当前覆盖表。
+  // 不可导出的扩展主题给语义化错误。清单合法性由导出侧再校验。
+  SkinPackManifest current_skin_manifest(QString* error = nullptr) const;
+
   // 生效主题名：跟随系统时按系统亮暗解析为 light／dark
   QString effective_theme() const;
   bool system_is_dark() const;
@@ -155,11 +170,16 @@ class ThemeManager : public QObject {
   // ⑭ 覆盖层落盘（group 重建：先清组再写，保证删覆盖即时落盘）
   void persist_custom_overrides() const;
   void persist_frosted(bool enabled) const;
+  // ⑮ 皮肤包：启动时从 QSettings 重装（坏包跳过，不阻断其余）；
+  // 单包落盘（先清同名组再写，替换安装不残留旧键）
+  void load_skin_packs();
+  void persist_skin(const SkinPackManifest& manifest) const;
 
   QString mode_ = QString::fromUtf8(kFollowSystem);
   ThemeTokens tokens_;
   QHash<QString, ThemeTokens> custom_;
   QHash<QString, QColor> overrides_;  // ⑭ 面板改色覆盖层（落 appearance/custom_colors）
+  QHash<QString, SkinPackManifest> skins_;  // ⑮ 已装皮肤包（名→清单，落 appearance/skins）
   // ⑭ 自定义槽位的内置基线（首个改色时的当前内置主题；「恢复默认」回落它）
   QString custom_base_ = QString::fromUtf8(kLight);
   bool frosted_enabled_ = false;      // ⑭ 毛玻璃开关（落 appearance/effects）

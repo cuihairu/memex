@@ -63,6 +63,8 @@ qt_add_executable(memex_client
   app/net_remote_settings.cpp
   app/away_settings.cpp
   app/theme.cpp
+  app/theme_pack.cpp
+  app/theme_pack.hpp
   app/theme.hpp
   app/theme_settings_page.cpp
   app/theme_settings_page.hpp
@@ -545,6 +547,7 @@ if(MEMEX_BUILD_TESTS)
     app/icons/icons.qrc
     app/icons/avatars/avatars.qrc
     app/theme.cpp
+    app/theme_pack.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_brand_settings PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -696,6 +699,7 @@ if(MEMEX_BUILD_TESTS)
     app/icons/icons.qrc
     app/icons/avatars/avatars.qrc
     app/theme.cpp
+    app/theme_pack.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_mode_switch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -756,6 +760,7 @@ if(MEMEX_BUILD_TESTS)
     app/icons/icons.qrc
     app/icons/avatars/avatars.qrc
     app/theme.cpp
+    app/theme_pack.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_tray PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -813,6 +818,7 @@ if(MEMEX_BUILD_TESTS)
     app/icons/icons.qrc
     app/icons/avatars/avatars.qrc
     app/theme.cpp
+    app/theme_pack.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_screenshot PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -892,6 +898,7 @@ if(MEMEX_BUILD_TESTS)
     app/icons/icons.qrc
     app/icons/avatars/avatars.qrc
     app/theme.cpp
+    app/theme_pack.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_icon PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -950,6 +957,7 @@ if(MEMEX_BUILD_TESTS)
     app/icons/icons.qrc
     app/icons/avatars/avatars.qrc
     app/theme.cpp
+    app/theme_pack.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_theme PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -1006,6 +1014,7 @@ if(MEMEX_BUILD_TESTS)
     app/icons/icons.qrc
     app/icons/avatars/avatars.qrc
     app/theme.cpp
+    app/theme_pack.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_chat_actions PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -1065,6 +1074,7 @@ if(MEMEX_BUILD_TESTS)
     app/icons/icons.qrc
     app/icons/avatars/avatars.qrc
     app/theme.cpp
+    app/theme_pack.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_flash_alert PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
