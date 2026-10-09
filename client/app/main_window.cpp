@@ -28,6 +28,9 @@
 
 #include "file_assistant.hpp"
 #include "emoji_pack_dialog.hpp"
+#include "avatar_store.hpp"
+#include "crop_dialog.hpp"
+#include <engine/collab/files_client.hpp>
 #include "group_memo_dialog.hpp"
 #include "group_vault_dialog.hpp"
 #include "group_ci_dialog.hpp"
@@ -46,6 +49,7 @@
 #include "audit_dialog.hpp"
 #include "office_map_dialog.hpp"
 #include <QMessageBox>
+#include <QBuffer>
 #include <QPainter>
 #include <QPixmap>
 #include <QRegularExpression>
@@ -67,6 +71,7 @@
 
 #include <algorithm>
 #include <map>
+#include <utility>
 
 #include <nlohmann/json.hpp>
 
@@ -1020,6 +1025,9 @@ void MainWindow::wire_collab() {
             // 登录即拉组织架构（策略与建群数据源）与群列表（T3.4／T4.1）
             collab_engine_.query_org();
             collab_engine_.query_groups();
+            // 需求批⑫：文件面同源自动登录（口令复用；端口走 QSettings，
+            // 未配置＝静默跳过——头像操作时再明示失败）
+            files_ensure_login();
           });
   connect(&collab_engine_, &CollabEngine::login_failed, this,
           [this](const QString& reason) {
@@ -1144,6 +1152,9 @@ void MainWindow::wire_collab() {
             member_signatures_.clear();
             // 需求批⑩：成员在线时长入缓存（tooltip 与个人资料展示面）
             member_online_.clear();
+            // 需求批⑫：成员头像版本戳入缓存（0=未设置——默认头像；ver 变
+            // 即排队下载 256 档，本地缩放缓存四档）
+            member_avatar_ver_.clear();
             const nlohmann::json j = nlohmann::json::parse(
                 org_json.toStdString(), nullptr, false);
             if (!j.is_discarded() && j.contains("members")) {
@@ -1160,8 +1171,13 @@ void MainWindow::wire_collab() {
                                   format_online_s(m.value("online_week_s", 0)),
                                   format_online_s(
                                       m.value("online_month_s", 0))));
+                  member_avatar_ver_.insert(a, m.value("avatar_ver", 0));
                 }
               }
+            }
+            for (auto it = member_avatar_ver_.constBegin();
+                 it != member_avatar_ver_.constEnd(); ++it) {
+              queue_avatar_download(it.key(), it.value());
             }
             apply_policy(org_json);
             refresh_devices(); // 签名 tooltip 随数据到达即时刷新
@@ -1324,6 +1340,7 @@ void MainWindow::wire_collab() {
 void MainWindow::login_collab(const QString& host, quint16 port,
                               const QString& account,
                               const QString& password) {
+  collab_host_ = host; // 需求批⑫：文件面同源主机默认（端口走 QSettings）
   collab_engine_.login(host, port, account, password);
 }
 
@@ -1336,6 +1353,10 @@ void MainWindow::logout_collab() {
   collab_degraded_ = false; // 平台-7：显式登出＝主动回直连，非降级
   online_accounts_.clear(); // T4.3：登出即未知在线态
   delivery_text_.clear();   // T4.3：发送状态随会话失效
+  // 需求批⑫：文件面会话随登出作废（在途头像挂起态一并清）
+  if (files_client_) files_client_->logout();
+  avatar_pick_pending_ = false;
+  avatar_pending_accounts_.clear();
   update_banner();
   append_system_line(QStringLiteral(
       "已登出协作态，回到直连态：消息不进归档（本地历史保留，合并展示）"));
@@ -2523,6 +2544,7 @@ void MainWindow::build_org_tree(const QString& org_json) {
   tree->setHeaderLabels({QStringLiteral("部门 / 成员"), QStringLiteral("职务"),
                          QStringLiteral("直属上级")});
   tree->setColumnWidth(0, 280);
+  tree->setIconSize(QSize(20, 20)); // 需求批⑫：成员行头像
   layout->addWidget(tree);
 
   // 部门：全路径逐级挂树（"公司/研发部/客户端组"）
@@ -2569,6 +2591,9 @@ void MainWindow::build_org_tree(const QString& org_json) {
       QTreeWidgetItem* parent =
           it != nodes.end() ? it->second : unassigned;
       auto* item = new QTreeWidgetItem(parent);
+      // 需求批⑫：成员行头像（ver>0 走本地缩放缓存，未设/未到货走默认头像组）
+      item->setIcon(0, avatar_for(account, member_avatar_ver_.value(account),
+                                  32));
       item->setText(0, QStringLiteral("%1（%2）%3")
                             .arg(name, account,
                                  role == QStringLiteral("admin")
@@ -3156,7 +3181,15 @@ void MainWindow::refresh_devices() {
       if (!dur.isEmpty()) {
         tips << dur;
       }
-      if (!tips.isEmpty()) item->setToolTip(tips.join(QLatin1Char('\n')));
+      // 需求批⑫：头像悬浮可见（富文本首行；已设走缓存文件，未设走默认组）
+      QString tip_html =
+          QStringLiteral("<img src='%1' width='32' height='32'>")
+              .arg(avatar_tooltip_src(
+                  account, member_avatar_ver_.value(account), 32));
+      if (!tips.isEmpty()) {
+        tip_html += QStringLiteral("<br>") + tips.join(QLatin1String("<br>"));
+      }
+      item->setToolTip(tip_html);
     }
   }
 
@@ -3805,6 +3838,53 @@ void MainWindow::show_profile_dialog() {
   auto* hint = new QLabel(
       QStringLiteral("签名在会话列表悬浮可见；留空保存＝清除。"), &dlg);
   layout->addWidget(hint);
+  // 需求批⑫：我的头像（已设走缩放缓存，未设走默认头像组）＋更换入口
+  {
+    auto* avatar_row = new QHBoxLayout;
+    auto* avatar_label = new QLabel(&dlg);
+    avatar_label->setAlignment(Qt::AlignCenter);
+    avatar_label->setPixmap(avatar_for(collab_engine_.account(),
+                                       member_avatar_ver_.value(
+                                           collab_engine_.account()), 64));
+    avatar_row->addWidget(avatar_label);
+    auto* btn_avatar = new QPushButton(QStringLiteral("更换头像…"), &dlg);
+    avatar_row->addWidget(btn_avatar);
+    avatar_row->addStretch(1);
+    layout->addLayout(avatar_row);
+    // 状态行红字明示（既有 request_failed 通道的对话框内显影；窗口销毁
+    // 即断连，不影响主窗状态栏通道）
+    auto* avatar_status = new QLabel(&dlg);
+    avatar_status->setStyleSheet(QStringLiteral("color:#c62828;"));
+    avatar_status->setWordWrap(true);
+    layout->addWidget(avatar_status);
+    const QPointer<QLabel> status_guard(avatar_status);
+    const QPointer<QLabel> pixmap_guard(avatar_label);
+    connect(files_client(), &FilesClient::request_failed, &dlg,
+            [status_guard](const QString& op, int status,
+                           const QString& error) {
+              if (!status_guard) return;
+              status_guard->setText(
+                  QStringLiteral("头像操作失败[%1]（%2）：%3")
+                      .arg(op,
+                           status > 0 ? QString::number(status)
+                                      : QStringLiteral("网络"),
+                           error));
+            });
+    connect(files_client(), &FilesClient::avatar_uploaded, &dlg,
+            [this, status_guard, pixmap_guard](int, qint64) {
+              if (!status_guard) return;
+              // 收尾档完成时 ver 已入缓存（主窗先连），本机先见即刷
+              if (avatar_upload_queue_.isEmpty() && avatar_new_ver_ > 0 &&
+                  pixmap_guard) {
+                pixmap_guard->setPixmap(
+                    avatar_for(collab_engine_.account(), avatar_new_ver_,
+                               64));
+                status_guard->setText(QStringLiteral("头像已更新"));
+              }
+            });
+    connect(btn_avatar, &QPushButton::clicked, &dlg,
+            [this] { change_avatar(); });
+  }
   // 需求批⑩：我的在线时长（滚动 24h/7d/30d 并集；org 数据到达即有值）
   const QString my_online = member_online_.value(collab_engine_.account());
   if (!my_online.isEmpty()) {
@@ -3839,6 +3919,206 @@ void MainWindow::apply_signature(const QString& signature) {
 
 QString MainWindow::own_signature() const {
   return member_signatures_.value(collab_engine_.account());
+}
+
+// —— 需求批⑫ 头像：文件面接线（懒建 FilesClient；登录复用协作口令，
+//     端口走 QSettings files_port，缺省 24561 与各文件面窗口同款）——
+
+FilesClient* MainWindow::files_client() {
+  if (files_client_) return files_client_;
+  files_client_ = new FilesClient(this);
+  connect(files_client_, &FilesClient::logged_in, this, [this] {
+    // 冲账：登录前挂起的头像下载
+    for (const QString& a : std::as_const(avatar_pending_accounts_)) {
+      queue_avatar_download(a, member_avatar_ver_.value(a));
+    }
+    avatar_pending_accounts_.clear();
+    // 登录前点「更换头像…」挂起的选图续流程
+    if (avatar_pick_pending_) {
+      avatar_pick_pending_ = false;
+      pick_and_upload_avatar();
+    }
+  });
+  connect(files_client_, &FilesClient::avatar_fetched, this,
+          [this](const QString& account, int size, const QByteArray& bytes) {
+            on_avatar_fetched(account, size, bytes);
+          });
+  connect(files_client_, &FilesClient::avatar_uploaded, this,
+          [this](int size, qint64 ver) { on_avatar_uploaded(size, ver); });
+  connect(files_client_, &FilesClient::avatar_deleted, this, [this] {
+    // 回落默认头像：本地缓存与在途对账全清，org 重拉带新 ver
+    avatar_fetched_ver_.remove(collab_engine_.account());
+    avatar_fetching_ver_.remove(collab_engine_.account());
+    member_avatar_ver_.insert(collab_engine_.account(), 0);
+    refresh_devices();
+    collab_engine_.query_org();
+    show_status(QStringLiteral("头像已清除（回落默认头像）"));
+  });
+  connect(files_client_, &FilesClient::request_failed, this,
+          [this](const QString& op, int status, const QString& error) {
+            if (op == QStringLiteral("avatar.download") && status == 404) {
+              // 未设置头像（或刚删除）：记为已取免反复拉，展示走默认头像组
+              for (auto it = avatar_fetching_ver_.constBegin();
+                   it != avatar_fetching_ver_.constEnd(); ++it) {
+                avatar_fetched_ver_.insert(it.key(), it.value());
+              }
+              avatar_fetching_ver_.clear();
+              return;
+            }
+            if (op == QStringLiteral("avatar.upload")) {
+              avatar_upload_queue_.clear();
+              avatar_upload_pixmaps_.clear();
+            }
+            show_status(QStringLiteral("头像操作失败（%1 %2：%3）")
+                            .arg(op,
+                                 status > 0 ? QString::number(status)
+                                            : QStringLiteral("网络"),
+                                 error));
+          });
+  return files_client_;
+}
+
+bool MainWindow::files_ensure_login() {
+  if (files_client_ && files_client_->is_logged_in()) return true;
+  if (!collab_engine_.is_logged_in()) return false;
+  const QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
+  const quint16 files_port = static_cast<quint16>(
+      settings.value(QStringLiteral("files_port"), QStringLiteral("24561"))
+          .toUInt());
+  if (files_port == 0) return false;
+  const QString host = collab_host_.isEmpty()
+                           ? settings.value(QStringLiteral("host"),
+                                            QStringLiteral("127.0.0.1"))
+                                 .toString()
+                           : collab_host_;
+  files_client()->login(host, files_port, collab_engine_.account(),
+                        collab_engine_.password());
+  return true; // 异步：logged_in 信号到后自动续（挂起下载/选图）
+}
+
+void MainWindow::change_avatar() {
+  if (!collab_engine_.is_logged_in()) {
+    show_status(QStringLiteral("更换头像需登录协作态"));
+    return;
+  }
+  if (files_client_ == nullptr || !files_client_->is_logged_in()) {
+    avatar_pick_pending_ = true;
+    if (!files_ensure_login()) {
+      avatar_pick_pending_ = false;
+      show_status(
+          QStringLiteral("文件面未连接（files_port 未配置或协作未登录）"));
+    }
+    return; // logged_in 到后自动续选图
+  }
+  pick_and_upload_avatar();
+}
+
+void MainWindow::pick_and_upload_avatar() {
+  const QString path = QFileDialog::getOpenFileName(
+      this, QStringLiteral("选择头像图片"), QString(),
+      QStringLiteral("图片 (*.png *.jpg *.jpeg *.gif)"));
+  if (path.isEmpty()) return;
+  // 发网前本地门：QPixmap 打不开即拒不发网（服务端只兜 magic/上限）
+  QPixmap pm(path);
+  if (pm.isNull()) {
+    show_status(QStringLiteral("图片无法读取（未发网）"));
+    return;
+  }
+  CropDialog dlg(pm.toImage(), this);
+  if (dlg.exec() != QDialog::Accepted) return;
+  const QImage square = dlg.cropped();
+  if (square.isNull()) {
+    show_status(QStringLiteral("裁剪结果无效（未发网）"));
+    return;
+  }
+  // 逐档平滑缩放并编码 PNG（256→32；上传串行走队列，失败即停）
+  avatar_upload_queue_.clear();
+  avatar_upload_pixmaps_.clear();
+  for (const int size : {256, 128, 64, 32}) {
+    const QPixmap scaled = QPixmap::fromImage(
+        square.scaled(size, size, Qt::IgnoreAspectRatio,
+                      Qt::SmoothTransformation));
+    avatar_upload_pixmaps_.push_back(scaled);
+    QByteArray bytes;
+    QBuffer buf(&bytes);
+    buf.open(QIODevice::WriteOnly);
+    scaled.save(&buf, "PNG");
+    avatar_upload_queue_.push_back({size, bytes});
+  }
+  avatar_uploaded_count_ = 0;
+  avatar_new_ver_ = 0;
+  show_status(QStringLiteral("头像上传中（1/4）"));
+  start_next_avatar_upload();
+}
+
+void MainWindow::start_next_avatar_upload() {
+  if (avatar_upload_queue_.isEmpty()) {
+    if (avatar_new_ver_ <= 0) return; // 全程无成功回包（理论不达；防呆）
+    // 本机先见：四档按服务端最新版本戳落缓存，不等 org 重拉
+    const QString me = collab_engine_.account();
+    for (int i = 0; i < avatar_upload_pixmaps_.size(); ++i) {
+      store_avatar_cache(me, avatar_new_ver_,
+                         avatar_upload_pixmaps_[i].width(),
+                         avatar_upload_pixmaps_[i]);
+    }
+    avatar_fetched_ver_.insert(me, avatar_new_ver_);
+    member_avatar_ver_.insert(me, avatar_new_ver_);
+    avatar_upload_pixmaps_.clear();
+    refresh_devices();
+    collab_engine_.query_org(); // 成功即重拉本人资料（org 随后到）
+    show_status(QStringLiteral("头像已更新"));
+    return;
+  }
+  const auto [size, bytes] = avatar_upload_queue_.front();
+  files_client_->avatar_upload(size, bytes);
+}
+
+void MainWindow::on_avatar_uploaded(int size, qint64 ver) {
+  Q_UNUSED(size);
+  if (ver > avatar_new_ver_) avatar_new_ver_ = ver; // 服务端 MAX(ts_ms) 演进
+  avatar_upload_queue_.pop_front();
+  ++avatar_uploaded_count_;
+  if (!avatar_upload_queue_.isEmpty()) {
+    show_status(QStringLiteral("头像上传中（%1/4）")
+                    .arg(avatar_uploaded_count_ + 1));
+  }
+  start_next_avatar_upload(); // 队列尽＝收尾（落本机缓存＋重拉 org）
+}
+
+void MainWindow::queue_avatar_download(const QString& account, qint64 ver) {
+  if (ver <= 0) return;
+  if (avatar_fetched_ver_.value(account) == ver) return; // 已缓存该版
+  if (files_client_ == nullptr || !files_client_->is_logged_in()) {
+    avatar_pending_accounts_.insert(account);
+    return;
+  }
+  avatar_fetching_ver_.insert(account, ver);
+  files_client_->avatar_download(account, 256); // 只取 256 档，本地派生四档
+}
+
+void MainWindow::on_avatar_fetched(const QString& account, int size,
+                                   const QByteArray& bytes) {
+  const qint64 ver = avatar_fetching_ver_.take(account);
+  if (ver <= 0 || size != 256) return;
+  QPixmap pm;
+  if (!pm.loadFromData(bytes) || pm.isNull()) {
+    avatar_fetched_ver_.insert(account, ver); // 坏包不再拉同版
+    return;
+  }
+  // 256 原档＋平滑缩放三档一并落缓存（tooltip/组织树/资料框同源取用）
+  for (const int s : {256, 128, 64, 32}) {
+    store_avatar_cache(account, ver, s, s == 256
+                                            ? pm
+                                            : pm.scaled(s, s,
+                                                        Qt::IgnoreAspectRatio,
+                                                        Qt::SmoothTransformation));
+  }
+  avatar_fetched_ver_.insert(account, ver);
+  refresh_devices(); // 悬浮头像即时刷新
+}
+
+qint64 MainWindow::own_avatar_ver() const {
+  return member_avatar_ver_.value(collab_engine_.account());
 }
 
 // 需求批⑩：本人在线时长展示串（org 数据缓存；tooltip/资料对话框同源）

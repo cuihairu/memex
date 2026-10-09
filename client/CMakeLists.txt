@@ -40,9 +40,14 @@ qt_add_executable(memex_client
   app/main_window.cpp
   app/emoji_pack_dialog.cpp
   app/main_window.hpp
+  app/avatar_store.cpp
+  app/avatar_store.hpp
+  app/crop_dialog.cpp
+  app/crop_dialog.hpp
   app/crash_report.cpp
   app/crash_report.hpp
   app/icons/icons.qrc
+  app/icons/avatars/avatars.qrc
   app/notify_center.cpp
   app/notify_center.hpp
   app/notify_prefs.cpp
@@ -512,6 +517,8 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
     app/file_assistant.cpp
     app/task_dialog.cpp
@@ -536,6 +543,7 @@ if(MEMEX_BUILD_TESTS)
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
     app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
     app/theme.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_brand_settings PRIVATE
@@ -587,6 +595,25 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # 用户头像客户端面（需求批⑫）：avatar_store（默认头像组稳定 hash＋缩放
+  # 缓存面）＋CropDialog 程序化取景（正方窗口/颜色映射/256 输出）＋
+  # FilesClient 头像域真服务端全链（上传回 ver/下载往返/404 失败通道/删除）
+  add_executable(test_avatar_client
+    tests/test_avatar_client.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
+    app/icons/avatars/avatars.qrc)
+  target_link_libraries(test_avatar_client PRIVATE
+    memex_engine_collab Qt6::Widgets)
+  target_include_directories(test_avatar_client PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_avatar_client PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME avatar_client COMMAND test_avatar_client)
+  set_tests_properties(avatar_client PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # 二期·办公室位置图窗口冒烟：真服务端进程 × 离屏 QDialog——member1
   # 无权编辑 403 状态行明示→admin1（org-admin）建座＋拖拽落位保存回查→
   # 同层互见（工位即楼层归属）→搜索过滤→绑定/解绑。判权协议腿走
@@ -629,6 +656,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
     app/main_window.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
@@ -665,6 +694,7 @@ if(MEMEX_BUILD_TESTS)
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
     app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
     app/theme.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_mode_switch PRIVATE
@@ -686,6 +716,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_tray
     tests/test_tray.cpp
     app/main_window.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
@@ -722,6 +754,7 @@ if(MEMEX_BUILD_TESTS)
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
     app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
     app/theme.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_tray PRIVATE
@@ -740,6 +773,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_screenshot
     tests/test_screenshot.cpp
     app/main_window.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
@@ -776,6 +811,7 @@ if(MEMEX_BUILD_TESTS)
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
     app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
     app/theme.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_screenshot PRIVATE
@@ -816,6 +852,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_icon
     tests/test_icon.cpp
     app/main_window.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
@@ -852,6 +890,7 @@ if(MEMEX_BUILD_TESTS)
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
     app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
     app/theme.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_icon PRIVATE
@@ -871,6 +910,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_theme
     tests/test_theme.cpp
     app/main_window.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
@@ -907,6 +948,7 @@ if(MEMEX_BUILD_TESTS)
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
     app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
     app/theme.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_theme PRIVATE
@@ -924,6 +966,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_chat_actions
     tests/test_chat_actions.cpp
     app/main_window.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
@@ -960,6 +1004,7 @@ if(MEMEX_BUILD_TESTS)
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
     app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
     app/theme.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_chat_actions PRIVATE
@@ -980,6 +1025,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_flash_alert
     tests/test_flash_alert.cpp
     app/main_window.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
     app/brand_kit.cpp
     app/brand_kit.hpp
@@ -1016,6 +1063,7 @@ if(MEMEX_BUILD_TESTS)
     app/notify_prefs.cpp
     app/screenshot_tool.cpp
     app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
     app/theme.cpp
     app/theme_settings_page.cpp)
   target_include_directories(test_flash_alert PRIVATE

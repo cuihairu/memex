@@ -51,6 +51,7 @@ class BrandSettingsDialog;
 class ShortcutSettingsDialog;
 class AwayLockSettingsDialog;
 class NetRemoteSettingsDialog;
+class FilesClient;
 
 class MainWindow : public QMainWindow {
 public:
@@ -188,6 +189,9 @@ public:
   // —— 需求批⑩ 在线时长（验收面）——
   // 本人在线时长展示串（org 数据缓存；空=未登录/数据未到）
   QString own_online() const;
+  // —— 需求批⑫ 头像（验收面）——
+  // 本人头像版本戳（org 数据缓存；0=未设置——展示默认头像，按账号 hash 取）
+  qint64 own_avatar_ver() const;
   // —— BUG-004 托盘激活（验收面）——
   // 单击/双击托盘 → 激活主界面（右键 Context 留给菜单，不接线）；
   // 测试用裸 QSystemTrayIcon 复用生产接线（发 activated 信号即走同一路径）。
@@ -237,6 +241,16 @@ private:
   // 「设置 → 个人资料…」（需求批⑪）：签名编辑对话框（登录门；保存走
   // apply_signature，回执后重拉 org 即时刷新悬浮）
   void show_profile_dialog();
+  // —— 需求批⑫ 头像：文件面接线（懒建 FilesClient；登录复用协作口令）——
+  FilesClient* files_client();  // 懒建＋信号接线（头像域；回执/失败统一入口）
+  bool files_ensure_login();    // 未登录则发起登录（异步；logged_in 后自动续）
+  void change_avatar();         // 「更换头像…」入口（登录门＋文件面门）
+  void pick_and_upload_avatar(); // 选图→QPixmap 门→裁剪→四档编码→排队上传
+  void start_next_avatar_upload(); // 串行传队列；末档完成即落本机缓存＋重拉 org
+  void queue_avatar_download(const QString& account, qint64 ver);
+  void on_avatar_fetched(const QString& account, int size,
+                         const QByteArray& bytes);
+  void on_avatar_uploaded(int size, qint64 ver);
   // 聊天区一行（消息或系统行）的结构化记录——主题切换时据此重渲，
   // 不必重查本地库（重查会丢掉尚未落库的即时提示）。
   struct ChatRow {
@@ -331,6 +345,21 @@ private:
   // 成员在线时长缓存（需求批⑩）：账号 → 已格式化展示串（滚动 24h/7d/30d
   // 并集时长，org 数据到达即刷新；会话列表 tooltip 与个人资料对话框共用）
   QHash<QString, QString> member_online_;
+  // 成员头像版本戳缓存（需求批⑫）：账号 → org 下发的 avatar_ver（0=未设置，
+  // 展示按账号 hash 取内置默认头像）
+  QHash<QString, qint64> member_avatar_ver_;
+  // 已取到字节并落缩放缓存的版本戳（404 也记＝未设置免反复拉；ver 变即失效）
+  QHash<QString, qint64> avatar_fetched_ver_;
+  // 在途下载：账号 → 发起时的版本戳（回包对账，防旧包盖新缓存）
+  QHash<QString, qint64> avatar_fetching_ver_;
+  FilesClient* files_client_{nullptr};    // 文件面（头像域专用；懒建）
+  bool avatar_pick_pending_{false};       // 文件面登录在途时挂起的选图续流程
+  QSet<QString> avatar_pending_accounts_; // 未登录时挂起的头像下载（登录后冲账）
+  QVector<QPair<int, QByteArray>> avatar_upload_queue_; // 待传四档（256→32）
+  QVector<QPixmap> avatar_upload_pixmaps_; // 同序档位图（传完落本机缓存先见）
+  int avatar_uploaded_count_{0};          // 已成功档数（状态行进度）
+  qint64 avatar_new_ver_{0};              // 服务端最新版本戳（上传回包带）
+  QString collab_host_;                   // 协作登录主机（文件面同源默认）
   bool org_dialog_pending_{false}; // 已请求组织架构、等待弹窗
   bool anonymous_allowed_{true};   // T3.4 生效策略：允许免登录使用（默认宽松）
   bool cross_state_allowed_{true}; // T3.4 生效策略：允许与未登录设备通信
