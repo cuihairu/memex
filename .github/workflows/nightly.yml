@@ -125,12 +125,28 @@ jobs:
           ninja --version
 
       # Windows 锁 MSVC：Ninja 需要显式选中 VS 工具链（不走默认生成器探测）。
-      # ilammy/msvc-dev-cmd 上游停在 v1.13.0（2024-03）target Node.js 20——
-      # 钉最新 tag；Node 20 弃用警告在其上游出 Node 24 版前为已知残留
-      #（GitHub 兼容层强制跑 Node 24，功能不受影响）
+      # 2026-10-10 用户令：去掉 ilammy/msvc-dev-cmd —— 上游最新版仍是 v1.13.0 且
+      # action.yml 写死 runs.using: node20，没有 node24 版可升，Node 20 弃用告警
+      # 消不掉。改为直接调 VS 自带 vcvars64.bat（vswhere 定位），把变量灌进
+      # GITHUB_ENV / PATH 灌进 GITHUB_PATH，与该 action 等价。
       - name: 配置 MSVC 环境（Windows）
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1.13.0
+        shell: pwsh
+        run: |
+          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vsWhere)) { throw "vswhere.exe not found" }
+          $vsPath = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsPath) { throw "No Visual Studio with C++ toolset" }
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvars64.bat"
+          if (-not (Test-Path $vcvars)) { throw "vcvars64.bat not found: $vcvars" }
+          cmd /s /c "`"$vcvars`" && set" | ForEach-Object {
+            if ($_ -match '^([^=]+)=(.*)$') {
+              $name = $matches[1]; $value = $matches[2]
+              if ($name -ieq 'PATH') { Add-Content -Path $env:GITHUB_PATH -Value $value }
+              else { Add-Content -Path $env:GITHUB_ENV -Value "$name=$value" }
+            }
+          }
+          Write-Host "MSVC environment loaded from $vcvars"
 
       # Windows/macOS 用官方 Qt 二进制（vcpkg 侧只装 Qt 以外依赖，避免源码重建
       # Qt 的 1.5h+；windeployqt / macdeployqt 与官方运行库天然同源）。
