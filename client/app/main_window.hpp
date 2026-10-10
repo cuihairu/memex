@@ -28,6 +28,7 @@
 
 class QAction;
 class QCloseEvent;
+class QMenu;
 class QShortcut;
 class QTimer;
 class QSystemTrayIcon;
@@ -35,6 +36,7 @@ class QSystemTrayIcon;
 namespace memex::client {
 
 class FileAssistantDialog;
+class RailNav;
 class GroupMemoDialog;
 class GroupVaultDialog;
 class GroupCiDialog;
@@ -207,6 +209,13 @@ private:
   void wire_engines();
   void wire_collab(); // 协作信号接入界面（T2.4）
   void refresh_devices();
+  // —— 原型 rail 面（用户令 2026-10-10 原型走查）：左侧图标导航栏 ——
+  // 分组与顺序严格按 docs/design/prototypes 桌面屏（直连/协作两套项），
+  // 不做自创布局；模式翻转才重建（refresh_devices 高频调用，走守卫）。
+  void rebuild_rail();
+  void rail_clicked(const QString& id);
+  void update_side_head();      // 侧栏头/搜索占位/推广卡/计数随态切换
+  void show_file_assistant();   // 菜单与 rail 共用的文件助手入口
   void open_peer(const QString& device_id);
   void open_chat(const QString& kind, const QString& id);
   // 关会话回列表态（布局令：无对话＝「左菜单+好友列表」长方形面板，
@@ -444,6 +453,11 @@ private:
   QPointer<NetRemoteSettingsDialog> net_dialog_; // 二期·网络与远程设置页（懒建）
 
   QLabel* device_count_{nullptr};
+  RailNav* rail_{nullptr};        // 原型 rail 面：最左图标导航栏
+  QMenu* opt_menu_{nullptr};      // 「设置」菜单（rail 齿轮弹同源菜单）
+  QWidget* collab_promo_{nullptr}; // 直连态「登录协作态」推广卡（原型侧栏面）
+  QString rail_mode_;             // rail 已建形态（direct/collab），防重复重建
+  QHash<QString, int> unread_counts_; // 会话键 → 未读数（行角标；打开即清）
   QLineEdit* search_box_{nullptr};
   QListWidget* device_list_{nullptr};
   QLabel* chat_title_{nullptr};

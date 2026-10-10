@@ -43,6 +43,8 @@ set(CMAKE_AUTORCC ON)
 qt_add_executable(memex_client
   app/main.cpp
   app/main_window.cpp
+  app/rail_nav.cpp
+  app/rail_nav.hpp
   app/emoji_pack_dialog.cpp
   app/main_window.hpp
   app/avatar_store.cpp
@@ -562,6 +564,7 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
+    app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
@@ -705,6 +708,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
     app/main_window.cpp
+    app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
@@ -769,6 +773,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_tray
     tests/test_tray.cpp
     app/main_window.cpp
+    app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
@@ -830,6 +835,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_screenshot
     tests/test_screenshot.cpp
     app/main_window.cpp
+    app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
@@ -913,6 +919,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_icon
     tests/test_icon.cpp
     app/main_window.cpp
+    app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
@@ -975,6 +982,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_theme
     tests/test_theme.cpp
     app/main_window.cpp
+    app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
@@ -1035,6 +1043,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_chat_actions
     tests/test_chat_actions.cpp
     app/main_window.cpp
+    app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
@@ -1098,6 +1107,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_flash_alert
     tests/test_flash_alert.cpp
     app/main_window.cpp
+    app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
