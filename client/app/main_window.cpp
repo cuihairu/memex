@@ -382,7 +382,8 @@ void MainWindow::build_ui() {
   connect(act_tasks, &QAction::triggered, this, [this] {
     if (!task_dialog_) {
       task_dialog_ = new TaskDialog(this);
-      task_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+      // 不设 WA_DeleteOnClose：关窗=hide 后台驻留——30s 到期轮询与
+      // 文件面连接持续，提醒经常驻通知中心照发（关窗后台提醒常驻化）
     }
     // 分配候选=组织架构账号（未拉到组织架构时候选只剩「自己」）
     const QJsonDocument od = QJsonDocument::fromJson(last_org_json_.toUtf8());

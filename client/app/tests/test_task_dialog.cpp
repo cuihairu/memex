@@ -14,6 +14,7 @@
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTimer>
 
 #include <functional>
 
@@ -352,6 +353,19 @@ int main(int argc, char** argv) {
     }
     return false;
   }, 8000));
+
+  // —— R27-1 关窗后台提醒常驻化：关窗=hide 不销毁——连接与 30s 轮询
+  //     持续（重开现窗不重建，后台提醒经常驻通知中心照发）——
+  {
+    auto* poll = dlg.findChild<QTimer*>(QStringLiteral("task_poll"));
+    CHECK(poll != nullptr && poll->isActive());
+    dlg.close();
+    CHECK(!dlg.isVisible());
+    CHECK(dlg.is_connected()); // 连接保活
+    CHECK(poll->isActive());   // 轮询保活
+    dlg.show();
+    CHECK(dlg.isVisible()); // 重开现窗
+  }
 
   // —— R27-3 拉取接线：独立 org 存储注入 → GitHub 凭据 → 拉取渲染 ⇣ 行
   //     （PR 滤除/详情解析/只读守卫/401 错误腿）；外部拉取不经文件面，
