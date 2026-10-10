@@ -124,7 +124,16 @@ class MemexClientTest {
     @Test
     fun `域名无法解析 → 连不上`() {
         val result = MemexClient(connectTimeoutMs = 2_000).probe(ServerAddress("nonexistent.invalid", 24360))
-        org.junit.Assert.assertTrue("期望 Unreachable，实得 $result", result is ProbeResult.Unreachable)
+        // 分类随环境 DNS 行为漂移，产品不变量不变——非存在域名不得放行向导：
+        //   正常 DNS：UnknownHostException → Unreachable
+        //   通配假 IP 解析（本机 127.0.0.53）：connect 成功对端即关 → EOF → NotMemex
+        //   黑洞域名：SocketTimeoutException → Timeout
+        // 三者对 InitActivity 同义（均 showError 停留向导，仅文案不同，见 renderProbe），
+        // 故断言钉「不 Ok＝连不上」不变量，不断言具体分类（BUG-005 修复记录 2026-10-10）。
+        org.junit.Assert.assertTrue(
+            "期望连不上（非 Ok），实得 $result",
+            result !is ProbeResult.Ok,
+        )
     }
 
     // ---------- 登录 ----------

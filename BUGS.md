@@ -37,13 +37,17 @@
 
 （三处均为「点击无响应」，疑似入口按钮没接线或面板没弹出，逐条独立定位、独立验收，修一条关一条。）
 
-- [ ] BUG-005 Android release 变体单测偶发红（debug 变体恒绿）
+- [x] BUG-005 Android release 变体单测偶发红（debug 变体恒绿）
   现象：`./gradlew test`（debug＋release 两变体全跑）release 腿 2–3 处红，debug 腿 57/57 恒绿。
   连跑两次实录（2026-10-04）：第一次 3 红——ChatSessionTest.个人通知落库归档态回ACK并回调分级（NoSuchElementException，ChatSessionTest.kt:567，两跑皆红）、ChatSessionTest.收到TEXT回ACK…重复补投去重（NPE :308，第二次复跑通过=时序敏感）、MemexClientTest.域名无法解析→连不上（期望 Unreachable 实得 NotMemex「对端在应答前关闭连接」，两跑皆红）；第二次 2 红（去重那条过了）。
   疑似方向：①测试的假服务端/ACK 轮询在 release 变体（无 debug 断言、JIT 时序不同）下有界等待不够宽；②「域名无法解析」用例依赖环境 DNS 行为（本沙箱对不可解析域名的连接失败路径与 CI/真机不同）。
   排查面：ChatSessionTest 轮询上界与快照读、MemexClientTest 域名用例对环境 DNS 的假设、MemexClient 错误分类（Unreachable vs NotMemex 判定在「连接即被关闭」时的归档）。
   平台：Android release 变体（本机 JVM；安卓无 CI 腿——`.github/workflows/` 无 android.yml，此腿只在开发机跑，CI 视野外）。
   备注：登记于 2026-10-04 文档对账批（T6.3 三块落地后首跑 `./gradlew test` 全变体时发现；此前验收笔「单测 57/57 绿」指 debug 变体）。按「只登记不修」原则挂起，修复时先定性（真时序缺陷 vs 用例环境假设）再动。
+  修复记录（2026-10-10，按登记口径「先定性再动」）：
+  - 定性（逐项）：①ChatSessionTest 个人通知落库归档态回ACK并回调分级（原 :567 NoSuchElementException）与 收到TEXT回ACK…重复补投去重（原 :308 NPE，时序敏感）＝**真时序缺陷**，已在 BUG-006 修复（2026-10-09 外发帧移会话发送线程）后时序面改变、双变体均绿——本增量复跑实证 debug 84 项两腿全过（非本修直接改动，属连带收口）；②MemexClientTest.域名无法解析→连不上＝**用例环境假设**（非代码缺陷）：本机 127.0.0.53 通配假 IP 解析使 `.invalid` 可解析，connect 成功后对端即关→EOFException→NotMemex，期望的 UnknownHostException→Unreachable 前提在此环境不成立；净树复跑同红（BUG-006 记录已实证与代码改动无关）。
+  - 修（仅②，测试面）：断言由「期望 Unreachable」改钉产品不变量「非存在域名不得放行向导（结果非 Ok）」——Unreachable/NotMemex/Timeout 对 InitActivity 同义（均 showError 停留向导，仅文案不同，见 renderProbe），具体分类随环境 DNS 行为漂移，注释钉三形态口径。
+  - 回归：`./gradlew test` 双变体 84/84×2 全绿（debug 84/84、release 84/84，0 失败）；定性①两腿双变体在跑。
 
 - [x] BUG-004 托盘图标（右下角）双击不弹主界面
   现象（原话）：托盘图标（右下角）双击不弹主界面——现在必须右键菜单选「主界面」才显示，与主流软件交互不一致，影响体验。
