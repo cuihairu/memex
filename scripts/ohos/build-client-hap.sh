@@ -31,6 +31,15 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
   exit 1
 }
 
+# 透传给子进程（cmake/vcpkg arm64-ohos triplet 读 OHOS_SDK_ROOT 环境变量）：
+# 调用方可能以未导出的 shell 变量持有，脚本内显式 export 兜住
+export OHOS_SDK_ROOT QT_OHOS_ROOT
+# QT_HOST_PATH 可选：非空才透传（预编译鸿蒙 Qt 内嵌 host 路径时可省，
+# 空串透传反而可能被 Qt 交叉工具链当已配置 host 处理）
+if [ -n "${QT_HOST_PATH:-}" ]; then
+  export QT_HOST_PATH
+fi
+
 cmake -S "$REPO" --preset client-release-ohos
 cmake --build "$REPO/build-client-ohos" --target memex_client
 

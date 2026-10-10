@@ -178,9 +178,11 @@ endif()
 # CMake API（technology preview）——qt_add_executable 目标平台为 OHOS 时自动
 # 生成 <target>_make_hap，经 harmonydeployqt 收集产物并调 hvigor 出 HAP；
 # 属性名实证自 doc.qt.io qt-for-harmonyos-cmake-api（2026-10-09）。
-# 网络权限：qt_add_harmonyos_permission 文档口径「Qt 模块默认贡献权限」，所链
-# Qt6::Network 应自带 ohos.permission.INTERNET——首建时核对生成 module.json5
-# 的 requestPermissions（见 packaging/ohos/README.md 检查点）。待真机验证。
+# 网络权限：显式声明（2026-10-10 补）——Qt 文档口径「所链 Qt 模块默认贡献
+# 权限」，Qt6::Network 应自带 ohos.permission.INTERNET，这里再显式声明一份
+# 防 Qt 版本行为差异；首建时核对生成 module.json5 的 requestPermissions
+# 是否与自动贡献重复（重复则删显式声明二选一收口，见
+# packaging/ohos/README.md 检查点）。待真机验证。
 if(OHOS)
   set_target_properties(memex_client PROPERTIES
     QT_HARMONYOS_APP_NAME "memex"
@@ -190,6 +192,7 @@ if(OHOS)
     QT_HARMONYOS_APP_VERSION_NAME "${PROJECT_VERSION}"
     QT_HARMONYOS_APP_VERSION_CODE "1"
     QT_HARMONYOS_MODULE_DESCRIPTION "Memex 内网办公即时通讯")
+  qt_add_harmonyos_permission(memex_client NAME ohos.permission.INTERNET)
 endif()
 
 if(MEMEX_BUILD_TESTS)

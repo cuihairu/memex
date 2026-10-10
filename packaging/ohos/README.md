@@ -40,11 +40,12 @@ arm64-v8a`）自编 Qt，再以其安装前缀作 `QT_OHOS_ROOT`。
 
 ## 首建核对点（代码-only 交付未验证项）
 
-1. **网络权限**：Qt 文档口径「所链 Qt 模块默认贡献权限」，Qt6::Network 应
-   自带 `ohos.permission.INTERNET`——首建后核对生成的
-   `module.json5` `requestPermissions`；若缺，用 `qt_add_harmonyos_permission
-   (memex_client NAME ohos.permission.INTERNET)` 补（Qt 6.12 命令，签名
-   `target NAME <permission-name>`）。
+1. **网络权限**：已在 `client/CMakeLists.txt` 显式声明
+   （2026-10-10：`qt_add_harmonyos_permission(memex_client NAME
+   ohos.permission.INTERNET)`，OHOS 分支内）——首建后核对生成的
+   `module.json5` `requestPermissions`：若与 Qt6::Network 自动贡献
+   **重复**则删显式声明二选一收口（Qt 文档口径「所链 Qt 模块默认贡献
+   权限」）。
 2. **triplet 端口可用性**：vcpkg 对 `arm64-ohos` 的 protobuf/openssl/nlohmann
    端口为 community 支持档，首装可能遇端口内 OHOS 适配缺口（逐个对 vcpkg
    issue 修）。
