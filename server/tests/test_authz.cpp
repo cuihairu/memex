@@ -26,8 +26,9 @@ using memex::server::Decision;
 using memex::server::RuleEffect;
 
 AuthzQuery q(const std::string& subject, const std::string& action,
-             const std::string& resource, const std::string& ctx = "") {
-  return AuthzQuery{subject, action, resource, ctx};
+             const std::string& resource, const std::string& ctx = "",
+             const std::string& scope = "") {
+  return AuthzQuery{subject, action, resource, ctx, scope};
 }
 
 } // namespace
