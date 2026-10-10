@@ -187,11 +187,19 @@ onBeforeUnmount(stopTimer)
 .showcase-slide {
   flex: 0 0 100%;
   min-width: 0;
+  /* 实况件宽高比离散（桌面 0.48–1.67、手机 0.45–0.5）：定高等比 contain，
+     不放大小图、不跳动（原型稿时代 width:100% 只适配统一 1300×820 渲染） */
+  height: 520px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .showcase-slide img {
   display: block;
-  width: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
   height: auto;
   user-select: none;
 }

@@ -43,7 +43,7 @@
 档判暗兜底回读已被染暗的调色板，还原又落回深色），浅图带暗入库；本轮修
 抓取机制（还原改显式回亮色）后浅色重摄、深色一并补齐。
 
-![桌面端好友列表（浅色·实况）](/screenshots/layout-friends.png)
+![桌面端好友列表（浅色·实况）](/screenshots/layout-friends-light.png)
 ![桌面端好友列表（深色·实况）](/screenshots/layout-friends-dark.png)
 
 原型稿：浅色与深色各一（协作态好友列表设计稿，保留备查）。
@@ -125,7 +125,7 @@ rail 面走查后重摄，浅／深配平）。
 
 实况截图（Android，T6.3）：首次启动强制进入服务器地址设置页，填写域名／IP（可带端口，缺省 24360）并连通校验（PING→PONG）通过后才放行登录——未完成初始化不出现任何可聊天界面（R17）。深色补摄（2026-10-10 深色主题走查，`walkthrough-18` 同源）。
 
-![手机端初始化向导（Android 实况·浅色）](/screenshots/mobile-live-init.png)
+![手机端初始化向导（Android 实况·浅色）](/screenshots/mobile-live-init-light.png)
 ![手机端初始化向导（Android 实况·深色）](/screenshots/mobile-live-init-dark.png)
 
 原型稿：浅色与深色各一。
@@ -144,7 +144,7 @@ rail 面走查后重摄，浅／深配平）。
 输入框（对端账号）、文件助手／退出登录入口；真实服务端下发（webhook 通知镜像）
 落会话并计未读——浅色（上）／深色（下）各一（`walkthrough-08/11` 同源）。
 
-![手机端会话列表（Android 实况·浅色）](/screenshots/mobile-live-sessions.png)
+![手机端会话列表（Android 实况·浅色）](/screenshots/mobile-live-sessions-light.png)
 ![手机端会话列表（Android 实况·深色）](/screenshots/mobile-live-sessions-dark.png)
 
 原型稿：浅色与深色各一（保留备查）。
@@ -164,7 +164,7 @@ rail 面走查后重摄，浅／深配平）。
 服务端归档恰触发新登记的 BUG-007（msg_id 撞车静默吞档，投递不受影响），见
 BUGS.md。
 
-![手机端聊天（Android 实况·浅色）](/screenshots/mobile-live-chat.png)
+![手机端聊天（Android 实况·浅色）](/screenshots/mobile-live-chat-light.png)
 ![手机端聊天（Android 实况·深色）](/screenshots/mobile-live-chat-dark.png)
 
 原型稿：浅色与深色各一（保留备查）。
@@ -204,4 +204,4 @@ rail 面落地（左图标导航栏，b92de8a）后，桌面端五屏实况重�
 ＋30s 轮询到点 IMPORTANT）三者均为对话框级新界面，不在八屏预览集内、不影响既有
 实况，已如实补注（见上「功能对话框（八屏预览集外）」节）；BUG-005 收口（fbfe6ef，
 测试假设修正）与 BUG-007 设计（37b89a0，设计文档）无界面变化。全部既有 live-*／
-layout-*／mobile-live-* 实况核对沿用不重摄。此前的进度口径：桌面端八屏已全部替换为实况截图（浅／深各一，真实客户端在 Xvfb 下拍摄，逐张目检非原型稿）；未登录直连态已随布局令（2026-10-08）重摄为「列表态」实况（浅／深各一，Xvfb 双实例互发现拍摄），「会话展开态」实况浅／深各一补齐（点好友后，`test_mode_switch` 布局腿程序化抓取，深色本轮切暗补摄）；好友列表屏实况浅／深各一（协作态列表态，登录后经生产 ✕ 路径关回列表态抓取——局域网设备＋「协作会话·服务端归档」两分组，`test_mode_switch` 布局腿程序化抓取；浅色 2026-10-10 重摄更正——2026-10-09 首轮入库误为深色抓图，抓取机制还原缺陷已修，深色同轮补齐）；手机端初始化向导与登录成功主界面为 Android 实况（T6.3 模拟器走查，与 `apps/android/docs/walkthrough-0*.png` 同源；深色随 2026-10-10 深色主题走查补齐，`walkthrough-18/19` 同源）；会话列表屏与聊天屏本轮补 Android 实况浅／深各一（2026-10-09 模拟器 android-34＋本机 serve 走查，与 `walkthrough-08/09/10/11` 同源）——聊天屏实况 2026-10-09 第二轮已换真实人对人互发（离线投递→登录送达→在线回复全链，BUG-006 修复后实测不崩；长按复制富交互入档，`walkthrough-14/15/16` 同源，详见上「聊天」小节）；「我」屏 Android 未建、iOS 代码-only——暂仍为原型稿并如实标注。鸿蒙端（T6.2 桌面矩阵项，工具链/证书/真机未备受阻；鸿蒙手机版 T6.6 代码-only＋CI，编译腿待 OHOS 工具链）不为其承诺实况截图。
+layout-*／mobile-live-* 实况核对沿用不重摄。此前的进度口径：桌面端八屏已全部替换为实况截图（浅／深各一，真实客户端在 Xvfb 下拍摄，逐张目检非原型稿）；未登录直连态已随布局令（2026-10-08）重摄为「列表态」实况（浅／深各一，Xvfb 双实例互发现拍摄），「会话展开态」实况浅／深各一补齐（点好友后，`test_mode_switch` 布局腿程序化抓取，深色本轮切暗补摄）；好友列表屏实况浅／深各一（协作态列表态，登录后经生产 ✕ 路径关回列表态抓取——局域网设备＋「协作会话·服务端归档」两分组，`test_mode_switch` 布局腿程序化抓取；浅色 2026-10-10 重摄更正——2026-10-09 首轮入库误为深色抓图，抓取机制还原缺陷已修，深色同轮补齐）；手机端初始化向导与登录成功主界面为 Android 实况（T6.3 模拟器走查，与 `apps/android/docs/walkthrough-0*.png` 同源；深色随 2026-10-10 深色主题走查补齐，`walkthrough-18/19` 同源）；会话列表屏与聊天屏本轮补 Android 实况浅／深各一（2026-10-09 模拟器 android-34＋本机 serve 走查，与 `walkthrough-08/09/10/11` 同源）——聊天屏实况 2026-10-09 第二轮已换真实人对人互发（离线投递→登录送达→在线回复全链，BUG-006 修复后实测不崩；长按复制富交互入档，`walkthrough-14/15/16` 同源，详见上「聊天」小节）；「我」屏 Android 未建、iOS 代码-only——暂仍为原型稿并如实标注。鸿蒙端（T6.2 桌面矩阵项，工具链/证书/真机未备受阻；鸿蒙手机版 T6.6 代码-only＋CI，编译腿待 OHOS 工具链）不为其承诺实况截图。2026-10-10 首页轮播实况化轮：文档站首页（`docs/src/index.md`）界面预览轮播十二席中十一席由原型稿渲染换为客户端实况截图（桌面八屏＋手机初始化向导/会话列表/聊天；「我」屏 Android 端未建仍原型稿），轮播组件（`ShowcaseCarousel.vue`）改定高等比 contain 适配实况件离散宽高比（0.45–1.67），四张无后缀浅色实况件统一命名补 `-light`（`layout-friends`／`mobile-live-init`／`mobile-live-sessions`／`mobile-live-chat`，抓取腿与本文档引用同步）；原型渲染件保留在库备查。

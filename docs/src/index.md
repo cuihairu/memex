@@ -36,26 +36,26 @@ features:
 
 <script setup>
 const desktopSlides = [
-  { key: 'desktop-direct', title: '桌面端 · 未登录直连态', desc: '零配置自动发现同网段终端，本机留存，不入归档' },
-  { key: 'desktop-friends', title: '桌面端 · 好友列表', desc: '无对话即列表态：不摆聊天面板，点好友才展开会话' },
-  { key: 'desktop-collab', title: '桌面端 · 登录协作态', desc: '长连接在线、消息全量归档、跨态会话显式标注' },
-  { key: 'desktop-chat', title: '桌面端 · 单聊', desc: '归档起点可追溯、撤回原文留存、文件卡片与引用' },
-  { key: 'desktop-group', title: '桌面端 · 群聊', desc: '公告、@提醒、群成员管理，群消息同样全量归档' },
-  { key: 'desktop-org', title: '桌面端 · 组织架构', desc: '部门树、汇报链路、直属上级与可见性策略' },
-  { key: 'desktop-files', title: '桌面端 · 文件传输', desc: '点对点直传不经服务端、断点续传、元数据入归档' },
-  { key: 'desktop-search', title: '桌面端 · 归档检索', desc: '按人员、时间、关键词检索归档，撤回原文留存可查' }
+  { key: 'live-direct', title: '桌面端 · 未登录直连态', desc: '零配置自动发现同网段终端，本机留存，不入归档' },
+  { key: 'layout-friends', title: '桌面端 · 好友列表', desc: '无对话即列表态：不摆聊天面板，点好友才展开会话' },
+  { key: 'live-collab', title: '桌面端 · 登录协作态', desc: '长连接在线、消息全量归档、跨态会话显式标注' },
+  { key: 'live-chat', title: '桌面端 · 单聊', desc: '直连单聊点对点直达：行首标注「直连·仅本机」，横幅明示消息不进归档' },
+  { key: 'live-group', title: '桌面端 · 群聊', desc: '群消息经服务端扇出并全量归档，侧栏群分组带人数与归档标识' },
+  { key: 'live-org', title: '桌面端 · 组织架构', desc: '部门树、成员卡片与汇报链路' },
+  { key: 'live-files', title: '桌面端 · 文件传输', desc: '点对点直传不经服务端、断点续传、元数据入归档' },
+  { key: 'live-search', title: '桌面端 · 归档检索', desc: '按人员、时间、关键词检索归档，撤回原文留存可查' }
 ]
 const mobileSlides = [
-  { key: 'mobile-init', title: '手机端 · 初始化向导', desc: '首次使用必须设置服务器地址，连通校验后才可进入' },
-  { key: 'mobile-sessions', title: '手机端 · 会话列表', desc: '移动端全部为协作态，不提供免登录匿名使用' },
-  { key: 'mobile-chat', title: '手机端 · 聊天', desc: '已读回执、文件卡片、归档状态随手可见' },
-  { key: 'mobile-me', title: '手机端 · 我', desc: '设备管理、桌面端单点在线、留存策略展示' }
+  { key: 'mobile-live-init', title: '手机端 · 初始化向导', desc: '首次使用必须设置服务器地址，连通校验后才可进入' },
+  { key: 'mobile-live-sessions', title: '手机端 · 会话列表', desc: '移动端全部为协作态，不提供免登录匿名使用' },
+  { key: 'mobile-live-chat', title: '手机端 · 聊天', desc: '真人对人互发（离线投递→登录送达→在线回复），长按消息可复制' },
+  { key: 'mobile-me', title: '手机端 · 我', desc: '设备管理、桌面端单点在线、留存策略展示（原型稿：Android 端未建）' }
 ]
 </script>
 
 ## 界面预览
 
-原型设计稿覆盖桌面端八屏与手机端四屏，品牌橙（#e16531）主色，浅色与深色两套均可查看。桌面端与手机端分列两组轮播，右上角按钮切换截图主题，支持自动轮播、左右箭头、键盘方向键与触屏滑动。（实况替换进度：桌面端八屏与手机端初始化向导、登录成功主界面、会话列表、聊天四屏均已换客户端实况截图，浅／深各一全配平；「我」屏 Android 未建、iOS 代码-only，暂仍原型稿并如实标注；鸿蒙端不承诺实况截图。详见[界面原型与预览](/guide/prototypes)。）
+界面预览覆盖桌面端八屏与手机端四屏，品牌橙（#e16531）主色，浅色与深色两套均可查看。桌面端与手机端分列两组轮播，右上角按钮切换截图主题，支持自动轮播、左右箭头、键盘方向键与触屏滑动。（实况替换进度：桌面端八屏与手机端初始化向导、登录成功主界面、会话列表、聊天均已换客户端实况截图，浅／深各一全配平；轮播十二席中十一席为实况，仅「我」屏因 Android 端未建、iOS 代码-only 仍为原型稿并如实标注；鸿蒙端不承诺实况截图。详见[界面原型与预览](/guide/prototypes)。）
 
 ### 桌面端（Windows / UOS / 麒麟 / macOS）
 

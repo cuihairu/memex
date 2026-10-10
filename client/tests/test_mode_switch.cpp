@@ -356,7 +356,7 @@ int main(int argc, char** argv) {
       close_btn->click();
       CHECK(!window.chat_panel_visible());
       CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
-                               QStringLiteral("/layout-friends.png")));
+                               QStringLiteral("/layout-friends-light.png")));
       // 深色随需补摄（2026-10-10 浅深配平轮）：同一列表态切暗再抓一张，
       // 随后显式回亮色（同 layout-chat-dark 还原法——system 档判暗会回读
       // 已被染暗的调色板再落回深色）
