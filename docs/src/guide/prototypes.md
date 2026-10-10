@@ -186,7 +186,12 @@ BUGS.md。
 - 桌面端：[desktop-direct](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct.html)（列表态：无对话不摆聊天面板）· [desktop-direct-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct-chat.html)（点好友后对话展开）· [desktop-friends](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-friends.html)（协作态好友列表·列表态）· [desktop-collab](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-collab.html) · [desktop-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-chat.html) · [desktop-group](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-group.html) · [desktop-org](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-org.html) · [desktop-files](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-files.html) · [desktop-search](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-search.html)
 - 手机端：[mobile-init](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-init.html) · [mobile-sessions](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-sessions.html) · [mobile-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-chat.html) · [mobile-me](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-me.html)
 
-功能实现后，本页截图将逐步替换为客户端实况截图。当前进度（2026-10-10 复核轮更新）：2026-10-10 原型走查
+功能实现后，本页截图将逐步替换为客户端实况截图。当前进度（2026-10-10 预览核验轮更新）：BUG-007
+实施批（42c4b46，服务端撞 id 消歧＋移动端 seq 台账）无界面变化；全部既有实况不做重摄、改为像素级
+核验为当前——`test_live_shots`＋`test_mode_switch` 重跑再生的 14 张桌面实况对入库版逐张比对，差异
+均为消息时钟与临时路径文字（0.00%–0.39%，UI 结构零差异），锁屏验收图本轮重跑字节级一致，紧急弹窗
+验收图与 `test_notify` 再生抓图像素级一致，docs 全站截图引用 38 处零缺失；剩余原型稿均如实标注
+（「我」屏未建、备查稿保留）。此前口径（2026-10-10 复核轮更新）：2026-10-10 原型走查 rail 面落地
 rail 面落地（左图标导航栏，b92de8a）后，桌面端五屏实况重摄浅／深配平——直连列表态／单聊／登录协作态／
 群聊／文件传输（`test_live_shots` 程序化驱动真实服务端＋双直连实例＋对端协作引擎抓取，逐张目检）；组织
 架构（对话框独抓）与归档检索（服务端 CLI 终端输出）画面不含窗口 chrome、不随 rail 改版，核对后沿用；
