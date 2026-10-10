@@ -31,6 +31,16 @@ QString locate_handler() {
   return on_path;
 }
 
+// crashpad 的 base::FilePath 平台差异：Windows 的 StringType 是 std::wstring，
+// POSIX 是 std::string——统一从 QString 构造，避免宽窄字符编译失败。
+base::FilePath to_filepath(const QString& p) {
+#ifdef Q_OS_WIN
+  return base::FilePath(p.toStdWString());
+#else
+  return base::FilePath(p.toStdString());
+#endif
+}
+
 // 本地既有 dump 份数据（new/completed/pending 三区）：与运行日志对时——
 // 下次启动即可看到上次崩溃是否真落了盘。
 int count_local_dumps(const QString& db_path) {
@@ -67,8 +77,7 @@ bool init_crash_reporting() {
     return false;
   }
 
-  auto database = crashpad::CrashReportDatabase::Initialize(
-      base::FilePath(db_path.toStdString()));
+  auto database = crashpad::CrashReportDatabase::Initialize(to_filepath(db_path));
   if (!database) {
     qWarning("[崩溃采集] dump 数据库初始化失败：%s（崩溃采集未启用）",
              qUtf8Printable(db_path));
@@ -78,8 +87,8 @@ bool init_crash_reporting() {
   // handler 常驻至进程结束（函数内静态：client socket 生命周期须覆盖全程）。
   static crashpad::CrashpadClient client;
   const bool started = client.StartHandler(
-      base::FilePath(handler.toStdString()),
-      base::FilePath(db_path.toStdString()),
+      to_filepath(handler),
+      to_filepath(db_path),
       base::FilePath(),  // 指标面：空＝不建
       std::string(),     // 上报 URL：空＝只本地落盘，不外发（数据外发默认关）
       {{"product", "memex-client"}, {"version", MEMEX_VERSION}},
