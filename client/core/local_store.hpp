@@ -31,8 +31,9 @@ struct StoredMessage {
   // 平台-9 同步状态机（蓝图§二十三）：LOCAL（本地域，不进服务端同步，
   // 直连态恒此值）/ PENDING（待发送）/ SENDING（在途）/ SERVER_ACKED
   // （服务端受理，已归档待投递）/ ARCHIVED（服务端归档确认：接收方向
-  // 落库即此值——唯一入口是服务端投递）/ FAILED（终态失败，不再补传）。
-  // 空串＝历史行（状态机启用前的旧数据），不参与恢复补传。
+  // 落库即此值——唯一入口是服务端投递；发送方向经 DELIVER_NOTICE/
+  // RECEIPT_DATA 触发面自 SERVER_ACKED 推进）/ FAILED（终态失败，不再
+  // 补传）。空串＝历史行（状态机启用前的旧数据），不参与恢复补传。
   std::string sync_state;
   // 回执态（需求批⑦，仅我发出的协作消息有意义）：''=无 / delivered=
   // 已送达对方客户端 / read=已读。接收方向与直连域恒空。
@@ -79,6 +80,14 @@ public:
   bool set_sync_state(const std::string& from_id, std::uint64_t seq,
                       const std::string& state);
   QList<StoredMessage> pending_sync(const std::string& from_id) const;
+
+  // 平台-9 发送侧归档推进：接收方客户端 ACK（已收取落库）经服务端
+  // DELIVER_NOTICE／RECEIPT_DATA 到达后，把发送侧 SERVER_ACKED 行推进
+  // ARCHIVED（状态机收口时服务端尚无归档确认事件、发送侧以 SERVER_ACKED
+  // 为终态的留尾，回执面补齐后按 msg_id 推进）。只从 SERVER_ACKED 推进
+  //（接收方向行本就 ARCHIVED、PENDING/SENDING/FAILED 不动）；未知
+  // msg_id 返回 false。
+  bool set_sync_state_archived(const std::string& msg_id);
 
   // —— 需求批⑦ 消息回执 ——
   // 发出消息回填服务端标识（sha256(account:seq) 本地推定，只补空位）。

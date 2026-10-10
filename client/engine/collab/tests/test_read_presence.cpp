@@ -192,14 +192,20 @@ int main(int argc, char** argv) {
   CHECK(a_delivered[0].msg_id == mid2);
   CHECK(a_delivered[0].to == QStringLiteral("bob"));
   {
-    // 本地库：发出的消息带 msg_id（发出即回填）＋ receipt=delivered
+    // 本地库：发出的消息带 msg_id（发出即回填）＋ receipt=delivered；
+    // 平台-9 发送侧归档推进——DELIVER_NOTICE 同帧把 SERVER_ACKED 推到
+    // ARCHIVED（服务端归档确认触发面）
     const auto hist = store_a.history(QStringLiteral("bob"));
-    bool saw_delivered = false;
+    bool saw_delivered = false, saw_archived = false;
     for (const auto& m : hist) {
       if (m.msg_id == mid2.toStdString() && m.receipt == "delivered")
         saw_delivered = true;
+      if (m.msg_id == mid2.toStdString() &&
+          m.sync_state == "ARCHIVED")
+        saw_archived = true;
     }
     CHECK(saw_delivered);
+    CHECK(saw_archived);
   }
 
   // 回执态补查（归档扩）：两条一起查 → JSON 对齐（msg1 已读/msg2 送达）

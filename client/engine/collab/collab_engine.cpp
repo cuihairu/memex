@@ -765,6 +765,10 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
     if (!msg.has_deliver_notice()) return;
     const auto& n = msg.deliver_notice();
     if (store_) store_->set_receipt(n.msg_id(), "delivered");
+    // 平台-9 发送侧归档推进：ACK=对方客户端已收取落库（接收方向
+    // ARCHIVED 唯一入口之外，发送侧以服务端确认事件 DELIVER_NOTICE
+    // 为触发面——SERVER_ACKED 留尾就此收口）
+    if (store_) store_->set_sync_state_archived(n.msg_id());
     emit message_delivered(QString::fromStdString(n.msg_id()),
                            QString::fromStdString(n.delivered_to()),
                            n.delivered_ms());
@@ -782,11 +786,14 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
       o["readers"] = nlohmann::json::array();
       for (const auto& r : e.readers()) o["readers"].push_back(r);
       arr.push_back(std::move(o));
-      // 台账对齐落本地（与实时通知同口径：已读压过送达；两项皆空不动）
+      // 台账对齐落本地（与实时通知同口径：已读压过送达；两项皆空不动；
+      // 平台-9 发送侧归档推进同 DELIVER_NOTICE 触发面）
       if (store_ && e.readers_size() > 0) {
         store_->set_receipt(e.msg_id(), "read");
+        store_->set_sync_state_archived(e.msg_id());
       } else if (store_ && e.delivered_to_size() > 0) {
         store_->set_receipt(e.msg_id(), "delivered");
+        store_->set_sync_state_archived(e.msg_id());
       }
     }
     emit receipts_received(QString::fromStdString(arr.dump()));

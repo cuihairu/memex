@@ -314,6 +314,21 @@ bool LocalStore::set_sync_state(const std::string& from_id, std::uint64_t seq,
   return q.numRowsAffected() > 0;
 }
 
+bool LocalStore::set_sync_state_archived(const std::string& msg_id) {
+  // 发送侧归档推进：只从 SERVER_ACKED 走（其余态不倒退不越级）
+  if (!open_ || msg_id.empty()) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "UPDATE messages SET sync_state = 'ARCHIVED'"
+      " WHERE msg_id = ? AND sync_state = 'SERVER_ACKED'"));
+  q.addBindValue(QString::fromStdString(msg_id));
+  if (!q.exec()) {
+    qWarning() << "[本地库] 归档推进失败：" << q.lastError().text();
+    return false;
+  }
+  return q.numRowsAffected() > 0;
+}
+
 // —— 需求批⑦ 消息回执 ——
 
 bool LocalStore::set_msg_id(const std::string& from_id, std::uint64_t seq,

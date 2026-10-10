@@ -254,16 +254,30 @@ int main(int argc, char** argv) {
     return QStringLiteral("<missing>");
   };
 
-  // 发送侧：服务端受理（ACK 到达）＝SERVER_ACKED；接收侧：服务端投递
-  // 落库即 ARCHIVED（接收方向唯一入口）
-  CHECK(sync_of(store_a, QStringLiteral("bob"), QStringLiteral("在线基线消息")) ==
-        QStringLiteral("SERVER_ACKED"));
-  CHECK(sync_of(store_a, QStringLiteral("bob"), QStringLiteral("中断期消息甲")) ==
-        QStringLiteral("SERVER_ACKED"));
-  CHECK(sync_of(store_a, QStringLiteral("bob"), QStringLiteral("中断期消息乙")) ==
-        QStringLiteral("SERVER_ACKED"));
-  CHECK(sync_of(store_a, QStringLiteral("bob"), QStringLiteral("恢复后新消息")) ==
-        QStringLiteral("SERVER_ACKED"));
+  // 发送侧：服务端受理（ACK 到达）＝SERVER_ACKED；接收方客户端落库发
+  // ACK→服务端 DELIVER_NOTICE 回达→发送侧推进 ARCHIVED（发送侧触发面，
+  // 等持久库面状态到位）；接收侧：服务端投递落库即 ARCHIVED（接收方向
+  // 唯一入口）
+  CHECK(wait_until([&] {
+    return sync_of(store_a, QStringLiteral("bob"),
+                   QStringLiteral("在线基线消息")) ==
+           QStringLiteral("ARCHIVED");
+  }, 8000));
+  CHECK(wait_until([&] {
+    return sync_of(store_a, QStringLiteral("bob"),
+                   QStringLiteral("中断期消息甲")) ==
+           QStringLiteral("ARCHIVED");
+  }, 8000));
+  CHECK(wait_until([&] {
+    return sync_of(store_a, QStringLiteral("bob"),
+                   QStringLiteral("中断期消息乙")) ==
+           QStringLiteral("ARCHIVED");
+  }, 8000));
+  CHECK(wait_until([&] {
+    return sync_of(store_a, QStringLiteral("bob"),
+                   QStringLiteral("恢复后新消息")) ==
+           QStringLiteral("ARCHIVED");
+  }, 8000));
   CHECK(sync_of(store_b, QStringLiteral("alice"), QStringLiteral("在线基线消息")) ==
         QStringLiteral("ARCHIVED"));
   CHECK(sync_of(store_b, QStringLiteral("alice"), QStringLiteral("中断期消息甲")) ==
@@ -315,6 +329,24 @@ int main(int argc, char** argv) {
     CHECK(sync_of(sp, QStringLiteral("carol"), QStringLiteral("待发一")) ==
           QStringLiteral("FAILED"));
     CHECK(sync_of(sp, QStringLiteral("carol"), QStringLiteral("历史行")).isEmpty());
+
+    // 发送侧归档推进（按 msg_id）：只从 SERVER_ACKED 走——其余态
+    //（PENDING/SENDING/ARCHIVED/空历史）不倒退不越级，未知 id=false
+    CHECK(sp.set_sync_state("alice", 2, "SERVER_ACKED")); // 复位回受理态
+    CHECK(sp.set_msg_id("alice", 2, "sha-a2"));
+    CHECK(sp.set_sync_state_archived("sha-a2"));
+    CHECK(sync_of(sp, QStringLiteral("carol"), QStringLiteral("在途二")) ==
+          QStringLiteral("ARCHIVED"));
+    CHECK(!sp.set_sync_state_archived("sha-a2")); // 已 ARCHIVED＝不再命中
+    CHECK(!sp.set_sync_state_archived("sha-none")); // 未知 msg_id
+    m.seq = 5;
+    m.text = "在途五";
+    m.sync_state = "SENDING";
+    CHECK(sp.append(m));
+    CHECK(sp.set_msg_id("alice", 5, "sha-a5"));
+    CHECK(!sp.set_sync_state_archived("sha-a5")); // SENDING 不越级
+    CHECK(sync_of(sp, QStringLiteral("carol"), QStringLiteral("在途五")) ==
+          QStringLiteral("SENDING"));
     sp.close();
   }
 
