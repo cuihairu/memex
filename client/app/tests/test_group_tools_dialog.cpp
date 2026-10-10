@@ -9,6 +9,7 @@
 // 数据拉式刷新（不推送），跨端断言前先 refresh。
 #include <QApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QListWidget>
 #include <QProcess>
@@ -21,6 +22,7 @@
 
 #include <app/group_tools_dialog.hpp>
 #include <app/notify_center.hpp>
+#include <app/theme.hpp>
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
 
@@ -501,6 +503,29 @@ int main(int argc, char** argv) {
     dlg_bob.check_due_tasks();
     dlg.check_due_tasks();
     CHECK(tray_notifies == after_first + 1);
+  }
+
+  // 文档站实况抓图（test_live_shots grab_pair 同式——亮暗各一、抓完显式
+  // 回亮；投票页真实台账三票）。窗未曾 show：先 show 排干布局再抓。
+  {
+    const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+    CHECK(QDir().mkpath(dir));
+    dlg.show();
+    QApplication::processEvents();
+    auto& tm = memex::client::ThemeManager::instance();
+    tm.apply(qApp);
+    QThread::msleep(120);
+    QApplication::processEvents();
+    CHECK(dlg.grab().save(
+        dir + QStringLiteral("/live-group-tools-light.png")));
+    tm.set_mode(QStringLiteral("dark"));
+    QThread::msleep(120);
+    QApplication::processEvents();
+    CHECK(dlg.grab().save(
+        dir + QStringLiteral("/live-group-tools-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents();
   }
 
   server.kill();

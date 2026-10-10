@@ -435,13 +435,16 @@ if(MEMEX_BUILD_TESTS)
     app/task_template_settings.cpp
     app/group_vault_crypto.cpp
     app/notify_center.cpp
-    app/notify_prefs.cpp)
+    app/notify_prefs.cpp
+    app/theme.cpp
+    app/theme_pack.cpp)
   target_link_libraries(test_task_dialog PRIVATE
     memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
   target_include_directories(test_task_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_task_dialog PRIVATE
-    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
   add_test(NAME task_dialog COMMAND test_task_dialog)
   set_tests_properties(task_dialog PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
@@ -499,13 +502,16 @@ if(MEMEX_BUILD_TESTS)
     app/tests/test_group_tools_dialog.cpp
     app/group_tools_dialog.cpp
     app/notify_center.cpp
-    app/notify_prefs.cpp)
+    app/notify_prefs.cpp
+    app/theme.cpp
+    app/theme_pack.cpp)
   target_link_libraries(test_group_tools_dialog PRIVATE
-    memex_engine_collab Qt6::Widgets)
+    memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
   target_include_directories(test_group_tools_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_group_tools_dialog PRIVATE
-    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
   add_test(NAME group_tools_dialog COMMAND test_group_tools_dialog)
   set_tests_properties(group_tools_dialog PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"

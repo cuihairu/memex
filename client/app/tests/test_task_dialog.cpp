@@ -8,6 +8,7 @@
 #include <QCalendarWidget>
 #include <QElapsedTimer>
 #include <QDateTime>
+#include <QDir>
 #include <QListWidget>
 #include <QProcess>
 #include <QPushButton>
@@ -24,6 +25,7 @@
 #include <app/task_dialog.hpp>
 #include <app/task_provider_store.hpp>
 #include <app/task_template_settings.hpp>
+#include <app/theme.hpp>
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
 #include <engine/task/task_http.hpp>
@@ -517,6 +519,26 @@ int main(int argc, char** argv) {
     CHECK(saw_yi);
     dlg.toggle_day_filter(QDate()); // 清筛选
     CHECK(!dlg.day_filter().isValid());
+    // 收尾前：文档站实况抓图（test_live_shots grab_pair 同式——亮暗各一、
+    // 抓完显式回亮；清单真实数据面＋日历展开态，此点日历仍展开）
+    {
+      const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+      CHECK(QDir().mkpath(dir));
+      auto& tm = memex::client::ThemeManager::instance();
+      tm.apply(qApp);
+      QThread::msleep(120);
+      QApplication::processEvents();
+      CHECK(dlg.grab().save(
+          dir + QStringLiteral("/live-task-dialog-light.png")));
+      tm.set_mode(QStringLiteral("dark"));
+      QThread::msleep(120);
+      QApplication::processEvents();
+      CHECK(dlg.grab().save(
+          dir + QStringLiteral("/live-task-dialog-dark.png")));
+      tm.set_mode(QStringLiteral("light"));
+      QThread::msleep(120);
+      QApplication::processEvents();
+    }
     // 收尾：撤回两条日历任务（主人程序化入口），列表还原
     int remaining = dlg.task_count();
     for (const QString& t :
