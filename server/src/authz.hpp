@@ -3,7 +3,8 @@
 // context(场景键) → 裁决+理由，本类不做 IO 不碰库——规则谓词由各功能面
 // 注册（谓词内部自行查元数据层），本类只管冲突规则与理由留痕。
 // 冲突规则写死：Explicit Deny > Allow > Inherited > Default Deny（白名单
-// 口径：无规则命中即拒）；同优先级内先注册先匹配（确定性，测试锁定）。
+// 口径：无规则命中即拒）；作用域只在同档内解近——最近作用域优先（计划书
+// §八），同深同档先注册先匹配（确定性，测试锁定）。
 // 数据过滤（蓝图§七）：权限不止操作面——Server Query → Authorization
 // Filter → Allowed Records，查询结果集在数据访问层逐条过同一套规则桶
 // （filter_allowed），不该见的行在服务端就滤掉而非 UI 隐藏。
@@ -27,6 +28,7 @@ struct AuthzQuery {
   std::string action;    // 动作，如 file:read / file:upload / file:delete
   std::string resource;  // 资源，如 group:3/file:12、user:alice/file:7、group:3
   std::string context;   // 场景键（自由文本：来源、设备、目标归属等）
+  std::string scope;     // 作用域（部门路径，如 公司/技术中心/游戏部；空=无作用域）
 };
 
 struct Decision {
@@ -42,8 +44,16 @@ class AuthorizationService {
   // 注册一条规则。name 进 Decision::reason（须可读、稳定——审计依赖）。
   void add_rule(RuleEffect effect, const std::string& name, Matcher match);
 
-  // 裁决：按 ExplicitDeny → ExplicitAllow → Inherited 顺序求首个命中；
-  // 全部未命中 → {false, "default-deny"}。
+  // 注册一条带作用域的规则（计划书§八）：scope=部门路径（如
+  // 公司/技术中心/游戏部），仅当查询作用域在该链上（等于或为其下级）
+  // 才可能命中；同档内最近作用域优先，同深同档先注册先匹配。
+  void add_scoped_rule(RuleEffect effect, const std::string& name,
+                       const std::string& scope, Matcher match);
+
+  // 裁决：按 ExplicitDeny → ExplicitAllow → Inherited 顺序求命中——每档
+  // 先按谓词＋作用域链筛出候选，取最近作用域（同深取先注册）；档间次序
+  // 全局优先（深作用域 Deny 照样压浅作用域 Allow）。全部未命中 →
+  // {false, "default-deny"}。
   Decision authorize(const AuthzQuery& q) const;
 
   // —— 数据过滤：对查询结果集（count 条）逐条裁决，只放行 allowed 的
@@ -63,9 +73,10 @@ class AuthorizationService {
   struct Rule {
     RuleEffect effect;
     std::string name;
+    std::string scope;  // 空=全局（恒覆盖）；非空=部门路径，链上才可命中
     Matcher match;
   };
-  std::vector<Rule> rules_;  // 注册序即同档匹配序
+  std::vector<Rule> rules_;  // 注册序即同档同深匹配序
 };
 
 } // namespace memex::server
