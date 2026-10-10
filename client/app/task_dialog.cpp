@@ -3,10 +3,13 @@
 // 与展示，不自造规则。
 #include "task_dialog.hpp"
 
+#include <QCalendarWidget>
+#include <QColor>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDateTimeEdit>
 #include <QDesktopServices>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QJsonArray>
@@ -19,6 +22,7 @@
 #include <QPalette>
 #include <QPushButton>
 #include <QSettings>
+#include <QTextCharFormat>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -128,6 +132,15 @@ void TaskDialog::build_ui() {
   conn->addWidget(btn_connect_);
   layout->addLayout(conn);
 
+  // R27-1 余量 日历视图：月历标到期日（品牌橙加粗），点日筛该日到期
+  // 任务，再点同日清筛选回全量。默认收起，「日历」按钮开关。
+  calendar_ = new QCalendarWidget(this);
+  calendar_->setObjectName(QStringLiteral("task_calendar"));
+  calendar_->setGridVisible(true);
+  calendar_->setVerticalHeaderFormat(QCalendarWidget::NoVerticalHeader);
+  calendar_->setVisible(false);
+  layout->addWidget(calendar_);
+
   // 任务列表
   list_ = new QListWidget(this);
   list_->setAlternatingRowColors(true);
@@ -180,10 +193,12 @@ void TaskDialog::build_ui() {
   btn_toggle_ = new QPushButton(QStringLiteral("完成/回退"), this);
   btn_delete_ = new QPushButton(QStringLiteral("撤回"), this);
   btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
+  btn_calendar_ = new QPushButton(QStringLiteral("日历"), this);
   ops->addWidget(btn_add_);
   ops->addWidget(btn_toggle_);
   ops->addWidget(btn_delete_);
   ops->addWidget(btn_refresh_);
+  ops->addWidget(btn_calendar_);
   ops->addStretch(1);
   layout->addLayout(ops);
 
@@ -236,6 +251,11 @@ void TaskDialog::build_ui() {
     if (ret == QMessageBox::Yes) delete_selected();
   });
   connect(btn_refresh_, &QPushButton::clicked, this, [this] { refresh(); });
+  connect(btn_calendar_, &QPushButton::clicked, this, [this] {
+    calendar_->setVisible(!calendar_->isVisible());
+  });
+  connect(calendar_, &QCalendarWidget::clicked, this,
+          [this](const QDate& d) { toggle_day_filter(d); });
   connect(btn_pull_, &QPushButton::clicked, this, [this] {
     pull_external(pull_provider_->currentData().toString());
   });
@@ -270,6 +290,60 @@ void TaskDialog::build_ui() {
 TaskDialog::~TaskDialog() {
   qDeleteAll(live_);
   if (http_owned_) delete http_;
+}
+
+// —— R27-1 余量 日历视图 ——
+
+void TaskDialog::update_day_marks() {
+  // 无参重载清全表再标——刷新重建后重入不叠色
+  calendar_->setDateTextFormat(QDate(), QTextCharFormat());
+  QTextCharFormat fmt;
+  fmt.setFontWeight(QFont::Bold);
+  // 品牌橙（与主窗 accent 兜底同源；本窗未接主题面，同 Qt::gray 行内惯例）
+  fmt.setForeground(QColor(QStringLiteral("#e16531")));
+  for (int i = 0; i < list_->count(); ++i) {
+    const auto* it = list_->item(i);
+    const qint64 due = it->data(Qt::UserRole + 2).toLongLong();
+    if (due <= 0) continue; // 派出行/⇣ 行/未设提醒项无到期数据
+    calendar_->setDateTextFormat(QDateTime::fromMSecsSinceEpoch(due).date(),
+                                 fmt);
+  }
+}
+
+int TaskDialog::apply_day_filter() {
+  int visible = 0;
+  for (int i = 0; i < list_->count(); ++i) {
+    auto* it = list_->item(i);
+    const qint64 due = it->data(Qt::UserRole + 2).toLongLong();
+    const bool hit =
+        day_filter_.isValid() && due > 0 &&
+        QDateTime::fromMSecsSinceEpoch(due).date() == day_filter_;
+    // 筛选态只留命中日；无到期数据行（派出/⇣/未设提醒）一并隐藏
+    it->setHidden(day_filter_.isValid() && !hit);
+    if (!it->isHidden()) ++visible;
+  }
+  return visible;
+}
+
+void TaskDialog::toggle_day_filter(const QDate& d) {
+  day_filter_ = d.isValid() && d == day_filter_ ? QDate() : d;
+  const int visible = apply_day_filter();
+  if (day_filter_.isValid()) {
+    set_status(QStringLiteral("日历筛选：%1（可见 %2 项，再点同日回全量）")
+                   .arg(day_filter_.toString(QStringLiteral("yyyy-MM-dd")),
+                        QString::number(visible)));
+  } else {
+    set_status(QStringLiteral("日历筛选已清（全量 %1 项）")
+                   .arg(visible));
+  }
+}
+
+int TaskDialog::visible_task_count() const {
+  int n = 0;
+  for (int i = 0; i < list_->count(); ++i) {
+    if (!list_->item(i)->isHidden()) ++n;
+  }
+  return n;
 }
 
 void TaskDialog::refresh_ext_combo() {
@@ -618,6 +692,9 @@ void TaskDialog::populate(const QJsonArray& mine, const QJsonArray& assigned) {
   }
   // 外部拉取会话缓存行（⇣ 只读镜像）缀尾，随每次重渲染对齐外部现态
   render_ext_rows();
+  // 日历视图：重标到期日＋重施筛选（30s 轮询刷新重建列表，筛选态保持）
+  update_day_marks();
+  apply_day_filter();
   set_status(QStringLiteral("清单已刷新（%1 项）").arg(mine.size()));
 }
 

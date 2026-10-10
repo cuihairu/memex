@@ -6,8 +6,10 @@
 // R27-3 拉取接线：已配置凭据（设置面→TaskProviderStore 加密落盘）的
 // L2 provider 直拉外部任务列表展示（⇣ 行，只读——登记后才能在清单标记）；
 // 外部拉取不经 memex 服务端，断连也可用。
+// R27-1 余量 日历视图：月历标到期日＋点日筛选该日到期（默认收起）。
 #pragma once
 
+#include <QDate>
 #include <QDialog>
 #include <QHash>
 #include <QJsonArray>
@@ -18,6 +20,7 @@
 
 #include "engine/task/task_provider.hpp"
 
+class QCalendarWidget;
 class QComboBox;
 class QDateTimeEdit;
 class QLabel;
@@ -76,6 +79,18 @@ class TaskDialog : public QDialog {
   // 可拉取 provider id（live 已配置＋声明 L2）
   QStringList pull_provider_ids() const;
 
+  // —— R27-1 余量 日历视图 ——
+  // 月历标到期日（品牌橙加粗），点日筛该日到期任务；无到期数据的行
+  //（派出行/⇣ 行/未设提醒项）筛选态下隐藏。再点同日或清筛选回全量。
+  QCalendarWidget* calendar() const { return calendar_; }
+  QPushButton* btn_calendar() const { return btn_calendar_; }
+  // 点日（点按与测试共用）：d 无效=清筛选回全量；同日再点=切换清
+  void toggle_day_filter(const QDate& d);
+  // 当前筛选日（无效=未筛选）
+  QDate day_filter() const { return day_filter_; }
+  // 筛选后可见任务行数
+  int visible_task_count() const;
+
   // —— 走查/测试观察点 ——
   QString status_text() const;
   int task_count() const;      // 列表总条数（我的清单＋我派出的）
@@ -95,6 +110,10 @@ class TaskDialog : public QDialog {
   // 会话缓存的外部拉取行渲染（⇣ 行；UserRole+6=true 只读标记）
   void render_ext_rows();
   bool selected_row_pulled() const;
+  // 日历视图：重标到期日（先清全表再标，刷新后重入不叠色）
+  void update_day_marks();
+  // 按 day_filter_ 施加行可见性；回可见行数
+  int apply_day_filter();
   void set_status(const QString& text, bool error = false);
   // 登记键原文 → （project, key）——「project#键」或整串为键
   static void split_ext_key(const QString& raw, QString& project,
@@ -130,6 +149,9 @@ class TaskDialog : public QDialog {
   QPushButton* btn_toggle_;
   QPushButton* btn_delete_;
   QPushButton* btn_refresh_;
+  QPushButton* btn_calendar_;
+  QCalendarWidget* calendar_;
+  QDate day_filter_; // 无效=未筛选
 };
 
 } // namespace memex::client

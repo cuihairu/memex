@@ -5,6 +5,7 @@
 // 判权矩阵（无关系 default-deny/主人专属动作）走 test_files_api 协议腿，
 // 不在此重复。
 #include <QApplication>
+#include <QCalendarWidget>
 #include <QElapsedTimer>
 #include <QDateTime>
 #include <QListWidget>
@@ -12,6 +13,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QTcpServer>
+#include <QTextCharFormat>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTimer>
@@ -448,6 +450,89 @@ int main(int argc, char** argv) {
     }
   }
   qApp->processEvents(); // WA_DeleteOnClose 收尾防悬垂
+
+  // —— R27-1 余量 日历视图：月历标到期日＋点日筛选该日到期 ——
+  {
+    // 甲落在 today+2：前置腿的「到期任务」due=now-1000 也是今天，避开
+    const QDate today = QDate::currentDate();
+    const QDate day_a = today.addDays(2);
+    const QDate other = today.addDays(3);
+    const int before = dlg.task_count();
+    CHECK(dlg.add_task(QStringLiteral("日历甲"), QString(),
+                       QDateTime(day_a, QTime(10, 0)).toMSecsSinceEpoch(),
+                       QString()));
+    CHECK(dlg.add_task(QStringLiteral("日历乙"), QString(),
+                       QDateTime(other, QTime(12, 0)).toMSecsSinceEpoch(),
+                       QString()));
+    CHECK(wait_until([&] { return dlg.task_count() == before + 2; }, 8000));
+    // 默认收起，「日历」按钮展开
+    auto* cal = dlg.calendar();
+    CHECK(cal != nullptr && !cal->isVisible());
+    CHECK(dlg.btn_calendar() != nullptr);
+    dlg.btn_calendar()->click();
+    CHECK(cal->isVisible());
+    // 到期日标品牌橙加粗；无任务日（today+1）无自定义标
+    const QColor brand(QStringLiteral("#e16531"));
+    const QTextCharFormat marked = cal->dateTextFormat(day_a);
+    CHECK(marked.foreground().color() == brand);
+    const QTextCharFormat unmarked =
+        cal->dateTextFormat(today.addDays(1));
+    CHECK(unmarked.foreground().color() != brand);
+    // 点日筛该日到期：无到期数据行（自建未设提醒/🌐 外部行）一并隐藏
+    dlg.toggle_day_filter(day_a);
+    CHECK(dlg.day_filter() == day_a);
+    CHECK(dlg.visible_task_count() == 1);
+    bool saw_other = false;
+    for (int i = 0; i < dlg.list()->count(); ++i) {
+      auto* it = dlg.list()->item(i);
+      if (!it->isHidden()) {
+        CHECK(it->text().contains(QStringLiteral("日历甲")));
+      } else if (it->text().contains(QStringLiteral("日历乙"))) {
+        saw_other = true;
+      }
+    }
+    CHECK(saw_other);
+    // 同日再点＝清筛选回全量
+    dlg.toggle_day_filter(day_a);
+    CHECK(!dlg.day_filter().isValid());
+    CHECK(dlg.visible_task_count() == before + 2);
+    // 筛选态跨刷新保持（30s 轮询重建列表后重施）
+    dlg.toggle_day_filter(other);
+    CHECK(dlg.visible_task_count() == 1);
+    dlg.refresh();
+    CHECK(wait_until(
+        [&] {
+          return dlg.status_text().contains(QStringLiteral("清单已刷新"));
+        },
+        8000));
+    CHECK(dlg.visible_task_count() == 1);
+    bool saw_yi = false;
+    for (int i = 0; i < dlg.list()->count(); ++i) {
+      auto* it = dlg.list()->item(i);
+      if (!it->isHidden()) {
+        CHECK(it->text().contains(QStringLiteral("日历乙")));
+      }
+      if (it->text().contains(QStringLiteral("日历乙"))) saw_yi = true;
+    }
+    CHECK(saw_yi);
+    dlg.toggle_day_filter(QDate()); // 清筛选
+    CHECK(!dlg.day_filter().isValid());
+    // 收尾：撤回两条日历任务（主人程序化入口），列表还原
+    int remaining = dlg.task_count();
+    for (const QString& t :
+         {QStringLiteral("日历甲"), QStringLiteral("日历乙")}) {
+      for (int i = 0; i < dlg.list()->count(); ++i) {
+        if (dlg.list()->item(i)->text().contains(t)) {
+          dlg.list()->setCurrentRow(i);
+          break;
+        }
+      }
+      CHECK(dlg.delete_selected());
+      --remaining;
+      CHECK(wait_until([&] { return dlg.task_count() == remaining; }, 8000));
+    }
+    CHECK(dlg.task_count() == before);
+  }
 
   server.kill();
   server.waitForFinished(3000);
