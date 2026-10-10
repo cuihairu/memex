@@ -158,7 +158,8 @@ public:
   // 回执标注验收用）
   void inject_message(const QString& from_id, const QString& text,
                       bool outgoing, const QString& msg_id = QString(),
-                      const QString& receipt = QString());
+                      const QString& receipt = QString(),
+                      qint64 ts_ms = 0); // 0=现在（分日分隔线腿注昨日时戳）
   // 注入一条图片消息走气泡渲染（需求批②验收缝：右键「收藏到表情包」
   // 需图片气泡在场；生产路径＝引擎文件回执驱动 append_image_message）
   void inject_image(const QString& from_id, const QString& image_path,
@@ -264,6 +265,11 @@ private:
     QString msg_id;     // 协作态消息标识（回执通知按它命中本行；直连恒空）
     QString receipt;    // 我发出消息的回执态（''/delivered/read，需求批⑦）
   };
+  // 分日分隔线判定（需求批⑧余量收口）：ts_ms 行前是否需先插日头——
+  // chat_rows_ 倒扫最近一条消息行（系统行不参与日序），日不同（或尚无
+  // 消息行）即为该日首条。状态即 chat_rows_ 本身：clear 与主题重放
+  //（分隔线作为系统行入列）天然同步，无需额外跟踪成员。
+  static bool needs_day_divider(const QVector<ChatRow>& rows, qint64 ts_ms);
   void show_status(const QString& text);
   // 新消息闪烁提醒（用户令 2026-10-05）：仅窗口非激活时；同窗多条合并；
   // 设置「通知偏好→新消息闪烁提醒」可关（默认开）。

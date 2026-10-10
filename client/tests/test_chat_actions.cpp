@@ -463,6 +463,35 @@ int main(int argc, char** argv) {
     CHECK(window.chat_panel_visible());
   }
 
+  // —— 需求批⑧余量 分日分隔线：跨日首条前插日头，同日续条不重复 ——
+  {
+    window.open_direct_peer(QStringLiteral("dev-D5"));
+    CHECK(window.chat_panel_visible());
+    const QDate today = QDate::currentDate();
+    const QDate yesterday = today.addDays(-1);
+    const qint64 yesterday_ts =
+        QDateTime(yesterday, QTime(12, 0)).toMSecsSinceEpoch();
+    const auto divider = [](const QDate& d) {
+      return QStringLiteral("── %1 ──").arg(
+          d.toString(QStringLiteral("yyyy-MM-dd")));
+    };
+    // 昨日首条 → 前插昨日日头
+    window.inject_message(QStringLiteral("dev-D5"), QStringLiteral("昨日气泡"),
+                          false, QString(), QString(), yesterday_ts);
+    CHECK(window.chat_html().contains(divider(yesterday)));
+    CHECK(window.chat_html().contains(QStringLiteral("昨日气泡")));
+    // 今日首条 → 前插今日日头
+    window.inject_message(QStringLiteral("dev-D5"), QStringLiteral("今日气泡"),
+                          true);
+    CHECK(window.chat_html().contains(divider(today)));
+    // 同日续条 → 不再插（日头总数仍为 2）
+    window.inject_message(QStringLiteral("dev-D5"), QStringLiteral("续条气泡"),
+                          true);
+    CHECK(window.chat_html().contains(QStringLiteral("续条气泡")));
+    CHECK(window.chat_html().count(divider(yesterday)) == 1);
+    CHECK(window.chat_html().count(divider(today)) == 1);
+  }
+
   if (g_failures == 0) {
     qInfo("chat action buttons: all passed");
     return 0;

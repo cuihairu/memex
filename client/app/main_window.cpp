@@ -262,6 +262,11 @@ QString day_label(qint64 ms) {
                       QStringLiteral("yyyy-MM-dd"))
                 : QStringLiteral("…");
 }
+// 分日分隔线（需求批⑧余量收口）：居中日头，与筛选头同 yyyy-MM-dd 口径。
+QString day_divider_html(const QDate& d) {
+  return system_line_html(
+      QStringLiteral("── %1 ──").arg(d.toString(QStringLiteral("yyyy-MM-dd"))));
+}
 // 需求批⑩ 在线时长秒数展示：服务端按秒计（滚动窗并集），四舍五入到
 // 分钟级可读量——秒级展示太抖（ORG_QUERY 每次现算都在涨）。
 QString format_online_s(qint64 seconds) {
@@ -1587,9 +1592,10 @@ void MainWindow::show_emoji_panel() {
 // —— 需求批① 文字颜色 ——
 void MainWindow::inject_message(const QString& from_id, const QString& text,
                                 bool outgoing, const QString& msg_id,
-                                const QString& receipt) {
-  append_message(from_id, text, QDateTime::currentMSecsSinceEpoch(), outgoing,
-                 QStringLiteral("direct"), msg_id, receipt);
+                                const QString& receipt, qint64 ts_ms) {
+  append_message(from_id, text,
+                ts_ms > 0 ? ts_ms : QDateTime::currentMSecsSinceEpoch(),
+                outgoing, QStringLiteral("direct"), msg_id, receipt);
 }
 
 void MainWindow::inject_image(const QString& from_id, const QString& image_path,
@@ -3626,6 +3632,9 @@ void MainWindow::append_message(const QString& from_id, const QString& text,
   row.at_mode = at_mode;
   row.msg_id = msg_id;
   row.receipt = receipt;
+  if (needs_day_divider(chat_rows_, row.ts_ms))
+    append_system_line(day_divider_html(
+        QDateTime::fromMSecsSinceEpoch(row.ts_ms).date()));
   chat_rows_.append(row);
   chat_view_->append(day_anchor(row.ts_ms) +
                      bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
@@ -3657,6 +3666,9 @@ void MainWindow::append_image_message(const QString& from_id,
   row.ts_ms = ts_ms;
   row.outgoing = outgoing;
   row.at_mode = false;
+  if (needs_day_divider(chat_rows_, row.ts_ms))
+    append_system_line(day_divider_html(
+        QDateTime::fromMSecsSinceEpoch(row.ts_ms).date()));
   chat_rows_.append(row);
   chat_view_->append(day_anchor(row.ts_ms) +
                      bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
@@ -3673,6 +3685,17 @@ void MainWindow::append_system_line(const QString& text) {
   chat_view_->append(system_line_html(text));
   auto* bar = chat_view_->verticalScrollBar();
   bar->setValue(bar->maximum());
+}
+
+bool MainWindow::needs_day_divider(const QVector<ChatRow>& rows,
+                                   qint64 ts_ms) {
+  if (ts_ms <= 0) return false;
+  const QDate d = QDateTime::fromMSecsSinceEpoch(ts_ms).date();
+  for (auto it = rows.crbegin(); it != rows.crend(); ++it) {
+    if (it->system || it->ts_ms <= 0) continue;
+    return QDateTime::fromMSecsSinceEpoch(it->ts_ms).date() != d;
+  }
+  return true;
 }
 
 void MainWindow::show_guidance() {
