@@ -357,7 +357,7 @@ message Envelope {
   string from = 3;  // 发送方标识（直连态为设备标识，协作态为账号）
   string to = 4;    // 接收方标识
   int64 ts_ms = 5;  // 发送时间戳（毫秒）
-  string msg_id = 6; // 消息标识（服务端分配：sha256(from:seq)）——去重与补投清理依据
+  string msg_id = 6; // 消息标识（服务端分配：常规 sha256(from:seq)；撞 id 且内容异时换盐重排 sha256(from:to:ts_ms:盐)，BUG-007）——去重与补投清理依据
 
   oneof body {
     Hello hello = 101;

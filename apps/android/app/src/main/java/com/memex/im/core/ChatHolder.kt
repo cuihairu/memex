@@ -13,14 +13,15 @@ object ChatHolder {
     @Volatile
     private var notifier: ChatManager.Listener? = null
 
-    /** 建立并挂载管理器（登录页调用；重复挂载先关旧的）。 */
-    fun establish(): ChatManager {
+    /** 建立并挂载管理器（登录页调用；重复挂载先关旧的）。seqLedger 随
+     *  管理器存活（BUG-007 §4.1：跨重新登录续位，管理器重建不重建台账）。 */
+    fun establish(seqLedger: SeqLedger? = null): ChatManager {
         val prev = manager
         if (prev != null) {
             prev.logoutAndClear()
             manager = null
         }
-        return ChatManager(ChatStoreFactory.memory()).also { m ->
+        return ChatManager(ChatStoreFactory.memory(), seqLedger = seqLedger).also { m ->
             manager = m
             notifier?.let { m.addListener(it) }
         }

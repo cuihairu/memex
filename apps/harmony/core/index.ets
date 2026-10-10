@@ -5,6 +5,7 @@ export { LENGTH_PREFIX_SIZE, MAX_FRAME_SIZE, encodeFrame, DecodeStatus, FrameDec
 export { DEFAULT_PORT, PORT_MAX, ServerAddress } from './address'
 export { NoticeGrade, fromProtoNumber, composeNoticeText } from './format'
 export { InMemoryChatStore } from './chat_store'
+export { SeqLedger, InMemorySeqLedger } from './seq_ledger'
 export { InitStore, Route, RouteGuard, InitEntry, InitGate } from './route'
 export { Transport, TransportError } from './transport'
 export { WireChannel, classifyFailure } from './wire_channel'

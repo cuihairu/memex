@@ -557,7 +557,9 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
       }
       // 平台-9 重启恢复：seq 计数从本地库续位——新进程若从 1 重数，既撞
       // 本地 UNIQUE(from_id,seq)，又因 msg_id=sha256(from:seq) 与旧消息
-      // 同 ID 被服务端去重误吞
+      // 同 ID 被服务端去重误吞（BUG-007 已修：服务端撞 id 按内容比对消歧
+      // ——同内容幂等一行、异内容换盐重排两行齐；本地 UNIQUE 对重排新消息
+      // 的拦截为 §4.2 升级窗口残差，本批未落）
       if (store_) {
         next_seq_ = static_cast<quint64>(
             store_->next_local_seq(account_.toStdString()));

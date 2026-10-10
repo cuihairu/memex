@@ -21,6 +21,7 @@ import {
   InMemoryChatStore,
   InitStore,
   NoticeGrade,
+  SeqLedger,
   ServerAddress,
   DEFAULT_PORT,
 } from '@memex/core';
@@ -86,6 +87,45 @@ class PrefsInitStore implements InitStore {
   }
 }
 
+/**
+ * 本端 seq 持久化台账（BUG-007 §4.1；core SeqLedger 的鸿蒙实现）：
+ * preferences 落盘 per-account 键（PrefsInitStore 同款机制）——ready() 预载
+ * 全量快照同步读；发号即写同步更新快照＋异步落盘（取 max 合并防乱序回写）。
+ */
+class PrefsSeqLedger implements SeqLedger {
+  private seqs = new Map<string, number>();
+  private prefs: preferences.Preferences | null = null;
+
+  async load(context: common.UIAbilityContext): Promise<void> {
+    const p = await preferences.getPreferencesAsync(context, 'memex_seq');
+    this.prefs = p;
+    const all = await p.getAll();
+    const keys = Object.keys(all);
+    for (const k of keys) {
+      if (k.startsWith('seq_')) {
+        this.seqs.set(k.substring(4), all[k] as number);
+      }
+    }
+  }
+
+  load(account: string): number {
+    return this.seqs.get(account) ?? 0;
+  }
+
+  save(account: string, seq: number): void {
+    if (seq <= (this.seqs.get(account) ?? 0)) {
+      return;
+    }
+    this.seqs.set(account, seq);
+    const p = this.prefs;
+    if (p === null) {
+      return; // ready 前不可达（守卫先行 ready()）
+    }
+    p.put('seq_' + account, seq);
+    p.flush();
+  }
+}
+
 class AppState {
   /** 初始化态（R17；preferences 落盘）。 */
   readonly initStore: PrefsInitStore = new PrefsInitStore();
@@ -107,6 +147,8 @@ class AppState {
   private readyPromise: Promise<void> | null = null;
   private session: ChatSession | null = null;
   private listeners: AppListener[] = [];
+  /** seq 台账（BUG-007 §4.1：ready() 随初始化态一并预载）。 */
+  private readonly seqLedger = new PrefsSeqLedger();
 
   /** UIAbility onCreate 时绑定上下文（preferences 载入用）。 */
   bindContext(ctx: common.UIAbilityContext): void {
@@ -120,7 +162,8 @@ class AppState {
       if (ctx === null) {
         return Promise.reject(new Error('AppState 未绑定 UIAbility 上下文'));
       }
-      this.readyPromise = this.initStore.load(ctx);
+      this.readyPromise =
+          this.initStore.load(ctx).then(() => this.seqLedger.load(ctx));
     }
     return this.readyPromise;
   }
@@ -165,7 +208,7 @@ class AppState {
       prev.logout();
       this.session = null;
     }
-    return new ChatSession(this.store, account, account, 8000, 0);
+    return new ChatSession(this.store, account, account, 8000, 0, this.seqLedger);
   }
 
   /** 发送文本。返回 seq（0=未连接/发送失败）。 */

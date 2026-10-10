@@ -78,7 +78,7 @@
 
 ## 2026-10-09 聊天实况补摄轮发现（BUG×1）
 
-- [ ] BUG-007 服务端 msg_id 用 sha256(from+":"+seq)，客户端 seq 每连接重置——同账号重登后与旧档撞 msg_id 的新消息被静默吞档（投递可达、归档丢失、发送方仍收 ACK）
+- [x] BUG-007 服务端 msg_id 用 sha256(from+":"+seq)，客户端 seq 每连接重置——同账号重登后与旧档撞 msg_id 的新消息被静默吞档（投递可达、归档丢失、发送方仍收 ACK）
   现象（2026-10-09 走查实录，两起独立复证）：同一账号 zhangsan 第二次登录后发的文本，服务端日志「收到 text」照记、发送方 ACK 照收、本端气泡照渲染，但服务端 SQLite `messages` 归档表无此行。①22:18 zhangsan 发 2 条（日志 ×2），归档仅 +1（"lisi hello, this is zhangsan" 消失，lisi 未读数与离线队列消费数均与之吻合）；②22:39 zhangsan 再发 1 条，归档零增长、离线队列正常入队（lisi 照常收到）。
   定位（源码三环闭合，2026-10-09）：
   - `session.cpp`（v1::TEXT）：`msg_id = sha256_hex(msg.from() + ":" + std::to_string(msg.seq()))`——msg_id 只由发送方账号＋seq 决定；
@@ -89,3 +89,9 @@
   平台：服务端（C++），触发源在客户端 seq 生命周期与服务端 msg_id 生成规则的组合；桌面端 Qt 客户端 seq 生命周期需修复时一并核对。
   备注：按「只登记不修」挂起。修复方向提示（不动手）：msg_id 加入服务端单调成分或时间戳（保持幂等去重语义需同步调整接收端按 msg_id 去重的重投口径），或客户端 seq 持久化跨连接——两路均牵 ACK/去重/归档三面，须整体设计。登记时发现走查环境还有一桩模拟器 NAT 单连接停滞（guest 发送缓冲字节滞留、服务端与应用双无责，重启 app 恢复，详见 todo.md 文档站持续更新行），与本条无关，仅留痕备查。
   修复方向（整体设计出稿，2026-10-10，**未动码、待授权动手**）：完整方案另立 docs/design/消息标识与归档去重.md（设计面事实、方向取舍、四面联动、分批落地序、验证方式全稿）。要点：直觉两条修法均不完备（纯服务端唯一 msg_id 无法分辨补传与重用死 seq 的新消息，纯客户端 seq 持久化闭不了跨设备与新装机向量）→ 选定**服务端撞 id 内容比对消歧＋换盐重排**——store_message 返回值改检查，撞键时比对既有行 (to,type,text,ts_ms)：全同＝真补传维持幂等现状，有异＝新消息换盐重排 msg_id=sha256(from:to:ts_ms:随机盐)（**拍板时间戳＋盐非单调成分**，NOTICE 同式，理由详设计稿 §3.1）重档重投；Ack 加可选 msg_id 回带最终 id（proto 只增）；移动端 seq 持久化同批（让重排退化为兜底）；桌面接收端 (from_id,seq) 拦截回退＋ACK 消费两件配套。零 schema 迁移、新旧混跑兼容、碰撞向量 V1–V3 全闭。
+  修复记录（2026-10-10，按设计 docs/design/消息标识与归档去重.md §5 批次 1+3 落地）：
+  - 服务端：`session.cpp` 新增 `archive_and_resolve`——按派生 id（sha256(from:seq)）落归档并检查 `store_message` 返回值；撞键（false）时 `message_by_id` 查既有行比对 (to_account,type,text,ts_ms)（ts 归一 `msg.ts_ms()>0?:now`）：全同＝真补传维持幂等现状（离线队列 OR-IGNORE 不重排），有异＝重用死 seq 的新消息换盐重排 sha256(from:to:ts_ms:随机盐) 重档重投（NOTICE 同式零持久状态）；查无此行＝库错照常受理（归档失败另有事件台账，不在本范围）。时序口径：归档消歧在群成员校验**之后**（拒收不归档原口径不变——首版误置于校验前，被 test_group 三条既有断言咬出后复归）。发送方受理回执回带最终 msg_id（`Ack.msg_id` 既有字段，proto 零改动；撞键重排时为重排新值）；振屏（NUDGE）同口径。
+  - 移动端 seq 持久化（§4.1，让重排退化为兜底）：Android `SeqLedger.kt`（接口＋InMemory 单测＋PrefsSeqLedger：SharedPreferences "memex_seq"、max 合并防乱序回写），`ChatSession` 发号即写（seqLock 串行 sendText/logout/sendAck 三出口）、构造期从台账上界＋1 续位、无记录从 1 起；iOS `SeqLedger` 协议＋`UserDefaultsSeqLedger`（AppChatManager 注入）、`nextSeqLocked` 同锁发号即写；harmony `seq_ledger.ts`＋AppState `PrefsSeqLedger`（preferences getAll 快照，ready 链先于建会话）。三端口径一致。
+  - 覆盖面核对：服务端 TEXT/NUDGE 两入口全走消歧；群消息撞键同口径（归档一行、扇出按最终 id）；桌面补传三路（超时重发/断线补传/平台-9 库面恢复）均保留原 seq＋原 ts_ms（collab_engine.cpp:1071/1056），与内容比对口径天然兼容、重发仍幂等——桌面侧零代码改动；proto msg_id 注释与桌面 collab_engine 平台-9 块注释按设计 §5 口径订正。
+  - 回归：新增 `server/tests/test_msg_dedupe.cpp`（§6 矩阵 ①-⑤：V1 重演两行齐＋换盐重排、补传幂等含在线重复帧、ACK msg_id 三态回带、群消息撞键、库错受理行为不变——⑤ 经第二连接 DROP TABLE 真注入）；test_group 既有断言原样绿；全量 ctest 71/71 绿（隔离跑）；Android JVM ChatSessionTest 13/13（新增 seq 台账发号即写＋重登续位腿）；harmony 全量 89/89（新增同款腿）；iOS 腿本机无 swift 工具链，由 CI `swift test` 验证。
+  - 残差（设计 §7 升级窗口，如实）：桌面 §4.2 接收端 (from_id,seq) 拦截回退与 §4.3 ACK 消费校正本地行（设计批次 2）不在本批——旧桌面看不到/校正不了重排后的 msg_id，服务端内容比对已兜底归档不丢、投递可达性不变，可作后续批次。

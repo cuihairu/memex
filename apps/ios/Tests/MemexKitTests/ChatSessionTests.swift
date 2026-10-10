@@ -60,9 +60,13 @@ final class ChatSessionTests: XCTestCase {
     private func connect(
         _ server: FakeMemexServer,
         store: ChatStore = InMemoryChatStore(),
-        listener: ChatSessionListener = RecordingListener()
+        listener: ChatSessionListener = RecordingListener(),
+        seqLedger: SeqLedger? = nil
     ) -> (ChatSession, ChatSession.ConnectOutcome) {
-        let session = ChatSession(store: store, account: "alice", displayName: "Alice")
+        let session = ChatSession(
+            store: store, account: "alice", displayName: "Alice",
+            seqLedger: seqLedger
+        )
         let outcome = session.connect(
             address: ServerAddress(host: "127.0.0.1", port: server.port),
             password: "pw",
@@ -314,6 +318,26 @@ final class ChatSessionTests: XCTestCase {
         XCTAssertEqual(convs.map { $0.peer }, ["bob"])
         XCTAssertEqual(convs[0].lastText, "我发的")
         XCTAssertEqual(convs[0].unread, 0) // 自己发的不计未读
+    }
+
+    /// BUG-007 §4.1：seq 台账发号即写、重登续位（对齐桌面平台-9；让服务端
+    /// 撞 id 重排退化为兜底）
+    func testSeqLedgerPersistsAndResumesAcrossRelogin() throws {
+        let server = try FakeMemexServer()
+        defer { server.close() }
+        let ledger = InMemorySeqLedger()
+        let (s1, outcome1) = connect(server, seqLedger: ledger)
+        guard case .ok = outcome1 else { return XCTFail("期望 .ok，实得 \(outcome1)") }
+        XCTAssertEqual(s1.sendText(to: "bob", text: "一"), 1)
+        XCTAssertEqual(s1.sendText(to: "bob", text: "二"), 2)
+        XCTAssertEqual(ledger.loadSeq(account: "alice"), 2) // 发号即写
+        s1.close()
+
+        let (s2, outcome2) = connect(server, seqLedger: ledger)
+        defer { s2.close() }
+        guard case .ok = outcome2 else { return XCTFail("期望 .ok，实得 \(outcome2)") }
+        XCTAssertEqual(s2.sendText(to: "bob", text: "三"), 3) // 重登续位
+        XCTAssertEqual(ledger.loadSeq(account: "alice"), 3)
     }
 }
 

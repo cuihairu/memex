@@ -15,11 +15,40 @@ public protocol ChatSessionListener: AnyObject {
     func onKicked(reason: String)
 }
 
+/// 本端 seq 持久化台账（BUG-007 §4.1）：seq 每连接重置会让重登后的新消息
+/// 与旧档撞 msg_id（服务端已按内容比对消歧，重排为兜底）——本台账对齐
+/// 桌面平台-9：账号维度单调续位、发号即写，常规流保持 sha256(from:seq) 派生式。
+public protocol SeqLedger: AnyObject {
+    /// 读账号已落盘 seq 上界（无记录返回 0）。
+    func loadSeq(account: String) -> UInt64
+    /// 发号即写（发号方串行调用；实现取 max 合并防乱序回写）。
+    func saveSeq(account: String, seq: UInt64)
+}
+
+/// 内存实现：单测与纯逻辑验证用；壳层提供 UserDefaults 落盘实现。
+public final class InMemorySeqLedger: SeqLedger {
+    private let lock = NSLock()
+    private var seqs: [String: UInt64] = [:]
+
+    public init() {}
+
+    public func loadSeq(account: String) -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        return seqs[account] ?? 0
+    }
+
+    public func saveSeq(account: String, seq: UInt64) {
+        lock.lock(); defer { lock.unlock() }
+        if seq > (seqs[account] ?? 0) { seqs[account] = seq }
+    }
+}
+
 /// 协作态长连接会话（T6.4 会话列表与收发）。
 ///
 /// 对齐桌面端 CollabEngine 语义（collab_engine.cpp）与 Android 端实现：
 /// - 登录后保持单条 TCP 连接；后台读线程分帧分发；
-/// - sendText：本端 seq 内存自增，帧 = Envelope{TEXT, seq, from, to, ts_ms, text}；
+/// - sendText：本端 seq 自增（seqLedger 提供时发号即写、重登续位——BUG-007
+///   §4.1 对齐桌面平台-9），帧 = Envelope{TEXT, seq, from, to, ts_ms, text}；
 /// - 收到 TEXT：按 peer 落库（群消息 peer=to 的 "group:N"，单聊 peer=from），
 ///   若带 msg_id 回 ACK(msg_id)（服务端按 msg_id 清离线队列，重复投递由本地
 ///   msg_id 去重）；自己发的消息本地立即落库（msg_id 为空，等受理回执）；
@@ -43,10 +72,12 @@ public final class ChatSession {
     private let account: String
     private let displayName: String
     private let eventQueue: DispatchQueue
+    private let seqLedger: SeqLedger?
     private let lock = NSLock()
     private var wire: Wire?
     private var closed = false
-    private var seqGen: UInt64 = 1
+    /// 发号器：构造期从台账续位（BUG-007 §4.1，对齐桌面平台-9；无台账从 1 起）
+    private var seqGen: UInt64
     private weak var listener: ChatSessionListener?
     private var readThread: Thread?
 
@@ -54,12 +85,17 @@ public final class ChatSession {
         store: ChatStore,
         account: String,
         displayName: String,
-        eventQueue: DispatchQueue = DispatchQueue(label: "com.memex.events")
+        eventQueue: DispatchQueue = DispatchQueue(label: "com.memex.events"),
+        seqLedger: SeqLedger? = nil
     ) {
         self.store = store
         self.account = account
         self.displayName = displayName
         self.eventQueue = eventQueue
+        self.seqLedger = seqLedger
+        // 台账存最后已发号，续位从上界＋1 起；无记录从 1 起
+        let last = seqLedger?.loadSeq(account: account) ?? 0
+        self.seqGen = last > 0 ? last + 1 : 1
     }
 
     private var nowMs: Int64 {
@@ -289,10 +325,11 @@ public final class ChatSession {
         return nextSeqLocked()
     }
 
-    /// 调用方必须已持有 lock
+    /// 调用方必须已持有 lock（发号与台账落盘同锁保序——BUG-007 §4.1 发号即写）
     private func nextSeqLocked() -> UInt64 {
         let s = seqGen
         seqGen += 1
+        seqLedger?.saveSeq(account: account, seq: s)
         return s
     }
 

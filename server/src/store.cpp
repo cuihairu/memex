@@ -2515,6 +2515,30 @@ std::string ServerStore::message_from(const std::string& msg_id) {
   return out;
 }
 
+std::optional<ArchivedMessage> ServerStore::message_by_id(
+    const std::string& msg_id) {
+  const char* sql =
+      "SELECT msg_id, from_account, to_account, type, text, ts_ms, recall "
+      "FROM messages WHERE msg_id = ?;";
+  sqlite3_stmt* st = nullptr;
+  std::optional<ArchivedMessage> out;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    ArchivedMessage m;
+    m.msg_id = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    m.from_account = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    m.to_account = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    m.type = sqlite3_column_int(st, 3);
+    m.text = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    m.ts_ms = sqlite3_column_int64(st, 5);
+    m.recalled = sqlite3_column_int(st, 6) != 0;
+    out = m;
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
 // 撤回事件独立记录（原文与序得在此表对账；只附加，不删改）
 bool ServerStore::record_recall_event(const std::string& msg_id,
                                       const std::string& by_account,

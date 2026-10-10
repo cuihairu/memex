@@ -140,11 +140,13 @@ class ChatSessionTest {
     private fun connect(
         server: FakeMemexServer, store: ChatStore = InMemoryChatStore(),
         listener: ChatSession.Listener = RecordingListener(),
+        seqLedger: SeqLedger? = null,
     ): Pair<ChatSession, ChatSession.ConnectOutcome> {
         val session = ChatSession(
             store = store,
             account = "alice",
             displayName = "Alice",
+            seqLedger = seqLedger,
         )
         val outcome = session.connect(
             address = ServerAddress("127.0.0.1", server.port),
@@ -493,6 +495,28 @@ class ChatSessionTest {
         assertEquals(0, convs[0].unread) // 自己发的不计未读
 
         session.close()
+        server.close()
+    }
+
+    @Test
+    fun `seq 台账发号即写且重登续位`() {
+        // BUG-007 §4.1：seq 每连接重置会让重登后新消息与旧档撞 msg_id——
+        // 台账续位对齐桌面平台-9，让服务端重排退化为兜底
+        val server = FakeMemexServer()
+        server.serve()
+        val ledger = InMemorySeqLedger()
+        val (s1, outcome) = connect(server, seqLedger = ledger)
+        assertTrue(outcome is ChatSession.ConnectOutcome.Ok)
+        assertEquals(1L, s1.sendText("bob", "一"))
+        assertEquals(2L, s1.sendText("bob", "二"))
+        assertEquals(2L, ledger.load("alice")) // 发号即写
+        s1.close()
+
+        val (s2, outcome2) = connect(server, seqLedger = ledger)
+        assertTrue(outcome2 is ChatSession.ConnectOutcome.Ok)
+        assertEquals(3L, s2.sendText("bob", "三")) // 重登续位
+        assertEquals(3L, ledger.load("alice"))
+        s2.close()
         server.close()
     }
 

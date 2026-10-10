@@ -22,7 +22,8 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * 对齐桌面端 CollabEngine 语义（collab_engine.cpp）：
  * - 登录后保持单条 TCP 连接；后台读线程分帧分发；
- * - send_text：本端 seq 内存自增，帧 = Envelope{TEXT, seq, from, to, ts_ms, text}；
+ * - send_text：本端 seq 自增（seqLedger 提供时发号即写、重登续位——BUG-007
+ *   §4.1 对齐桌面平台-9），帧 = Envelope{TEXT, seq, from, to, ts_ms, text}；
  * - 收到 TEXT：按 peer 落库（群消息 peer=to 的 "group:N"，单聊 peer=from），
  *   若带 msg_id 回 ACK(msg_id)（服务端按 msg_id 清离线队列，重复投递由本地
  *   msg_id 去重）；自己发的消息本地立即落库（msg_id 为空，等受理回执）；
@@ -43,6 +44,7 @@ class ChatSession(
     private val executor: (Runnable) -> Unit = { it.run() },
     private val connectTimeoutMs: Int = 8_000,
     private val readTimeoutMs: Int = 0, // 0=无限：长连接不因空闲断
+    private val seqLedger: SeqLedger? = null, // BUG-007 §4.1：重登续位台账
 ) : AutoCloseable {
     /** UI 回调（均在 executor 线程投递） */
     interface Listener {
@@ -78,9 +80,29 @@ class ChatSession(
     }
 
     private val closed = AtomicBoolean(false)
-    private val seqGen = AtomicLong(1)
+
+    /**
+     * 发号器：构造期从台账续位（BUG-007 §4.1，对齐桌面平台-9——seq 每连接
+     * 重置会让重登后的新消息与旧档撞 msg_id）。台账存最后已发号，续位从
+     * 上界＋1 起；无台账/无记录从 1 起（单测/默认口径）。
+     */
+    private val seqGen = AtomicLong(run {
+        val last = seqLedger?.load(account) ?: 0L
+        if (last > 0) last + 1 else 1L
+    })
+
+    /** 发号串行锁：sendText/logout 调用线程与 sendAck 读线程并发，发号与
+     *  落盘须同锁保序（乱序回写会让台账上界回退） */
+    private val seqLock = Any()
     @Volatile private var readThread: Thread? = null
     private var listener: Listener? = null
+
+    /** 发号＋发号即写（BUG-007 §4.1；调用方跨线程，同锁串行） */
+    private fun issueSeq(): Long = synchronized(seqLock) {
+        val seq = seqGen.getAndIncrement()
+        seqLedger?.save(account, seq)
+        seq
+    }
 
     /**
      * 发送线程（单条，随会话存亡）：外发帧（TEXT/LOGOUT/ACK）一律排队经此
@@ -197,7 +219,7 @@ class ChatSession(
     fun sendText(to: String, text: String): Long {
         val w = wire ?: return 0
         if (closed.get() || to.isEmpty()) return 0
-        val seq = seqGen.getAndIncrement()
+        val seq = issueSeq()
         val ts = System.currentTimeMillis()
         val frame = Envelope.newBuilder()
             .setType(MsgType.TEXT)
@@ -225,7 +247,7 @@ class ChatSession(
         if (w != null && !closed.get()) {
             val frame = Envelope.newBuilder()
                 .setType(MsgType.LOGOUT)
-                .setSeq(seqGen.getAndIncrement())
+                .setSeq(issueSeq())
                 .setFrom(account)
                 .setTo("server")
                 .setTsMs(System.currentTimeMillis())
@@ -318,7 +340,7 @@ class ChatSession(
             w,
             Envelope.newBuilder()
                 .setType(MsgType.ACK)
-                .setSeq(seqGen.getAndIncrement())
+                .setSeq(issueSeq())
                 .setFrom(account)
                 .setTo("server")
                 .setTsMs(System.currentTimeMillis())

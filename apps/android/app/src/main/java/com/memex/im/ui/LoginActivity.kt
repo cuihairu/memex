@@ -16,6 +16,7 @@ import com.memex.im.core.ChatSession
 import com.memex.im.core.DeviceIdentity
 import com.memex.im.core.InitStore
 import com.memex.im.core.PrefsInitStore
+import com.memex.im.core.PrefsSeqLedger
 import com.memex.im.core.ServerAddress
 import com.memex.im.core.Session
 import java.util.concurrent.ExecutorService
@@ -81,7 +82,7 @@ class LoginActivity : AppCompatActivity() {
         }
         setBusy(true)
         executor.execute {
-            val manager = ChatHolder.establish()
+            val manager = ChatHolder.establish(PrefsSeqLedger(this))
             val outcome = manager.attach(
                 address = address,
                 password = password,

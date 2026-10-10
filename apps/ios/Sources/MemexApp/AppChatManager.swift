@@ -1,6 +1,26 @@
 import Foundation
 import MemexKit
 
+/// seq 持久化台账（BUG-007 §4.1）：UserDefaults 落盘（per-account 键，取 max
+/// 合并防乱序回写；随 AppChatManager 存活——跨重新登录续位）。
+final class UserDefaultsSeqLedger: SeqLedger {
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func loadSeq(account: String) -> UInt64 {
+        UInt64(defaults.integer(forKey: "seq_" + account))
+    }
+
+    func saveSeq(account: String, seq: UInt64) {
+        if seq > loadSeq(account: account) {
+            defaults.set(Int(seq), forKey: "seq_" + account)
+        }
+    }
+}
+
 /// 会话管理器（对齐 Android ChatManager）：持有长连接会话与本地存储，
 /// 事件回调统一投递主队列刷新 UI；KICK 时经 kickHandler 交上层退回登录页。
 final class AppChatManager: ObservableObject {
@@ -11,6 +31,7 @@ final class AppChatManager: ObservableObject {
     private(set) var disconnectCause: String?
 
     private let store = InMemoryChatStore()
+    private let seqLedger = UserDefaultsSeqLedger()
     private var session: ChatSession?
     private var account = ""
 
@@ -29,7 +50,7 @@ final class AppChatManager: ObservableObject {
         self.account = account
         let session = ChatSession(
             store: store, account: account, displayName: displayName,
-            eventQueue: .main
+            eventQueue: .main, seqLedger: seqLedger
         )
         self.session = session
         let outcome = session.connect(

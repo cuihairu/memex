@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { ChatSession, ConnectOutcome } from '../core/session';
 import { MemexClient } from '../core/client';
 import { InMemoryChatStore } from '../core/chat_store';
+import { InMemorySeqLedger } from '../core/seq_ledger';
 import { ServerAddress } from '../core/address';
 import { MsgType } from '../core/wire';
 import { NoticeGrade } from '../core/format';
@@ -25,8 +26,9 @@ async function connectSession(
   s: FakeMemexServer,
   store: InMemoryChatStore = new InMemoryChatStore(),
   listener: RecordingListener = new RecordingListener(),
+  seqLedger: InMemorySeqLedger | null = null,
 ): Promise<{ session: ChatSession; outcome: ConnectOutcome; listener: RecordingListener }> {
-  const session = new ChatSession(store, 'alice', 'Alice');
+  const session = new ChatSession(store, 'alice', 'Alice', 8000, 0, seqLedger);
   const outcome = await session.connect(
     new NodeTransport(),
     '127.0.0.1',
@@ -131,6 +133,24 @@ test('发送文本帧线格式对齐桌面端且受理回执 onSent', async () =
   assert.equal(await until(() => listener.sentSeqs.length === 1), true);
   assert.deepEqual(listener.sentSeqs, [seq]);
   session.close();
+  await s.close();
+});
+
+test('seq 台账发号即写且重登续位', async () => {
+  // BUG-007 §4.1：seq 每连接重置会让重登后新消息与旧档撞 msg_id——
+  // 台账续位对齐桌面平台-9，让服务端重排退化为兜底
+  const s = await newServer();
+  const ledger = new InMemorySeqLedger();
+  const { session: s1 } = await connectSession(s, undefined, undefined, ledger);
+  assert.equal(s1.sendText('bob', '一'), 1);
+  assert.equal(s1.sendText('bob', '二'), 2);
+  assert.equal(ledger.load('alice'), 2); // 发号即写
+  s1.close();
+
+  const { session: s2 } = await connectSession(s, undefined, undefined, ledger);
+  assert.equal(s2.sendText('bob', '三'), 3); // 重登续位
+  assert.equal(ledger.load('alice'), 3);
+  s2.close();
   await s.close();
 });
 

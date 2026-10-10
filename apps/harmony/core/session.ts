@@ -2,7 +2,8 @@
  * 协作态长连接会话（镜像 apps/android ChatSession.kt，语义对齐桌面
  * collab_engine.cpp）：
  * - 登录后保持单条 TCP 连接；帧流由 WireChannel 分帧分发；
- * - send_text：本端 seq 自增，帧 = Envelope{TEXT, seq, from, to, ts_ms, text}；
+ * - send_text：本端 seq 自增（seqLedger 提供时发号即写、重登续位——BUG-007
+ *   §4.1 对齐桌面平台-9），帧 = Envelope{TEXT, seq, from, to, ts_ms, text}；
  * - 收到 TEXT：按 peer 落库（群消息 peer=to 的 "group:N"，单聊 peer=from），
  *   若带 msg_id 回 ACK(msg_id)（服务端按 msg_id 清离线队列，重复投递由
  *   本地 msg_id 去重）；自己发的消息本地立即落库（msg_id 为空，等受理回执）；
@@ -28,6 +29,7 @@ import {
 import { Transport } from './transport';
 import { WireChannel, classifyFailure } from './wire_channel';
 import { ChatStore } from './chat_store';
+import { SeqLedger } from './seq_ledger';
 import { NoticeGrade, composeNoticeText, fromProtoNumber } from './format';
 
 /** UI 回调（读线程/事件线程进入，壳层负责投递 UI 线程）。 */
@@ -62,7 +64,9 @@ export class ChatSession {
   private channel: WireChannel | null = null;
   private listener: ChatSessionListener | null = null;
   private closed = true;
-  private seqGen = 1;
+  /** 发号器：构造期从台账续位（BUG-007 §4.1，对齐桌面平台-9；无台账从 1 起） */
+  private seqGen: number;
+  private readonly seqLedger: SeqLedger | null;
 
   private readonly store: ChatStore;
   private readonly account: string;
@@ -77,12 +81,24 @@ export class ChatSession {
     displayName: string,
     connectTimeoutMs = 8000,
     readTimeoutMs = 0,
+    seqLedger: SeqLedger | null = null,
   ) {
     this.store = store;
     this.account = account;
     this.displayName = displayName;
     this.connectTimeoutMs = connectTimeoutMs;
     this.readTimeoutMs = readTimeoutMs;
+    this.seqLedger = seqLedger;
+    // 台账存最后已发号，续位从上界＋1 起；无记录从 1 起
+    const last = seqLedger !== null ? seqLedger.load(account) : 0;
+    this.seqGen = last > 0 ? last + 1 : 1;
+  }
+
+  /** 发号＋发号即写（BUG-007 §4.1；事件循环单线程，天然保序）。 */
+  private issueSeq(): number {
+    const seq = this.seqGen++;
+    if (this.seqLedger !== null) this.seqLedger.save(this.account, seq);
+    return seq;
   }
 
   /**
@@ -155,7 +171,7 @@ export class ChatSession {
   sendText(to: string, text: string): number {
     const ch = this.channel;
     if (ch === null || this.closed || to.length === 0) return 0;
-    const seq = this.seqGen++;
+    const seq = this.issueSeq();
     const ts = Date.now();
     try {
       ch.send(textEnvelope(seq, this.account, to, text, ts));
@@ -185,7 +201,7 @@ export class ChatSession {
     const ch = this.channel;
     if (ch !== null && !this.closed) {
       try {
-        ch.send(logoutEnvelope(this.seqGen++, this.account, Date.now()));
+        ch.send(logoutEnvelope(this.issueSeq(), this.account, Date.now()));
       } catch (e) {
         // 忽略：即将断开
       }
@@ -277,7 +293,7 @@ export class ChatSession {
     const ch = this.channel;
     if (ch === null) return;
     try {
-      ch.send(ackEnvelope(this.seqGen++, this.account, 'server', msgId, Date.now()));
+      ch.send(ackEnvelope(this.issueSeq(), this.account, 'server', msgId, Date.now()));
     } catch (e) {
       // 忽略：断线路径由读侧处理
     }

@@ -14,6 +14,7 @@ import android.os.Looper
 class ChatManager(
     val store: ChatStore,
     private val uiHandler: Handler = Handler(Looper.getMainLooper()),
+    private val seqLedger: SeqLedger? = null, // BUG-007 §4.1：重登续位台账
 ) : ChatSession.Listener {
 
     private val sessionListeners = LinkedHashSet<Listener>()
@@ -61,6 +62,7 @@ class ChatManager(
             account = account,
             displayName = displayName,
             executor = { r -> uiHandler.post(r) },
+            seqLedger = seqLedger,
         )
         val outcome = s.connect(
             address = address,

@@ -383,6 +383,8 @@ public:
   bool is_recalled(const std::string& msg_id);
   // 某消息发送方（撤回权限判定）；不存在返回空串。
   std::string message_from(const std::string& msg_id);
+  // 按 msg_id 查归档全行（BUG-007 撞 id 内容比对用）；不存在返回 nullopt。
+  std::optional<ArchivedMessage> message_by_id(const std::string& msg_id);
   // 撤回事件独立留痕（只附加、不删改）。
   bool record_recall_event(const std::string& msg_id,
                            const std::string& by_account,
