@@ -74,6 +74,7 @@ public:
   QString org_json() const;
   // —— T4.1 群聊（验收面）——
   QString groups_json() const; // 最近一次群列表数据
+  void refresh_groups();       // 重拉群列表（验收缝；登录时自动拉一次）
   // 最近一次常用联系人数据（T4.5；星标置顶＋最近排序，服务端换机保留）
   QString fav_json() const;
   // 当前会话的星标切换（服务端常用联系人；未登录协作态时提示）

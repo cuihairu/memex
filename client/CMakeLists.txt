@@ -767,6 +767,68 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # 实况截图重摄腿（2026-10-10 原型走查 rail 面落地后）：五屏浅深配平
+  # ——live-direct／live-chat／live-collab／live-group／live-files，真实服务端
+  # 进程＋双直连引擎＋对端协作引擎驱动真实主窗；同一份 app 源（含
+  # rail_nav）与 MEMEX_SERVER_BIN／MEMEX_DOCS_SHOT_DIR 宏
+  add_executable(test_live_shots
+    tests/test_live_shots.cpp
+    app/main_window.cpp
+    app/rail_nav.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
+    app/emoji_pack_dialog.cpp
+    app/brand_kit.cpp
+    app/brand_kit.hpp
+    app/brand_settings_page.cpp
+    app/shortcut_settings.cpp
+    app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
+    app/away_settings.cpp
+    app/file_assistant.cpp
+    app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
+    app/task_template_settings.cpp
+    app/approval_dialog.cpp
+    app/report_dialog.cpp
+    app/group_tools_dialog.cpp
+    app/audit_dialog.cpp
+    app/office_map_dialog.cpp
+    app/assist_dialog.cpp
+    engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
+    engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
+    app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
+    app/group_ci_dialog.cpp
+    app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
+    app/theme.cpp
+    app/theme_pack.cpp
+    app/theme_settings_page.cpp)
+  target_include_directories(test_live_shots PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_live_shots PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
+  target_compile_definitions(test_live_shots PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
+  add_test(NAME live_shots COMMAND test_live_shots)
+  set_tests_properties(live_shots PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 120)
+
   # BUG-004 托盘交互验收：单击/双击激活主界面（隐藏弹出、最小化还原保留最大化），
   # 右键留给菜单；裸 QSystemTrayIcon 发真实 activated 信号驱动生产接线
   # wire_tray_activation（offscreen 可跑，无 DE 依赖）。

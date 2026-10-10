@@ -2090,6 +2090,10 @@ bool MainWindow::collab_logged_in() const {
 
 QString MainWindow::groups_json() const { return last_groups_json_; }
 
+// 服务端无群列表推送（GROUP_DATA 仅应答 GROUP_QUERY），群变更他端发起时
+// 由此重拉（登录时已自动拉一次）
+void MainWindow::refresh_groups() { collab_engine_.query_groups(); }
+
 // 组织架构全部账号（建群／拉人数据源；未拉到组织架构时为空，弹窗走手输）
 QStringList MainWindow::org_accounts() const {
   QStringList out;
