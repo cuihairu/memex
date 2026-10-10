@@ -20,12 +20,14 @@
 #include <iostream>
 
 #include <app/group_tools_dialog.hpp>
+#include <app/notify_center.hpp>
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
 
 using memex::client::CollabEngine;
 using memex::client::GroupToolsDialog;
 using memex::client::LocalStore;
+using memex::client::NotificationCenter;
 
 #ifndef MEMEX_SERVER_BIN
 #error "MEMEX_SERVER_BIN 未定义（应传入 $<TARGET_FILE:memex_server>）"
@@ -447,6 +449,59 @@ int main(int argc, char** argv) {
     return text.contains(QStringLiteral("bob 完成")) &&
            text.contains(QStringLiteral("周报汇总"));
   }, 8000));
+
+  // —— 群任务截止面＋到点提醒（设计稿 §0 群任务「可选截止」补客户端缺口）——
+  {
+    int tray_notifies = 0;
+    QObject::connect(&NotificationCenter::instance(),
+                     &NotificationCenter::want_tray_notify, &app,
+                     [&](const QString&, const QString&) { ++tray_notifies; });
+    const qint64 past = QDateTime::currentMSecsSinceEpoch() - 1000;
+    // 建带截止任务（过去时刻=已到点）：行内「｜截止」渲染落地
+    CHECK(dlg.add_task(QStringLiteral("到点任务"), QStringLiteral("bob"),
+                       past));
+    CHECK(wait_until(
+        [&] {
+          return row_text(dlg.task_list(), 0)
+                     .contains(QStringLiteral("到点任务")) &&
+                 row_text(dlg.task_list(), 0)
+                     .contains(QStringLiteral("｜截止"));
+        },
+        8000));
+    // 非提醒对象（alice 既非负责人也非创建人…创建人是 alice，
+    // 但有负责人时只提醒负责人）：不提醒
+    dlg.check_due_tasks();
+    CHECK(tray_notifies == 0);
+    // 负责人 bob 侧：到点检查提醒一次，会话内去重
+    dlg_bob.refresh();
+    CHECK(wait_until(
+        [&] { return select_row_containing(dlg_bob.task_list(),
+                                           QStringLiteral("到点任务")); },
+        8000));
+    dlg_bob.check_due_tasks();
+    CHECK(wait_until([&] { return tray_notifies >= 1; }, 3000));
+    const int after_first = tray_notifies;
+    dlg_bob.check_due_tasks();
+    CHECK(tray_notifies == after_first);
+    // 无人认领到期：提醒创建人 alice（bob 侧不提醒）
+    CHECK(dlg.add_task(QStringLiteral("待认领到期"), QString(), past));
+    CHECK(wait_until([&] { return dlg.task_list()->count() >= 3; }, 8000));
+    dlg.check_due_tasks();
+    CHECK(wait_until([&] { return tray_notifies == after_first + 1; }, 3000));
+    dlg_bob.refresh();
+    CHECK(wait_until([&] { return dlg_bob.task_list()->count() >= 3; }, 8000));
+    dlg_bob.check_due_tasks();
+    CHECK(tray_notifies == after_first + 1);
+    // 未到点不提醒（due 门；与 30s 轮询无竞态——未来截止不可能到点）
+    CHECK(dlg.add_task(QStringLiteral("未到点任务"), QStringLiteral("bob"),
+                       QDateTime::currentMSecsSinceEpoch() + 3600000));
+    CHECK(wait_until([&] { return dlg.task_list()->count() >= 4; }, 8000));
+    dlg_bob.refresh();
+    CHECK(wait_until([&] { return dlg_bob.task_list()->count() >= 4; }, 8000));
+    dlg_bob.check_due_tasks();
+    dlg.check_due_tasks();
+    CHECK(tray_notifies == after_first + 1);
+  }
 
   server.kill();
   server.waitForFinished(3000);

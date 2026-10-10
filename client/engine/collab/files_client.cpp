@@ -1171,11 +1171,14 @@ void FilesClient::close_chain(quint64 gid, qint64 chain_id) {
 }
 
 void FilesClient::create_group_task(quint64 gid, const QString& title,
-                                    const QString& assignee) {
+                                    const QString& assignee, qint64 due_ms) {
   QJsonObject body{{QStringLiteral("gid"), static_cast<double>(gid)},
                    {QStringLiteral("title"), title}};
   if (!assignee.isEmpty()) {
     body.insert(QStringLiteral("assignee"), assignee);
+  }
+  if (due_ms > 0) {
+    body.insert(QStringLiteral("due_ms"), static_cast<double>(due_ms));
   }
   send_json(QStringLiteral("group-task.create"), QStringLiteral("POST"),
             QStringLiteral("/files/group-tasks"), body,

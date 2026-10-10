@@ -6,6 +6,7 @@
 
 #include <QDialog>
 #include <QJsonArray>
+#include <QSet>
 #include <QString>
 
 #include <QtGlobal>
@@ -46,10 +47,15 @@ class GroupToolsDialog : public QDialog {
   bool add_chain(const QString& title, const QString& format_hint);
   bool join_selected(const QString& content);
   bool close_selected_chain();
-  // 群任务：建（assignee 可空=待认领）/认领/完成
-  bool add_task(const QString& title, const QString& assignee);
+  // 群任务：建（assignee 可空=待认领；due_ms>0=设截止）/认领/完成
+  bool add_task(const QString& title, const QString& assignee,
+                qint64 due_ms = 0);
   bool claim_selected();
   bool done_selected();
+  // 群任务到点检查（30s 轮询与测试共用）：todo 且已到截止、未提醒过、
+  // 本人=负责人（无人认领时=创建人）→通知中心 IMPORTANT；本窗会话内
+  // 去重（QSet，重开窗重新计——开窗期轮询口径，同 R27-1 初版）
+  void check_due_tasks();
   // 拉三页列表
   void refresh();
 
@@ -92,6 +98,9 @@ class GroupToolsDialog : public QDialog {
   QLineEdit* chain_content_;
   QLineEdit* task_title_;
   QLineEdit* task_assignee_;
+  QCheckBox* task_deadline_on_; // 设截止（不勾=不限期，同投票截止行）
+  QDateTimeEdit* task_deadline_;
+  QSet<qint64> gtask_reminded_; // 会话内已提醒任务 id（重开窗重计）
   QPushButton* btn_connect_;
   QPushButton* btn_poll_add_;
   QPushButton* btn_poll_vote_;

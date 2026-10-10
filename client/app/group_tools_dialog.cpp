@@ -16,9 +16,11 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QTabWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include "engine/collab/files_client.hpp"
+#include "notify_center.hpp"
 
 namespace memex::client {
 namespace {
@@ -83,6 +85,17 @@ GroupToolsDialog::GroupToolsDialog(QWidget* parent) : QDialog(parent) {
                QStringLiteral(" · 群 ") + gid_box_->text() +
                QStringLiteral("）"));
     refresh();
+    // 群任务到点轮询（30s）：开窗期提醒经通知中心（关窗即停——
+    // 开窗期口径，同 R27-1 初版；findChild 守卫防重连重入）
+    if (!findChild<QTimer*>(QStringLiteral("gtask_poll"))) {
+      auto* poll = new QTimer(this);
+      poll->setObjectName(QStringLiteral("gtask_poll"));
+      connect(poll, &QTimer::timeout, this, [this] {
+        check_due_tasks();
+        refresh();
+      });
+      poll->start(30000);
+    }
   });
   connect(client_, &FilesClient::login_failed, this,
           [this](const QString& r) {
@@ -277,6 +290,22 @@ void GroupToolsDialog::build_ui() {
   task_form->addWidget(task_title_);
   task_form->addWidget(task_assignee_, 1);
   task_layout->addLayout(task_form);
+  // 截止时间（勾选才生效；不勾=不限期，同投票截止行；到点提醒在客户端
+  // 轮询侧，服务端只存 due_ms）
+  auto* task_due_row = new QHBoxLayout;
+  task_deadline_on_ = new QCheckBox(QStringLiteral("设截止"), task_page);
+  task_deadline_on_->setObjectName(QStringLiteral("task_deadline_on"));
+  task_deadline_ = new QDateTimeEdit(
+      QDateTime::currentDateTime().addSecs(3600), task_page);
+  task_deadline_->setObjectName(QStringLiteral("task_deadline"));
+  task_deadline_->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
+  task_deadline_->setEnabled(false);
+  connect(task_deadline_on_, &QCheckBox::toggled, task_deadline_,
+          &QDateTimeEdit::setEnabled);
+  task_due_row->addWidget(task_deadline_on_);
+  task_due_row->addWidget(task_deadline_);
+  task_due_row->addStretch(1);
+  task_layout->addLayout(task_due_row);
   auto* task_ops = new QHBoxLayout;
   btn_task_add_ = new QPushButton(QStringLiteral("建任务"), task_page);
   btn_task_claim_ = new QPushButton(QStringLiteral("认领"), task_page);
@@ -329,7 +358,10 @@ void GroupToolsDialog::build_ui() {
   connect(btn_chain_close_, &QPushButton::clicked, this,
           [this] { close_selected_chain(); });
   connect(btn_task_add_, &QPushButton::clicked, this, [this] {
-    add_task(task_title_->text().trimmed(), task_assignee_->text().trimmed());
+    add_task(task_title_->text().trimmed(), task_assignee_->text().trimmed(),
+             task_deadline_on_->isChecked()
+                 ? task_deadline_->dateTime().toMSecsSinceEpoch()
+                 : 0);
   });
   connect(btn_task_claim_, &QPushButton::clicked, this,
           [this] { claim_selected(); });
@@ -490,13 +522,14 @@ bool GroupToolsDialog::close_selected_chain() {
 }
 
 bool GroupToolsDialog::add_task(const QString& title,
-                                const QString& assignee) {
+                                const QString& assignee, qint64 due_ms) {
   if (title.isEmpty()) {
     set_status(QStringLiteral("任务标题不能为空"), true);
     return false;
   }
   if (!require_connected()) return false;
-  client_->create_group_task(gid_box_->text().toULongLong(), title, assignee);
+  client_->create_group_task(gid_box_->text().toULongLong(), title, assignee,
+                             due_ms);
   return true;
 }
 
@@ -613,6 +646,17 @@ void GroupToolsDialog::populate_tasks(const QJsonArray& tasks) {
     const QString status = t.value(QStringLiteral("status")).toString();
     auto* item = new QListWidgetItem(QString(), task_list_);
     item->setData(Qt::UserRole, t.value(QStringLiteral("id")).toDouble());
+    // 到点检查面（check_due_tasks 用）：due/status/assignee/creator/title
+    item->setData(Qt::UserRole + 1,
+                  static_cast<qint64>(
+                      t.value(QStringLiteral("due_ms")).toDouble()));
+    item->setData(Qt::UserRole + 2, status);
+    item->setData(Qt::UserRole + 3,
+                  t.value(QStringLiteral("assignee")).toString());
+    item->setData(Qt::UserRole + 4,
+                  t.value(QStringLiteral("created_by")).toString());
+    item->setData(Qt::UserRole + 5,
+                  t.value(QStringLiteral("title")).toString());
     const QString assignee =
         t.value(QStringLiteral("assignee")).toString();
     QString who = assignee.isEmpty() ? QStringLiteral("待认领")
@@ -624,13 +668,46 @@ void GroupToolsDialog::populate_tasks(const QJsonArray& tasks) {
     } else if (t.value(QStringLiteral("claimed_ms")).toDouble() > 0) {
       tail = QStringLiteral("（已认领）");
     }
-    item->setText(QStringLiteral("#%1 %2 ｜%3 ｜创建人 %4%5")
+    QString due_tail;
+    const qint64 due = item->data(Qt::UserRole + 1).toLongLong();
+    if (due > 0) {
+      due_tail = QStringLiteral(" ｜截止 %1")
+                     .arg(QDateTime::fromMSecsSinceEpoch(due).toString(
+                         QStringLiteral("MM-dd HH:mm")));
+    }
+    item->setText(QStringLiteral("#%1 %2 ｜%3 ｜创建人 %4%5%6")
                       .arg(QString::number(
                                t.value(QStringLiteral("id")).toDouble()),
                            t.value(QStringLiteral("title")).toString(), who,
                            t.value(QStringLiteral("created_by")).toString(),
-                           tail));
+                           tail, due_tail));
     if (status == QStringLiteral("done")) item->setForeground(Qt::gray);
+  }
+}
+
+void GroupToolsDialog::check_due_tasks() {
+  if (!is_connected()) return;
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  const QString me = client_->account();
+  for (int i = 0; i < task_list_->count(); ++i) {
+    const auto* it = task_list_->item(i);
+    if (it->data(Qt::UserRole + 2).toString() != QStringLiteral("todo")) {
+      continue; // 已完成/已认领终态不提醒
+    }
+    const qint64 due = it->data(Qt::UserRole + 1).toLongLong();
+    if (due <= 0 || due > now) continue;
+    const qint64 id = it->data(Qt::UserRole).toLongLong();
+    if (gtask_reminded_.contains(id)) continue; // 会话内只提醒一次
+    const QString assignee = it->data(Qt::UserRole + 3).toString();
+    const QString creator = it->data(Qt::UserRole + 4).toString();
+    // 提醒对象：负责人；无人认领时=创建人（谁派谁盯；其余成员不打扰）
+    if (assignee.isEmpty() ? creator != me : assignee != me) continue;
+    gtask_reminded_.insert(id);
+    NotificationCenter::instance().on_notice(
+        QStringLiteral("群任务提醒"),
+        it->data(Qt::UserRole + 5).toString(),
+        QStringLiteral("群任务已到期待办"), /*IMPORTANT*/ 2, QString(), now,
+        QStringLiteral("gtask-%1-%2").arg(id).arg(now));
   }
 }
 

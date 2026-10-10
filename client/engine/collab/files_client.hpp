@@ -261,7 +261,7 @@ class FilesClient : public QObject {
   void close_chain(quint64 gid, qint64 chain_id);
   // 建群任务（assignee 可空=待认领；非空须群成员否则 404）
   void create_group_task(quint64 gid, const QString& title,
-                         const QString& assignee);
+                         const QString& assignee, qint64 due_ms = 0);
   // 群任务列表（status/done_by/claimed_ms 留痕可见）
   void list_group_tasks(quint64 gid);
   // 认领（todo 且无人认领；已占 409）

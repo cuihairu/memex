@@ -492,7 +492,9 @@ if(MEMEX_BUILD_TESTS)
   # 协议腿，不在此重复
   add_executable(test_group_tools_dialog
     app/tests/test_group_tools_dialog.cpp
-    app/group_tools_dialog.cpp)
+    app/group_tools_dialog.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp)
   target_link_libraries(test_group_tools_dialog PRIVATE
     memex_engine_collab Qt6::Widgets)
   target_include_directories(test_group_tools_dialog PRIVATE
