@@ -12,9 +12,7 @@
 name: nightly
 
 on:
-  schedule:
-    # 02:43（UTC+8），整点外错峰
-    - cron: "43 18 * * *"
+# 2026-10-11 版本发布红线（用户令）：版本只能用户手动触发，schedule 自动发版已移除。
   workflow_dispatch:
 
 concurrency:
