@@ -1,8 +1,10 @@
 # memex 服务端一键起：memex-server（SQLite 持久卷）+ RustFS（S3 兼容对象
 # 存储，文件面后端）+ memex-admin（网页管理后台）。用法：
-# `docker compose up -d`，三服务 healthy 即就绪；客户端连 <宿主机>:24360
-# （协作面）与 <宿主机>:24561（文件面）；浏览器开 <宿主机>:8089（管理后台，
-# admin.memex.cuihairu.site → http://192.168.5.5:8089 即指这里）。
+# `docker compose up -d`，三服务 healthy 即就绪；客户端连 <宿主机>:8088
+# （协作面对外口，与 Cloudflare tunnel 回源 tcp://192.168.5.5:8088 对齐）
+# 或 <宿主机>:24360（局域网默认端口兼容），文件面 <宿主机>:24561；
+# 浏览器开 <宿主机>:8089（管理后台，admin.memex.cuihairu.site →
+# http://192.168.5.5:8089 即指这里）。
 # 口令面：生产部署把 MEMEX_S3_ACCESS_KEY/SECRET_KEY 写进同目录 .env 再起
 # （示例口令仅限本机试跑）；RustFS 数据与 SQLite 都在命名卷里，up/down 不丢。
 # RustFS 容器契约（1.0.1 实测，与 server storage compose 生成器同口径）：
@@ -58,8 +60,13 @@ services:
       MEMEX_S3_SECRET_KEY: "${MEMEX_S3_SECRET_KEY:-memexdemo-secret}"
     volumes:
       - server-data:/var/lib/memex
+    command:
+      ["serve", "--db", "/var/lib/memex/memex.db", "--port", "24360",
+       "--webhook-port", "24361", "--files-port", "24561"]
     ports:
-      - "24360:24360" # 协作面（TCP/protobuf）
+      - "8088:24360"  # 协作面对外口（tunnel 回源 tcp://192.168.5.5:8088）
+      - "24360:24360" # 协作面局域网默认端口（客户端缺省 24360 直连兼容）
+      - "24361:24361" # webhook 接入（HTTP：POST /hook/<token>）
       - "24561:24561" # 文件面（HTTP：/files/*）
     healthcheck:
       test:
