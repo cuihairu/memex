@@ -382,8 +382,9 @@
 
 ## 服务器部署批（2026-10-11 用户令，verbatim：「提供部署到docker 中，需要ci 配置，然后我cloudfare tunnel 提供tcp 域名连接，这个服务器地址，我默认为server.memex.cuihairu.site」）
 
-- [ ] **Docker 部署交付**：服务端出 `Dockerfile` + `compose.yml`——含数据卷持久化（`memex-server.db` 与归档文件不随容器重建丢失）、端口映射（服务端 TCP + webhook 端口 24361）、环境/配置注入；`docker compose up` 一条命令可起，起后客户端可正常登录（不只构建通过就算数）
+- [ ] **Docker 部署交付**：服务端出 `Dockerfile` + `compose.yml`——含数据卷持久化（`memex-server.db` 与归档文件不随容器重建丢失）、端口映射（服务端 TCP + webhook 端口 24361）、环境/配置注入；`docker compose up` 一条命令可起，起后客户端可正常登录（不只构建通过就算数）；**对外服务端 TCP 端口 8088**（与用户已配 tunnel 回源 `tcp://192.168.5.5:8088` 对齐），webhook 端口 24361
 - [ ] **CI 镜像流水线**：workflow 构建服务端镜像并推 ghcr（`latest` + `sha-<短提交>`，与舰队既有口径一致），构建绿才推；不打 tag、不建 Release（版本发布红线，nightly/滚动 latest 除外）
-- [ ] **Cloudflare tunnel TCP 接入**：仓里给 `cloudflared` 配置样例——`tcp://` ingress 把服务端 TCP 端口与 webhook 端口暴露到公网，**域名 `server.memex.cuihairu.site`（用户已定）**；tunnel token/账号归用户 Cloudflare 侧，仓里只放配置样例与接入步骤，不代管凭证
+- [ ] **Cloudflare tunnel TCP 对接（用户侧已配好 2026-10-11）**：用户已完成映射 **`server.memex.cuihairu.site` → `tcp://192.168.5.5:8088`**（tunnel token/账号在用户 Cloudflare 侧，仓里不代管）。仓里要做的是：①服务端**对外 TCP 端口对齐 8088**（Docker 端口映射与文档一致，回源能通）；②接入文档写清映射关系与排查步骤（回源端口、tunnel 状态、连不通怎么查）；③webhook 端口若也要暴露需用户另加 ingress，文档注明
 - [ ] **客户端默认服务器地址**：默认值设为 `server.memex.cuihairu.site`（首次启动向导与默认配置同源）；**地址始终可改**——内网/局域网部署场景不强制走外网域名，连接目标是用户可配置项而非硬编码
+- [ ] **域名强制解析配置（局域网直连）**（用户 2026-10-11 verbatim「需要提供配置选项，用户可以在局域网把server.memex.cuihairu.site 强制解析为真实的服务器ip」）：提供**域名→内网 IP 覆盖**配置——局域网用户可把 `server.memex.cuihairu.site` 强制解析到真实服务器 IP（如 `192.168.5.5`），流量直连内网不过 tunnel。落地形态二选一或并存：①客户端设置里加「服务器域名解析覆盖」（域名→IP 映射，配置优先于系统 DNS）；②至少给出 hosts / 内网 DNS 两种标准做法的配置文档。**默认不覆盖**（公网场景走 tunnel 正常解析），覆盖为显式用户配置项
 - **验收（硬口径）**：①本机 `docker compose up` 真实起服务 → 客户端用默认地址 `server.memex.cuihairu.site` 经 tunnel **真连上并登录成功**（连接日志/截图留证）；②CI run 绿且 ghcr 镜像可拉；③数据卷重启不丢（重启容器后账号/消息仍在）；④无 tunnel 环境下改回内网地址仍可登录（证明默认值不是硬依赖）。测试绿才 push，commit 英文简短。
