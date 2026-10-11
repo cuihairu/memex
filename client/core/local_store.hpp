@@ -71,6 +71,9 @@ public:
   // 服务端起源消息（如通知，无发送方会话 seq）本地分配单调 seq——满足
   // UNIQUE(from_id, seq)；离线重投的去重仍走 msg_id 唯一索引。
   qint64 next_local_seq(const std::string& from_id);
+  // 查 (from_id, seq) 槽位上已落库行的 msg_id（BUG-007 §4.2：接收方向据此
+  // 分辨「同槽位重投」与「重排新消息」）。无该槽位行返回空串。
+  std::string msg_id_at(const std::string& from_id, std::uint64_t seq);
 
   // 按 msg_id 置撤回标记（服务端撤回事件到达后调用）。
   bool mark_recalled(const std::string& msg_id);
@@ -93,6 +96,11 @@ public:
   // 发出消息回填服务端标识（sha256(account:seq) 本地推定，只补空位）。
   bool set_msg_id(const std::string& from_id, std::uint64_t seq,
                   const std::string& msg_id);
+  // 服务端回执回带最终 msg_id 时覆盖本地推定值（BUG-007 §4.3：撞 id 换盐
+  // 重排后的新值）——与 set_msg_id 的「只补空位」相对，此法强制覆盖，此后
+  // 送达/已读回执、撤回按新 id 命中。
+  bool set_msg_id_final(const std::string& from_id, std::uint64_t seq,
+                        const std::string& msg_id);
   // 我发出消息的回执态（receipt 列）：state=delivered/read，只升不降
   //（已读终态不被乱序送达通知倒退）。非我发出或未知 msg_id 返回 false。
   bool set_receipt(const std::string& msg_id, const std::string& state);

@@ -76,8 +76,9 @@ public slots:
   void cross_log(const QString& op, const QString& peer_device,
                  const QString& peer_name, qint64 started_ms, qint64 ended_ms);
   // —— 已读回执与在线状态（T4.3）——
-  // 服务端 msg_id 派生式（session.cpp 同式 sha256(from:seq)）：发出即回填
-  // 本地行（send_text），送达/已读回执通知按它命中；界面层同式取用。
+  // 客户端本地推定式（服务端常规同式 sha256(from:seq)；撞 id 换盐重排后经
+  // 回执回带最终值覆盖本地行，BUG-007 §4.3）：发出即回填，送达/已读回执
+  // 通知按本地行 msg_id 命中；界面层同式取用。
   static QString msg_id_for(const QString& account, quint64 seq);
   // 上报某条收到的协作消息已读（服务端留痕＋通知发送方）；须登录态。
   // 是否上报（隐私开关）由界面层裁决——引擎只管机制。

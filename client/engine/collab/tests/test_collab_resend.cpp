@@ -473,6 +473,100 @@ int main(int argc, char** argv) {
     }
 
     a3.logout();
+
+    // 进程级：全新空库 alice 重登（seq 从 1 重来，重演 V1 撞 id）→ 发同 seq
+    // 不同内容 → 服务端换盐重排 → bob 侧 (alice,1) 槽位被占——修复前该新
+    // 消息被 UNIQUE 约束静默丢行，修复后本地改分配 seq 落库可见（⑥）；发送
+    // 侧经 ACK 回带最终 msg_id 覆盖本地推定值（⑦）。须在 server4 存活期
+    // 内（对账「共 5 条」之后，a4 的重排行恰是第 6 条）
+    {
+      const QString derived =
+          CollabEngine::msg_id_for(QStringLiteral("alice"), 1);
+      LocalStore store_c;
+      CHECK(store_c.open(tmp.filePath(QStringLiteral("c.db"))));
+      CollabEngine a4;
+      a4.attach_store(&store_c);
+      a4.set_heartbeat(300, 2);
+      bool a4_in = false;
+      QObject::connect(&a4, &CollabEngine::logged_in, &a4,
+                       [&](const QString&, const QString&) { a4_in = true; });
+      a4.login(QStringLiteral("127.0.0.1"), port, QStringLiteral("alice"),
+               QStringLiteral("pass-a"));
+      CHECK(wait_until([&] { return a4_in; }, 8000));
+
+      CHECK(a4.send_text(QStringLiteral("bob"), QStringLiteral("重排后新消息")) != 0);
+
+      // ⑥ 接收端：新消息可见（不被 (alice,1) 槽位吞掉）且恰落一行
+      CHECK(wait_until([&] { return b_got.size() == 6; }, 8000));
+      CHECK(b_got[5] == QStringLiteral("重排后新消息"));
+      CHECK(wait_until([&] {
+        int copies = 0;
+        for (const auto& m : store_b.history(QStringLiteral("alice"))) {
+          if (m.text == "重排后新消息") ++copies;
+        }
+        return copies == 1;
+      }, 5000));
+      // 原槽位行不动：seq 仍 1、msg_id 仍推定值（真补投语义不被破坏）
+      for (const auto& m : store_b.history(QStringLiteral("alice"))) {
+        if (m.text == "在线基线消息") {
+          CHECK(m.seq == 1);
+          CHECK(QString::fromStdString(m.msg_id) == derived);
+        }
+      }
+      // 重排行 msg_id ≠ 推定值（服务端换盐重排的新值）
+      std::string reshuffled;
+      for (const auto& m : store_b.history(QStringLiteral("alice"))) {
+        if (m.text == "重排后新消息") reshuffled = m.msg_id;
+      }
+      CHECK(!reshuffled.empty());
+      CHECK(QString::fromStdString(reshuffled) != derived);
+
+      // ⑦ 发送端：ACK 回带最终 msg_id 覆盖本地行（推定值 → 最终值）
+      CHECK(wait_until([&] {
+        for (const auto& m : store_c.history(QStringLiteral("bob"))) {
+          if (m.seq == 1 && m.from == "alice") {
+            return !m.msg_id.empty() &&
+                   QString::fromStdString(m.msg_id) != derived;
+          }
+        }
+        return false;
+      }, 8000));
+      // 两端最终值一致（同一最终 id）
+      std::string final_id;
+      for (const auto& m : store_c.history(QStringLiteral("bob"))) {
+        if (m.seq == 1 && m.from == "alice") final_id = m.msg_id;
+      }
+      CHECK(final_id == reshuffled);
+
+      a4.logout();
+    }
+  }
+
+  // —— BUG-007 批次2：桌面接收端重排行可见（§4.2）＋ ACK 消费校正（§4.3）——
+  // 纯库层：msg_id_at 槽位查询 + set_msg_id_final 强制覆盖
+  {
+    LocalStore sp;
+    CHECK(sp.open(tmp.filePath(QStringLiteral("bug7.db"))));
+    memex::client::StoredMessage m;
+    m.peer = "carol";
+    m.from = "alice";
+    m.to = "carol";
+    m.ts_ms = 1;
+    m.source = "collab";
+    m.seq = 1;
+    m.text = "槽位一";
+    m.sync_state = "ARCHIVED";
+    CHECK(sp.append(m));
+    CHECK(sp.msg_id_at("alice", 1).empty()); // 未回填＝空串
+    CHECK(sp.set_msg_id("alice", 1, "sha-orig")); // 只补空位
+    CHECK(sp.msg_id_at("alice", 1) == "sha-orig");
+    CHECK(!sp.set_msg_id("alice", 1, "sha-other")); // 已占＝不覆盖
+    CHECK(sp.msg_id_at("alice", 1) == "sha-orig");
+    CHECK(sp.set_msg_id_final("alice", 1, "sha-final")); // 回带＝强制覆盖
+    CHECK(sp.msg_id_at("alice", 1) == "sha-final");
+    CHECK(!sp.set_msg_id_final("alice", 999, "sha-x")); // 无此槽位＝false
+    CHECK(sp.msg_id_at("nobody", 1).empty());
+    sp.close();
   }
 
   b.logout();

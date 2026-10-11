@@ -148,8 +148,9 @@ void CollabEngine::logout() {
 }
 
 namespace {
-// 服务端 msg_id 派生式（session.cpp 同式）：sha256_hex(from + ":" + seq)。
-// 发出即回填本地行，回执通知（DELIVER_NOTICE/READ_NOTICE）按它命中。
+// 客户端本地推定式（服务端常规同式 session.cpp）：sha256_hex(from + ":" + seq)。
+// 发出即回填本地行；服务端撞 id 换盐重排时经回执回带最终值覆盖（BUG-007
+// §4.3），送达/已读回执、撤回按本地行 msg_id 命中。
 QString derive_msg_id(const QString& account, quint64 seq) {
   return CollabEngine::msg_id_for(account, seq);
 }
@@ -858,6 +859,16 @@ void CollabEngine::handle_text(const Message& msg) {
   if (store_) {
     memex::client::StoredMessage sm;
     sm.seq = msg.seq();
+    // BUG-007 §4.2：(from_id, seq) 槽位被占且既有行 msg_id 不同＝服务端
+    // 换盐重排后的新消息（同 seq 不同内容）——本地改分配单调 seq 落库
+    // （与 handle_notice 对无 seq 通知同构），否则 UNIQUE 约束静默丢行；
+    // msg_id 相同＝真补投照旧去重。重投经 msg_id 唯一索引仍幂等。
+    if (msg.seq() > 0 && !msg.msg_id().empty()) {
+      const std::string prev = store_->msg_id_at(msg.from(), msg.seq());
+      if (!prev.empty() && prev != msg.msg_id()) {
+        sm.seq = store_->next_local_seq(msg.from());
+      }
+    }
     sm.peer = peer;
     sm.from = msg.from();
     sm.to = msg.to();
@@ -965,6 +976,13 @@ void CollabEngine::handle_ack(const Message& msg) {
     // 平台-9：服务端受理＝已归档待投递（SERVER_ACKED）
     if (store_) {
       store_->set_sync_state(account_.toStdString(), seq, "SERVER_ACKED");
+      // BUG-007 §4.3：回执回带服务端最终 msg_id（撞 id 换盐重排后的新值）
+      // 时覆盖本地推定值——此后送达/已读回执、撤回按新 id 命中；老服务端
+      // 不回带（空串）不动作
+      if (msg.has_ack() && !msg.ack().msg_id().empty()) {
+        store_->set_msg_id_final(account_.toStdString(), seq,
+                                 msg.ack().msg_id());
+      }
     }
     emit text_delivered(seq, true);
   }

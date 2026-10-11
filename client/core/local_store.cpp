@@ -179,6 +179,22 @@ qint64 LocalStore::next_local_seq(const std::string& from_id) {
   return q.value(0).toLongLong();
 }
 
+std::string LocalStore::msg_id_at(const std::string& from_id,
+                                  std::uint64_t seq) {
+  if (!open_ || from_id.empty()) return {};
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "SELECT msg_id FROM messages WHERE from_id = ? AND seq = ?"));
+  q.addBindValue(QString::fromStdString(from_id));
+  q.addBindValue(static_cast<qint64>(seq));
+  if (!q.exec()) {
+    qWarning() << "[本地库] 槽位查询失败：" << q.lastError().text();
+    return {};
+  }
+  if (!q.next()) return {};
+  return q.value(0).toString().toStdString();
+}
+
 QList<StoredMessage> LocalStore::history(const QString& peer, int limit) const {
   QList<StoredMessage> out;
   if (!open_) return out;
@@ -334,7 +350,8 @@ bool LocalStore::set_sync_state_archived(const std::string& msg_id) {
 bool LocalStore::set_msg_id(const std::string& from_id, std::uint64_t seq,
                             const std::string& msg_id) {
   // 发出消息落服务端标识（受理前即按 sha256(account:seq) 本地推定写入，
-  // 服务端同式派生——两侧一致；只补空位不覆盖既有值）
+  // 服务端常规同式派生；撞 id 换盐重排后经 set_msg_id_final 覆盖——只补
+  // 空位不覆盖既有值）
   if (!open_ || from_id.empty() || msg_id.empty()) return false;
   QSqlQuery q(QSqlDatabase::database(connection_name_));
   q.prepare(QStringLiteral(
@@ -345,6 +362,25 @@ bool LocalStore::set_msg_id(const std::string& from_id, std::uint64_t seq,
   q.addBindValue(static_cast<qint64>(seq));
   if (!q.exec()) {
     qWarning() << "[本地库] msg_id 回填失败：" << q.lastError().text();
+    return false;
+  }
+  return q.numRowsAffected() > 0;
+}
+
+bool LocalStore::set_msg_id_final(const std::string& from_id,
+                                  std::uint64_t seq,
+                                  const std::string& msg_id) {
+  // BUG-007 §4.3：回执回带最终 msg_id 时覆盖本地推定值（换盐重排的新值）；
+  // 撞 msg_id 唯一索引会 exec 失败照常返回 false（新值全局唯一，正常不发生）
+  if (!open_ || from_id.empty() || msg_id.empty()) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "UPDATE messages SET msg_id = ? WHERE from_id = ? AND seq = ?"));
+  q.addBindValue(QString::fromStdString(msg_id));
+  q.addBindValue(QString::fromStdString(from_id));
+  q.addBindValue(static_cast<qint64>(seq));
+  if (!q.exec()) {
+    qWarning() << "[本地库] msg_id 覆盖失败：" << q.lastError().text();
     return false;
   }
   return q.numRowsAffected() > 0;
