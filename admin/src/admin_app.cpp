@@ -71,7 +71,7 @@ bool bool_or(const Json::Value& j, const char* key, bool dflt = false) {
 // 会话取当前账号（未登录＝空串）
 std::string session_account(const drogon::HttpRequestPtr& req) {
   const auto acct = req->session()->getOptional<std::string>("account");
-  return acct.value_or({});
+  return acct.value_or(std::string{}); // {} 推不出 value_or 模板参（CI GCC 拒，GCC 15 收）
 }
 
 // —— CSRF 轻闸：改写类请求须带自定义头（跨站表单无法携带，CORS 预检

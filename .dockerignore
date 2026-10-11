@@ -1,4 +1,5 @@
-# Docker 构建上下文裁剪（context=仓库根，镜像只需服务端构建面）
+# Docker 构建上下文裁剪（context=仓库根，两镜像各取所需：
+# server/Dockerfile 只 COPY server 面，admin/Dockerfile 还要 admin 面）
 .git
 build
 build-client
@@ -6,13 +7,13 @@ build-server
 build-nightly
 build-notify
 build-theme-check
+build-ci
 Testing
 client
 apps
 docs
 packaging
 dist
-admin
 scripts
 vcpkg_installed
 vcpkg_installed-*
