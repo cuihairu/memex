@@ -53,6 +53,9 @@ interface ChatStore {
 
     /** 本端单调 seq（服务端起源消息用的本地序号分配，对齐桌面 next_local_seq）。 */
     fun nextLocalSeq(from: String): Long
+
+    /** 清空本机全部会话（「我」屏本地缓存清理；仅本机，不影响服务端归档）。 */
+    fun clearAll()
 }
 
 /**
@@ -109,4 +112,12 @@ class InMemoryChatStore : ChatStore {
 
     override fun nextLocalSeq(from: String): Long =
         (localSeqs[from] ?: 0L).let { cur -> localSeqs[from] = cur + 1; cur + 1 }
+
+    override fun clearAll() {
+        store.clear()
+        unread.clear()
+        msgIds.clear()
+        localSeqs.clear()
+        nextId = 1L
+    }
 }

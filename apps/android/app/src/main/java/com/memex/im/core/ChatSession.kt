@@ -69,6 +69,9 @@ class ChatSession(
 
         /** 被服务端互踢（KICK） */
         fun onKicked(reason: String)
+
+        /** 组织架构回包（ORG_DATA；queryOrg 的应答。默认空实现＝不关心的订阅方免改） */
+        fun onOrgData(members: List<OrgMemberLite>) {}
     }
 
     sealed class ConnectOutcome {
@@ -260,6 +263,26 @@ class ChatSession(
         safeClose()
     }
 
+    /**
+     * 拉取组织架构（ORG_QUERY，T3.1；「我」屏账号卡数据面——姓名/部门/职务）。
+     * 空载荷查询帧（协议无 OrgQuery 体，对齐桌面端）；应答经 onOrgData 回调，
+     * 服务端按通讯录可见性过滤下发（session.cpp）。
+     */
+    fun queryOrg() {
+        val w = wire ?: return
+        if (closed.get()) return
+        enqueueSend(
+            w,
+            Envelope.newBuilder()
+                .setType(MsgType.ORG_QUERY)
+                .setSeq(issueSeq())
+                .setFrom(account)
+                .setTo("server")
+                .setTsMs(System.currentTimeMillis())
+                .build()
+        )
+    }
+
     override fun close() = safeClose()
 
     private fun readLoop() {
@@ -277,7 +300,8 @@ class ChatSession(
                         return
                     }
                     MsgType.PONG -> Unit
-                    else -> Unit // 组织/群/已读等后续块处理
+                    MsgType.ORG_DATA -> onOrgData(env)
+                    else -> Unit // 群/已读等后续块处理
                 }
             }
         } catch (e: Exception) {
@@ -347,6 +371,21 @@ class ChatSession(
                 .setAck(memex.protocol.v1.Memex.Ack.newBuilder().setMsgId(msgId))
                 .build()
         )
+    }
+
+    /** 组织架构回包：只取「我」屏要用的成员子集，转 UI 线程回调 */
+    private fun onOrgData(env: Envelope) {
+        if (!env.hasOrgData()) return
+        val members = env.orgData.membersList.map { m ->
+            OrgMemberLite(
+                account = m.account,
+                displayName = m.displayName,
+                title = m.title,
+                departmentPath = m.departmentPath,
+                role = m.role,
+            )
+        }
+        dispatch { listener?.onOrgData(members) }
     }
 
     private fun onAck(env: Envelope) {

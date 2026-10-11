@@ -77,6 +77,10 @@ class MainActivity : AppCompatActivity(), ChatManager.Listener {
             startActivity(Intent(this, FileAssistantActivity::class.java))
         }
 
+        findViewById<Button>(R.id.btn_me).setOnClickListener {
+            startActivity(Intent(this, MeActivity::class.java))
+        }
+
         findViewById<Button>(R.id.btn_logout).setOnClickListener {
             ChatHolder.manager?.removeListener(this)
             ChatHolder.clear()

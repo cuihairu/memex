@@ -99,11 +99,13 @@ class ChatSessionTest {
         val sent = CopyOnWriteArrayList<Long>()
         val kicked = CopyOnWriteArrayList<String>()
         val disconnected = CopyOnWriteArrayList<String>()
+        val orgs = CopyOnWriteArrayList<List<OrgMemberLite>>()
         // 只等首次事件；重复去重断言用集合 size 验证，不靠 latch 计数
         val onMessage = CountDownLatch(1)
         val onNotice = CountDownLatch(1)
         val onSent = CountDownLatch(1)
         val onKicked = CountDownLatch(1)
+        val onOrg = CountDownLatch(1)
 
         override fun onMessage(peer: String, msgId: String, mine: Boolean) {
             messages.add(peer to msgId)
@@ -134,6 +136,11 @@ class ChatSessionTest {
         override fun onKicked(reason: String) {
             kicked.add(reason)
             onKicked.countDown()
+        }
+
+        override fun onOrgData(members: List<OrgMemberLite>) {
+            orgs.add(members)
+            onOrg.countDown()
         }
     }
 
@@ -654,5 +661,80 @@ class ChatSessionTest {
         assertEquals(NoticeGrade.NORMAL, NoticeGrade.fromProtoNumber(99))
         assertEquals("发布：新版本", composeNoticeText("发布", "新版本", ""))
         assertEquals("发布：新版本 https://e.cn/a", composeNoticeText("发布", "新版本", "https://e.cn/a"))
+    }
+
+    @Test
+    fun `queryOrg 发 ORG_QUERY 回包映射成成员子集回调`() {
+        val server = FakeMemexServer()
+        val querySeen = CountDownLatch(1)
+        var queryEnvelope: Envelope? = null
+        server.serve { req, c ->
+            when (req.type) {
+                MsgType.LOGIN -> server.send(
+                    c,
+                    Envelope.newBuilder()
+                        .setType(MsgType.LOGIN_RESULT)
+                        .setSeq(1).setFrom("server").setTo(req.login.account)
+                        .setTsMs(System.currentTimeMillis())
+                        .setLoginResult(LoginResult.newBuilder().setOk(true).build())
+                        .build()
+                )
+                MsgType.ORG_QUERY -> {
+                    queryEnvelope = req
+                    querySeen.countDown()
+                    // 对齐 session.cpp：登录后可查，按通讯录可见性过滤下发
+                    server.send(
+                        c,
+                        Envelope.newBuilder()
+                            .setType(MsgType.ORG_DATA)
+                            .setSeq(0).setFrom("server").setTo(req.from)
+                            .setTsMs(System.currentTimeMillis())
+                            .setOrgData(
+                                memex.protocol.v1.Memex.OrgData.newBuilder()
+                                    .addMembers(
+                                        memex.protocol.v1.Memex.OrgMember.newBuilder()
+                                            .setAccount("alice")
+                                            .setDisplayName("张伟")
+                                            .setTitle("工程师")
+                                            .setDepartmentPath("公司/产品研发部/研发一组")
+                                            .setRole("member")
+                                    )
+                                    .addMembers(
+                                        memex.protocol.v1.Memex.OrgMember.newBuilder()
+                                            .setAccount("bob")
+                                            .setDisplayName("李四")
+                                    )
+                            )
+                            .build()
+                    )
+                }
+                else -> Unit
+            }
+        }
+        val listener = RecordingListener()
+        val (session, outcome) = connect(server, listener = listener)
+        assertTrue(outcome is ChatSession.ConnectOutcome.Ok)
+
+        session.queryOrg()
+        if (!querySeen.await(3, TimeUnit.SECONDS)) {
+            org.junit.Assert.fail("ORG_QUERY 帧未到达服务端；服务端收到: ${server.received.map { it.type }}")
+        }
+        val q = queryEnvelope!!
+        assertEquals(MsgType.ORG_QUERY, q.type)
+        assertEquals("alice", q.from)
+        assertEquals("server", q.to)
+
+        waitLatch(listener.onOrg)
+        val members = listener.orgs.single()
+        assertEquals(2, members.size)
+        assertEquals(
+            OrgMemberLite("alice", "张伟", "工程师", "公司/产品研发部/研发一组", "member"),
+            members[0],
+        )
+        // 未填字段（proto3 缺省）映射为空串，文案层按缺项跳过
+        assertEquals(OrgMemberLite("bob", "李四", "", "", ""), members[1])
+
+        session.close()
+        server.close()
     }
 }

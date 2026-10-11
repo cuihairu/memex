@@ -47,6 +47,11 @@
             android:name="com.memex.im.ui.FileAssistantActivity"
             android:exported="false" />
 
+        <!-- 「我」屏：账号卡＋账号与设备＋通用（入口在主界面，不新造 tab） -->
+        <activity
+            android:name="com.memex.im.ui.MeActivity"
+            android:exported="false" />
+
         <!-- 紧急通知「确认收悉」动作（点按后才允许滑除该横幅） -->
         <receiver
             android:name="com.memex.im.ui.MemexNotifyReceiver"

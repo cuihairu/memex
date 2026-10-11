@@ -130,8 +130,8 @@ class LoginActivity : AppCompatActivity() {
     private fun deviceFingerprint(): String {
         val androidId =
             Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: ""
-        return DeviceIdentity.fingerprint(
-            "android:$androidId:${android.os.Build.DEVICE}:${android.os.Build.MODEL}"
+        return DeviceIdentity.androidFingerprint(
+            androidId, android.os.Build.DEVICE, android.os.Build.MODEL,
         )
     }
 

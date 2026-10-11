@@ -105,4 +105,22 @@ class ChatStoreTest {
         assertEquals(2L, store.nextLocalSeq("alice"))
         assertEquals(1L, store.nextLocalSeq("bob"))
     }
+
+    @Test
+    fun `clearAll 清空本机全部会话 未读与去重台账一并重置`() {
+        val store = InMemoryChatStore()
+        store.append(msgTo("bob", 1000, "早", msgId = "m1"))
+        store.append(msgTo("carol", 2000, "晚", msgId = "m2"))
+        store.nextLocalSeq("alice")
+
+        store.clearAll()
+
+        assertEquals(emptyList<Conversation>(), store.conversations())
+        assertEquals(emptyList<StoredMessage>(), store.history("bob"))
+        assertEquals(emptyList<StoredMessage>(), store.history("carol"))
+        // 去重台账清空：清理后同一 msg_id 重投（重新收到）应可再落库
+        assertTrue(store.append(msgTo("bob", 3000, "重新收到", msgId = "m1")))
+        assertEquals(1, store.history("bob").size)
+        assertEquals(1, store.conversations().single().unread)
+    }
 }

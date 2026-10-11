@@ -26,8 +26,41 @@
     <string name="main_new_chat">发起</string>
     <string name="main_empty">暂无会话：在下方输入对端账号发起聊天。</string>
     <string name="main_logout">退出登录</string>
+    <string name="main_me">我</string>
     <string name="group_display">群 %1$s</string>
     <string name="unread_count">（%1$d 未读）</string>
+
+    <!-- 「我」屏（移动端设置与账号信息，对齐原型 mobile-me.html） -->
+    <string name="me_title">我</string>
+    <string name="me_state_collab">协作态 · %1$s</string>
+    <string name="me_org_loading">组织资料加载中…</string>
+    <string name="me_sec_account">账号与设备</string>
+    <string name="me_devices">登录设备管理</string>
+    <string name="me_devices_value">本机</string>
+    <string name="me_devices_sub">本机 Android · %1$s · 指纹 %2$s</string>
+    <string name="me_devices_note">桌面端同一账号仅一台在线：另一台电脑登录时，本机将被下线并收到提示</string>
+    <string name="me_devices_todo">服务端设备台账查询面未接入</string>
+    <string name="me_logins">登录记录</string>
+    <string name="me_not_connected">未接入</string>
+    <string name="me_logins_sub">服务端有台账（成功失败都记），移动端查询面未接入</string>
+    <string name="me_retention">消息留存策略（管理侧下发）</string>
+    <string name="me_retention_sub">留存策略由管理侧配置，移动端展示面未接入</string>
+    <string name="me_sec_general">通用</string>
+    <string name="me_cache_clear">本地缓存清理</string>
+    <string name="me_cache_value">仅清理本机 · 不影响服务端归档</string>
+    <string name="me_cache_confirm_title">清理本机缓存</string>
+    <string name="me_cache_confirm_msg">清空本机会话列表与聊天记录？服务端归档不受影响（本机为内存暂存，重新收到消息会重新出现）。</string>
+    <string name="me_cache_action">清理</string>
+    <string name="me_cache_done">已清理本机缓存</string>
+    <string name="me_notify">通知与提醒</string>
+    <string name="me_notify_value">系统设置</string>
+    <string name="me_about">关于 Memex</string>
+    <string name="me_about_value">v%1$s（%2$d）</string>
+    <string name="me_about_msg">Memex v%1$s（%2$d）\n协作态移动端：全部功能基于登录账号运行。</string>
+    <string name="me_switch_or_logout">切换服务器 / 退出登录</string>
+    <string name="me_action_switch">切换服务器</string>
+    <string name="me_action_logout">退出登录</string>
+    <string name="me_hint">移动端全部功能基于登录账号运行：桌面端才有「本网段临时使用」的未登录形态，移动端不提供。</string>
 
     <!-- 聊天窗（T6.3） -->
     <string name="chat_send">发送</string>

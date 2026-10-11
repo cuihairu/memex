@@ -44,6 +44,9 @@ class ChatManager(
 
         /** 被互踢 */
         fun onKicked(reason: String)
+
+        /** 组织架构回包（queryOrg 应答；默认空实现＝不关心的订阅方免改） */
+        fun onOrgData(members: List<OrgMemberLite>) {}
     }
 
     /** 登录验证＋长连接建立（阻塞调用，放后台线程）；成功即可开始收发。 */
@@ -82,6 +85,9 @@ class ChatManager(
 
     /** 发送文本。seq=0 表示未连接。阻塞写走会话发送线程（主线程调用安全，BUG-006）。 */
     fun sendText(to: String, text: String): Long = session?.sendText(to, text) ?: 0
+
+    /** 拉取组织架构（ORG_QUERY；应答经 onOrgData 投 UI 线程）。未连接时静默。 */
+    fun queryOrg() = session?.queryOrg()
 
     fun addListener(l: Listener) {
         sessionListeners.add(l)
@@ -138,6 +144,12 @@ class ChatManager(
         uiHandler.post {
             session = null
             for (l in sessionListeners.toList()) l.onKicked(reason)
+        }
+    }
+
+    override fun onOrgData(members: List<OrgMemberLite>) {
+        uiHandler.post {
+            for (l in sessionListeners.toList()) l.onOrgData(members)
         }
     }
 }
