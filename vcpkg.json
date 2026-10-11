@@ -40,6 +40,14 @@
         }
       ]
     },
+    "admin": {
+      "description": "管理后台依赖（Drogon C++17 Web 框架：admin 独立进程监听 8089，静态页＋登录会话＋直连库管理面；2026-10-11 拍板）",
+      "dependencies": [
+        {
+          "name": "drogon"
+        }
+      ]
+    },
     "client": {
       "description": "Qt 桌面客户端依赖（本地 dev/ci 与每日构建客户端产物启用）",
       "dependencies": [

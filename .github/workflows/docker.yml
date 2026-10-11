@@ -1,8 +1,11 @@
-# 服务端镜像出仓：推 tag（v*）或推 main 即构建并推 ghcr.io。main 推送产
-# 出不可变 sha-<完整 sha>（CI 部署链的回滚币）与 latest；v* 另出 semver。
-# 构建全程在容器内（docker build 多阶段，server/Dockerfile）——与宿主/CI
-# 的 vcpkg 树互不干扰；依赖层（vcpkg 静态编译 aws-sdk 等）走 buildx gha
-# 缓存，vcpkg.json 不变则跨 run 秒级复用。
+# 服务端与管理后台镜像出仓：推 tag（v*）或推 main 即构建并推 ghcr.io。
+# main 推送产出不可变 sha-<完整 sha>（CI 部署链的回滚币）与 latest；v*
+# 另出 semver。两镜像并行出：memex-server（服务端）、memex-admin（网页
+# 管理后台，admin.memex.cuihairu.site → 192.168.5.5:8089 的交付面）。
+# 构建全程在容器内（docker build 多阶段，server|admin/Dockerfile）——与
+# 宿主/CI 的 vcpkg 树互不干扰；依赖层（vcpkg 静态编译 aws-sdk/drogon 等）
+# 走 buildx gha 缓存，vcpkg.json 不变则跨 run 秒级复用（两 job 共用缓存
+# 前缀分列镜像名，互不踩）。
 name: docker
 
 on:
@@ -15,13 +18,20 @@ permissions:
   contents: read
   packages: write # 推 ghcr.io
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/memex-server
-
 jobs:
   build-push:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: memex-server
+            dockerfile: server/Dockerfile
+          - image: memex-admin
+            dockerfile: admin/Dockerfile
     runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository_owner }}/${{ matrix.image }}
     steps:
       - uses: actions/checkout@v7
 
@@ -62,11 +72,11 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: server/Dockerfile
+          file: ${{ matrix.dockerfile }}
           build-contexts: |
             vcpkgsrc=./vcpkg-src
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

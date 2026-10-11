@@ -1,0 +1,90 @@
+/* memex 管理后台静态样式：轻量朴素风，不引入前端栈 */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 14px/1.5 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #1c2733;
+  background: #f3f5f7;
+}
+.hidden { display: none !important; }
+
+/* 登录 */
+.login-wrap { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.login-card {
+  background: #fff; border-radius: 10px; padding: 28px 32px; width: 340px;
+  box-shadow: 0 6px 24px rgba(16, 32, 48, .12);
+}
+.login-card h1 { font-size: 18px; margin: 0 0 18px; color: #e16531; }
+.login-card label { display: block; margin-bottom: 12px; }
+.login-card input {
+  width: 100%; padding: 8px 10px; margin-top: 4px;
+  border: 1px solid #cdd5dc; border-radius: 6px; font-size: 14px;
+}
+.login-card button {
+  width: 100%; padding: 9px; border: 0; border-radius: 6px;
+  background: #e16531; color: #fff; font-size: 15px; cursor: pointer;
+}
+.login-card button:hover { background: #c9541f; }
+.hint { color: #6b7a89; font-size: 12px; margin: 14px 0 0; }
+.error { color: #c0392b; font-size: 13px; margin-bottom: 10px; }
+
+/* 布局 */
+.layout { display: flex; min-height: 100vh; }
+.nav {
+  width: 200px; background: #223140; color: #d7dee5;
+  display: flex; flex-direction: column; padding: 14px 0;
+}
+.brand { font-weight: 600; color: #fff; padding: 6px 18px 16px; }
+.nav a, .nav-todo {
+  padding: 9px 18px; color: #d7dee5; text-decoration: none; font-size: 13px;
+}
+.nav a:hover { background: #2d3f50; }
+.nav a.active { background: #e16531; color: #fff; }
+.nav-sep { margin-top: 16px; padding: 6px 18px 2px; font-size: 11px; color: #8fa1b3; }
+.nav-todo { color: #8fa1b3; }
+.nav-foot { margin-top: auto; padding: 12px 18px 0; font-size: 12px; display: flex; gap: 8px; align-items: center; }
+.nav-foot button {
+  padding: 4px 10px; border: 1px solid #55697d; background: transparent;
+  color: #d7dee5; border-radius: 5px; cursor: pointer;
+}
+
+/* 内容 */
+#content { flex: 1; padding: 22px 28px; max-width: 1080px; }
+#content h2 { margin: 0 0 6px; font-size: 18px; }
+#content .desc { color: #6b7a89; margin: 0 0 18px; font-size: 13px; }
+.card {
+  background: #fff; border-radius: 8px; padding: 16px 18px; margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(16, 32, 48, .08);
+}
+.card h3 { margin: 0 0 12px; font-size: 14px; }
+form.inline { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; }
+form.inline label { display: flex; flex-direction: column; font-size: 12px; color: #55697d; gap: 3px; }
+form.inline input, form.inline select {
+  padding: 6px 8px; border: 1px solid #cdd5dc; border-radius: 5px; font-size: 13px; min-width: 110px;
+}
+form.inline button, .row-actions button {
+  padding: 7px 14px; border: 0; border-radius: 5px; background: #e16531;
+  color: #fff; cursor: pointer; font-size: 13px;
+}
+button.ghost { background: #eef1f4; color: #33475b; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid #e8edf1; }
+th { color: #55697d; font-weight: 600; background: #f7f9fa; }
+td .pill {
+  display: inline-block; padding: 1px 8px; margin-right: 4px; border-radius: 9px;
+  background: #eef3f8; color: #33556e; font-size: 12px;
+}
+td .pill.org-admin { background: #fdeadd; color: #b04a12; }
+td .pill.auditor { background: #e5f2e8; color: #226b34; }
+.pill.off { background: #fbe4e4; color: #a33030; }
+.row-actions button { padding: 3px 9px; font-size: 12px; margin-right: 5px; }
+.muted { color: #8fa1b3; }
+.mono { font-family: Consolas, monospace; font-size: 12px; }
+
+/* 提示条 */
+.toast {
+  position: fixed; right: 20px; bottom: 20px; padding: 10px 16px;
+  background: #223140; color: #fff; border-radius: 7px; max-width: 420px;
+  box-shadow: 0 4px 14px rgba(16, 32, 48, .3); font-size: 13px;
+}
+.toast.error { background: #a33030; }

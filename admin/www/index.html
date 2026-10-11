@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Memex 管理后台</title>
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+  <!-- 登录视图 -->
+  <div id="view-login" class="login-wrap hidden">
+    <form id="login-form" class="login-card">
+      <h1>Memex 管理后台</h1>
+      <label>账号 <input id="login-account" autocomplete="username" required></label>
+      <label>口令 <input id="login-password" type="password" autocomplete="current-password" required></label>
+      <div id="login-error" class="error hidden"></div>
+      <button type="submit">登录</button>
+      <p class="hint">角色门：org-admin 管理面 / auditor 审计面（判权同服务端，未授权即 403 并留痕）</p>
+    </form>
+  </div>
+
+  <!-- 主视图：侧导航 + 内容区 -->
+  <div id="view-main" class="layout hidden">
+    <aside class="nav">
+      <div class="brand">Memex 管理后台</div>
+      <a href="#accounts" data-page="accounts">账号与组织</a>
+      <a href="#policy" data-page="policy">策略下发</a>
+      <a href="#retention" data-page="retention">留存策略</a>
+      <a href="#messages" data-page="messages">归档检索与导出</a>
+      <a href="#auditreads" data-page="auditreads">查阅日志</a>
+      <a href="#devices" data-page="devices">设备与登录台账</a>
+      <a href="#health" data-page="health">健康状态</a>
+      <div class="nav-sep">波次 2（未上线）</div>
+      <span class="nav-todo">通知与集成 · 群组管理面 · 业务流程页 · 品牌外观</span>
+      <div class="nav-foot">
+        <span id="whoami"></span>
+        <button id="btn-logout" type="button">退出</button>
+      </div>
+    </aside>
+    <main id="content"></main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/admin.js"></script>
+</body>
+</html>

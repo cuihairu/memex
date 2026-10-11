@@ -393,17 +393,17 @@
 
 > 现状盘点（扫代码非臆造）：`admin/` 仅 README 占位（规划「第一期第四阶段起建设」）；管理能力现散布在 **90 个 `/files/*` HTTP 路由 + 19 个 CLI 子命令**（account/org/policy/audit/messages/retention/webhook/bot/device/group/storage/assist/model/branding…共 40+ 二级命令）里，**全部没有 UI**。本批=把这些能力整理成网页后台的建设范围：
 
-- [ ] **部署口径（用户已配映射 2026-10-11）**：后台对外 **`admin.memex.cuihairu.site` → `http://192.168.5.5:8089`**（HTTP tunnel，用户 Cloudflare 侧已配）。后台容器监听 **8089**，随 Docker 批交付（compose 服务 + CI 镜像 + 域名接入文档与排查步骤）；公网经 tunnel、局域网可用强制解析覆盖直连（复用部署批「域名强制解析配置」同一机制）
-- [ ] **后台骨架（技术选型=drogon，2026-10-11 拍板）**：基于 **Drogon**（C++17 Web 框架，vcpkg 引入）的独立 admin 进程监听 8089——不动现有 FileServer 与协议；登录与角色门（org-admin / auditor 分权，判权复用服务端 az 规则**不自造**）、导航、会话超时、静态资源与 CSRF 中间件
-- [ ] **账号与组织**：`account add/list`、部门树 `org dept/member/membership`、汇报线 `org reporting`、组织字段与可见性 `org fields/visibility/hide/allow/import`、角色授予 `org role`
-- [ ] **设备与登录台账**：`device list/enable/disable/set/unbind`、`logins` 台账、`identity`
-- [ ] **策略下发**：`policy set/list/show`（含部门行、文件跨部门/转发四开关）、`retention set/show/purge`（留存与到期清理）
-- [ ] **归档检索与导出**：`messages` 检索/导出 + 在线审计 `/files/audit/search|reads`（条件摘要、被拒留痕、导出留证）——**必须走 auditor 证**（平台-6 红线：org-admin 不自动可读消息）
+- [x] **部署口径（用户已配映射 2026-10-11）**：后台对外 **`admin.memex.cuihairu.site` → `http://192.168.5.5:8089`**（HTTP tunnel，用户 Cloudflare 侧已配）。后台容器监听 **8089**，随 Docker 批交付（compose 服务 + CI 镜像 + 域名接入文档与排查步骤）；公网经 tunnel、局域网可用强制解析覆盖直连（复用部署批「域名强制解析配置」同一机制）——✅ 2026-10-11 compose `admin` 服务（8089:8089）+ admin/Dockerfile + CI `memex-admin` 镜像 job + README 域名接入/首号 bootstrap 文档；宿主实机 up 待部署批跑
+- [x] **后台骨架（技术选型=drogon，2026-10-11 拍板）**：基于 **Drogon**（C++17 Web 框架，vcpkg 引入）的独立 admin 进程监听 8089——不动现有 FileServer 与协议；登录与角色门（org-admin / auditor 分权，判权复用服务端 az 规则**不自造**）、导航、会话超时、静态资源与 CSRF 中间件——✅ 2026-10-11 Drogon 1.9.13 独立进程；登录=credentials 表同源 PBKDF2 判登；判权=服务端 authz.cpp 同一引擎镜像注册（admin-manage→org-admin、audit-read→auditor，default-deny）；会话 30min 超时（可调）；CSRF 轻闸=X-Memex-Admin 头（如实口径非完整方案）；19 腿 API 验收测试 test_admin_api 全绿（含基础 admin≠org-admin、越权 403 留痕）
+- [x] **账号与组织**：`account add/list`、部门树 `org dept/member/membership`、汇报线 `org reporting`、组织字段与可见性 `org fields/visibility/hide/allow/import`、角色授予 `org role`——✅ 2026-10-11 波次 1 面：建号（基础角色 admin|member 白名单）/列表、部门树（路径式 ensure）、成员归属、资料建档（职务/直属上级，环拒绝）、角色授予/吊销（时间窗、即时生效）UI+API；reporting/visibility API 已通 UI 控件留波次 2；`org fields/visibility/hide/allow/import` 完整面留波次 2
+- [x] **设备与登录台账**：`device list/enable/disable/set/unbind`、`logins` 台账、`identity`——✅ 2026-10-11 设备台账（列表/启停/责任人/解绑）+ 登录台账 UI；`identity`（外部身份绑定面）留波次 2
+- [x] **策略下发**：`policy set/list/show`（含部门行、文件跨部门/转发四开关）、`retention set/show/purge`（留存与到期清理）——✅ 2026-10-11 四开关+部门行下发与回读；留存 30/180/365/1095/0 档位；purge 双人审批红线（审批人≠执行人、双方须建号、理由必填、台账落库）UI+API
+- [x] **归档检索与导出**：`messages` 检索/导出 + 在线审计 `/files/audit/search|reads`（条件摘要、被拒留痕、导出留证）——**必须走 auditor 证**（平台-6 红线：org-admin 不自动可读消息）——✅ 2026-10-11 检索（账号/关键词/时间窗/对端）+JSONL 导出附件+查阅日志（含 audit.denied 被拒留痕）；auditor 证强制（org-admin 检索 403 且落 audit.denied，测试逐腿验证与 CLI 同口径）
 - [ ] **通知与集成**：`webhook create/list/revoke`（token 仅一次显示）、三级通知偏好只读展示、`bot add/remove/token`、`model endpoint`（模型网关外部端点）
 - [ ] **文件与配额**：`/files/manage/delete|pin|quota`、两级配额（群+个人）、`storage up/down/health/compose` 状态只读
 - [ ] **群组管理面**：`group list/capability`、群 CI（`group-ci/runs|trigger`）、群服务器与远程会话（`group-servers/enroll|sessions|session/*`）、密码箱（`group-vault/acl|rekey|audit`）、备忘录回滚（`group-memo/rollback|history`）、投票、群任务、群工具凭证
 - [ ] **业务流程页**：审批列表与决定（`/files/approvals*`）、日报团队聚合（`reports/team`）、办公室位置图管理（`office-map`）、远程协助会话台账与策略（`assist/*`）、任务与备忘录
 - [ ] **品牌与外观**：`branding` logo/splash 上传、表情包管理（`emoji/*`）、头像（`avatar/*`）
-- [ ] **健康与运维**：`/files/health`、服务状态、审计只读视图
+- [x] **健康与运维**：`/files/health`、服务状态、审计只读视图——✅ 2026-10-11 健康页（admin 自身 ok/db open/uptime；files 面探活经 MEMEX_FILES_URL 显 up/down，未配显「未配置」）+ 查阅日志只读视图；服务详情面留波次 2
 - **验收（硬口径）**：真实部署起后台 → org-admin 登录完成每块至少一条端到端操作（造数据 → 页面操作 → API/库回读一致）；auditor 只读面**改不了数据**（越权 403 与 CLI 同口径）；截图留证；测试绿才 push
 - **边界**：权限不自造（复用服务端 az）；消息内容不向 org-admin 开放（平台-6 红线）；本批只做后台页面，不动既有 CLI/协议

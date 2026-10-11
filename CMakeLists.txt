@@ -30,6 +30,7 @@ add_subdirectory(common)
 # 函数（MSVC 无），避免为不交付的产物做无谓移植。
 if(MEMEX_BUILD_SERVER)
   add_subdirectory(server)
+  add_subdirectory(admin) # 管理后台（Drogon 独立进程，直连库面复用服务端库）
 endif()
 
 if(MEMEX_BUILD_CLIENT)

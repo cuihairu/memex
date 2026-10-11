@@ -1,6 +1,8 @@
 # memex 服务端一键起：memex-server（SQLite 持久卷）+ RustFS（S3 兼容对象
-# 存储，文件面后端）。用法：`docker compose up -d`，两服务 healthy 即就绪；
-# 客户端连 <宿主机>:24360（协作面）与 <宿主机>:24561（文件面）。
+# 存储，文件面后端）+ memex-admin（网页管理后台）。用法：
+# `docker compose up -d`，三服务 healthy 即就绪；客户端连 <宿主机>:24360
+# （协作面）与 <宿主机>:24561（文件面）；浏览器开 <宿主机>:8089（管理后台，
+# admin.memex.cuihairu.site → http://192.168.5.5:8089 即指这里）。
 # 口令面：生产部署把 MEMEX_S3_ACCESS_KEY/SECRET_KEY 写进同目录 .env 再起
 # （示例口令仅限本机试跑）；RustFS 数据与 SQLite 都在命名卷里，up/down 不丢。
 # RustFS 容器契约（1.0.1 实测，与 server storage compose 生成器同口径）：
@@ -66,6 +68,37 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  # 网页管理后台（独立进程直连同一 SQLite：账号组织/策略下发/留存/
+  # 归档检索导出/设备台账/健康）。8089 映射宿主＝域名接入面。
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+      additional_contexts:
+        vcpkgsrc: "${VCPKG_SRC:-./vcpkg-src}"
+      args:
+        UBUNTU_MIRROR: "${UBUNTU_MIRROR:-}"
+    image: ghcr.io/cuihairu/memex-admin:${TAG:-local}
+    container_name: memex-admin
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      # 文件面探活（健康页显示 up/down；不配则健康页显「未配置」）
+      MEMEX_FILES_URL: "http://server:24561"
+    volumes:
+      - server-data:/var/lib/memex
+    ports:
+      - "8089:8089" # 管理后台（HTTP）
+    healthcheck:
+      test:
+        ["CMD-SHELL", "[ $$(curl -s -o /dev/null -w '%{http_code}' -m 4 http://127.0.0.1:8089/api/whoami) = 401 ]"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 volumes:
   server-data:

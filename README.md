@@ -111,22 +111,41 @@ git -C vcpkg-src checkout 10541e317a660f4165ba4ac2851ab54a8d4577b1
 docker buildx build --build-context vcpkgsrc=./vcpkg-src \
   -f server/Dockerfile -t ghcr.io/cuihairu/memex-server:local .
 
-# One-command start: server (SQLite persistent volume) + RustFS (S3-compatible object storage)
+# One-command start: server (SQLite persistent volume) + RustFS (S3-compatible object storage) + admin web console
 # (compose uses the same build by default: the VCPKG_SRC environment variable points to
 #  the snapshot, ./vcpkg-src by default; once an image exists, plain up skips the build
 #  and needs no snapshot)
 docker compose up -d
-docker compose ps        # ready once both services are healthy
+docker compose ps        # ready once all three services are healthy
 # Client connections: <host>:24360 (collaboration plane), <host>:24561 (file plane)
+# Admin console: http://<host>:8089 (see below)
 ```
 
 For production, write the object-storage credentials into `.env` in the same directory (`MEMEX_S3_ACCESS_KEY` / `MEMEX_S3_SECRET_KEY`) before starting; the example credentials are for local trials only. Server-side S3 flags take precedence over environment variables (`MEMEX_S3_ENDPOINT` / `MEMEX_S3_BUCKET` / `MEMEX_S3_ACCESS_KEY` / `MEMEX_S3_SECRET_KEY`); the bucket is created idempotently when the file plane starts (with retries until the endpoint is ready). The health probe is the unauthenticated file-plane `GET /files/health` (if you change the file-plane port, also set the container's `MEMEX_FILES_PORT`).
 
-Image publishing: pushing a `v*` tag or pushing to main has CI (`.github/workflows/docker.yml`) build and push `ghcr.io/<owner>/memex-server` (from main: immutable `sha-<full sha>` plus latest; `v*` tags additionally produce semver tags), with the dependency layer on the buildx gha cache.
+Image publishing: pushing a `v*` tag or pushing to main has CI (`.github/workflows/docker.yml`) build and push `ghcr.io/<owner>/memex-server` and `ghcr.io/<owner>/memex-admin` (from main: immutable `sha-<full sha>` plus latest; `v*` tags additionally produce semver tags), with the dependency layer on the buildx gha cache (per-image cache scopes, so the two images do not evict each other).
+
+### Admin web console (port 8089)
+
+`memex-admin` is an independent Drogon process that opens the same SQLite database as the server (busy-timeout concurrency, same-CLI data plane) and serves the org-management surface on **8089**: accounts & org tree, policy push, retention (dual-approval purge), archived-message search/export + online audit trail, device/login ledger, health. Authorization reuses the server's az engine and role semantics: managing requires the **org-admin** effective role, reading archived messages requires the **auditor** role (an org-admin is *not* automatically able to read messages — denied attempts are logged); sessions time out after 30 minutes of inactivity.
+
+```bash
+# First admin account bootstrap (one-off, via the server container's CLI; the web
+# console takes over after that):
+docker exec -it memex-server memex_server account add admin --role admin   # check exact flags with `memex_server account --help`
+docker exec -it memex-server memex_server org role grant admin org-admin
+
+# Domain access: admin.memex.cuihairu.site → http://192.168.5.5:8089 (tunnel/reverse
+# proxy maps to the host's 8089; keep the mapping terminal-side and the LAN resolves
+# through the same mechanism as the existing memex domains). All console APIs are
+# POST-only with a session cookie plus a custom X-Memex-Admin header (cross-site
+# form protection, honestly labeled: not a full CSRF solution; keep 8089 off the
+# public internet or front it with an authenticating proxy).
+```
 
 ### CI deployment chain (runner-Docker, 192.168.5.5)
 
-Chain: ci (tests) green → docker (build and push to ghcr) → **deploy** (`.github/workflows/deploy.yml`, self-hosted runner): pull the immutable `sha-<full sha>` → compose up in `/data/deploy/memex` (only the `TAG=` line of `.env` is rewritten; host configuration such as the S3 credentials is preserved as-is and never printed during the process) → bounded polling (30×10s) of the container healthcheck plus a real host-side HTTP probe of `/files/health` = 200 → if the gate fails, roll back automatically to the previous tag and verify the rolled-back deployment is healthy. Manual `workflow_dispatch` can roll back explicitly to a given `sha-xxx` (rollback material = the historical sha images retained on the host).
+Chain: ci (tests) green → docker (build and push both images to ghcr) → **deploy** (`.github/workflows/deploy.yml`, self-hosted runner): pull the immutable `sha-<full sha>` → compose up in `/data/deploy/memex` (only the `TAG=` line of `.env` is rewritten; host configuration such as the S3 credentials is preserved as-is and never printed during the process) → bounded polling (30×10s) of the container healthchecks plus a real host-side HTTP probe of `/files/health` = 200 → if the gate fails, roll back automatically to the previous tag and verify the rolled-back deployment is healthy. Manual `workflow_dispatch` can roll back explicitly to a given `sha-xxx` (rollback material = the historical sha images retained on the host). The compose file also brings up `memex-admin`; when upgrading an existing deployment, the first `up` pulls the admin image alongside the server one and the console appears on the host's 8089.
 
 One-time setup of runner-Docker (run on that machine):
 
