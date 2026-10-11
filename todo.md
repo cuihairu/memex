@@ -379,3 +379,11 @@
 
 - [ ] **截图功能真实可用性排查修复**（用户 2026-10-11 verbatim「memex 的截图也没有实现」）：代码面存在 `client/app/screenshot_tool.cpp` + `test_screenshot.cpp` + `shortcut_settings` 接线，T4.4 也标了 `[x]`，但用户实测不可用——排查：①入口是否真触发（菜单项/快捷键是否接线到主窗、点击有无反应）；②截屏→标注（涂鸦/箭头/马赛克/文字）链路能否走通；③确认发送是否直达会话。修复后**真实走查留证**（截一张→标注→发送→会话可见，截图入报文），再把 T4.4 与本条如实对账（实现到什么程度如实勾，未达验收的不许标完成）。
 - [ ] **原型图逐屏核对**（用户 2026-10-11 verbatim「核对下原型图，很多都对不上，ui都对不上啊」「把核对不对的 整理到todo.md 中」）：`docs/design/prototypes/` 14 稿（desktop 10 + mobile 4，含 prototypes.css）↔ 实现逐屏比对——布局/字段/控件/文案/主题令牌逐项对照，**对不上的逐条列进本节**（格式：屏名｜差距｜原型 desktop-xx.html:行 / 实现 client/app/xxx.cpp:行｜P0/P1/P2）；已实况化的屏（live-*）与原型稿差异单独判定是「实现过时」还是「原型未更新」，不许混为一谈。只整理不改码（修复另批）。
+
+## 服务器部署批（2026-10-11 用户令，verbatim：「提供部署到docker 中，需要ci 配置，然后我cloudfare tunnel 提供tcp 域名连接，这个服务器地址，我默认为server.memex.cuihairu.site」）
+
+- [ ] **Docker 部署交付**：服务端出 `Dockerfile` + `compose.yml`——含数据卷持久化（`memex-server.db` 与归档文件不随容器重建丢失）、端口映射（服务端 TCP + webhook 端口 24361）、环境/配置注入；`docker compose up` 一条命令可起，起后客户端可正常登录（不只构建通过就算数）
+- [ ] **CI 镜像流水线**：workflow 构建服务端镜像并推 ghcr（`latest` + `sha-<短提交>`，与舰队既有口径一致），构建绿才推；不打 tag、不建 Release（版本发布红线，nightly/滚动 latest 除外）
+- [ ] **Cloudflare tunnel TCP 接入**：仓里给 `cloudflared` 配置样例——`tcp://` ingress 把服务端 TCP 端口与 webhook 端口暴露到公网，**域名 `server.memex.cuihairu.site`（用户已定）**；tunnel token/账号归用户 Cloudflare 侧，仓里只放配置样例与接入步骤，不代管凭证
+- [ ] **客户端默认服务器地址**：默认值设为 `server.memex.cuihairu.site`（首次启动向导与默认配置同源）；**地址始终可改**——内网/局域网部署场景不强制走外网域名，连接目标是用户可配置项而非硬编码
+- **验收（硬口径）**：①本机 `docker compose up` 真实起服务 → 客户端用默认地址 `server.memex.cuihairu.site` 经 tunnel **真连上并登录成功**（连接日志/截图留证）；②CI run 绿且 ghcr 镜像可拉；③数据卷重启不丢（重启容器后账号/消息仍在）；④无 tunnel 环境下改回内网地址仍可登录（证明默认值不是硬依赖）。测试绿才 push，commit 英文简短。
