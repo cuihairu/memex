@@ -129,14 +129,35 @@ int main(int argc, char** argv) {
                            QStringLiteral("bob"), QStringLiteral("pass-b"),
                            QStringLiteral("--db"), srv_db}) == 0);
 
-  const quint16 port = free_port();
+  // free_port() + 重试整个 server 启动（最多 3 次，与 test_avatar_client
+  // 同构）：吸收 CI 共享 runner 竞态——free_port 探活与 serve bind 之间
+  // 端口可被抢占，bind 失败即全腿级联
+  quint16 port = 0;
   QProcess server;
-  server.setProcessChannelMode(QProcess::ForwardedChannels);
-  server.start(server_bin, {QStringLiteral("serve"), QStringLiteral("--db"),
-                            srv_db, QStringLiteral("--port"),
-                            QString::number(port)});
-  CHECK(server.waitForStarted(5000));
-  CHECK(wait_until([&] { return port_listening(port); }, 8000));
+  bool server_ok = false;
+  for (int attempt = 0; attempt < 3 && !server_ok; ++attempt) {
+    port = free_port();
+    if (port == 0) {
+      QThread::msleep(100);
+      continue;
+    }
+    server.setProcessChannelMode(QProcess::ForwardedChannels);
+    server.start(server_bin, {QStringLiteral("serve"), QStringLiteral("--db"),
+                              srv_db, QStringLiteral("--port"),
+                              QString::number(port)});
+    if (!server.waitForStarted(5000)) {
+      qCritical("FAIL server 启动超时（尝试 %d/3）", attempt + 1);
+      continue;
+    }
+    if (wait_until([&] { return port_listening(port); }, 8000)) {
+      server_ok = true;
+      break;
+    }
+    qCritical("FAIL port %u 探活超时（尝试 %d/3），重试", port, attempt + 1);
+    server.kill();
+    server.waitForFinished(3000);
+  }
+  CHECK(server_ok);
 
   // 直连双实例（真实互发现，同生产 UDP 通道）
   DirectEngine da("dev-A2", tmp.filePath(QStringLiteral("a.db")));

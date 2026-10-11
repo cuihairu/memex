@@ -519,17 +519,40 @@ void test_e2e(const QString& tmp_path) {
   }
 
   PHASE("e2e:server-start");
-  const quint16 port = free_port();
-  const quint16 wh_port = free_port();
+  // 双端口 free_port() + 重试整个 server 启动（最多 3 次，与
+  // test_avatar_client 同构）：吸收 CI 共享 runner 竞态——free_port
+  // 探活与 serve bind 之间端口可被抢占，bind 失败即全腿级联
+  quint16 port = 0;
+  quint16 wh_port = 0;
   QProcess server;
-  server.setProcessChannelMode(QProcess::ForwardedChannels);
-  server.start(server_bin,
-               {QStringLiteral("serve"), QStringLiteral("--db"), db,
-                QStringLiteral("--port"), QString::number(port),
-                QStringLiteral("--webhook-port"), QString::number(wh_port)});
-  CHECK(server.waitForStarted(5000));
-  CHECK(wait_until([&] { return port_listening(port); }, 15000));
-  CHECK(wait_until([&] { return port_listening(wh_port); }, 15000));
+  bool server_ok = false;
+  for (int attempt = 0; attempt < 3 && !server_ok; ++attempt) {
+    port = free_port();
+    wh_port = free_port();
+    if (port == 0 || wh_port == 0) {
+      QThread::msleep(100);
+      continue;
+    }
+    server.setProcessChannelMode(QProcess::ForwardedChannels);
+    server.start(server_bin,
+                 {QStringLiteral("serve"), QStringLiteral("--db"), db,
+                  QStringLiteral("--port"), QString::number(port),
+                  QStringLiteral("--webhook-port"), QString::number(wh_port)});
+    if (!server.waitForStarted(5000)) {
+      qCritical("FAIL server 启动超时（尝试 %d/3）", attempt + 1);
+      continue;
+    }
+    if (wait_until([&] { return port_listening(port); }, 15000) &&
+        wait_until([&] { return port_listening(wh_port); }, 15000)) {
+      server_ok = true;
+      break;
+    }
+    qCritical("FAIL port %u/%u 探活超时（尝试 %d/3），重试", port, wh_port,
+              attempt + 1);
+    server.kill();
+    server.waitForFinished(3000);
+  }
+  CHECK(server_ok);
 
   // 建 webhook（CLI 真跑，token 从 stdout 解析——与运维口径一致）
   const auto make_webhook = [&](const QString& target) {
