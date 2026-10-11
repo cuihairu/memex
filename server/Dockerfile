@@ -55,6 +55,9 @@ FROM deps AS build
 COPY CMakeLists.txt ./
 COPY common ./common
 COPY server ./server
+# 根 CMakeLists 在 MEMEX_BUILD_SERVER 下 add_subdirectory(admin)（后台面
+# 归入服务端构建树），源码目录须随上下文带入，配置期才不缺目录
+COPY admin ./admin
 RUN cmake -S . -B build -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_TOOLCHAIN_FILE=/opt/vcpkg/scripts/buildsystems/vcpkg.cmake \
