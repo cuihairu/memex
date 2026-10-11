@@ -11,11 +11,13 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QImage>
 #include <QPainter>
 #include <QPixmap>
 #include <QProcess>
 #include <QRandomGenerator>
+#include <QScreen>
 #include <QTemporaryDir>
 #include <QThread>
 #include <QTcpServer>
@@ -220,6 +222,21 @@ void test_region_math() {
   CHECK(region_to_local(QRect(0, 0, 10, 10), a_top, a_size, 0).isEmpty());
 }
 
+// —— ④ freeze-first 入口门：抓屏全空的平台（offscreen）＝立即降级 failed，
+// running_ 复位（不闪选区框、不留卡死态；真机 X11 路径见 Xvfb 走查证据）
+void test_fail_fast() {
+  MainWindow window;
+  const QPixmap probe = QGuiApplication::primaryScreen()->grabWindow(0);
+  if (!probe.isNull()) return; // 有真实抓屏的平台不适用本腿（X11/Xvfb 走查覆盖）
+  bool failed_seen = false;
+  QObject::connect(window.screenshot_tool(),
+                   &memex::client::ScreenshotTool::failed,
+                   [&] { failed_seen = true; });
+  window.screenshot_tool()->start();
+  CHECK(failed_seen);
+  CHECK(!window.screenshot_tool()->isRunning());
+}
+
 // —— ③ 端到端：注入截屏 → 标注 → 确认 → 发送 → 对端收到 ——
 
 void test_end_to_end() {
@@ -380,6 +397,7 @@ int main(int argc, char** argv) {
 
   test_canvas();
   test_region_math();
+  test_fail_fast();
   test_end_to_end();
 
   if (g_failures == 0) {

@@ -135,13 +135,21 @@ bool AnnotationCanvas::save(const QString& path) const {
 
 // —— 区域选择覆盖层 ——
 
-RegionSelectOverlay::RegionSelectOverlay(QScreen* screen, SelectionState* state,
+RegionSelectOverlay::RegionSelectOverlay(QScreen* screen, const QPixmap& frozen,
+                                         SelectionState* state,
                                          QWidget* parent)
-    : QWidget(parent), screen_(screen), state_(state) {
+    : QWidget(parent), screen_(screen), frozen_(frozen), state_(state) {
   Q_ASSERT(screen);
-  setAttribute(Qt::WA_TranslucentBackground);
+  // 全窗不透明：冻结底图＋压暗预合成——选区「透亮」靠原图画上而非 alpha
+  // 挖洞，无合成器桌面（Xvfb／裸 X）渲染同样正确
   setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint |
                  Qt::Tool);
+  dimmed_ = frozen;
+  if (!dimmed_.isNull()) {
+    QPainter p(&dimmed_);
+    p.fillRect(dimmed_.rect(), QColor(20, 20, 20, 110));
+    p.end();
+  }
   setGeometry(screen->geometry());
   setCursor(Qt::CrossCursor);
   setMouseTracking(true);
@@ -150,17 +158,24 @@ RegionSelectOverlay::RegionSelectOverlay(QScreen* screen, SelectionState* state,
 
 void RegionSelectOverlay::paintEvent(QPaintEvent*) {
   QPainter p(this);
-  p.fillRect(rect(), QColor(20, 20, 20, 110));
+  // 冻结底图（触发瞬间的真实画面，压暗版）铺满本屏
+  if (!dimmed_.isNull()) p.drawPixmap(rect(), dimmed_);
+  else p.fillRect(rect(), QColor(20, 20, 20));
   if (state_->selecting) {
     const QRect local =
         region_to_local(state_->current, screen_->geometry().topLeft(),
                         screen_->geometry().size(),
                         screen_->devicePixelRatio());
     if (!local.isEmpty()) {
-      // 选区「挖空」：Clear 合成擦出透明，桌面透出（经典选区效果）
-      p.setCompositionMode(QPainter::CompositionMode_Clear);
-      p.fillRect(local, Qt::transparent);
-      p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+      // 选区「透亮」：未压暗冻结图块按设备像素原样画上（不透明）
+      if (!frozen_.isNull()) {
+        const double dpr = screen_->devicePixelRatio();
+        QRect dev(QPoint(qRound(local.x() * dpr), qRound(local.y() * dpr)),
+                  QSize(qRound(local.width() * dpr),
+                        qRound(local.height() * dpr)));
+        dev = dev.intersected(frozen_.rect());
+        if (!dev.isEmpty()) p.drawPixmap(local, frozen_, dev);
+      }
       p.setPen(QPen(QColor(QStringLiteral("#e16531")), 2));
       p.drawRect(local.adjusted(0, 0, -1, -1));
       // 尺寸标签：优先在选区上方，空间不足放内部顶端
@@ -209,6 +224,12 @@ void RegionSelectOverlay::mouseReleaseEvent(QMouseEvent* e) {
 
 void RegionSelectOverlay::keyPressEvent(QKeyEvent* e) {
   if (e->key() == Qt::Key_Escape) emit escapePressed();
+}
+
+void RegionSelectOverlay::hideEvent(QHideEvent*) {
+  // 选区中途窗被藏（WM 关窗／他窗接管＝Esc 已无焦点面）＝流程悬死——
+  // 同径取消让 running_ 复位；正常收尾路径 selecting 已复位，不会误发
+  if (state_->selecting) emit escapePressed();
 }
 
 // —— 标注窗 ——
@@ -553,9 +574,28 @@ ScreenshotTool::~ScreenshotTool() {
 }
 
 void ScreenshotTool::start() {
+  // 卡死自愈：running_ 残留但覆盖层与标注窗皆无＝上次流程被外部打断
+  // （WM 杀窗等），若不复位此后每次触发都静默 no-op（「点截图没反应」）
+  if (running_ && overlays_.isEmpty() && !widget_) running_ = false;
   if (running_) return;
+  // freeze-first：触发瞬间抓全屏（此时无任何覆盖层＝画面干净），选完直接
+  // 从冻结图裁剪——先出框后抓屏会烙进遮罩，且 unmap 后 Expose 未处理前
+  // 抓屏抓到黑底（Xvfb 实录 2026-10-12）。全部屏抓空（Wayland 无门户等）
+  // 立即降级提示，不闪选区框
+  frozen_.clear();
+  for (QScreen* s : QGuiApplication::screens())
+    frozen_.append({s, s->grabWindow(0)});
+  bool any_grab = false;
+  for (const FrozenScreen& f : frozen_) any_grab = any_grab || !f.grab.isNull();
   running_ = true;
   state_ = SelectionState();
+  if (!any_grab) {
+    running_ = false;
+    emit failed(QStringLiteral(
+        "当前桌面环境不支持截屏（Wayland 会话需门户授权）；"
+        "可改用「发文件」发送图片"));
+    return;
+  }
   showOverlays();
 }
 
@@ -568,7 +608,10 @@ void ScreenshotTool::startWithImage(const QPixmap& img) {
 
 void ScreenshotTool::showOverlays() {
   for (QScreen* s : QGuiApplication::screens()) {
-    auto* ov = new RegionSelectOverlay(s, &state_);
+    QPixmap grab;
+    for (const FrozenScreen& f : frozen_)
+      if (f.screen == s) grab = f.grab;
+    auto* ov = new RegionSelectOverlay(s, grab, &state_);
     connect(ov, &RegionSelectOverlay::pressed, this,
             &ScreenshotTool::onOverlayPressed);
     connect(ov, &RegionSelectOverlay::moved, this,
@@ -589,6 +632,11 @@ void ScreenshotTool::showOverlays() {
 }
 
 void ScreenshotTool::closeOverlays() {
+  // 先同步 hide（立即 unmap）再 deleteLater：DeferredDelete 不被
+  // processEvents(AllEvents) 处理（Qt 需显式 DeferredDelete 标志），只
+  // deleteLater 的话取屏时遮罩仍压在屏上＝全屏遮罩烙进截图（Xvfb 实测
+  // 抓到遮罩像素 (9,9,9)，2026-10-12）
+  for (RegionSelectOverlay* ov : overlays_) ov->hide();
   for (RegionSelectOverlay* ov : overlays_) ov->deleteLater();
   overlays_.clear();
 }
@@ -623,18 +671,40 @@ void ScreenshotTool::onOverlayReleased(const QPoint& device_pt) {
     return;
   }
   last_region_ = rect;
-  // 覆盖层先隐藏再取屏，避免把选区 UI 截进去
-  QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-  const QPixmap shot = QGuiApplication::primaryScreen()->grabWindow(
-      0, rect.x(), rect.y(), rect.width(), rect.height());
-  if (shot.isNull()) {
+  // 冻结图裁剪：选区中心所在屏为准（跨屏选区以中心屏边界截断），逻辑
+  // 全局 → 本屏逻辑 → 设备像素。冻结图即触发瞬间的干净画面，与覆盖层
+  // 关闭／重绘时序彻底解耦
+  const FrozenScreen* picked = nullptr;
+  for (const FrozenScreen& f : frozen_)
+    if (!f.grab.isNull() && f.screen->geometry().contains(rect.center())) {
+      picked = &f;
+      break;
+    }
+  if (!picked) {
+    for (const FrozenScreen& f : frozen_)
+      if (!f.grab.isNull()) {
+        picked = &f;
+        break;
+      }
+  }
+  if (!picked) {
     running_ = false;
-    emit failed(QStringLiteral(
-        "当前桌面环境不支持截屏（Wayland 会话需门户授权）；"
-        "可改用「发文件」发送图片"));
+    emit failed(QStringLiteral("截屏失败：取屏缓存为空"));
     return;
   }
-  emit captured(shot);
+  const double dpr = picked->screen->devicePixelRatio();
+  const QRect geo = picked->screen->geometry();
+  QRect dev((rect.x() - geo.x()) * static_cast<int>(dpr),
+            (rect.y() - geo.y()) * static_cast<int>(dpr),
+            rect.width() * static_cast<int>(dpr),
+            rect.height() * static_cast<int>(dpr));
+  dev = dev.intersected(picked->grab.rect());
+  if (dev.isEmpty()) {
+    running_ = false;
+    emit failed(QStringLiteral("截屏失败：选区不在有效屏幕内"));
+    return;
+  }
+  emit captured(picked->grab.copy(dev));
 }
 
 void ScreenshotTool::onOverlayEscape() {

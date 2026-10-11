@@ -75,14 +75,18 @@ struct SelectionState {
   QRect current; // 虚拟屏设备像素
 };
 
-// 区域选择覆盖层（每屏一个）：全屏压暗＋选区高亮＋尺寸标签；
-// 拖拽跨屏选择，松开确认，Esc 取消。坐标为虚拟屏设备像素。
+// 区域选择覆盖层（每屏一个）：冻结底图＋压暗＋选区「透亮」＋尺寸标签。
+// 底图为触发瞬间抓取的冻结屏（freeze-first：先抓屏后出框，抓取与
+// 覆盖层关闭时序彻底解耦——unmap 后 Expose 未处理前抓屏会烙进遮罩/
+// 黑底，Xvfb 实测 2026-10-12）。全窗不透明（无 WA_TranslucentBackground），
+// 选区「透亮」＝直接把未压暗冻结图块画上去，无合成器也渲染正确；
+// 松开确认，Esc 取消。坐标为虚拟屏设备像素。
 class RegionSelectOverlay : public QWidget {
   Q_OBJECT
 
 public:
-  RegionSelectOverlay(QScreen* screen, SelectionState* state,
-                      QWidget* parent = nullptr);
+  RegionSelectOverlay(QScreen* screen, const QPixmap& frozen,
+                      SelectionState* state, QWidget* parent = nullptr);
 
 signals:
   void pressed(const QPoint& device_pt);
@@ -96,9 +100,12 @@ protected:
   void mouseMoveEvent(QMouseEvent*) override;
   void mouseReleaseEvent(QMouseEvent*) override;
   void keyPressEvent(QKeyEvent*) override;
+  void hideEvent(QHideEvent*) override;
 
 private:
   QScreen* screen_;
+  QPixmap frozen_;     // 本屏冻结底图（设备像素）
+  QPixmap dimmed_;     // 冻结图压暗版（显示用，预合成）
   SelectionState* state_;
 };
 
@@ -207,6 +214,13 @@ private:
   void onWidgetFailed(const QString& reason);
 
   SelectionState state_;
+  // freeze-first：触发瞬间各屏冻结底图（设备像素）——选区覆盖层画它，
+  // 确认后从它裁剪（无重绘竞态）
+  struct FrozenScreen {
+    QScreen* screen;
+    QPixmap grab;
+  };
+  QVector<FrozenScreen> frozen_;
   QRect last_region_; // 最近一次取屏区域（设备像素；标注窗定位用）
   QVector<RegionSelectOverlay*> overlays_;
   AnnotationWidget* widget_{nullptr};
