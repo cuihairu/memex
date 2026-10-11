@@ -617,6 +617,65 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # 主窗列表态窗口宽度约束冒烟（2026-10-11 用户实录）：列表态右缘上限＝
+  # 左侧列内容宽（拖窗口右缘不再撑出死空间）；开会话释放上限恢复会话态
+  # 宽；回列表态上限复归窗宽收回。离屏真 MainWindow 三腿
+  add_executable(test_window_layout
+    app/tests/test_window_layout.cpp
+    app/shortcut_settings.cpp
+    app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
+    app/away_settings.cpp
+    app/brand_kit.cpp
+    app/main_window.cpp
+    app/rail_nav.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
+    app/emoji_pack_dialog.cpp
+    app/file_assistant.cpp
+    app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
+    app/task_template_settings.cpp
+    app/approval_dialog.cpp
+    app/report_dialog.cpp
+    app/group_tools_dialog.cpp
+    app/audit_dialog.cpp
+    app/office_map_dialog.cpp
+    app/assist_dialog.cpp
+    engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
+    engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
+    app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
+    app/group_ci_dialog.cpp
+    app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
+    app/theme.cpp
+    app/theme_pack.cpp
+    app/theme_settings_page.cpp
+    app/brand_settings_page.cpp)
+  target_include_directories(test_window_layout PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_window_layout PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
+  target_compile_definitions(test_window_layout PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME window_layout COMMAND test_window_layout)
+  set_tests_properties(window_layout PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # 二期·会话审计窗口冒烟：真服务端进程 × 离屏 QDialog——CollabEngine
   # 造归档消息→无角色检索 403 状态行明示→授 auditor 后持证检索命中→
   # 查阅日志台账见检索与被拒留痕（可对账）。判权分立腿（admin≠auditor）

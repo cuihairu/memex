@@ -816,14 +816,16 @@ void MainWindow::build_ui() {
     }
   });
   // 好友/会话列表：点击打开会话（点开＝面板展开）；再点当前会话项＝
-  // 关回列表态（经典 IM 三栏切换）。selectionChanged 键盘导航不打开，
-  // 回车/双击激活走 itemActivated 同一路径。
+  // 关回列表态（经典 IM 三栏切换）。会话开着与否看状态变量（current_peer_
+  // 与面板显隐同步变化，close_chat 清/open_chat 设；离屏未 show 的窗口里
+  // 子件 isVisible() 恒 false，不能拿面板显隐当判据）。selectionChanged
+  // 键盘导航不打开，回车/双击激活走 itemActivated 同一路径。
   const auto list_open = [this](QListWidgetItem* item) {
     if (!item) return;
     const QString id = item->data(Qt::UserRole).toString();
     if (id.isEmpty()) return; // 分组标题行不可选
     const QString kind = item->data(Qt::UserRole + 1).toString();
-    if (chat_panel_->isVisible() && id == current_peer_ &&
+    if (!current_peer_.isEmpty() && id == current_peer_ &&
         kind == current_kind_) {
       close_chat(); // 再点当前好友＝回列表态
       return;
@@ -3517,11 +3519,17 @@ void MainWindow::close_chat() {
   chat_view_->clear();
   chat_panel_->hide();
   if (!isMaximized() && width() > 400) resize(320, height());
+  // 列表态收紧窗口右缘上限＝左侧列内容宽（rail 60＋会话列 260）：拖窗口右缘
+  // 不再把列表与右框之间撑出死空间（2026-10-11 用户报——列表态拉宽窗口，
+  // 对话面板已收起，右侧空档与列表视觉分离）。拉长只应发生在会话态（右窗
+  // 可见时由 chat 面吸收）。最大化不受本上限约束（受屏幕几何支配）。
+  if (!isMaximized()) setMaximumWidth(rail_->minimumWidth() + side_->minimumWidth());
 }
 
 void MainWindow::open_chat(const QString& kind, const QString& id) {
   // 布局令：对话面板只在打开会话后展开（列表态点好友／菜单／通知点入）；
   // 从列表态展开时若窗口还停在窄长方形，恢复会话态宽度
+  setMaximumWidth(QWIDGETSIZE_MAX); // 释放列表态的右缘上限（见 close_chat）
   if (chat_panel_->isHidden() && !isMaximized() && width() < 520)
     resize(960, height());
   chat_panel_->show();
