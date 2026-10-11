@@ -388,3 +388,21 @@
 - [ ] **客户端默认服务器地址**：默认值设为 `server.memex.cuihairu.site`（首次启动向导与默认配置同源）；**地址始终可改**——内网/局域网部署场景不强制走外网域名，连接目标是用户可配置项而非硬编码
 - [ ] **域名强制解析配置（局域网直连）**（用户 2026-10-11 verbatim「需要提供配置选项，用户可以在局域网把server.memex.cuihairu.site 强制解析为真实的服务器ip」）：提供**域名→内网 IP 覆盖**配置——局域网用户可把 `server.memex.cuihairu.site` 强制解析到真实服务器 IP（如 `192.168.5.5`），流量直连内网不过 tunnel。落地形态二选一或并存：①客户端设置里加「服务器域名解析覆盖」（域名→IP 映射，配置优先于系统 DNS）；②至少给出 hosts / 内网 DNS 两种标准做法的配置文档。**默认不覆盖**（公网场景走 tunnel 正常解析），覆盖为显式用户配置项
 - **验收（硬口径）**：①本机 `docker compose up` 真实起服务 → 客户端用默认地址 `server.memex.cuihairu.site` 经 tunnel **真连上并登录成功**（连接日志/截图留证）；②CI run 绿且 ghcr 镜像可拉；③数据卷重启不丢（重启容器后账号/消息仍在）；④无 tunnel 环境下改回内网地址仍可登录（证明默认值不是硬依赖）。测试绿才 push，commit 英文简短。
+
+## admin 管理后台（2026-10-11 用户令：整理现有管理功能面并立项网页化）
+
+> 现状盘点（扫代码非臆造）：`admin/` 仅 README 占位（规划「第一期第四阶段起建设」）；管理能力现散布在 **90 个 `/files/*` HTTP 路由 + 19 个 CLI 子命令**（account/org/policy/audit/messages/retention/webhook/bot/device/group/storage/assist/model/branding…共 40+ 二级命令）里，**全部没有 UI**。本批=把这些能力整理成网页后台的建设范围：
+
+- [ ] **后台骨架**：登录与角色门（org-admin / auditor 分权，判权复用服务端 az 规则**不自造**）、导航、会话超时
+- [ ] **账号与组织**：`account add/list`、部门树 `org dept/member/membership`、汇报线 `org reporting`、组织字段与可见性 `org fields/visibility/hide/allow/import`、角色授予 `org role`
+- [ ] **设备与登录台账**：`device list/enable/disable/set/unbind`、`logins` 台账、`identity`
+- [ ] **策略下发**：`policy set/list/show`（含部门行、文件跨部门/转发四开关）、`retention set/show/purge`（留存与到期清理）
+- [ ] **归档检索与导出**：`messages` 检索/导出 + 在线审计 `/files/audit/search|reads`（条件摘要、被拒留痕、导出留证）——**必须走 auditor 证**（平台-6 红线：org-admin 不自动可读消息）
+- [ ] **通知与集成**：`webhook create/list/revoke`（token 仅一次显示）、三级通知偏好只读展示、`bot add/remove/token`、`model endpoint`（模型网关外部端点）
+- [ ] **文件与配额**：`/files/manage/delete|pin|quota`、两级配额（群+个人）、`storage up/down/health/compose` 状态只读
+- [ ] **群组管理面**：`group list/capability`、群 CI（`group-ci/runs|trigger`）、群服务器与远程会话（`group-servers/enroll|sessions|session/*`）、密码箱（`group-vault/acl|rekey|audit`）、备忘录回滚（`group-memo/rollback|history`）、投票、群任务、群工具凭证
+- [ ] **业务流程页**：审批列表与决定（`/files/approvals*`）、日报团队聚合（`reports/team`）、办公室位置图管理（`office-map`）、远程协助会话台账与策略（`assist/*`）、任务与备忘录
+- [ ] **品牌与外观**：`branding` logo/splash 上传、表情包管理（`emoji/*`）、头像（`avatar/*`）
+- [ ] **健康与运维**：`/files/health`、服务状态、审计只读视图
+- **验收（硬口径）**：真实部署起后台 → org-admin 登录完成每块至少一条端到端操作（造数据 → 页面操作 → API/库回读一致）；auditor 只读面**改不了数据**（越权 403 与 CLI 同口径）；截图留证；测试绿才 push
+- **边界**：权限不自造（复用服务端 az）；消息内容不向 org-admin 开放（平台-6 红线）；本批只做后台页面，不动既有 CLI/协议
