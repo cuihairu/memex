@@ -109,12 +109,43 @@ docker buildx build --build-context vcpkgsrc=./vcpkg-src \
 #  已有镜像后直接 up 不触发构建、无需快照）
 docker compose up -d
 docker compose ps        # 两服务 healthy 即就绪
-# 客户端连接：<宿主机>:24360（协作面）、<宿主机>:24561（文件面）
+# 客户端连接：<宿主机>:8088（协作面对外口，对齐 tunnel 回源 tcp://192.168.5.5:8088）
+# 或 <宿主机>:24360（局域网缺省口兼容）、<宿主机>:24561（文件面）
 ```
 
 对象存储口令生产环境写同目录 `.env`（`MEMEX_S3_ACCESS_KEY`／`MEMEX_S3_SECRET_KEY`）再起；示例口令仅限本机试跑。服务端 S3 配置旗标优先、环境变量兜底（`MEMEX_S3_ENDPOINT`／`MEMEX_S3_BUCKET`／`MEMEX_S3_ACCESS_KEY`／`MEMEX_S3_SECRET_KEY`），桶在起面时幂等自建（含对端就绪重试）。健康探针＝文件面无鉴权 `GET /files/health`（改文件面端口时同步设容器 `MEMEX_FILES_PORT`）。
 
 镜像发布：推 `v*` tag 或推 main 由 CI（`.github/workflows/docker.yml`）构建并推 `ghcr.io/<owner>/memex-server`（main＝不可变 `sha-<完整 sha>` + latest；v* 另出 semver），依赖层走 buildx gha 缓存。
+
+### 公网接入：Cloudflare tunnel（TCP 8088）
+
+```
+客户端（cloudflared access tcp）→ Cloudflare 边缘：server.memex.cuihairu.site
+  → 用户侧 tunnel → 回源 tcp://<回源机>:8088 → 宿主 0.0.0.0:8088 → 容器 24360
+```
+
+映射关系配在用户 Cloudflare 侧（token 与 tunnel 配置不进仓、不代管）。仓里的契约只有一条：**协作面对外发布在宿主 8088**（compose 默认即此），且 tunnel 回源地址指向真正跑 `docker compose up` 的那台机——部署机与 tunnel 配置假设的机不一致时改回源地址，端口保持 8088。
+
+- 原始 TCP tunnel 的客户端侧：公网侧裸 TCP 客户端连不到边缘——客户端机先跑 `cloudflared access tcp --hostname server.memex.cuihairu.site --url 127.0.0.1:8088`，再把 Memex 客户端指向 `127.0.0.1:8088`；局域网内不走 tunnel，直连 `<宿主机>:8088`。
+- webhook（24361）：要对外暴露须另配 ingress（HTTP 域名映射，或同 tunnel 加一条 HTTP ingress）——**仓里不代管**；hook token 是持有式凭据，能只留局域网就别暴露公网。
+
+状态自查与排查——从回源侧往外走：
+
+```bash
+# 1) 回源机真在服务？（先全绿再怀疑 tunnel）
+docker compose ps                                   # server healthy
+nc -zv <回源机> 8088                                # 协作面 accept
+curl -sf http://<回源机>:24561/files/health         # 文件面健康 = 200
+
+# 2) tunnel 状态（用户侧）：Cloudflare 控制台 → Zero Trust → Networks → Tunnels，
+#    或在 cloudflared 所在机：
+cloudflared tunnel list && cloudflared tunnel info <tunnel>
+
+# 3) 客户端连不通？按序走：server.memex.cuihairu.site 解析得通？→ tunnel 状态
+#    HEALTHY（connector 在线）？→ cloudflared 所在机能 nc 通 <回源机>:8088？
+#    → 客户端真走了 cloudflared access（裸 TCP 到不了边缘）？
+#    局域网替代路：hosts 把域名强制解析到服务器 IP 直连，不过 tunnel。
+```
 
 ### CI 部署链（runner-Docker，192.168.5.5）
 

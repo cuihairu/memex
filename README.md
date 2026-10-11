@@ -117,13 +117,47 @@ docker buildx build --build-context vcpkgsrc=./vcpkg-src \
 #  and needs no snapshot)
 docker compose up -d
 docker compose ps        # ready once all three services are healthy
-# Client connections: <host>:24360 (collaboration plane), <host>:24561 (file plane)
+# Client connections: <host>:8088 (collaboration plane, external port aligned with the
+# tunnel origin tcp://192.168.5.5:8088) or <host>:24360 (LAN default-port compat),
+# <host>:24561 (file plane)
 # Admin console: http://<host>:8089 (see below)
 ```
 
 For production, write the object-storage credentials into `.env` in the same directory (`MEMEX_S3_ACCESS_KEY` / `MEMEX_S3_SECRET_KEY`) before starting; the example credentials are for local trials only. Server-side S3 flags take precedence over environment variables (`MEMEX_S3_ENDPOINT` / `MEMEX_S3_BUCKET` / `MEMEX_S3_ACCESS_KEY` / `MEMEX_S3_SECRET_KEY`); the bucket is created idempotently when the file plane starts (with retries until the endpoint is ready). The health probe is the unauthenticated file-plane `GET /files/health` (if you change the file-plane port, also set the container's `MEMEX_FILES_PORT`).
 
 Image publishing: pushing a `v*` tag or pushing to main has CI (`.github/workflows/docker.yml`) build and push `ghcr.io/<owner>/memex-server` and `ghcr.io/<owner>/memex-admin` (from main: immutable `sha-<full sha>` plus latest; `v*` tags additionally produce semver tags), with the dependency layer on the buildx gha cache (per-image cache scopes, so the two images do not evict each other).
+
+### Public access via Cloudflare tunnel (TCP 8088)
+
+```
+client (cloudflared access tcp) → Cloudflare edge: server.memex.cuihairu.site
+  → user-side tunnel → origin tcp://<origin-host>:8088 → host 0.0.0.0:8088 → container 24360
+```
+
+The mapping itself is configured on the user's Cloudflare side (token and tunnel config are not managed in this repo). The repo's side of the contract is one line: **publish the collaboration plane on host port 8088** (the compose default) and point the tunnel origin at the machine that actually runs `docker compose up` — if the deployment lives on a different host than the tunnel config assumes, update the origin, the port stays 8088.
+
+- Client side of a raw-TCP tunnel: the edge cannot be hit with a bare TCP client from the internet — run `cloudflared access tcp --hostname server.memex.cuihairu.site --url 127.0.0.1:8088` on the client machine, then point the Memex client at `127.0.0.1:8088`. LAN clients skip the tunnel entirely and connect to `<host>:8088` directly.
+- Webhook (24361): public exposure needs its own ingress rule (an HTTP-mapped hostname or an extra HTTP ingress on the same tunnel) — deliberately **not managed in this repo**; the hook token is a bearer secret, so prefer keeping 24361 LAN-only.
+
+Status checks and troubleshooting — walk from the origin outward:
+
+```bash
+# 1) Origin really serving? (all green here before blaming the tunnel)
+docker compose ps                                   # server healthy
+nc -zv <origin-host> 8088                           # collaboration plane accepts
+curl -sf http://<origin-host>:24561/files/health    # file plane health = 200
+
+# 2) Tunnel status (user side): Cloudflare dashboard → Zero Trust → Networks →
+#    Tunnels, or from the cloudflared host:
+cloudflared tunnel list && cloudflared tunnel info <tunnel>
+
+# 3) Client cannot connect? In order: does server.memex.cuihairu.site resolve?
+#    → tunnel HEALTHY (connector online)? → can the cloudflared host reach
+#    <origin-host>:8088? → is the client really going through cloudflared access
+#    (a bare TCP client never reaches the edge)?
+#    LAN alternative: hosts-override the domain to the server IP and connect
+#    directly — no tunnel in the path.
+```
 
 ### Admin web console (port 8089)
 
