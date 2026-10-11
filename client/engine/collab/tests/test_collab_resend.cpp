@@ -80,6 +80,24 @@ QString run_capture(const QString& bin, const QStringList& args) {
   return QString::fromUtf8(p.readAllStandardOutput());
 }
 
+// 服务端起面（带重试）：全量套件负载下杀旧起新同端口，端口释放与
+// 进程孵化偶发迟滞，一次绑定失败＝整段后续腿级联假红——kill 后重试，
+// 直到探活命中；重试耗尽返回 false（真问题不掩盖）
+bool start_server(QProcess& proc, const QString& bin,
+                  const QStringList& args, quint16 port) {
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    if (attempt > 0) {
+      proc.kill();
+      proc.waitForFinished(5000);
+      QThread::msleep(500);
+    }
+    proc.start(bin, args);
+    if (!proc.waitForStarted(5000)) continue;
+    if (wait_until([&] { return port_listening(port); }, 8000)) return true;
+  }
+  return false;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -109,9 +127,7 @@ int main(int argc, char** argv) {
                                    QString::number(port)};
   QProcess server;
   server.setProcessChannelMode(QProcess::ForwardedChannels);
-  server.start(server_bin, server_args);
-  CHECK(server.waitForStarted(5000));
-  CHECK(wait_until([&] { return port_listening(port); }, 8000));
+  CHECK(start_server(server, server_bin, server_args, port));
 
   LocalStore store_a, store_b;
   CHECK(store_a.open(tmp.filePath(QStringLiteral("a.db"))));
@@ -171,9 +187,7 @@ int main(int argc, char** argv) {
   // —— 服务端恢复：自动重连 → 补传 → 归档无重复无缺失 ——
   QProcess server2;
   server2.setProcessChannelMode(QProcess::ForwardedChannels);
-  server2.start(server_bin, server_args);
-  CHECK(server2.waitForStarted(5000));
-  CHECK(wait_until([&] { return port_listening(port); }, 8000));
+  CHECK(start_server(server2, server_bin, server_args, port));
   CHECK(wait_until([&] { return a_re && b_re; }, 20000));
 
   // 接收端收到补传消息（重复投递由 msg_id 去重）
@@ -392,9 +406,7 @@ int main(int argc, char** argv) {
     // 服务端复活：bob 自动重连；alice 已手动登出不再自动连
     QProcess server3;
     server3.setProcessChannelMode(QProcess::ForwardedChannels);
-    server3.start(server_bin, server_args);
-    CHECK(server3.waitForStarted(5000));
-    CHECK(wait_until([&] { return port_listening(port); }, 8000));
+    CHECK(start_server(server3, server_bin, server_args, port));
     bool b_re2 = false;
     QObject::connect(&b, &CollabEngine::reconnected, &b, [&] { b_re2 = true; });
     CHECK(wait_until([&] { return b_re2; }, 20000));
@@ -432,9 +444,7 @@ int main(int argc, char** argv) {
     // 服务端复活 + 全新引擎登录：flush_pending_sends 从库回收 PENDING 行
     QProcess server4;
     server4.setProcessChannelMode(QProcess::ForwardedChannels);
-    server4.start(server_bin, server_args);
-    CHECK(server4.waitForStarted(5000));
-    CHECK(wait_until([&] { return port_listening(port); }, 8000));
+    CHECK(start_server(server4, server_bin, server_args, port));
 
     CollabEngine a3;
     a3.attach_store(&store_a);
@@ -468,7 +478,7 @@ int main(int argc, char** argv) {
                                  db, QStringLiteral("--limit"),
                                  QStringLiteral("50")});
               return out.contains(QStringLiteral("共 5 条"));
-            }, 5000));
+            }, 15000)); // coverage 慢相下 CLI 孵化可秒级，5s 预算烧穿过一轮
       CHECK(out.count(QStringLiteral("重启恢复消息")) == 1);
     }
 
