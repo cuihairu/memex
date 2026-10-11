@@ -673,6 +673,31 @@ public:
   bool bot_join_group(const std::string& name, std::uint64_t group_id,
                       std::int64_t joined_ms);
   bool bot_leave_group(const std::string& name, std::uint64_t group_id);
+  // —— bot 可用范围白名单（细粒度权限）——
+  // 口径：名单非空才收紧，空=不设限（存量 bot 零变化）。
+  // 群白名单：名单非空时 bot 群成员资格 ⊆ 名单——allow/deny 后统一
+  // 扫尾，不在名单的群连带退群（bot_remove 连带退群同款）；join 名单
+  // 外群由 bot_join_group 拒。部门白名单：名单非空时单聊目标账号部门
+  // 路径须落在任一白名单部门子树（「/」段边界的 ancestor-or-self 前缀
+  // 匹配；未分配部门从严）。入站不裁（白名单管 bot 能动谁，不管谁能找
+  // bot——TEXT 直达/扇出零改动是 bot 面立身之本）。allow 的群／部门须
+  // 已存在（无隐式创建）；幽灵账号交给既有 404 语义。
+  // 名单写入留痕（created_ms）。bot_remove 连带清两表。
+  bool bot_allow_group(const std::string& name, std::uint64_t group_id,
+                       std::int64_t created_ms);  // 群不存在返 false
+  bool bot_deny_group(const std::string& name, std::uint64_t group_id);  // 移出名单即连带退群（名单复空亦退）
+  bool bot_allow_dept(const std::string& name,
+                      const std::string& department_path,
+                      std::int64_t created_ms);  // 部门路径不存在返 false
+  bool bot_deny_dept(const std::string& name,
+                     const std::string& department_path);
+  std::vector<std::uint64_t> bot_groups_allowed(const std::string& name);
+  std::vector<std::string> bot_depts_allowed(const std::string& name);
+  // 判定面：名单非空且不含 → false（true=放行）。幽灵账号 bot_group_
+  // allowed 不涉及；bot_account_allowed 对不存在账号返回 true（交
+  // deliver_notice 出既有 404）。
+  bool bot_group_allowed(const std::string& name, std::uint64_t group_id);
+  bool bot_account_allowed(const std::string& name, const std::string& account);
 
   // —— 模型网关（平台三期）：端点登记＋调用审计 ——
   // 端点登记（重名返回 0）；注册序=路由优先序。
@@ -1470,6 +1495,8 @@ public:
 
 private:
   bool ensure_schema();
+  // 白名单收紧扫尾：名单非空时退掉名单外全部群（见 bot_allow_group 注）
+  void bot_prune_group_membership(const std::string& name);
 
   sqlite3* db_{nullptr};
   std::function<void(const std::string&)> enqueue_hook_;

@@ -2099,7 +2099,8 @@ int cmd_bot(int argc, char** argv, const std::string& db_path) {
   if (argc < 1) {
     std::cerr << "用法：memex_server bot add <name> --by <账号> | list | "
                  "remove <name> | disable|enable <name> | join|leave "
-                 "<name> <群号> [--db <库>]\n";
+                 "<name> <群号> | allow|deny <name> --group <群号>|--dept "
+                 "<部门全路径> [--db <库>]\n";
     return 2;
   }
   const std::string_view sub = argv[0];
@@ -2157,7 +2158,8 @@ int cmd_bot(int argc, char** argv, const std::string& db_path) {
 
   if (sub == "list") {
     const auto rows = store.bot_list();
-    std::cout << "name\t全名\t创建人\ttoken 摘要前缀\t创建时刻\t状态\n";
+    std::cout << "name\t全名\t创建人\ttoken 摘要前缀\t创建时刻\t状态\t"
+                 "白名单（空=不设限）\n";
     for (const auto& b : rows) {
       std::time_t secs = static_cast<std::time_t>(b.created_ms / 1000);
       std::tm tm{};
@@ -2166,9 +2168,76 @@ int cmd_bot(int argc, char** argv, const std::string& db_path) {
       std::strftime(when, sizeof(when), "%Y-%m-%d %H:%M:%S", &tm);
       std::cout << b.name << "\tbot:" << b.name << '\t' << b.created_by
                 << '\t' << b.token_hash.substr(0, 12) << '\t' << when << '\t'
-                << (b.disabled ? "已禁用" : "启用") << '\n';
+                << (b.disabled ? "已禁用" : "启用") << '\t';
+      // 白名单摘要：群{1,2} 部门{公司/研发部,…}；两名单全空=不设限
+      const auto groups = store.bot_groups_allowed(b.name);
+      const auto depts = store.bot_depts_allowed(b.name);
+      if (groups.empty() && depts.empty()) {
+        std::cout << '-';
+      } else {
+        std::cout << "群{";
+        for (std::size_t i = 0; i < groups.size(); ++i) {
+          std::cout << (i ? "," : "") << groups[i];
+        }
+        std::cout << "} 部门{";
+        for (std::size_t i = 0; i < depts.size(); ++i) {
+          std::cout << (i ? "," : "") << depts[i];
+        }
+        std::cout << "}";
+      }
+      std::cout << '\n';
     }
     std::cout << "共 " << rows.size() << " 个\n";
+    return 0;
+  }
+
+  // allow / deny <name> --group <群号> | --dept <部门全路径>：
+  // 可用范围白名单维护（名单非空才收紧；群名单变动连带退名单外群）
+  if (sub == "allow" || sub == "deny") {
+    if (argc < 4) {
+      std::cerr << "用法：bot " << sub
+                << " <name> --group <群号> | --dept <部门全路径>\n";
+      return 2;
+    }
+    const std::string flag = argv[2];
+    const std::string name = argv[1];
+    const std::string value = argv[3];
+    if (flag != "--group" && flag != "--dept") {
+      std::cerr << "用法：bot " << sub
+                << " <name> --group <群号> | --dept <部门全路径>\n";
+      return 2;
+    }
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now().time_since_epoch())
+                         .count();
+    if (flag == "--group") {
+      const auto gid = std::strtoull(value.c_str(), nullptr, 10);
+      const bool ok = sub == "allow"
+                          ? store.bot_allow_group(name, gid, now)
+                          : store.bot_deny_group(name, gid);
+      if (!ok) {
+        std::cerr << (sub == "allow" ? "加白失败（bot 或群不存在）"
+                                     : "deny 失败（bot 不存在）")
+                  << "：" << name << " → 群 " << value << "\n";
+        return 1;
+      }
+      std::cout << "bot " << name
+                << (sub == "allow" ? " 已加白群 " : " 已移出白名单群 ") << value
+                << "（移出名单即退群；名单非空时名单外群连带退群）\n";
+      return 0;
+    }
+    const bool ok = sub == "allow"
+                        ? store.bot_allow_dept(name, value, now)
+                        : store.bot_deny_dept(name, value);
+    if (!ok) {
+      std::cerr << (sub == "allow" ? "加白失败（bot 或部门路径不存在）"
+                                   : "deny 失败（bot 不存在）")
+                << "：" << name << " → " << value << "\n";
+      return 1;
+    }
+    std::cout << "bot " << name
+              << (sub == "allow" ? " 已加白部门 " : " 已移出部门白名单 ")
+              << value << "\n";
     return 0;
   }
 
@@ -2209,7 +2278,7 @@ int cmd_bot(int argc, char** argv, const std::string& db_path) {
     const bool ok = sub == "join" ? store.bot_join_group(name, gid, now)
                                   : store.bot_leave_group(name, gid);
     if (!ok) {
-      std::cerr << (sub == "join" ? "加群失败（bot 或群不存在）"
+      std::cerr << (sub == "join" ? "加群失败（bot／群不存在，或群不在白名单）"
                                   : "退群失败（bot 不存在或本不在群）")
                 << "：" << name << " → 群 " << gid << "\n";
       return 1;
@@ -2221,7 +2290,8 @@ int cmd_bot(int argc, char** argv, const std::string& db_path) {
 
   std::cerr << "未知 bot 子命令：" << sub << "\n"
             << "用法：bot add <name> --by <账号> | list | remove <name> | "
-               "disable|enable <name> | join|leave <name> <群号>\n";
+               "disable|enable <name> | join|leave <name> <群号> | "
+               "allow|deny <name> --group <群号>|--dept <部门全路径>\n";
   return 2;
 }
 

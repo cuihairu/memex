@@ -496,6 +496,115 @@ void test_long_poll(ServerStore& store, CollabServer& server,
   CHECK(store.offline_count("bot:echo") == 0);
 }
 
+// —— 细粒度权限白名单：群白名单（名单非空 ⇒ 群成员资格 ⊆ 名单，变动
+// 连带退名单外群）、部门白名单（单聊目标部门须落白名单子树，未分配从
+// 严）；名单空=不设限，存量行为零变化；入站不裁（白名单管 bot 能动谁，
+// 不管谁能找 bot）——
+void test_bot_scope(ServerStore& store, CollabServer& server,
+                    std::uint16_t port) {
+  const std::string ok_token = "bot_ok_token";
+  const auto g1 = store.create_group("白名单群一", "alice", {"alice", "bob"});
+  const auto g2 = store.create_group("白名单群二", "alice", {"alice", "bob"});
+  CHECK(g1 > 0);
+  CHECK(g2 > 0);
+  const std::string k1 = "group:" + std::to_string(g1);
+  const std::string k2 = "group:" + std::to_string(g2);
+
+  // ① 名单空=不设限：两群照常 join、群发 200（缺省零名单回归）
+  CHECK(store.bot_join_group("echo", g1, now_ms()));
+  CHECK(store.bot_join_group("echo", g2, now_ms()));
+  auto r = bot_post(port, ok_token, "/bot/send",
+                    R"({"target":")" + k1 + R"(","text":"白名单前群发"})");
+  CHECK(r.status == 200);
+  r = bot_post(port, ok_token, "/bot/ack",
+               R"({"msg_id":")" + r.body["msg_id"].get<std::string>() +
+                   R"("})");
+  CHECK(r.status == 200);
+
+  // 部门树与目标账号：alice=研发部（子树内）、bob=财务部（树外）、
+  // carol=未分配（从严）、dave=幽灵（404 语义保留，名单不辖）
+  CHECK(store.create_account("carol", "pw-carol", "Carol"));
+  // dave 不建账号＝真幽灵（验证名单不辖 404 语义）
+  CHECK(store.set_member_profile(
+      "alice", store.ensure_department_path("公司/研发部"), "工程师", ""));
+  CHECK(store.set_member_profile(
+      "bob", store.ensure_department_path("公司/财务部"), "会计", ""));
+
+  // ② allow 群二：名单收紧 → 群一连带退群（成员资格 ⊆ 名单不变式）；
+  //    群一 send 403＝白名单口径（先于成员资格，消息可辨）＋群二照常 200
+  CHECK(store.bot_allow_group("echo", g2, now_ms()));
+  CHECK(!store.is_group_member(g1, "bot:echo"));
+  CHECK(store.is_group_member(g2, "bot:echo"));
+  r = bot_post(port, ok_token, "/bot/send",
+               R"({"target":")" + k1 + R"(","text":"收紧后偷发"})");
+  CHECK(r.status == 403);
+  CHECK(r.body["error"] == "群不在 bot 可用白名单");
+  r = bot_post(port, ok_token, "/bot/send",
+               R"({"target":")" + k2 + R"(","text":"名单内照常"})");
+  CHECK(r.status == 200);
+  r = bot_post(port, ok_token, "/bot/ack",
+               R"({"msg_id":")" + r.body["msg_id"].get<std::string>() +
+                   R"("})");
+  CHECK(r.status == 200);
+
+  // ③ join 名单外群 → store 层拒
+  CHECK(!store.bot_join_group("echo", g1, now_ms()));
+
+  // ④ deny 群二 → 连带退群；名单复空后 send 403＝非成员口径；群二消息
+  //    不再入 bot 队列（扇出只达在册成员）
+  CHECK(store.bot_deny_group("echo", g2));
+  CHECK(!store.is_group_member(g2, "bot:echo"));
+  r = bot_post(port, ok_token, "/bot/send",
+               R"({"target":")" + k2 + R"(","text":"deny 后偷发"})");
+  CHECK(r.status == 403);
+  CHECK(r.body["error"] == "bot 不在该群，无法发送");
+  {
+    asio::io_context io;
+    TestClient a(io, server.port());
+    a.send(make_login("alice", "pa-w", "pc-scope"));
+    CHECK(a.read().login_result().ok());
+    a.send(make_text("alice", k2, 1, "群二消息不入白名单外 bot"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    r = bot_get(port, ok_token, "/bot/updates");
+    CHECK(r.status == 200);
+    CHECK(r.body["updates"].empty());
+  }
+
+  // ⑤ 部门白名单：allow 公司/研发部 → 子树内 alice 200；树外 bob 403；
+  //    未分配 carol 403（从严）；幽灵 dave 404（交既有交付层语义）
+  CHECK(store.bot_allow_dept("echo", "公司/研发部", now_ms()));
+  r = bot_post(port, ok_token, "/bot/send",
+               R"({"target":"alice","text":"部门内单聊"})");
+  CHECK(r.status == 200);
+  r = bot_post(port, ok_token, "/bot/send",
+               R"({"target":"bob","text":"树外单聊"})");
+  CHECK(r.status == 403);
+  CHECK(r.body["error"] == "目标账号不在 bot 可用部门白名单");
+  r = bot_post(port, ok_token, "/bot/send",
+               R"({"target":"carol","text":"未分配从严"})");
+  CHECK(r.status == 403);
+  r = bot_post(port, ok_token, "/bot/send",
+               R"({"target":"dave","text":"幽灵不受名单辖"})");
+  CHECK(r.status == 404);
+
+  // ⑥ deny 公司/研发部 → 名单复空＝不设限（部门维度不退任何东西，
+  //    部门名单只裁发送不裁成员）→ alice 恢复 200
+  CHECK(store.bot_deny_dept("echo", "公司/研发部"));
+  CHECK(store.bot_depts_allowed("echo").empty());
+  r = bot_post(port, ok_token, "/bot/send",
+               R"({"target":"alice","text":"空名单恢复"})");
+  CHECK(r.status == 200);
+
+  // ⑦ bot_remove 连带清名单：同名重建不残留旧名单
+  CHECK(store.bot_allow_dept("echo", "公司/研发部", now_ms()));
+  CHECK(store.bot_remove("echo"));
+  CHECK(store.bot_groups_allowed("echo").empty());
+  CHECK(store.bot_depts_allowed("echo").empty());
+
+  // 收尾对账：bot 队列全程无残留（发送者不入自己扇出名单）
+  CHECK(store.offline_count("bot:echo") == 0);
+}
+
 } // namespace
 
 int main() {
@@ -515,6 +624,7 @@ int main() {
     test_validation(store, wh.port());
     test_pipeline(store, server, wh.port());
     test_long_poll(store, server, wh.port());
+    test_bot_scope(store, server, wh.port());
 
     io.stop();
     io_thread.join();

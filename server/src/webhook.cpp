@@ -347,8 +347,10 @@ private:
       }
       const std::string target = j["target"].get<std::string>();
       const std::string text = j["text"].get<std::string>();
-      // 群发送：群存在性 404 先于成员资格 403（与设计稿状态表同序）；
-      // 个人目标交给 deliver_notice 校验（404）
+      // 群发送：群存在性 404 先于白名单 403 再于成员资格 403（组织级
+      // 配置先于群级成员关系；与设计稿状态表同序）；个人目标先过部门
+      // 白名单（名单不辖幽灵账号——404 语义交 deliver_notice 保既有序），
+      // 再交给 deliver_notice 校验（404）
       if (target.rfind("group:", 0) == 0) {
         const auto gid = static_cast<std::uint64_t>(
             std::strtoull(target.c_str() + 6, nullptr, 10));
@@ -356,10 +358,18 @@ private:
           respond(404, {{"ok", false}, {"error", "目标群不存在：" + target}});
           return;
         }
+        if (!server_.store().bot_group_allowed(bot->name, gid)) {
+          respond(403,
+                  {{"ok", false}, {"error", "群不在 bot 可用白名单"}});
+          return;
+        }
         if (!server_.store().is_group_member(gid, self)) {
           respond(403, {{"ok", false}, {"error", "bot 不在该群，无法发送"}});
           return;
         }
+      } else if (!server_.store().bot_account_allowed(bot->name, target)) {
+        respond(403, {{"ok", false}, {"error", "目标账号不在 bot 可用部门白名单"}});
+        return;
       }
       // sender=bot:<name>：归档 from＝bot 身份（留痕口径与普通消息同链路）
       const NoticeDelivery d = deliver_notice(
