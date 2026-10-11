@@ -308,6 +308,15 @@ int main() {
   CHECK(http(port, "GET", "/files/download?id=99999", H("member1"), "")
             .status == 404);
 
+  // —— 退群即失权（授权盘点 P0-1 补漏）：成员被移出后群文件即时 403，
+  //    群成员判定每请求现查，恢复成员身份后可读 ——
+  CHECK(store.group_leave(gid, "member1"));
+  CHECK(http(port, "GET", "/files/download?id=" + std::to_string(id1),
+             H("member1"), "").status == 403);
+  CHECK(store.group_invite(gid, "member1"));
+  CHECK(http(port, "GET", "/files/download?id=" + std::to_string(id1),
+             H("member1"), "").status == 200);
+
   // —— 个人文件：仅本人可读；他人（含群主）403；只扣个人配额 ——
   const auto up_p = http(port, "POST", "/files/upload?target=me",
                          {{"Authorization", "Bearer " + tok["member1"]},

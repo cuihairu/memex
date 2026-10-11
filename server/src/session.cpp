@@ -132,6 +132,20 @@ std::string archive_and_resolve(CollabServer& server,
   return reshuffled;
 }
 
+// 平台-1 伪造回执闸（授权盘点 P0-1 补漏）：delivered/read 事件仅消息
+// 收件人可记——单聊＝收件人本人；群消息＝群成员。非收件人的 ACK/READ
+// 属伪造回执，拒不留痕不通知（队列清退本就按收件人 SQL 限定，不受影响）
+bool is_recipient(CollabServer& server, const std::string& to_account,
+                  const std::string& account) {
+  if (to_account == account) return true;
+  if (to_account.rfind("group:", 0) == 0) {
+    const auto gid = static_cast<std::uint64_t>(
+        std::strtoull(to_account.c_str() + 6, nullptr, 10));
+    return server.store().is_group_member(gid, account);
+  }
+  return false;
+}
+
 void Session::handle_message(const memex::protocol::Message& msg) {
   if (logged_in_) {
     log(std::string{"收到 "} + memex::protocol::msg_type_name(msg.type()) +
@@ -227,6 +241,12 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     // 接收方 ACK(msg_id) 清队列，未 ACK 的下次登录重投（接收端按 msg_id 去重）。
     // 群消息（to="group:<群号>"，T4.1）：成员校验后全量归档一次、按成员扇出。
     if (!logged_in_ || !msg.has_text()) break;
+    // 平台-1 伪造身份闸（授权盘点 P0-1 补漏）：归档与投递的发送者一律
+    // 绑定登录会话身份，不信任客户端自填 from——与撤回同款拒收＋留痕
+    if (msg.from() != account_) {
+      log("伪造发送者被拒：" + account_ + " 报称 " + msg.from());
+      break;
+    }
     // 收件人集合：单聊一人；群聊＝群成员（不含发送者）
     std::vector<std::string> recipients;
     const bool is_group = msg.to().rfind("group:", 0) == 0;
@@ -450,8 +470,13 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     if (logged_in_ && msg.has_ack() && !msg.ack().msg_id().empty()) {
       const std::string target = msg.ack().msg_id();
       server_.store().ack_offline(target, account_); // 清离线队列（幂等）
-      const std::string original_from = server_.store().message_from(target);
-      if (original_from.empty()) break; // 非归档消息（伪造 msg_id）不留痕
+      const auto row = server_.store().message_by_id(target);
+      if (!row) break; // 非归档消息（伪造 msg_id）不留痕
+      if (!is_recipient(server_, row->to_account, account_)) {
+        log("伪造回执被拒：非收件人 ACK " + target);
+        break;
+      }
+      const std::string original_from = row->from_account;
       if (server_.store().delivered_recorded(target, account_)) break;
       const std::int64_t dms = now_ms(); // 留痕与通知共用同一时刻
       server_.store().append_message_event(target, "delivered", account_, "",
@@ -476,8 +501,13 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     // 推送 READ_NOTICE（发送方离线则仅留痕，不补投——已读态下次可查）。
     if (!logged_in_ || !msg.has_read() || msg.read().msg_id().empty()) break;
     const std::string target = msg.read().msg_id();
-    const std::string original_from = server_.store().message_from(target);
-    if (original_from.empty()) break; // 非归档消息（伪造 msg_id）不留痕
+    const auto row = server_.store().message_by_id(target);
+    if (!row) break; // 非归档消息（伪造 msg_id）不留痕
+    if (!is_recipient(server_, row->to_account, account_)) {
+      log("伪造回执被拒：非收件人 READ " + target);
+      break;
+    }
+    const std::string original_from = row->from_account;
     // 重复上报幂等：已记过该读者的不再重发 NOTICE（发送方已知已读）
     bool is_new = true;
     for (const auto& r : server_.store().readers_for(target)) {
@@ -675,6 +705,11 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     // 防刷限频双层：服务端连接级 1s 最小间隔（静默丢弃），发送端 UI 级
     // 同一会话 10s 冷却（客户端面）。群扇出留余量：仅单聊。
     if (!logged_in_ || !msg.has_nudge()) break;
+    // 平台-1 伪造身份闸：振屏同样绑定会话身份（NUDGE 归档含 from）
+    if (msg.from() != account_) {
+      log("伪造发送者被拒：" + account_ + " 报称 " + msg.from());
+      break;
+    }
     if (msg.to().rfind("group:", 0) == 0) {
       log("群振屏不支持被拒：" + msg.to());
       break;

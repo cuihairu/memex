@@ -61,6 +61,12 @@ if(MEMEX_BUILD_TESTS)
   add_test(NAME gateway COMMAND test_gateway)
   set_tests_properties(gateway PROPERTIES TIMEOUT 60)
 
+  # 平台-1 授权盘点补漏：伪造发送者、伪造回执（非收件人拒留痕）、设备停用语义
+  add_executable(test_authz_audit tests/test_authz_audit.cpp)
+  target_link_libraries(test_authz_audit PRIVATE memex_server_core)
+  add_test(NAME authz_audit COMMAND test_authz_audit)
+  set_tests_properties(authz_audit PROPERTIES TIMEOUT 60)
+
   # T2.3 消息归档验收：全量落库、撤回仅置标记不清正文、撤回事件独立留痕、越权拒绝
   add_executable(test_archive tests/test_archive.cpp)
   target_link_libraries(test_archive PRIVATE memex_server_core)
