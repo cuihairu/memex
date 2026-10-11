@@ -111,6 +111,29 @@ bool DirectEngine::start() {
   connect(discovery_.get(), &DiscoveryService::peerUpdated, this,
           [this](const Peer&) { emit peers_changed(); });
 
+  // 飞秋/IPMSG 兼容（开关经设置页即时生效）：收文与 memex 直连消息同径
+  // 落库上抛（from_id 形如 "ipmsg:user@host"，协议无序号，seq 补本机
+  // 序号仅作去重键）；RECVMSG 回执按同号关单 text_delivered
+  connect(discovery_.get(), &DiscoveryService::ipmsg_received, this,
+          [this](const std::string& from_id, const QString& text,
+                 qint64 ts_ms) {
+            StoredMessage m;
+            m.peer = from_id;
+            m.from = from_id;
+            m.to = device_id_;
+            m.seq = ++seq_counter_;
+            m.ts_ms = ts_ms;
+            m.text = text.toStdString();
+            m.source = "direct";
+            m.sync_state = "LOCAL"; // 直连域不进服务端同步（平台-9）
+            store_->append(m);
+            emit message_received(QString::fromStdString(from_id), text, ts_ms);
+          });
+  connect(discovery_.get(), &DiscoveryService::ipmsg_acked, this,
+          [this](quint32 packet_no) {
+            emit text_delivered(static_cast<quint64>(packet_no), true);
+          });
+
   connect(transport_.get(), &DirectTransport::text_received, this,
           [this](const QString& from_id, const QString& /*to_id*/, quint64 seq,
                  qint64 ts_ms, const QString& text) {
@@ -231,11 +254,15 @@ void DirectEngine::set_collab_account(const std::string& account) {
   if (discovery_) discovery_->set_account(account);
 }
 
+void DirectEngine::set_ipmsg_enabled(bool on) {
+  if (discovery_) discovery_->set_ipmsg_enabled(on);
+}
+
 quint64 DirectEngine::send_text(const std::string& peer_device_id,
                                 const std::string& text) {
   if (!running_) return 0;
   const Peer target = peer(peer_device_id);
-  if (target.device_id.empty() || target.tcp_port == 0) {
+  if (target.device_id.empty()) {
     qWarning() << "[直连引擎] 对端不可达："
                << QString::fromStdString(peer_device_id);
     return 0;
@@ -255,6 +282,21 @@ quint64 DirectEngine::send_text(const std::string& peer_device_id,
   m.source = "direct";
   m.sync_state = "LOCAL"; // 直连域不进服务端同步（平台-9）
   store_->append(m);
+
+  // 飞秋对端（"ipmsg:" 前缀、无 TCP 直连口）：走 UDP IPMSG 通道，
+  // GBK/UTF-8 双向；送达以对端 RECVMSG 回执为准（ipmsg_acked 按同号
+  // 回填 text_delivered）
+  if (target.tcp_port == 0) {
+    if (peer_device_id.rfind("ipmsg:", 0) != 0 ||
+        discovery_->send_ipmsg_text(peer_device_id,
+                                    QString::fromStdString(text),
+                                    static_cast<quint32>(seq)) == 0) {
+      qWarning() << "[直连引擎] 飞秋通道不可达："
+                 << QString::fromStdString(peer_device_id);
+      return 0;
+    }
+    return static_cast<quint64>(seq);
+  }
 
   transport_->send_text(target.address, target.tcp_port, peer_device_id, seq, text);
   return static_cast<quint64>(seq);

@@ -51,6 +51,16 @@ NetRemoteSettingsDialog::NetRemoteSettingsDialog(MainWindow* win,
           [this] { add_entry(edit_cidr_->text()); });
   connect(btn_del, &QPushButton::clicked, this, [this] { del_entry(); });
 
+  // —— 飞秋/IPMSG 兼容：同口 UDP 2425 对飞秋在线表互现＋单聊互通 ——
+  auto* lbl_ipmsg = new QLabel(QStringLiteral("飞秋兼容"), this);
+  lbl_ipmsg->setStyleSheet(QStringLiteral("font-weight:600;"));
+  layout->addWidget(lbl_ipmsg);
+
+  chk_ipmsg_ = new QCheckBox(QStringLiteral("兼容飞秋/IPMSG（默认关闭）"), this);
+  chk_ipmsg_->setObjectName(QStringLiteral("chk_ipmsg"));
+  chk_ipmsg_->setChecked(ipmsg_compat::enabled());
+  layout->addWidget(chk_ipmsg_);
+
   // —— 远程控制：默认关；开启后受控方批准前须输对配对密码 ——
   auto* lbl_remote = new QLabel(QStringLiteral("远程控制"), this);
   lbl_remote->setStyleSheet(QStringLiteral("font-weight:600;"));
@@ -75,8 +85,10 @@ NetRemoteSettingsDialog::NetRemoteSettingsDialog(MainWindow* win,
   layout->addWidget(edit_confirm_);
 
   auto* note = new QLabel(
-      QStringLiteral("黑名单关＝全放行；远程控制默认关闭、开启须显式操作——"
-                     "开启后受控方批准远程协助前须输入配对密码。"), this);
+      QStringLiteral("黑名单关＝全放行；飞秋兼容开启后与同网段飞秋客户端"
+                     "在线互见、单聊互通（GBK/UTF-8）；远程控制默认关闭、"
+                     "开启须显式操作——开启后受控方批准远程协助前须输入"
+                     "配对密码。"), this);
   note->setWordWrap(true);
   layout->addWidget(note);
 
@@ -132,6 +144,7 @@ QString NetRemoteSettingsDialog::save_settings() {
     cidrs << list_entries_->item(i)->text();
   net_blacklist::set_entries(cidrs);
   net_blacklist::set_enabled(chk_blacklist_->isChecked());
+  ipmsg_compat::set_enabled(chk_ipmsg_->isChecked());
   remote_control::set_enabled(remote_on);
   if (win_) win_->apply_net_settings(); // 开关/段表即时生效（运行中改即按新表判）
   return QString();

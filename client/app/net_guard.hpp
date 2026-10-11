@@ -28,6 +28,13 @@ QStringList entries();      // 已录段列表（原样，含未启用时的）
 void set_entries(const QStringList& cidrs);
 } // namespace net_blacklist
 
+namespace ipmsg_compat {
+// 飞秋/IPMSG 兼容总开关（默认关＝同口 UDP 2425 只走 memex JSON 发现）：
+// 开＝同口伴发 BR_ENTRY 广播并响应飞秋在线表与单聊（GBK/UTF-8 双向）
+bool enabled();
+void set_enabled(bool on);
+} // namespace ipmsg_compat
+
 namespace remote_control {
 bool enabled(); // 远程控制总开关（默认关＝收方批准面前先挡）
 void set_enabled(bool on);

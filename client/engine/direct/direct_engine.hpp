@@ -100,6 +100,10 @@ public:
   // 跨态判定；空=未登录）。
   void set_collab_account(const std::string& account);
 
+  // 飞秋/IPMSG 兼容开关（设置页即时生效）：开＝同口 UDP 2425 伴发
+  // BR_ENTRY 并响应飞秋包，"ipmsg:" 前缀对端走单聊（send_text 内分流）。
+  void set_ipmsg_enabled(bool on);
+
   // —— 平台-10 文件旁路授权门 ——
   // 接线授权面后，send_file／send_directory 先发查询（立即返回关联号），
   // 裁决经 file_authz_resolved 关单：允→真正起传；拒→file_finished(false)。

@@ -33,6 +33,7 @@ class NetRemoteSettingsDialog : public QDialog {
   MainWindow* win_;
   QLineEdit* edit_cidr_;
   QCheckBox* chk_blacklist_;
+  QCheckBox* chk_ipmsg_;
   QCheckBox* chk_remote_;
   QLineEdit* edit_pwd_;
   QLineEdit* edit_confirm_;

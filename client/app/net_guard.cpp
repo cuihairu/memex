@@ -82,6 +82,18 @@ void set_entries(const QStringList& cidrs) {
 
 } // namespace net_blacklist
 
+namespace ipmsg_compat {
+
+bool enabled() {
+  return QSettings().value(QStringLiteral("net/ipmsg_enabled"), false).toBool();
+}
+
+void set_enabled(bool on) {
+  QSettings().setValue(QStringLiteral("net/ipmsg_enabled"), on);
+}
+
+} // namespace ipmsg_compat
+
 namespace remote_control {
 
 namespace {

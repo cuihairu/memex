@@ -22,6 +22,7 @@ target_link_libraries(memex_core PUBLIC Qt6::Core Qt6::Sql)
 add_library(memex_engine_direct STATIC
   engine/direct/direct_engine.cpp
   engine/direct/discovery.cpp
+  engine/direct/ipmsg.cpp
   engine/direct/direct_transport.cpp
   engine/direct/file_transfer.cpp
   engine/direct/secure_channel.cpp)
@@ -216,6 +217,16 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(discovery PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 40)
+
+  # 飞秋/IPMSG 兼容验收（2026-10-11）：编解码往返与 GB18030/UTF-8 兜底；
+  # mock 飞秋对拨（在线表 BR_ENTRY/ANSENTRY/BR_EXIT、单聊 SENDMSG/RECVMSG
+  # 回执、UTF-8 兜底带 UTF8OPT、关断静默、memex 标记不重复建行）
+  add_executable(test_ipmsg engine/direct/tests/test_ipmsg.cpp)
+  target_link_libraries(test_ipmsg PRIVATE memex_engine_direct)
+  add_test(NAME ipmsg COMMAND test_ipmsg)
+  set_tests_properties(ipmsg PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
 
   # T1.2 直连文本验收：双实例互发、送达确认、本地落库、重开历史仍在
   add_executable(test_direct_chat engine/direct/tests/test_direct_chat.cpp)

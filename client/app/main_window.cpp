@@ -2940,6 +2940,7 @@ void MainWindow::apply_away_lock_settings() {
 // 直连引擎（发现包 sender 与 TCP 入站 peerAddress 两处同一谓词）。
 // CIDR 匹配只在 net_guard 内实现，这里只拼装不重复实现。
 void MainWindow::apply_net_settings() {
+  direct_engine_.set_ipmsg_enabled(ipmsg_compat::enabled()); // 飞秋兼容即时生效
   if (!net_blacklist::enabled()) {
     direct_engine_.set_address_filter({});
     return;
@@ -3340,6 +3341,13 @@ void MainWindow::refresh_devices() {
     const QString id = QString::fromStdString(p.device_id);
     const QString name =
         p.name.empty() ? id.left(8) : QString::fromStdString(p.name);
+    // 飞秋对端（"ipmsg:" 前缀）无 TCP 直连口：元信息行走 UDP 标注
+    const bool is_ipmsg = id.startsWith(QStringLiteral("ipmsg:"));
+    const QString meta =
+        is_ipmsg
+            ? QStringLiteral("飞秋 · UDP %1").arg(p.address.toString())
+            : QStringLiteral("%1 · TCP %2")
+                  .arg(p.address.toString(), QString::number(p.tcp_port));
     // T4.2：对端登录账号入列表行（仅作显示；空=未登录）
     const QString acct = p.account.empty()
                              ? QString()
@@ -3349,9 +3357,7 @@ void MainWindow::refresh_devices() {
     const int unread = unread_counts_.value(id);
     item->setText(
         (unread > 0 ? QStringLiteral("(%1) ").arg(unread) : QString()) +
-        QStringLiteral("%1\n%2 · TCP %3%4")
-            .arg(name, p.address.toString(), QString::number(p.tcp_port),
-                 acct));
+        QStringLiteral("%1\n%2%3").arg(name, meta, acct));
     item->setData(Qt::UserRole, id);
     item->setData(Qt::UserRole + 1, QStringLiteral("direct"));
     // 需求批⑨查找：可检索字段＝昵称/设备 id/IP/协作账号（\n 分行，整行比对
