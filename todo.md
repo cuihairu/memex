@@ -393,7 +393,8 @@
 
 > 现状盘点（扫代码非臆造）：`admin/` 仅 README 占位（规划「第一期第四阶段起建设」）；管理能力现散布在 **90 个 `/files/*` HTTP 路由 + 19 个 CLI 子命令**（account/org/policy/audit/messages/retention/webhook/bot/device/group/storage/assist/model/branding…共 40+ 二级命令）里，**全部没有 UI**。本批=把这些能力整理成网页后台的建设范围：
 
-- [ ] **后台骨架**：登录与角色门（org-admin / auditor 分权，判权复用服务端 az 规则**不自造**）、导航、会话超时
+- [ ] **部署口径（用户已配映射 2026-10-11）**：后台对外 **`admin.memex.cuihairu.site` → `http://192.168.5.5:8089`**（HTTP tunnel，用户 Cloudflare 侧已配）。后台容器监听 **8089**，随 Docker 批交付（compose 服务 + CI 镜像 + 域名接入文档与排查步骤）；公网经 tunnel、局域网可用强制解析覆盖直连（复用部署批「域名强制解析配置」同一机制）
+- [ ] **后台骨架（技术选型=drogon，2026-10-11 拍板）**：基于 **Drogon**（C++17 Web 框架，vcpkg 引入）的独立 admin 进程监听 8089——不动现有 FileServer 与协议；登录与角色门（org-admin / auditor 分权，判权复用服务端 az 规则**不自造**）、导航、会话超时、静态资源与 CSRF 中间件
 - [ ] **账号与组织**：`account add/list`、部门树 `org dept/member/membership`、汇报线 `org reporting`、组织字段与可见性 `org fields/visibility/hide/allow/import`、角色授予 `org role`
 - [ ] **设备与登录台账**：`device list/enable/disable/set/unbind`、`logins` 台账、`identity`
 - [ ] **策略下发**：`policy set/list/show`（含部门行、文件跨部门/转发四开关）、`retention set/show/purge`（留存与到期清理）
