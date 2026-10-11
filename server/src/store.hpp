@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -357,6 +358,14 @@ public:
   bool queue_offline(const std::string& msg_id, const std::string& to_account,
                      const std::string& envelope_blob);
   std::vector<std::string> pending_offline(const std::string& account);
+  // 入队钩子（bot 长轮询唤醒源）：queue_offline 真落新行后同步回调
+  // to_account。现行全部入队点（session TEXT 扇出／webhook 投递面）与
+  // 回调同在 CollabServer 共享单线程 io_context 上，无并发；回调内不得
+  // 再做本库操作。owner 指针守卫：多 WebhookServer 交叠生命周期时，
+  // 旧者析构不清掉新者刚注册的钩子。
+  void set_enqueue_hook(void* owner,
+                        std::function<void(const std::string&)> hook);
+  void clear_enqueue_hook(void* owner);
   // 接收方回执清队列（按接收方清：群扇出时同一条消息对每名成员各一行）
   bool ack_offline(const std::string& msg_id, const std::string& account);
   std::size_t offline_count(const std::string& account);
@@ -1463,6 +1472,8 @@ private:
   bool ensure_schema();
 
   sqlite3* db_{nullptr};
+  std::function<void(const std::string&)> enqueue_hook_;
+  void* enqueue_hook_owner_{nullptr};
 };
 
 } // namespace memex::server

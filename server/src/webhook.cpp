@@ -26,6 +26,45 @@ using tcp = asio::ip::tcp;
 
 constexpr std::size_t kMaxHead = 8 * 1024;  // 请求头上限（防呆，非安全边界）
 constexpr std::size_t kMaxBody = 64 * 1024; // JSON body 上限
+// bot 长轮询单次挂起上限（毫秒）：到期回空数组，防连接被永久挂住。
+constexpr std::int64_t kMaxLongPollMs = 30000;
+
+// updates 拉取共用本体：pending_offline 的 protobuf blob 逐条解码成 JSON
+//（只解 TEXT；NOTICE 等其余类型原样跳过——bot 收发面只承诺文本）。
+json drain_updates(ServerStore& store, const std::string& bot) {
+  json updates = json::array();
+  for (const auto& blob : store.pending_offline(bot)) {
+    memex::protocol::Message m;
+    if (!m.ParseFromString(blob)) continue; // 解不开的跳过（不应发生）
+    if (m.type() != memex::protocol::v1::TEXT) continue; // 只承诺文本
+    updates.push_back({{"msg_id", m.msg_id()},
+                       {"from", m.from()},
+                       {"to", m.to()},
+                       {"text", m.text().text()},
+                       {"ts_ms", m.ts_ms()}});
+  }
+  return updates;
+}
+
+// /bot/updates?timeout_ms=N 查询参数：无参＝0（即拉即回，原口径）；
+// 非法（非数字）返回 false 由调用方 400；超出 kMaxLongPollMs 截到上限。
+// 其余查询参数忽略。
+bool parse_long_poll_timeout(const std::string& uri, std::int64_t& out) {
+  out = 0;
+  const auto q = uri.find('?');
+  if (q == std::string::npos) return true;
+  std::istringstream qs(uri.substr(q + 1));
+  std::string kv;
+  while (std::getline(qs, kv, '&')) {
+    if (kv.rfind("timeout_ms=", 0) != 0) continue;
+    const std::string v = kv.substr(11);
+    if (v.empty() || v.find_first_not_of("0123456789") != std::string::npos)
+      return false;
+    out = v.size() > 9 ? kMaxLongPollMs : std::stoll(v);
+    if (out > kMaxLongPollMs) out = kMaxLongPollMs;
+  }
+  return true;
+}
 
 std::int64_t now_ms() {
   return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -50,8 +89,8 @@ const char* reason_phrase(int status) {
 // body，鉴权＋JSON 校验后回写 JSON 响应并关闭（Connection: close，无 keep-alive）。
 class HttpConn : public std::enable_shared_from_this<HttpConn> {
 public:
-  HttpConn(tcp::socket sock, CollabServer& server)
-      : sock_(std::move(sock)), server_(server) {}
+  HttpConn(tcp::socket sock, CollabServer& server, WebhookServer& hub)
+      : sock_(std::move(sock)), server_(server), hub_(hub) {}
 
   void start() { do_read(); }
 
@@ -266,9 +305,12 @@ private:
   void process_bot(const std::string& body) {
     const bool is_get = method_ == "GET";
     const bool is_post = method_ == "POST";
-    if (uri_ == "/bot/updates" ? !is_get : !is_post) {
+    // updates 可带查询参数（?timeout_ms=…），路由按前缀认
+    const bool updates_route =
+        uri_ == "/bot/updates" || uri_.rfind("/bot/updates?", 0) == 0;
+    if (updates_route ? !is_get : !is_post) {
       respond(405, {{"ok", false},
-                    {"error", uri_ == "/bot/updates"
+                    {"error", updates_route
                                   ? "方法不支持：updates 用 GET"
                                   : "方法不支持：请用 POST"}});
       return;
@@ -335,20 +377,31 @@ private:
       return;
     }
 
-    if (uri_ == "/bot/updates") {
-      // 非阻塞 drain：即拉即回（真挂起长轮询会卡共享 io_context，留后续）。
-      json updates = json::array();
-      for (const auto& blob : server_.store().pending_offline(self)) {
-        memex::protocol::Message m;
-        if (!m.ParseFromString(blob)) continue; // 解不开的跳过（不应发生）
-        if (m.type() != memex::protocol::v1::TEXT) continue; // 只承诺文本
-        updates.push_back({{"msg_id", m.msg_id()},
-                           {"from", m.from()},
-                           {"to", m.to()},
-                           {"text", m.text().text()},
-                           {"ts_ms", m.ts_ms()}});
+    if (uri_ == "/bot/updates" || uri_.rfind("/bot/updates?", 0) == 0) {
+      std::int64_t timeout_ms = 0;
+      if (!parse_long_poll_timeout(uri_, timeout_ms)) {
+        respond(400,
+                {{"ok", false}, {"error", "timeout_ms 须为非负整数（毫秒）"}});
+        return;
       }
-      respond(200, {{"ok", true}, {"updates", updates}});
+      json updates = drain_updates(server_.store(), self);
+      if (timeout_ms <= 0 || !updates.empty()) {
+        // 即拉即回（原口径）：非空队列或未要求挂起都直接回
+        respond(200, {{"ok", true}, {"updates", updates}});
+        return;
+      }
+      // 真挂起长轮询：空队挂至新消息入队（ServerStore 入队钩子唤醒）或
+      // 到期回空数组。零新线程——定时器挂在共享 io_context 上，唤醒与
+      // 注册同线程无竞态；到期/唤醒统一走 park_poll 的 finish 收口。
+      // 请求体已读满、连接上再无待处理读——finish 里捕 shared_from_this
+      // 兜底连接存活（挂起期引用计数归零即断连接），机器人断开亦得体。
+      std::cout << "[MEMEX] bot updates 长轮询挂起 bot=" << self
+                << " timeout_ms=" << timeout_ms << std::endl;
+      const auto self_conn = shared_from_this();
+      hub_.park_poll(self, timeout_ms, [this, self, self_conn]() {
+        respond(200,
+                {{"ok", true}, {"updates", drain_updates(server_.store(), self)}});
+      });
       return;
     }
 
@@ -418,6 +471,7 @@ private:
 
   tcp::socket sock_;
   CollabServer& server_;
+  WebhookServer& hub_; // bot 长轮询挂起登记（park_poll）
   std::array<char, 4096> chunk_{};
   std::string buf_;
   bool head_parsed_{false};
@@ -430,6 +484,14 @@ private:
 };
 
 } // namespace
+
+// 挂起中的 bot 长轮询请求：steady_timer 挂共享 io_context（零新增线程），
+// 到期或被入队钩子唤醒取消（operation_aborted）都恰走一次 finish 收口。
+struct WebhookServer::BotPoll {
+  explicit BotPoll(asio::io_context& io) : timer(io) {}
+  asio::steady_timer timer;
+  std::function<void()> finish;
+};
 
 NoticeDelivery deliver_notice(CollabServer& server, const std::string& target,
                               const std::string& title,
@@ -576,10 +638,57 @@ bool deliver_group_text(CollabServer& server, const std::string& target,
 WebhookServer::WebhookServer(asio::io_context& io, CollabServer& server,
                              std::uint16_t port)
     : io_(io), server_(server),
-      acceptor_(io, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port)) {}
+      acceptor_(io, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port)) {
+  // 入队钩子＝长轮询唤醒源：queue_offline 真落新行即唤醒该收件人的全部
+  // 挂起请求。全部入队点（session TEXT 扇出／webhook 投递面）与回调同在
+  // 共享 io_context 单线程，无锁（口径见 store.hpp 入队钩子注）。
+  server_.store().set_enqueue_hook(
+      this, [this](const std::string& to) { wake_polls(to); });
+}
+
+WebhookServer::~WebhookServer() {
+  // 以 owner 守卫清钩子（交叠生命周期不清掉后来者注册）；挂起请求随
+  // polls_ 析构（定时器取消，连接随共享指针释放，客户端读得 EOF）。
+  server_.store().clear_enqueue_hook(this);
+}
 
 std::uint16_t WebhookServer::port() const {
   return acceptor_.local_endpoint().port();
+}
+
+std::shared_ptr<WebhookServer::BotPoll> WebhookServer::park_poll(
+    const std::string& bot, std::int64_t timeout_ms,
+    std::function<void()> finish) {
+  auto poll = std::make_shared<BotPoll>(io_);
+  poll->finish = std::move(finish);
+  poll->timer.expires_after(std::chrono::milliseconds(timeout_ms));
+  // 到期/唤醒都恰走一次本 handler：finish 回包后摘表——否则到期路径的
+  // 挂起条目永留 polls_（finish 闭包捕着连接共享指针＝连接泄漏）。唤醒
+  // 路径 wake_polls 已先行摘表，此处再摘＝落空无害。
+  poll->timer.async_wait([this, bot, poll](std::error_code) {
+    poll->finish();
+    drop_poll(bot, poll.get());
+  });
+  polls_[bot].push_back(poll);
+  return poll;
+}
+
+void WebhookServer::wake_polls(const std::string& bot) {
+  const auto it = polls_.find(bot);
+  if (it == polls_.end()) return;
+  auto parked = std::move(it->second); // 先摘表再取消：完成回调稍后跑，
+  polls_.erase(it);                    // 回调内 drop_poll 找空表＝无害
+  for (const auto& p : parked) p->timer.cancel();
+}
+
+void WebhookServer::drop_poll(const std::string& bot, BotPoll* poll) {
+  const auto it = polls_.find(bot);
+  if (it == polls_.end()) return;
+  auto& v = it->second;
+  v.erase(std::remove_if(v.begin(), v.end(),
+                         [poll](const auto& p) { return p.get() == poll; }),
+          v.end());
+  if (v.empty()) polls_.erase(it);
 }
 
 void WebhookServer::start_accept() {
@@ -591,7 +700,8 @@ void WebhookServer::do_accept() {
   acceptor_.async_accept(
       [this](std::error_code ec, asio::ip::tcp::socket socket) {
         if (!ec) {
-          std::make_shared<HttpConn>(std::move(socket), server_)->start();
+          std::make_shared<HttpConn>(std::move(socket), server_, *this)
+              ->start();
         }
         do_accept();
       });

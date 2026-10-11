@@ -5,8 +5,11 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <asio.hpp>
 
@@ -49,11 +52,27 @@ public:
   // port=0 由系统分配（测试用），实际端口经 port() 取。
   WebhookServer(asio::io_context& io, CollabServer& server,
                 std::uint16_t port);
+  // 清 store 入队钩子（注册时以 this 为 owner 守卫，见 store.hpp）。
+  ~WebhookServer();
 
   std::uint16_t port() const;
 
   // 开始接受连接（io.run() 前调用一次）。
   void start_accept();
+
+  // —— bot 长轮询（GET /bot/updates?timeout_ms=N）——
+  // BotPoll 定义在 webhook.cpp（与 HttpConn 同文件私有面）。
+  struct BotPoll;
+  // 挂起一个长轮询请求：timeout_ms 后到期，到期或被入队钩子唤醒取消时
+  // 统一走 finish 收口（恰一次）。返回句柄由挂起表持有兜底连接生命周期。
+  std::shared_ptr<BotPoll> park_poll(const std::string& bot,
+                                     std::int64_t timeout_ms,
+                                     std::function<void()> finish);
+  // 入队钩子触发：摘走该 bot 全部挂起请求并取消定时器（完成回调稍后
+  // 在 io 队列跑 finish——摘表先行，回调内 drop_poll 找空表＝无害）。
+  void wake_polls(const std::string& bot);
+  // 完成后自摘（到期路径用；唤醒路径表项已被 wake_polls 摘走，找空＝无害）。
+  void drop_poll(const std::string& bot, BotPoll* poll);
 
 private:
   void do_accept();
@@ -61,6 +80,9 @@ private:
   asio::io_context& io_;
   CollabServer& server_;
   asio::ip::tcp::acceptor acceptor_;
+  // 挂起表：bot 账号 → 挂起请求。仅共享 io_context 单线程触达（注册在
+  // /bot/updates 处理内、唤醒在 store 入队钩子内），无锁。
+  std::map<std::string, std::vector<std::shared_ptr<BotPoll>>> polls_;
 };
 
 } // namespace memex::server

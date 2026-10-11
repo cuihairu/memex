@@ -8,13 +8,14 @@
 #   memex_server bot add echo --by admin1      # 得 token（仅此一次显示）
 #   memex_server bot join echo <群号>          # 可选：加群收群消息
 #
-# 行为：每秒拉一次 /bot/updates，打印收到的文本，ack 后原样回发。
+# 行为：长轮询 /bot/updates（timeout_ms=5000，消息入队即刻返回——不必
+# 密集轮询），打印收到的文本，ack 后原样回发。
 # 依赖：curl（jq 可选——有则输出更整齐）。
 set -u
 
 SERVER="${MEMEX_SERVER:-127.0.0.1:24361}"
 TOKEN="${MEMEX_TOKEN:?缺 MEMEX_TOKEN（memex_server bot add 输出的 token）}"
-POLL="${MEMEX_POLL:-1}"
+POLL="${MEMEX_POLL:-5000}"   # 长轮询挂起毫秒数（旧版为秒间隔轮询）
 
 api() { # api <method> <path> [json-body]
   local method="$1" path="$2" body="${3-}"
@@ -26,22 +27,22 @@ api() { # api <method> <path> [json-body]
   fi
 }
 
-echo "echo bot 已启动（$SERVER，每 ${POLL}s 拉一次，Ctrl-C 退出）"
+echo "echo bot 已启动（$SERVER，长轮询 ${POLL}ms，Ctrl-C 退出）"
 while true; do
   # jq 缺席时用 python3 兜底解析（再缺席则打印原始 JSON 由人眼读）
   if command -v jq >/dev/null 2>&1; then
-    UPDATES=$(api GET /bot/updates | jq -r '.updates[] |
+    UPDATES=$(api GET "/bot/updates?timeout_ms=$POLL" | jq -r '.updates[] |
       "\(.msg_id)\t\(.from)\t\(.text)"' 2>/dev/null) || UPDATES=""
   elif command -v python3 >/dev/null 2>&1; then
-    UPDATES=$(api GET /bot/updates | python3 -c '
+    UPDATES=$(api GET "/bot/updates?timeout_ms=$POLL" | python3 -c '
 import json,sys
 for u in json.load(sys.stdin).get("updates",[]):
     print(f"{u[\"msg_id\"]}\t{u[\"from\"]}\t{u[\"text\"]}")' 2>/dev/null) || UPDATES=""
   else
-    UPDATES=$(api GET /bot/updates)
+    UPDATES=$(api GET "/bot/updates?timeout_ms=$POLL")
   fi
 
-  [ -z "$UPDATES" ] && { sleep "$POLL"; continue; }
+  [ -z "$UPDATES" ] && { sleep 1; continue; }   # 到期回空（或断连）：短歇重挂
   while IFS="$(printf '\t')" read -r msg_id from text; do
     [ -n "$msg_id" ] || continue
     echo "收到 [$from] $text"
@@ -53,5 +54,5 @@ for u in json.load(sys.stdin).get("updates",[]):
       *) api POST /bot/send "{\"target\":\"$from\",\"text\":\"$text\"}" >/dev/null ;;
     esac
   done <<< "$UPDATES"
-  sleep "$POLL"
+  sleep 1
 done

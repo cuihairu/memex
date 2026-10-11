@@ -1557,8 +1557,24 @@ bool ServerStore::queue_offline(const std::string& msg_id,
                     static_cast<int>(envelope_blob.size()), SQLITE_TRANSIENT);
   sqlite3_bind_int64(st, 4, now_ms());
   const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  // 真落新行（changes>0；撞键被 IGNORE 跳过不唤醒）才触发钩子——bot 长轮
+  // 询唤醒源，注：changes 须在本语句 finalize 前读（期间无其他语句）
+  const int inserted = ok ? sqlite3_changes(db_) : 0;
   sqlite3_finalize(st);
+  if (inserted > 0 && enqueue_hook_) enqueue_hook_(to_account);
   return ok;
+}
+
+void ServerStore::set_enqueue_hook(
+    void* owner, std::function<void(const std::string&)> hook) {
+  enqueue_hook_owner_ = owner;
+  enqueue_hook_ = std::move(hook);
+}
+
+void ServerStore::clear_enqueue_hook(void* owner) {
+  if (enqueue_hook_owner_ != owner) return; // 非注册者本人：不动现行钩子
+  enqueue_hook_owner_ = nullptr;
+  enqueue_hook_ = nullptr;
 }
 
 std::vector<std::string> ServerStore::pending_offline(const std::string& account) {

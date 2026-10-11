@@ -8,6 +8,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -383,6 +384,118 @@ void test_pipeline(ServerStore& store, CollabServer& server,
   }
 }
 
+// —— 真挂起长轮询（GET /bot/updates?timeout_ms=N，机器人平台设计稿 §0
+//      留后续项收口）：空队挂至新消息入队或到期；参数校验；到期回空；
+//      多挂起同唤醒；入队钩子唤醒源（store queue_offline 新行）。 ——
+void test_long_poll(ServerStore& store, CollabServer& server,
+                    std::uint16_t port) {
+  const std::string ok_token = "bot_ok_token";
+
+  // ① 参数校验：非数字／负数 → 400（带查询参数的路由按前缀认，仍 GET-only）
+  auto r = bot_get(port, ok_token, "/bot/updates?timeout_ms=abc");
+  CHECK(r.status == 400);
+  r = bot_get(port, ok_token, "/bot/updates?timeout_ms=-5");
+  CHECK(r.status == 400);
+  r = bot_post(port, ok_token, "/bot/updates?timeout_ms=500", "");
+  CHECK(r.status == 405);
+
+  asio::io_context io;
+  TestClient a(io, server.port());
+  a.send(make_login("alice", "pa-w", "pc-lp"));
+  CHECK(a.read().login_result().ok());
+
+  // ② 队列非空＋大 timeout：即拉即回（挂起路径不碰非空队），随后 ack 清队
+  a.send(make_text("alice", "bot:echo", 1, "先到一条"));
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  auto t0 = now_ms();
+  r = bot_get(port, ok_token, "/bot/updates?timeout_ms=15000");
+  const auto immediate_ms = now_ms() - t0;
+  CHECK(r.status == 200);
+  CHECK(r.body["updates"].size() == 1);
+  CHECK(r.body["updates"][0]["text"] == "先到一条");
+  CHECK(immediate_ms < 5000); // 非空队即拉即回，不吃满 timeout
+  r = bot_post(port, ok_token, "/bot/ack",
+               R"({"msg_id":")" +
+                   r.body["updates"][0]["msg_id"].get<std::string>() +
+                   R"("})");
+  CHECK(r.status == 200);
+
+  // ③ 空队挂起→新消息唤醒：挂起中的请求在消息入队后提前返回（不等满
+  //    timeout），响应带新消息。发起与投递的先后不定——消息先到则退化为
+  //    ②的即拉即回，两形态断言同一（响应含消息且早于 timeout）
+  {
+    std::atomic<int> wake_status{0};
+    json wake_body;
+    auto t1 = now_ms();
+    std::thread parked([&] {
+      const auto rr =
+          bot_get(port, ok_token, "/bot/updates?timeout_ms=15000");
+      wake_status = rr.status;
+      wake_body = rr.body;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    a.send(make_text("alice", "bot:echo", 2, "唤醒一条"));
+    parked.join();
+    const auto woke_ms = now_ms() - t1;
+    CHECK(wake_status == 200);
+    CHECK(wake_body["updates"].size() == 1);
+    CHECK(wake_body["updates"][0]["text"] == "唤醒一条");
+    CHECK(woke_ms < 14900);
+    r = bot_post(port, ok_token, "/bot/ack",
+                 R"({"msg_id":")" +
+                     wake_body["updates"][0]["msg_id"].get<std::string>() +
+                     R"("})");
+    CHECK(r.status == 200);
+  }
+
+  // ④ 空队到期：timeout_ms=900 恰在 900ms 后回空数组（steady_timer 不早触发）
+  {
+    const auto t2 = now_ms();
+    r = bot_get(port, ok_token, "/bot/updates?timeout_ms=900");
+    const auto expired_ms = now_ms() - t2;
+    CHECK(r.status == 200);
+    CHECK(r.body["updates"].empty());
+    CHECK(expired_ms >= 850);
+    CHECK(expired_ms < 20000);
+  }
+
+  // ⑤ 双挂起同唤醒：同一 bot 两个挂起请求都在入队时被唤醒拿到同一条
+  //    （drain 只读不删，ack 才清——多挂起各回全量幂等）
+  {
+    std::atomic<int> s1{0};
+    std::atomic<int> s2{0};
+    json b1;
+    json b2;
+    std::thread p1([&] {
+      const auto rr = bot_get(port, ok_token, "/bot/updates?timeout_ms=15000");
+      s1 = rr.status;
+      b1 = rr.body;
+    });
+    std::thread p2([&] {
+      const auto rr = bot_get(port, ok_token, "/bot/updates?timeout_ms=15000");
+      s2 = rr.status;
+      b2 = rr.body;
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    a.send(make_text("alice", "bot:echo", 3, "双唤醒"));
+    p1.join();
+    p2.join();
+    CHECK(s1 == 200);
+    CHECK(s2 == 200);
+    CHECK(b1["updates"].size() == 1);
+    CHECK(b1["updates"][0]["text"] == "双唤醒");
+    CHECK(b2["updates"].size() == 1);
+    CHECK(b2["updates"][0]["text"] == "双唤醒");
+    r = bot_post(port, ok_token, "/bot/ack",
+                 R"({"msg_id":")" +
+                     b1["updates"][0]["msg_id"].get<std::string>() + R"("})");
+    CHECK(r.status == 200);
+  }
+
+  // 收尾对账：三腿消息 ack 后队列复空
+  CHECK(store.offline_count("bot:echo") == 0);
+}
+
 } // namespace
 
 int main() {
@@ -401,6 +514,7 @@ int main() {
 
     test_validation(store, wh.port());
     test_pipeline(store, server, wh.port());
+    test_long_poll(store, server, wh.port());
 
     io.stop();
     io_thread.join();
