@@ -191,10 +191,18 @@ BUGS.md。
 
 ### 我
 
-原型稿（Android 端「我」屏未建，iOS 端代码-only）：
+Android 实况（2026-10-11 走查，`walkthrough-20/21` 同源）：账号卡组织资料
+（ORG_QUERY 拉真实姓名/部门/职务）、本机设备指纹、本地缓存清理、通知入口、
+关于、切换服务器/退出登录；服务端设备台账/登录记录/留存策略查询面协议未开，
+屏内如实标「未接入」，不留假数据。浅色（上）／深色（下）各一。
 
-![手机端我（浅色）](/screenshots/mobile-me-light.png)
-![手机端我（深色）](/screenshots/mobile-me-dark.png)
+![手机端我（Android 实况·浅色）](/screenshots/mobile-live-me-light.png)
+![手机端我（Android 实况·深色）](/screenshots/mobile-live-me-dark.png)
+
+原型稿：浅色与深色各一（保留备查）。
+
+![手机端我（浅色·原型稿）](/screenshots/mobile-me-light.png)
+![手机端我（深色·原型稿）](/screenshots/mobile-me-dark.png)
 
 ## 原型源文件
 
@@ -228,4 +236,9 @@ layout-*／mobile-live-* 实况核对沿用不重摄。此前的进度口径：�
 真实数据面，任务台账六项含日历展开态与外部任务拉取面、投票台账三票含匿名
 多选与到点自动关票；抓取腿照 `test_live_shots` grab_pair 式，亮暗各一、抓完
 显式回亮）。八屏预览集与轮播十二席口径不变（十一席实况＋「我」屏原型稿），
-鸿蒙端承诺外维持前令。
+鸿蒙端承诺外维持前令。2026-10-11「我」屏实况轮：Android「我」屏落地（
+5e213ba，`MeActivity`——账号卡接 ORG_QUERY/ORG_DATA 组织资料；设备管理/登录
+记录/留存策略协议无查询面，屏内如实标「未接入」），android-34 模拟器＋本机
+serve 走查实况浅／深各一（`walkthrough-20/21` 同源，入 `apps/android/docs/`），
+首页轮播 mobile-me 席由原型稿渲染换实况（`mobile-live-me[-light|-dark]`）。
+八屏预览集不变，轮播十二席全实况收口；鸿蒙端承诺外维持前令。
