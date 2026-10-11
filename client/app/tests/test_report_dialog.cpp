@@ -153,14 +153,19 @@ int main(int argc, char** argv) {
       8000));
   CHECK(dlg.report_count() == 0);
 
+  // 当周日报（跨天不倒：日期从当天推导——团队视图「仅本周」默认开，
+  // 写死日期会在周一翻周后掉出窗口假红，2026-10-12 实录）
+  const QDate today = QDate::currentDate();
+  const QString day = today.toString(QStringLiteral("yyyy-MM-dd"));
+
   // 空内容本地拒（不发网）
-  CHECK(!dlg.write_report(QStringLiteral("2026-10-08"), QString()));
+  CHECK(!dlg.write_report(day, QString()));
 
   // 写日报（三段自由文本）→列表一行；点行回填编辑器
-  CHECK(dlg.write_report(QStringLiteral("2026-10-08"),
+  CHECK(dlg.write_report(day,
                          QStringLiteral("今日完成：日报链路\n明日计划：\nblockers：无")));
   CHECK(wait_until([&] { return dlg.report_count() == 1; }, 8000));
-  CHECK(dlg.list()->item(0)->text().startsWith(QStringLiteral("2026-10-08")));
+  CHECK(dlg.list()->item(0)->text().startsWith(day));
   // 点行回填编辑器（itemClicked=用户交互信号，程序化发同款）
   dlg.list()->setCurrentRow(0);
   emit dlg.list()->itemClicked(dlg.list()->item(0));
@@ -168,7 +173,7 @@ int main(int argc, char** argv) {
   CHECK(dlg.content_edit()->toPlainText().contains(QStringLiteral("日报链路")));
 
   // 当日重复提交=更新：同日期仍一行、首行内容换新
-  CHECK(dlg.write_report(QStringLiteral("2026-10-08"),
+  CHECK(dlg.write_report(day,
                          QStringLiteral("今日完成：日报链路 v2")));
   CHECK(wait_until([&] {
     return dlg.report_count() == 1 &&
