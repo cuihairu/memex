@@ -201,6 +201,11 @@ public:
   // 测试用裸 QSystemTrayIcon 复用生产接线（发 activated 信号即走同一路径）。
   void wire_tray_activation(QSystemTrayIcon* tray);
   void activate_from_tray(); // 隐藏→弹出、最小化→还原（保留最大化），随后置顶聚焦
+  // 托盘菜单「退出」真身（act_quit 接线；2026-10-11 用户实录：窗口在托盘
+  // 隐藏态时仅 close() 不退进程——Qt 对不可见窗口的 close 不发
+  // lastWindowClosed，进程滞留＝无窗运行还得拉起来再退。退出即显式
+  // quit，不依赖窗口可见性）。公开给退出语义回归测试走同一路径。
+  void quit_app();
 
 private:
   // 离开锁屏（用户令 2026-10-08 ④）：全局输入喂计时器＋超时上锁

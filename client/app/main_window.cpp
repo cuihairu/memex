@@ -2849,13 +2849,22 @@ void MainWindow::setup_tray() {
     NotificationCenter::instance().show_settings();
   });
   auto* act_quit = menu->addAction(QStringLiteral("退出"));
-  connect(act_quit, &QAction::triggered, this, [this] {
-    tray_ = nullptr; // 先摘托盘，closeEvent 不再拦截（真退出）
-    close();
-  });
+  connect(act_quit, &QAction::triggered, this, &MainWindow::quit_app);
   tray_->setContextMenu(menu);
   tray_->show();
   wire_tray_activation(tray_);
+}
+
+// 托盘菜单「退出」真身（2026-10-11 用户实录：窗口最小化到托盘的隐藏态
+// 点退出，进程不退——close() 不可见窗口不触发 lastWindowClosed（Qt 的
+// 「最后一个可见窗口关闭」语义），仅摘窗不退进程＝无窗运行态，托盘图标
+// 还在（QSystemTrayIcon 对象未析构），用户得把窗口拉起来再退一次才死。
+// 退出即显式 quit：不依赖窗口可见性。先摘 tray_ 让 closeEvent 不再按
+// 「最小化到托盘」分支拦截，close() 走完关闭语义（隐藏＋收尾）再退。
+void MainWindow::quit_app() {
+  tray_ = nullptr;
+  close();
+  QApplication::quit();
 }
 
 // 新消息闪烁提醒（用户令 2026-10-05）：QWindow::alert 走平台原生注意 API

@@ -103,3 +103,8 @@
   修复（close_chat／open_chat 成对）：列表态 `setMaximumWidth(rail_->minimumWidth() + side_->minimumWidth())`＝60＋260＝320，右缘拖不出左侧列内容宽；`open_chat` 首行 `setMaximumWidth(QWIDGETSIZE_MAX)` 释放上限（会话态右窗可见，加宽由对话面板吸收）。最大化态不受本上限约束（受屏幕几何支配）；最大化→还原后列表态窗口无上限，与旧行为一致未额外收紧。
   顺带修判据一枚（test 逼出）：列表「再点当前会话项＝回列表态」原以 `chat_panel_->isVisible()` 判定会话开着——离屏未 show 的窗口里子件 isVisible() 恒 false，二次点击会再次走 open_chat；改用状态变量 `current_peer_` 判定（与面板显隐同步：close_chat 清／open_chat 设），语义更直接、真实窗口行为不变。
   回归：新增 test_window_layout（离屏真 MainWindow 三腿）——①构造＝列表态→右缘上限恰 320 且当前宽不超；②点列表项开会话→上限释放＋窗宽 960；③再点同一行回列表态→上限复归＋窗宽 320。单跑绿。
+- [x] BUG-009 托盘菜单「退出」点了进程不退（窗口在托盘隐藏态时），得把主窗拉起来再退一次
+  现象（2026-10-11 用户实录）：点击托盘图标弹菜单选「退出」，主窗消失但进程滞留（无窗运行态；托盘图标仍在——QSystemTrayIcon 对象未析构）；必须先点图标把主窗拉起来、再退一次才真退。
+  定位（离屏对照实证，同版 Qt）：托盘「退出」动作修前只做 `tray_ = nullptr; close()`（main_window.cpp:2851-2855），退出依赖 `quitOnLastWindowClosed`；而 Qt 的 lastWindowClosed 只在**可见**窗口关闭时发——窗口处于「最小化到托盘」的隐藏态时 close() 不触发，exec 继续跑＝进程滞留。离屏最小对照：可见窗 close → exec 返回 rc=0；隐藏窗 close → 1.5s 看门狗内仍 running。与用户「需要把memex拉起来修复」精确吻合：拉起＝窗口转可见，再退＝close 才真正退出。
+  修复：退出动作提为 `MainWindow::quit_app()`（main_window.cpp:2864）：摘 tray_（closeEvent 不再按最小化分支拦）→ close() 走完关闭语义 → **显式 QApplication::quit()**——退出即退进程，不依赖窗口可见性；act_quit 改接该槽。closeEvent 本身零改动（托盘分支＝最小化到托盘的原语义保留）。
+  回归：test_window_layout 新增第④腿——show→hide（托盘常驻同态）后 exec 内 singleShot(0) 调 quit_app，断言 exec 立即返回 rc=0（3s 看门狗兜底）；突变验证有牙：注释掉 quit() 重编，该腿 3.1s 判红（恰是修前的滞留态）。真二进制进程级证据：`memex_client --smoke` 运行中 `ps` 见 pid、显式 quit 后 exit=0 且 `ps -p` 空＝process gone、pgrep 无残留、日志引擎干净停止（[直连发现] 停止）。本机全量 ctest 72/72 绿（串行，负载 1.1 干净窗）。
