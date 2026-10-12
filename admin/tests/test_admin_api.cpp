@@ -219,6 +219,9 @@ int main() {
       CHECK(seed.task_pull_config_set(tp));
       CHECK(seed.task_source_cred_set("m1", "github", "deadbeef-sealed",
                                       1700000313001));
+      // 任务类型腿：aud1 的一条引用「运维」类型的任务（删除引用拒证）
+      CHECK(seed.task_create("aud1", "aud1", "盘点任务", "", 0,
+                             1700000314000, "", "", "运维") > 0);
     }
     // 业务流程面腿：部门与汇报线（团队聚合）＋日报＋审批（待决/已决）＋
     // 办公室位置图（3F 两席）＋任务与备忘录＋远程协助会话与放行策略
@@ -1630,6 +1633,38 @@ int main() {
     CHECK(http("GET", "/api/admin/task-pull", {}, lm1.set_cookie).code == 403);
     CHECK(http("POST", "/api/admin/task-pull", R"({"enabled":true})",
                lm1.set_cookie).code == 403);
+  }
+
+  // ㊺ 任务类型清单（服务端配置）：初始四类与默认回读、加类型、重名拒、
+  //    缺参 400、删默认/删有引用/删不存在拒、删空类型放行、member 403
+  {
+    const auto g = http("GET", "/api/admin/task-types", {}, root_cookie);
+    CHECK(g.code == 200);
+    const Json::Value st = jbody(g.text);
+    CHECK(st["types"].size() == 4);
+    CHECK(st["default"].asString() == "任务");
+    CHECK(http("POST", "/api/admin/task-types", R"({"name":"运维"})",
+               root_cookie).code == 200);
+    CHECK(http("POST", "/api/admin/task-types", R"({"name":"运维"})",
+               root_cookie).code == 400); // 重名
+    CHECK(http("POST", "/api/admin/task-types", "{}", root_cookie).code ==
+          400); // 缺参
+    CHECK(http("POST", "/api/admin/task-types/delete", R"({"name":"任务"})",
+               root_cookie).code == 400); // 默认类型拒删
+    CHECK(http("POST", "/api/admin/task-types/delete", R"({"name":"运维"})",
+               root_cookie).code == 400); // 有任务引用拒删（存量不悬空）
+    CHECK(http("POST", "/api/admin/task-types", R"({"name":"临时"})",
+               root_cookie).code == 200);
+    CHECK(http("POST", "/api/admin/task-types/delete", R"({"name":"临时"})",
+               root_cookie).code == 200); // 空类型放行
+    CHECK(http("POST", "/api/admin/task-types/delete", R"({"name":"临时"})",
+               root_cookie).code == 400); // 二次删＝不存在
+    const auto lm2 =
+        http("POST", "/api/login", R"({"account":"m1","password":"m1-pw"})");
+    CHECK(http("GET", "/api/admin/task-types", {}, lm2.set_cookie).code ==
+          403);
+    CHECK(http("POST", "/api/admin/task-types", R"({"name":"x"})",
+               lm2.set_cookie).code == 403);
   }
 
   // ㊷ 登出后会话失效

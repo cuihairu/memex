@@ -260,6 +260,127 @@ class FilesClient {
         request("file.delete", "POST", "/files/manage/delete?id=$id", body = "")
     }
 
+    // —— 任务清单（R27-6）：端点/语义对齐桌面 TaskDialog × FileServer ——
+    //
+    //  - type 在服务端配置（/files/task-types 清单拉取；缺省=默认类型），
+    //    status 三态（待办/进行中/完成）读取为准，done 由服务端双写过渡。
+    //  - start_ms 默认 0=未设；due_ms 同桌面 deadline 口径。
+
+    /** 任务行（assigned 行无 creator/reminded_ms——服务端口径缺省 0/空串） */
+    data class Task(
+        val id: Long,
+        val title: String,
+        val note: String,
+        val dueMs: Long,
+        val remindedMs: Long,
+        val done: Boolean,
+        val creator: String,
+        val provider: String,
+        val extKey: String,
+        val startMs: Long,
+        val startRemindedMs: Long,
+        val type: String,
+        val status: String,
+    )
+
+    /** /files/tasks 双数组：我的清单＋我派出的 */
+    data class TaskBoard(val mine: List<Task>, val assignedByMe: List<Task>)
+
+    data class TaskType(val name: String, val isDefault: Boolean)
+
+    @Throws(ApiException::class)
+    fun listTasks(): TaskBoard {
+        val json = request("task.list", "GET", "/files/tasks")
+        return TaskBoard(
+            mine = parseTasks(json.optJSONArray("tasks")),
+            assignedByMe = parseTasks(json.optJSONArray("assigned_by_me")),
+        )
+    }
+
+    /** type 空=服务端默认类型；startMs<=0=未设（与桌面 create_task 同形） */
+    @Throws(ApiException::class)
+    fun createTask(
+        title: String,
+        note: String,
+        dueMs: Long,
+        assignee: String,
+        type: String = "",
+        startMs: Long = 0,
+    ): Long {
+        val body = JSONObject().put("title", title).put("note", note)
+        if (dueMs > 0) body.put("due_ms", dueMs)
+        if (assignee.isNotEmpty()) body.put("assignee", assignee)
+        if (type.isNotEmpty()) body.put("type", type)
+        if (startMs > 0) body.put("start_ms", startMs)
+        return request("task.create", "POST", "/files/tasks", body.toString())
+            .optLong("id")
+    }
+
+    /** 状态切换（待办/进行中/完成——服务端判权 owner 并双写 done） */
+    @Throws(ApiException::class)
+    fun setTaskStatus(id: Long, status: String) {
+        request(
+            "task.status", "POST", "/files/tasks/status",
+            JSONObject().put("id", id).put("status", status).toString(),
+        )
+    }
+
+    @Throws(ApiException::class)
+    fun setTaskDone(id: Long, done: Boolean) {
+        request(
+            "task.done", "POST", "/files/tasks/done",
+            JSONObject().put("id", id).put("done", done).toString(),
+        )
+    }
+
+    @Throws(ApiException::class)
+    fun deleteTask(id: Long) {
+        request(
+            "task.delete", "POST", "/files/tasks/delete",
+            JSONObject().put("id", id).toString(),
+        )
+    }
+
+    @Throws(ApiException::class)
+    fun markTaskReminded(id: Long, kind: String = "") {
+        val body = JSONObject().put("id", id)
+        if (kind.isNotEmpty()) body.put("kind", kind)
+        request("task.reminded", "POST", "/files/tasks/reminded", body.toString())
+    }
+
+    /** 类型清单（admin 后台可增删改，端侧只读拉取） */
+    @Throws(ApiException::class)
+    fun taskTypes(): List<TaskType> {
+        val json = request("task.types", "GET", "/files/task-types")
+        val arr = json.optJSONArray("types") ?: JSONArray()
+        return (0 until arr.length()).mapNotNull { i ->
+            arr.optJSONObject(i)?.let {
+                TaskType(it.optString("name"), it.optBoolean("is_default"))
+            }
+        }
+    }
+
+    private fun parseTasks(arr: JSONArray?): List<Task> =
+        if (arr == null) emptyList()
+        else (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            Task(
+                id = o.optLong("id"),
+                title = o.optString("title"),
+                note = o.optString("note"),
+                dueMs = o.optLong("due_ms"),
+                remindedMs = o.optLong("reminded_ms"),
+                done = o.optBoolean("done"),
+                creator = o.optString("creator"),
+                provider = o.optString("provider"),
+                extKey = o.optString("ext_key"),
+                startMs = o.optLong("start_ms"),
+                startRemindedMs = o.optLong("start_reminded_ms"),
+                type = o.optString("type"),
+                status = o.optString("status"),
+            )
+        }
+
     // —— 内部 ——
 
     private fun open(path: String, method: String): HttpURLConnection {

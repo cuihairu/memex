@@ -117,6 +117,38 @@
     <string name="files_err_prefix">操作失败（HTTP %1$d）：%2$s</string>
     <string name="main_file_assistant">文件助手</string>
 
+    <!-- 任务清单（R27-6）：列表/看板双视图，类型清单从服务端拉取 -->
+    <string name="main_tasks">任务清单</string>
+    <string name="tasks_title">任务清单</string>
+    <string name="tasks_title_hint">任务标题</string>
+    <string name="tasks_assignee_hint">分配给（可空）</string>
+    <string name="tasks_type_default">类型…</string>
+    <string name="tasks_deadline_label">截止</string>
+    <string name="tasks_start_label">开始</string>
+    <string name="tasks_ms_hint">毫秒时间戳</string>
+    <string name="tasks_remind_start">开始到点提醒</string>
+    <string name="tasks_remind_due">截止到期提醒</string>
+    <string name="tasks_add">添加任务</string>
+    <string name="tasks_board">看板</string>
+    <string name="tasks_list">列表</string>
+    <string name="tasks_empty">暂无任务，连接后添加</string>
+    <string name="tasks_state_on">已连接</string>
+    <string name="tasks_state_count">清单已刷新（%1$d 项）</string>
+    <string name="tasks_err_need_title">标题不能为空</string>
+    <string name="tasks_col_todo">待办</string>
+    <string name="tasks_col_doing">进行中</string>
+    <string name="tasks_col_done">完成</string>
+    <string name="tasks_self">自建</string>
+    <string name="tasks_from">由 %1$s 分配</string>
+    <string name="tasks_doing">（进行中）</string>
+    <string name="tasks_start_at">开始 %1$s</string>
+    <string name="tasks_due_at">截止 %1$s</string>
+    <string name="tasks_action_start_pause">开始/暂停</string>
+    <string name="tasks_action_done_toggle">完成</string>
+    <string name="tasks_notify_title">任务提醒</string>
+    <string name="tasks_notify_start">任务已到开始时间：%1$s</string>
+    <string name="tasks_notify_due">任务已到期待办：%1$s</string>
+
     <!-- 校验失败原因（与 core 探测结果一一对应） -->
     <string name="err_addr_empty">服务器地址不能为空</string>
     <string name="err_addr_bad_host">地址格式不正确，请填写域名或 IP</string>

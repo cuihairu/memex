@@ -859,8 +859,16 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (path_ == "/files/tasks/done" && method_ == "POST") {
       return route_task_done(body);
     }
+    // R27-6 状态切换（待办/进行中/完成——看板列语义；done 双写过渡）
+    if (path_ == "/files/tasks/status" && method_ == "POST") {
+      return route_task_status(body);
+    }
     if (path_ == "/files/tasks/reminded" && method_ == "POST") {
       return route_task_reminded(body);
+    }
+    // R27-6 任务类型清单（服务端配置，admin 增删改——客户端拉取展示）
+    if (path_ == "/files/task-types" && method_ == "GET") {
+      return route_task_types();
     }
     if (path_ == "/files/tasks/delete" && method_ == "POST") {
       return route_task_delete(body);
@@ -1384,6 +1392,8 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         j["title"].get<std::string>().empty() ||
         (j.contains("note") && !j["note"].is_string()) ||
         (j.contains("due_ms") && !j["due_ms"].is_number_integer()) ||
+        (j.contains("start_ms") && !j["start_ms"].is_number_integer()) ||
+        (j.contains("type") && !j["type"].is_string()) ||
         (j.contains("assignee") && !j["assignee"].is_string()) ||
         (j.contains("provider") && !j["provider"].is_string()) ||
         (j.contains("ext_key") && !j["ext_key"].is_string())) {
@@ -1391,8 +1401,8 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
           400,
           {{"ok", false},
            {"error",
-            "缺少字段：title（非空）；note/due_ms/assignee/provider/"
-            "ext_key 可选"}});
+            "缺少字段：title（非空）；note/due_ms/start_ms/type/assignee/"
+            "provider/ext_key 可选"}});
       return;
     }
     // R27-2 外部任务登记：provider/ext_key 成对，空=本地任务。外部条目
@@ -1433,9 +1443,32 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         j.contains("due_ms") ? j["due_ms"].get<std::int64_t>() : 0;
     const std::string note =
         j.contains("note") ? j["note"].get<std::string>() : "";
+    // R27-6：类型须在服务端清单内（缺省=默认类型「任务」）；开始时间
+    // 0=未设
+    std::string type = impl_.store.task_type_default();
+    if (j.contains("type")) {
+      type = j["type"].get<std::string>();
+      bool known = false;
+      for (const auto& t : impl_.store.task_types()) {
+        if (t.name == type) known = true;
+      }
+      if (!known) {
+        respond_json(400, {{"ok", false},
+                           {"error", "未知任务类型（清单在 /files/task-types）"}});
+        return;
+      }
+    }
+    std::int64_t start_ms = 0;
+    if (j.contains("start_ms")) {
+      start_ms = j["start_ms"].get<std::int64_t>();
+      if (start_ms < 0) {
+        respond_json(400, {{"ok", false}, {"error", "start_ms 须 ≥0"}});
+        return;
+      }
+    }
     const std::int64_t id = impl_.store.task_create(
         assignee, account, j["title"].get<std::string>(), note, due_ms,
-        now_ms(), provider, ext_key);
+        now_ms(), provider, ext_key, type, start_ms);
     if (id <= 0) {
       respond_json(404, {{"ok", false}, {"error", "任务接收人不存在"}});
       return;
@@ -1462,7 +1495,11 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                       {"done_ms", t.done_ms},
                       {"created_ms", t.created_ms},
                       {"provider", t.provider},
-                      {"ext_key", t.ext_key}});
+                      {"ext_key", t.ext_key},
+                      {"start_ms", t.start_ms},
+                      {"start_reminded_ms", t.start_reminded_ms},
+                      {"type", t.type},
+                      {"status", t.status}});
     }
     json assigned = json::array();
     for (const auto& t : impl_.store.tasks_assigned_by(account)) {
@@ -1475,7 +1512,11 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                           {"done_ms", t.done_ms},
                           {"created_ms", t.created_ms},
                           {"provider", t.provider},
-                          {"ext_key", t.ext_key}});
+                          {"ext_key", t.ext_key},
+                          {"start_ms", t.start_ms},
+                          {"start_reminded_ms", t.start_reminded_ms},
+                          {"type", t.type},
+                          {"status", t.status}});
     }
     respond_json(200, {{"ok", true}, {"tasks", mine},
                        {"assigned_by_me", assigned}});
@@ -1514,6 +1555,62 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     respond_json(200, {{"ok", true}});
   }
 
+  // R27-6 状态切换（待办/进行中/完成——看板列语义；完成↔done 双写，
+  // 读取以 status 为准）；判权同勾完成：清单主人
+  void route_task_status(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number_integer() ||
+        !j.contains("status") || !j["status"].is_string()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：id/status"}});
+      return;
+    }
+    const std::string status = j["status"].get<std::string>();
+    if (status != "待办" && status != "进行中" && status != "完成") {
+      respond_json(400,
+                   {{"ok", false},
+                    {"error", "status 须为 待办/进行中/完成"}});
+      return;
+    }
+    const std::int64_t id = j["id"].get<std::int64_t>();
+    const auto row = impl_.store.task_by_id(id);
+    if (!row.has_value()) {
+      respond_json(404, {{"ok", false}, {"error", "任务不存在"}});
+      return;
+    }
+    if (row->owner != account) {
+      respond_json(403, {{"ok", false},
+                         {"error", "只有清单主人能改任务状态"}});
+      return;
+    }
+    if (!impl_.store.task_set_status(id, status, now_ms())) {
+      respond_json(500, {{"ok", false}, {"error", "任务状态更新失败"}});
+      return;
+    }
+    respond_json(200, {{"ok", true}});
+  }
+
+  // R27-6 任务类型清单（服务端配置，admin 增删改——客户端拉取展示；
+  // 缺省类型单列，建任务缺省用它）
+  void route_task_types() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json arr = json::array();
+    for (const auto& t : impl_.store.task_types()) {
+      arr.push_back({{"name", t.name}, {"is_default", t.is_default}});
+    }
+    respond_json(200, {{"ok", true},
+                       {"types", arr},
+                       {"default", impl_.store.task_type_default()}});
+  }
+
   void route_task_reminded(const std::string& body) {
     const std::string account = account_or_respond();
     if (account.empty()) return;
@@ -1539,7 +1636,15 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                          {"error", "提醒回执归清单主人"}});
       return;
     }
-    impl_.store.task_mark_reminded(id, now_ms());
+    // R27-6：kind=start＝开始到点提醒回执（独立位，不与 deadline 互抢）；
+    // 缺省=deadline 到期提醒（兼容现口径）
+    const bool start_kind = j.contains("kind") && j["kind"].is_string() &&
+                            j["kind"].get<std::string>() == "start";
+    if (start_kind) {
+      impl_.store.task_mark_start_reminded(id, now_ms());
+    } else {
+      impl_.store.task_mark_reminded(id, now_ms());
+    }
     respond_json(200, {{"ok", true}});
   }
 

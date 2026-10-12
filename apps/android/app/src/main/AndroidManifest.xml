@@ -47,6 +47,11 @@
             android:name="com.memex.im.ui.FileAssistantActivity"
             android:exported="false" />
 
+        <!-- 任务清单（R27-6）：列表/看板双视图，入口在主界面 -->
+        <activity
+            android:name="com.memex.im.ui.TasksActivity"
+            android:exported="false" />
+
         <!-- 「我」屏：账号卡＋账号与设备＋通用（入口在主界面，不新造 tab） -->
         <activity
             android:name="com.memex.im.ui.MeActivity"

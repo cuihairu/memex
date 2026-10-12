@@ -159,17 +159,25 @@ class FilesClient : public QObject {
   // —— 个人任务清单（R27-1 /files/tasks）——
   // 建（assignee 空=自建；非空=分配给他人，服务端按「同群/同部门」判权。
   // R27-2 外部任务登记：provider/ext_key 成对非空=外部引用条目，
-  // 个人登记不转派，详情 URL 由客户端 provider SPI 解析）
+  // 个人登记不转派，详情 URL 由客户端 provider SPI 解析。
+  // R27-6：type 空=服务端默认类型；start_ms>0=开始时间）
   void create_task(const QString& title, const QString& note, qint64 due_ms,
                    const QString& assignee = QString(),
                    const QString& provider = QString(),
-                   const QString& ext_key = QString());
+                   const QString& ext_key = QString(),
+                   const QString& type = QString(), qint64 start_ms = 0);
   // 我的清单＋我派出的（一次双数组）
   void list_tasks();
+  // R27-6 任务类型清单（服务端配置，建任务下拉与校验的数据源）
+  void fetch_task_types();
   // 完成/回退（仅清单主人）
   void set_task_done(qint64 id, bool done);
-  // 提醒回执（仅清单主人；服务端只落一次时刻）
-  void mark_task_reminded(qint64 id);
+  // R27-6 状态切换（待办/进行中/完成——服务端双写 done，读取以 status
+  // 为准）
+  void set_task_status(qint64 id, const QString& status);
+  // 提醒回执（仅清单主人；服务端只落一次时刻。kind 非空=「start」开始
+  // 到点提醒回执，独立位不与 deadline 互抢）
+  void mark_task_reminded(qint64 id, const QString& kind = QString());
   // 撤回（清单主人或分配人）
   void delete_task(qint64 id);
 
@@ -357,7 +365,9 @@ class FilesClient : public QObject {
   void file_deleted(qint64 file_id);
   void task_created(qint64 id);
   void tasks_listed(const QJsonArray& mine, const QJsonArray& assigned_by_me);
+  void task_types_loaded(const QJsonArray& types, const QString& def);
   void task_done_set(qint64 id);
+  void task_status_set(qint64 id);
   void task_reminded(qint64 id);
   void task_deleted(qint64 id);
   void approval_created(qint64 id);

@@ -3458,6 +3458,81 @@ int setup(int argc, char** argv) {
             cb(json_resp(drogon::k200OK, ok_json()));
           });
 
+  // —— R27-6 任务类型清单（服务端配置；初始四类 任务/需求/缺陷/其他，
+  //     默认「任务」；admin 可增删改——桌面/手机从 /files/task-types 拉取） ——
+  guarded("/api/admin/task-types", {drogon::Get}, false,
+          [ctx](const drogon::HttpRequestPtr& req,
+                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
+            if (auto deny = require_manage(*ctx, req, "task_types.view")) {
+              cb(std::move(*deny));
+              return;
+            }
+            Json::Value out = ok_json();
+            std::lock_guard<std::mutex> lk(ctx->mu);
+            Json::Value arr(Json::arrayValue);
+            for (const auto& t : ctx->store->task_types()) {
+              Json::Value row;
+              row["name"] = t.name;
+              row["is_default"] = t.is_default;
+              arr.append(row);
+            }
+            out["types"] = arr;
+            out["default"] = ctx->store->task_type_default();
+            cb(json_resp(drogon::k200OK, out));
+          });
+
+  guarded("/api/admin/task-types", {drogon::Post}, true,
+          [ctx](const drogon::HttpRequestPtr& req,
+                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
+            if (auto deny = require_manage(*ctx, req, "task_types.manage")) {
+              cb(std::move(*deny));
+              return;
+            }
+            const auto j = body_of(req);
+            if (!j || !j->isMember("name") || !(*j)["name"].isString() ||
+                (*j)["name"].asString().empty()) {
+              cb(err_resp(drogon::k400BadRequest, "缺少字段：name（非空）"));
+              return;
+            }
+            const std::string name = (*j)["name"].asString();
+            const std::string account = session_account(req);
+            std::lock_guard<std::mutex> lk(ctx->mu);
+            if (!ctx->store->task_type_add(name)) {
+              cb(err_resp(drogon::k400BadRequest, "类型已存在或非法"));
+              return;
+            }
+            std::cout << "[MEMEX-ADMIN] task-type add name=" << name
+                      << " by=" << account << std::endl;
+            cb(json_resp(drogon::k200OK, ok_json()));
+          });
+
+  guarded("/api/admin/task-types/delete", {drogon::Post}, true,
+          [ctx](const drogon::HttpRequestPtr& req,
+                std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
+            if (auto deny = require_manage(*ctx, req, "task_types.manage")) {
+              cb(std::move(*deny));
+              return;
+            }
+            const auto j = body_of(req);
+            if (!j || !j->isMember("name") || !(*j)["name"].isString() ||
+                (*j)["name"].asString().empty()) {
+              cb(err_resp(drogon::k400BadRequest, "缺少字段：name（非空）"));
+              return;
+            }
+            const std::string name = (*j)["name"].asString();
+            const std::string account = session_account(req);
+            std::lock_guard<std::mutex> lk(ctx->mu);
+            if (!ctx->store->task_type_delete(name)) {
+              // 默认类型/有任务引用/不存在——一律拒（存量任务不悬空）
+              cb(err_resp(drogon::k400BadRequest,
+                          "拒删：默认类型、有任务引用或不存在"));
+              return;
+            }
+            std::cout << "[MEMEX-ADMIN] task-type delete name=" << name
+                      << " by=" << account << std::endl;
+            cb(json_resp(drogon::k200OK, ok_json()));
+          });
+
   guarded("/api/admin/memos", {drogon::Get}, false,
           [ctx](const drogon::HttpRequestPtr& req,
               std::function<void(const drogon::HttpResponsePtr&)>&& cb) {

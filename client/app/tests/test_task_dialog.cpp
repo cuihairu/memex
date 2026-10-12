@@ -6,6 +6,7 @@
 // 不在此重复。
 #include <QApplication>
 #include <QCalendarWidget>
+#include <QCheckBox>
 #include <QElapsedTimer>
 #include <QDateTime>
 #include <QDir>
@@ -452,6 +453,255 @@ int main(int argc, char** argv) {
     }
   }
   qApp->processEvents(); // WA_DeleteOnClose 收尾防悬垂
+
+  // —— R27-6 类型/开始时间/状态/看板/提醒开关 ——
+  {
+    auto find_row = [&dlg](const QString& title) -> int {
+      for (int i = 0; i < dlg.task_count(); ++i) {
+        if (dlg.list()->item(i)->text().contains(title)) return i;
+      }
+      return -1;
+    };
+    // 类型清单随登录拉取（服务端初始四类，缺省选中默认「任务」）
+    CHECK(wait_until(
+        [&] { return dlg.task_type_names().size() == 4; }, 8000));
+    CHECK(dlg.task_type_names().contains(QStringLiteral("任务")) &&
+          dlg.task_type_names().contains(QStringLiteral("需求")) &&
+          dlg.task_type_names().contains(QStringLiteral("缺陷")) &&
+          dlg.task_type_names().contains(QStringLiteral("其他")));
+    const int def_idx =
+        dlg.task_type_names().indexOf(QStringLiteral("任务"));
+    CHECK(def_idx == 0); // is_default 排首（ORDER BY is_default DESC）
+
+    // 带 type+start 创建：列表行带类型与开始时间（roles 回读）
+    const qint64 start_past =
+        QDateTime::currentMSecsSinceEpoch() - 2000;
+    CHECK(dlg.add_task(QStringLiteral("类型甲"), QString(), 0, QString(),
+                       QStringLiteral("需求"), start_past));
+    CHECK(wait_until([&] { return find_row(QStringLiteral("类型甲")) >= 0; },
+                     8000));
+    int tz = find_row(QStringLiteral("类型甲"));
+    CHECK(dlg.list()->item(tz)->text().contains(QStringLiteral("·需求")));
+    CHECK(dlg.list()->item(tz)->text().contains(QStringLiteral("开始")));
+    CHECK(dlg.list()->item(tz)->data(Qt::UserRole + 9).toString() ==
+          QStringLiteral("需求"));
+    CHECK(dlg.list()->item(tz)->data(Qt::UserRole + 7).toLongLong() ==
+          start_past);
+    CHECK(dlg.list()->item(tz)->data(Qt::UserRole + 10).toString() ==
+          QStringLiteral("待办"));
+
+    // 状态切换：待办→进行中→完成→待办（服务端双写 done，读取以 status
+    // 为准）；状态按钮文案随选中态同步（进行中=暂停）
+    dlg.list()->setCurrentRow(find_row(QStringLiteral("类型甲")));
+    CHECK(dlg.set_selected_status(QStringLiteral("进行中")));
+    CHECK(wait_until(
+        [&] {
+          const int r = find_row(QStringLiteral("类型甲"));
+          return r >= 0 && dlg.list()->item(r)->text().contains(
+                               QStringLiteral("（进行中）"));
+        },
+        8000));
+    dlg.list()->setCurrentRow(find_row(QStringLiteral("类型甲")));
+    bool saw_pause = false;
+    for (auto* b : dlg.findChildren<QPushButton*>()) {
+      if (b->text() == QStringLiteral("暂停")) saw_pause = true;
+    }
+    CHECK(saw_pause);
+    dlg.list()->setCurrentRow(find_row(QStringLiteral("类型甲")));
+    CHECK(dlg.set_selected_status(QStringLiteral("完成")));
+    CHECK(wait_until(
+        [&] {
+          const int r = find_row(QStringLiteral("类型甲"));
+          return r >= 0 &&
+                 dlg.list()->item(r)->text().startsWith(
+                     QStringLiteral("[x]"));
+        },
+        8000));
+    CHECK(dlg.list()->item(find_row(QStringLiteral("类型甲")))
+              ->data(Qt::UserRole + 1)
+              .toBool()); // done 双写
+    dlg.list()->setCurrentRow(find_row(QStringLiteral("类型甲")));
+    CHECK(dlg.set_selected_status(QStringLiteral("待办")));
+    CHECK(wait_until(
+        [&] {
+          const int r = find_row(QStringLiteral("类型甲"));
+          return r >= 0 &&
+                 !dlg.list()->item(r)->text().startsWith(
+                     QStringLiteral("[x]"));
+        },
+        8000));
+    CHECK(!dlg.list()->item(find_row(QStringLiteral("类型甲")))
+               ->data(Qt::UserRole + 1)
+               .toBool()); // done/done_ms 一并清
+
+    // 开始到点提醒：start 已过（两开关默认开）→ check_due 触发＋
+    // kind=start 回执（start_reminded_ms 与 deadline 回执相互独立）
+    const int base_notifies = tray_notifies;
+    dlg.check_due();
+    CHECK(wait_until([&] { return tray_notifies >= base_notifies + 1; },
+                     8000));
+    last_pull = 0;
+    CHECK(wait_until([&] {
+      const int r = find_row(QStringLiteral("类型甲"));
+      if (r >= 0 &&
+          dlg.list()->item(r)->data(Qt::UserRole + 8).toLongLong() > 0 &&
+          dlg.list()->item(r)->data(Qt::UserRole + 3).toLongLong() == 0) {
+        return true;
+      }
+      const qint64 now = QDateTime::currentMSecsSinceEpoch();
+      if (now - last_pull > 500) {
+        last_pull = now;
+        dlg.refresh();
+      }
+      return false;
+    }, 8000));
+
+    // 提醒开关：持久化（QSettings）＋闸门生效（关=到点不提醒）。收尾
+    // remove 回缺省开（QSettings 走真配置，勿留测试值）
+    auto* cb_start = dlg.findChild<QCheckBox*>(
+        QStringLiteral("task_remind_start"));
+    auto* cb_due =
+        dlg.findChild<QCheckBox*>(QStringLiteral("task_remind_due"));
+    CHECK(cb_start != nullptr && cb_due != nullptr);
+    CHECK(cb_start->isChecked() && cb_due->isChecked()); // 默认开
+    {
+      QSettings s(QStringLiteral("memex"), QStringLiteral("collab"));
+      cb_start->setChecked(false);
+      CHECK(!s.value(QStringLiteral("task_remind_start"), true).toBool());
+      cb_start->setChecked(true);
+      CHECK(s.value(QStringLiteral("task_remind_start"), true).toBool());
+    }
+    // 开始提醒关闸：新建 start 已过的任务，check_due 不触发
+    const qint64 start_past2 =
+        QDateTime::currentMSecsSinceEpoch() - 2000;
+    {
+      QSettings s(QStringLiteral("memex"), QStringLiteral("collab"));
+      s.setValue(QStringLiteral("task_remind_start"), false);
+    }
+    CHECK(dlg.add_task(QStringLiteral("类型乙"), QString(), 0, QString(),
+                       QStringLiteral("缺陷"), start_past2));
+    CHECK(wait_until([&] { return find_row(QStringLiteral("类型乙")) >= 0; },
+                     8000));
+    const int quiet1 = tray_notifies;
+    dlg.check_due();
+    QApplication::processEvents();
+    CHECK(tray_notifies == quiet1);
+    {
+      QSettings s(QStringLiteral("memex"), QStringLiteral("collab"));
+      s.setValue(QStringLiteral("task_remind_start"), true);
+    }
+    dlg.check_due();
+    CHECK(wait_until([&] { return tray_notifies >= quiet1 + 1; }, 8000));
+    // 类型乙回执落库后再动 deadline 闸（stale 列表会把同一行重燃，
+    // 污染下一腿的静默计数——回执先对齐）
+    last_pull = 0;
+    CHECK(wait_until([&] {
+      const int r = find_row(QStringLiteral("类型乙"));
+      if (r >= 0 &&
+          dlg.list()->item(r)->data(Qt::UserRole + 8).toLongLong() > 0) {
+        return true;
+      }
+      const qint64 now = QDateTime::currentMSecsSinceEpoch();
+      if (now - last_pull > 500) {
+        last_pull = now;
+        dlg.refresh();
+      }
+      return false;
+    }, 8000));
+    // deadline 提醒同闸：关=到期不提醒，开=触发
+    const qint64 past_due =
+        QDateTime::currentMSecsSinceEpoch() - 1000;
+    {
+      QSettings s(QStringLiteral("memex"), QStringLiteral("collab"));
+      s.setValue(QStringLiteral("task_remind_due"), false);
+    }
+    CHECK(dlg.add_task(QStringLiteral("到期乙"), QString(), past_due,
+                       QString()));
+    CHECK(wait_until([&] { return find_row(QStringLiteral("到期乙")) >= 0; },
+                     8000));
+    const int quiet2 = tray_notifies;
+    dlg.check_due();
+    QApplication::processEvents();
+    CHECK(tray_notifies == quiet2);
+    {
+      QSettings s(QStringLiteral("memex"), QStringLiteral("collab"));
+      s.setValue(QStringLiteral("task_remind_due"), true);
+    }
+    dlg.check_due();
+    CHECK(wait_until([&] { return tray_notifies >= quiet2 + 1; }, 8000));
+    // 回执落库后不再重复提醒（节流重拉对齐，同到期提醒腿口径）
+    last_pull = 0;
+    CHECK(wait_until([&] {
+      const int r = find_row(QStringLiteral("到期乙"));
+      if (r >= 0 &&
+          dlg.list()->item(r)->data(Qt::UserRole + 3).toLongLong() > 0) {
+        return true;
+      }
+      const qint64 now = QDateTime::currentMSecsSinceEpoch();
+      if (now - last_pull > 500) {
+        last_pull = now;
+        dlg.refresh();
+      }
+      return false;
+    }, 8000));
+    dlg.check_due();
+    dlg.refresh();
+    QApplication::processEvents();
+    CHECK(tray_notifies == quiet2 + 1);
+    {
+      QSettings s(QStringLiteral("memex"), QStringLiteral("collab"));
+      s.remove(QStringLiteral("task_remind_start"));
+      s.remove(QStringLiteral("task_remind_due"));
+    }
+
+    // 看板：同一批任务数据的另一视图（三列分桶＋逾期红/完成灰；双击
+    // 卡片推进状态）。看板只收本端数据（⇣/派出行不进看板）
+    dlg.list()->setCurrentRow(find_row(QStringLiteral("类型甲")));
+    CHECK(dlg.set_selected_status(QStringLiteral("进行中")));
+    CHECK(wait_until(
+        [&] {
+          const int r = find_row(QStringLiteral("类型甲"));
+          return r >= 0 && dlg.list()->item(r)->text().contains(
+                               QStringLiteral("（进行中）"));
+        },
+        8000));
+    dlg.toggle_kanban();
+    CHECK(dlg.is_kanban());
+    // mine 行：自建任务/到期任务/url外部/类型乙/到期乙=待办；类型甲=
+    // 进行中；gh外部（已勾完成）=完成
+    CHECK(dlg.kanban_count(0) == 5);
+    CHECK(dlg.kanban_count(1) == 1);
+    CHECK(dlg.kanban_count(2) == 1);
+    // 逾期卡片红（到期任务 due 在过去且未完成）
+    auto* todo_col =
+        dlg.findChild<QListWidget*>(QStringLiteral("kanban_todo"));
+    bool saw_red = false;
+    for (int i = 0; i < todo_col->count(); ++i) {
+      auto* card = todo_col->item(i);
+      if (card->text().contains(QStringLiteral("到期任务")) &&
+          card->foreground().color() == QColor(Qt::red)) {
+        saw_red = true;
+      }
+    }
+    CHECK(saw_red);
+    // 双击推进：完成列卡片→待办；进行列卡片→完成
+    auto* done_col =
+        dlg.findChild<QListWidget*>(QStringLiteral("kanban_done"));
+    CHECK(done_col->count() == 1);
+    done_col->itemDoubleClicked(done_col->item(0)); // gh 外部→待办
+    CHECK(wait_until([&] {
+      return dlg.kanban_count(0) == 6 && dlg.kanban_count(2) == 0;
+    }, 8000));
+    auto* doing_col =
+        dlg.findChild<QListWidget*>(QStringLiteral("kanban_doing"));
+    CHECK(doing_col->count() == 1);
+    doing_col->itemDoubleClicked(doing_col->item(0)); // 类型甲→完成
+    CHECK(wait_until([&] {
+      return dlg.kanban_count(1) == 0 && dlg.kanban_count(2) == 1;
+    }, 8000));
+    dlg.toggle_kanban(); // 回列表视图（后续日历腿与抓图按列表面走查）
+    CHECK(!dlg.is_kanban());
+  }
 
   // —— R27-1 余量 日历视图：月历标到期日＋点日筛选该日到期 ——
   {

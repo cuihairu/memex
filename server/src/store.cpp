@@ -215,8 +215,20 @@ bool ServerStore::ensure_schema() {
       "  done_ms INTEGER NOT NULL DEFAULT 0,"
       "  created_ms INTEGER NOT NULL,"
       "  provider TEXT NOT NULL DEFAULT '',"
-      "  ext_key TEXT NOT NULL DEFAULT '');"
+      "  ext_key TEXT NOT NULL DEFAULT '',"
+      // R27-6：类型/开始时间/状态（done 双写过渡，读取以 status 为准）
+      "  type TEXT NOT NULL DEFAULT '任务',"
+      "  start_ms INTEGER NOT NULL DEFAULT 0,"
+      "  status TEXT NOT NULL DEFAULT '待办',"
+      "  start_reminded_ms INTEGER NOT NULL DEFAULT 0);"
       "CREATE INDEX IF NOT EXISTS idx_tasks_owner ON tasks(owner);"
+      // R27-6 任务类型清单（服务端配置，admin 后台增删改）：初始四类
+      //（回执#6），默认「任务」（补①）——桌面/手机从服务端拉取
+      "CREATE TABLE IF NOT EXISTS task_types ("
+      "  name TEXT PRIMARY KEY,"
+      "  is_default INTEGER NOT NULL DEFAULT 0);"
+      "INSERT OR IGNORE INTO task_types(name, is_default) VALUES"
+      "  ('任务',1),('需求',0),('缺陷',0),('其他',0);"
       // 二期·审批（请假起步）：四态 pending|approved|rejected|withdrawn
       //（决定不删改全程留痕；判权在路由层 az——直属上级或无上级 admin 兜底）
       "CREATE TABLE IF NOT EXISTS approvals ("
@@ -812,6 +824,25 @@ bool ServerStore::ensure_schema() {
   sqlite3_exec(db_, "ALTER TABLE tasks ADD COLUMN"
                     " ext_key TEXT NOT NULL DEFAULT ''",
               nullptr, nullptr, nullptr);
+  // 旧库迁移（R27-6）：任务表补 type/start_ms/status/start_reminded_ms；
+  // status 存量回填 done=1→「完成」否则→「待办」（回执#3；done 列保留
+  // 写双份过渡）。回填幂等：新世界 done/status 双写恒一致，重复执行无效果。
+  sqlite3_exec(db_, "ALTER TABLE tasks ADD COLUMN"
+                    " type TEXT NOT NULL DEFAULT '任务'",
+              nullptr, nullptr, nullptr);
+  sqlite3_exec(db_, "ALTER TABLE tasks ADD COLUMN"
+                    " start_ms INTEGER NOT NULL DEFAULT 0",
+              nullptr, nullptr, nullptr);
+  sqlite3_exec(db_, "ALTER TABLE tasks ADD COLUMN"
+                    " status TEXT NOT NULL DEFAULT '待办'",
+              nullptr, nullptr, nullptr);
+  sqlite3_exec(db_, "ALTER TABLE tasks ADD COLUMN"
+                    " start_reminded_ms INTEGER NOT NULL DEFAULT 0",
+              nullptr, nullptr, nullptr);
+  sqlite3_exec(db_,
+               "UPDATE tasks SET status='完成'"
+               " WHERE done=1 AND status='待办'",
+               nullptr, nullptr, nullptr);
   // 旧库迁移（第七笔）：投票表补匿名/多选两列（默认 0=记名单选不变）
   sqlite3_exec(db_, "ALTER TABLE group_polls ADD COLUMN"
                     " anonymous INTEGER NOT NULL DEFAULT 0",
@@ -3934,11 +3965,16 @@ ServerStore::TaskRow task_row_read(sqlite3_stmt* st) {
   t.created_ms = sqlite3_column_int64(st, 9);
   t.provider = reinterpret_cast<const char*>(sqlite3_column_text(st, 10));
   t.ext_key = reinterpret_cast<const char*>(sqlite3_column_text(st, 11));
+  t.start_ms = sqlite3_column_int64(st, 12);
+  t.type = reinterpret_cast<const char*>(sqlite3_column_text(st, 13));
+  t.status = reinterpret_cast<const char*>(sqlite3_column_text(st, 14));
+  t.start_reminded_ms = sqlite3_column_int64(st, 15);
   return t;
 }
 const char* kTaskCols =
     "id, owner, creator, title, note, due_ms, reminded_ms, done, done_ms,"
-    " created_ms, provider, ext_key";
+    " created_ms, provider, ext_key, start_ms, type, status,"
+    " start_reminded_ms";
 } // namespace
 
 std::int64_t ServerStore::task_create(const std::string& owner,
@@ -3948,7 +3984,9 @@ std::int64_t ServerStore::task_create(const std::string& owner,
                                       std::int64_t due_ms,
                                       std::int64_t created_ms,
                                       const std::string& provider,
-                                      const std::string& ext_key) {
+                                      const std::string& ext_key,
+                                      const std::string& type,
+                                      std::int64_t start_ms) {
   if (owner.empty() || creator.empty() || title.empty()) return 0;
   // 外部任务引用成对（路由层把守口径，库层再兜一道）
   if (provider.empty() != ext_key.empty()) return 0;
@@ -3956,7 +3994,7 @@ std::int64_t ServerStore::task_create(const std::string& owner,
   if (!find_account(owner) || !find_account(creator)) return 0;
   const char* sql =
       "INSERT INTO tasks(owner, creator, title, note, due_ms, created_ms,"
-      " provider, ext_key) VALUES(?,?,?,?,?,?,?,?);";
+      " provider, ext_key, type, start_ms) VALUES(?,?,?,?,?,?,?,?,?,?);";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
   sqlite3_bind_text(st, 1, owner.c_str(), -1, SQLITE_TRANSIENT);
@@ -3967,6 +4005,8 @@ std::int64_t ServerStore::task_create(const std::string& owner,
   sqlite3_bind_int64(st, 6, created_ms);
   sqlite3_bind_text(st, 7, provider.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 8, ext_key.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 9, type.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 10, start_ms);
   const bool ok = sqlite3_step(st) == SQLITE_DONE;
   sqlite3_finalize(st);
   return ok ? sqlite3_last_insert_rowid(db_) : 0;
@@ -4021,15 +4061,39 @@ std::optional<ServerStore::TaskRow> ServerStore::task_by_id(std::int64_t id) {
 
 bool ServerStore::task_set_done(std::int64_t id, bool done,
                                 std::int64_t done_ms) {
+  // R27-6 双写过渡：完成/回退同步刷 status（读取以 status 为准）
   const char* sql =
-      "UPDATE tasks SET done = ?, done_ms = ? WHERE id = ?;";
+      "UPDATE tasks SET done = ?, done_ms = ?, status = ? WHERE id = ?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
     return false;
   }
   sqlite3_bind_int(st, 1, done ? 1 : 0);
   sqlite3_bind_int64(st, 2, done ? done_ms : 0);
-  sqlite3_bind_int64(st, 3, id);
+  sqlite3_bind_text(st, 3, done ? "完成" : "待办", -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, id);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::task_set_status(std::int64_t id, const std::string& status,
+                                  std::int64_t done_ms) {
+  // R27-6 状态切换（待办/进行中/完成）；完成↔done 双写，其余 done=0
+  if (status != "待办" && status != "进行中" && status != "完成") {
+    return false;
+  }
+  const char* sql =
+      "UPDATE tasks SET status = ?, done = ?, done_ms = ? WHERE id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  const bool done = status == "完成";
+  sqlite3_bind_text(st, 1, status.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(st, 2, done ? 1 : 0);
+  sqlite3_bind_int64(st, 3, done ? done_ms : 0);
+  sqlite3_bind_int64(st, 4, id);
   const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
   sqlite3_finalize(st);
   return ok;
@@ -4048,6 +4112,112 @@ bool ServerStore::task_mark_reminded(std::int64_t id,
   sqlite3_bind_int64(st, 1, reminded_ms);
   sqlite3_bind_int64(st, 2, id);
   sqlite3_bind_int64(st, 3, reminded_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::task_mark_start_reminded(std::int64_t id,
+                                           std::int64_t reminded_ms) {
+  // R27-6 开始到点提醒回执（口径同 deadline 回执，独立位互不抢占）
+  const char* sql =
+      "UPDATE tasks SET start_reminded_ms = ? WHERE id = ? AND"
+      " (start_reminded_ms = 0 OR start_reminded_ms > ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_int64(st, 1, reminded_ms);
+  sqlite3_bind_int64(st, 2, id);
+  sqlite3_bind_int64(st, 3, reminded_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
+  sqlite3_finalize(st);
+  return ok;
+}
+
+// —— R27-6 任务类型清单（服务端配置） ——
+
+std::vector<ServerStore::TaskType> ServerStore::task_types() {
+  std::vector<TaskType> out;
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT name, is_default FROM task_types"
+                         " ORDER BY is_default DESC, name;",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return out;
+  }
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    TaskType t;
+    t.name = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    t.is_default = sqlite3_column_int(st, 1) != 0;
+    out.push_back(std::move(t));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::string ServerStore::task_type_default() {
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT name FROM task_types WHERE is_default=1"
+                         " LIMIT 1;",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return "任务";
+  }
+  std::string out = "任务";
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    out = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+bool ServerStore::task_type_add(const std::string& name) {
+  if (name.empty()) return false;
+  const char* sql =
+      "INSERT INTO task_types(name, is_default) VALUES(?, 0);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE; // 重名=约束失败=false
+  sqlite3_finalize(st);
+  return ok;
+}
+
+bool ServerStore::task_type_delete(const std::string& name) {
+  if (name.empty()) return false;
+  // 默认类型不删（建任务的兜底类型；删了新任务没落点）
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT is_default FROM task_types WHERE name=?;",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+  bool exists = false, is_default = false;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    exists = true;
+    is_default = sqlite3_column_int(st, 0) != 0;
+  }
+  sqlite3_finalize(st);
+  if (!exists || is_default) return false;
+  // 有任务引用＝拒删（存量任务不悬空；删空类型才放行）
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT 1 FROM tasks WHERE type=? LIMIT 1;",
+                         -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+  const bool in_use = sqlite3_step(st) == SQLITE_ROW;
+  sqlite3_finalize(st);
+  if (in_use) return false;
+  if (sqlite3_prepare_v2(db_, "DELETE FROM task_types WHERE name=?;", -1,
+                         &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
   const bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) == 1;
   sqlite3_finalize(st);
   return ok;

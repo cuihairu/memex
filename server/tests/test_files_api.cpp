@@ -1965,6 +1965,120 @@ int main() {
                "{\"id\":" + std::to_string(tid) + "}").status == 404);
   }
 
+  // —— R27-6 任务类型/开始时间/状态（看板列语义）：类型清单（服务端
+  //     配置）/建任务带 type+start_ms/未知类型 400/状态切换与 done 双写/
+  //     开始到点提醒回执（独立位不与 deadline 互抢）/旧库 status 回填 ——
+  {
+    // 类型清单：初始四类、默认「任务」；未登录 401
+    CHECK(http(port, "GET", "/files/task-types", {}, "").status == 401);
+    const auto tt = http(port, "GET", "/files/task-types", H("member1"), "");
+    CHECK(tt.status == 200);
+    CHECK(tt.body.find("任务") != std::string::npos &&
+          tt.body.find("需求") != std::string::npos &&
+          tt.body.find("缺陷") != std::string::npos &&
+          tt.body.find("其他") != std::string::npos);
+    CHECK(tt.body.find("\"is_default\":true") != std::string::npos);
+    // 建任务带 type+start_ms；未知类型 400（清单外不落库）
+    const auto t6 = http(port, "POST", "/files/tasks", H("member1"),
+                         "{\"title\":\"改造网关\",\"type\":\"需求\","
+                         "\"start_ms\":1700001000000}");
+    CHECK(t6.status == 200);
+    const std::int64_t tid6 = jint(t6.body, "id");
+    CHECK(http(port, "POST", "/files/tasks", H("member1"),
+               "{\"title\":\"x\",\"type\":\"史诗\"}").status == 400);
+    // 列表回读新字段
+    const auto l6 = http(port, "GET", "/files/tasks", H("member1"), "");
+    CHECK(l6.status == 200);
+    CHECK(l6.body.find("\"type\":\"需求\"") != std::string::npos);
+    CHECK(l6.body.find("\"status\":\"待办\"") != std::string::npos);
+    CHECK(l6.body.find("\"start_ms\":1700001000000") != std::string::npos);
+    // 状态切换判权：非清单主人 403；主人 待办→进行中（done 不动）
+    CHECK(http(port, "POST", "/files/tasks/status", H("owner1"),
+               "{\"id\":" + std::to_string(tid6) + ",\"status\":\"进行中\"}")
+              .status == 403);
+    CHECK(http(port, "POST", "/files/tasks/status", H("member1"),
+               "{\"id\":" + std::to_string(tid6) + ",\"status\":\"进行中\"}")
+              .status == 200);
+    auto r6 = store.task_by_id(tid6);
+    CHECK(r6.has_value() && r6->status == "进行中" && !r6->done);
+    // 非法枚举 400（库层枚举校验；路由先拦）
+    CHECK(http(port, "POST", "/files/tasks/status", H("member1"),
+               "{\"id\":" + std::to_string(tid6) + ",\"status\":\"挂起\"}")
+              .status == 400);
+    // 进行中→完成：status 与 done 双写（done_ms 落笔）
+    CHECK(http(port, "POST", "/files/tasks/status", H("member1"),
+               "{\"id\":" + std::to_string(tid6) + ",\"status\":\"完成\"}")
+              .status == 200);
+    r6 = store.task_by_id(tid6);
+    CHECK(r6.has_value() && r6->status == "完成" && r6->done &&
+          r6->done_ms > 0);
+    // 回退走 status：完成→待办（done 同步归零、done_ms 清零）
+    CHECK(http(port, "POST", "/files/tasks/status", H("member1"),
+               "{\"id\":" + std::to_string(tid6) + ",\"status\":\"待办\"}")
+              .status == 200);
+    r6 = store.task_by_id(tid6);
+    CHECK(r6.has_value() && r6->status == "待办" && !r6->done &&
+          r6->done_ms == 0);
+    // 旧 done 路由仍活（双写另一方向）：勾完成→status=完成
+    CHECK(http(port, "POST", "/files/tasks/done", H("member1"),
+               "{\"id\":" + std::to_string(tid6) + ",\"done\":true}")
+              .status == 200);
+    r6 = store.task_by_id(tid6);
+    CHECK(r6.has_value() && r6->status == "完成" && r6->done);
+    // 开始到点提醒回执（kind=start）：独立落位，deadline 回执位不动；
+    // 缺省 kind=deadline 口径照旧
+    CHECK(http(port, "POST", "/files/tasks/reminded", H("member1"),
+               "{\"id\":" + std::to_string(tid6) + ",\"kind\":\"start\"}")
+              .status == 200);
+    r6 = store.task_by_id(tid6);
+    CHECK(r6.has_value() && r6->start_reminded_ms > 0 &&
+          r6->reminded_ms == 0);
+    CHECK(http(port, "POST", "/files/tasks/reminded", H("member1"),
+               "{\"id\":" + std::to_string(tid6) + "}").status == 200);
+    r6 = store.task_by_id(tid6);
+    CHECK(r6.has_value() && r6->reminded_ms > 0);
+    // 旧库回填：裸 sqlite 建 R27-1 形状任务表（无新列）→open 迁移→
+    // status 按 done 回填（done=1→完成、done=0→待办）、type 落默认
+    const std::string legacy_db6 =
+        "memex_test_legacy6_" + std::to_string(::getpid()) + ".db";
+    std::remove(legacy_db6.c_str());
+    sqlite3* raw6 = nullptr;
+    CHECK(sqlite3_open(legacy_db6.c_str(), &raw6) == SQLITE_OK);
+    char* err6 = nullptr;
+    sqlite3_exec(
+        raw6,
+        "CREATE TABLE accounts (account TEXT PRIMARY KEY,"
+        " display_name TEXT NOT NULL, salt TEXT NOT NULL,"
+        " digest TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member',"
+        " created_ms INTEGER NOT NULL);"
+        "CREATE TABLE tasks (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " owner TEXT NOT NULL, creator TEXT NOT NULL, title TEXT NOT NULL,"
+        " note TEXT NOT NULL DEFAULT '', due_ms INTEGER NOT NULL DEFAULT 0,"
+        " reminded_ms INTEGER NOT NULL DEFAULT 0,"
+        " done INTEGER NOT NULL DEFAULT 0,"
+        " done_ms INTEGER NOT NULL DEFAULT 0,"
+        " created_ms INTEGER NOT NULL,"
+        " provider TEXT NOT NULL DEFAULT '',"
+        " ext_key TEXT NOT NULL DEFAULT '');"
+        "INSERT INTO tasks(owner, creator, title, done, done_ms, created_ms)"
+        " VALUES('legacy1','legacy1','老任务一',1,1700000900000,"
+        "1700000800000);"
+        "INSERT INTO tasks(owner, creator, title, done, created_ms)"
+        " VALUES('legacy1','legacy1','老任务二',0,1700000800000);",
+        nullptr, nullptr, &err6);
+    CHECK(err6 == nullptr);
+    sqlite3_close(raw6);
+    memex::server::ServerStore lst6;
+    CHECK(lst6.open(legacy_db6)); // ensure_schema 跑迁移＋回填
+    const auto old1 = lst6.task_by_id(1);
+    CHECK(old1.has_value() && old1->status == "完成" && old1->done &&
+          old1->type == "任务" && old1->start_ms == 0);
+    const auto old2 = lst6.task_by_id(2);
+    CHECK(old2.has_value() && old2->status == "待办" && !old2->done);
+    CHECK(lst6.task_types().size() == 4); // 初始四类随 open 播种
+    std::remove(legacy_db6.c_str());
+  }
+
   // —— 二期·审批（请假起步）：固定模板白名单/审批人=直属上级（无上级
   //     org-admin 兜底）/四态流转/判权先于状态/全程留痕 ——
   {

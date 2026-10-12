@@ -5,6 +5,7 @@
 #include "collab_defaults.hpp"
 
 #include <QCalendarWidget>
+#include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
 #include <QDateTime>
@@ -23,6 +24,7 @@
 #include <QPalette>
 #include <QPushButton>
 #include <QSettings>
+#include <QSplitter>
 #include <QTextCharFormat>
 #include <QTimer>
 #include <QUrl>
@@ -72,6 +74,7 @@ TaskDialog::TaskDialog(QWidget* parent, TaskHttp* http,
     btn_add_->setEnabled(true);
     btn_add_ext_->setEnabled(true);
     refresh();
+    client_->fetch_task_types(); // R27-6 类型清单（admin 后台可增删改）
     if (!findChild<QTimer*>("task_poll")) {
       auto* poll = new QTimer(this);
       poll->setObjectName(QStringLiteral("task_poll"));
@@ -96,6 +99,28 @@ TaskDialog::TaskDialog(QWidget* parent, TaskHttp* http,
     set_status(QStringLiteral("任务状态已更新"));
     refresh();
   });
+  // R27-6 状态切换回执（与 done 双写同源：服务端双写，读取以 status 为准）
+  connect(client_, &FilesClient::task_status_set, this, [this](qint64) {
+    set_status(QStringLiteral("任务状态已更新"));
+    refresh();
+  });
+  // R27-6 类型清单来自服务端（缺省选中默认类型，原选中尽量不跳）
+  connect(client_, &FilesClient::task_types_loaded, this,
+          [this](const QJsonArray& types, const QString& def) {
+            const QString prev = type_->currentText();
+            type_->clear();
+            for (const auto& v : types) {
+              type_->addItem(
+                  v.toObject().value(QStringLiteral("name")).toString());
+            }
+            const int pi = type_->findText(prev);
+            if (pi >= 0) {
+              type_->setCurrentIndex(pi);
+            } else {
+              const int di = type_->findText(def);
+              type_->setCurrentIndex(di >= 0 ? di : 0);
+            }
+          });
   connect(client_, &FilesClient::task_deleted, this, [this](qint64) {
     set_status(QStringLiteral("任务已撤回"));
     refresh();
@@ -147,6 +172,29 @@ void TaskDialog::build_ui() {
   list_->setAlternatingRowColors(true);
   layout->addWidget(list_, 1);
 
+  // R27-6 看板：同一批任务数据的另一视图（不新建数据模型/通道），与
+  // 列表并存切换，默认隐藏。三列=待办/进行中/完成（读 status 语义）。
+  kanban_ = new QSplitter(Qt::Horizontal, this);
+  kanban_->setObjectName(QStringLiteral("task_kanban"));
+  auto mkcol = [this](const QString& title, const QString& object) {
+    auto* box = new QWidget(kanban_);
+    auto* lay = new QVBoxLayout(box);
+    lay->setContentsMargins(0, 0, 0, 0);
+    lay->addWidget(new QLabel(title, box));
+    auto* lw = new QListWidget(box);
+    lw->setObjectName(object);
+    lw->setAlternatingRowColors(true);
+    lay->addWidget(lw, 1);
+    kanban_->addWidget(box);
+    return lw;
+  };
+  kanban_todo_ = mkcol(QStringLiteral("待办"), QStringLiteral("kanban_todo"));
+  kanban_doing_ =
+      mkcol(QStringLiteral("进行中"), QStringLiteral("kanban_doing"));
+  kanban_done_ = mkcol(QStringLiteral("完成"), QStringLiteral("kanban_done"));
+  kanban_->setVisible(false);
+  layout->addWidget(kanban_, 1);
+
   // 录入区：标题＋备注＋到期＋分配给
   auto* form1 = new QHBoxLayout;
   title_ = new QLineEdit(this);
@@ -164,11 +212,53 @@ void TaskDialog::build_ui() {
   assignee_ = new QComboBox(this);
   assignee_->setEditable(true);
   assignee_->addItem(QStringLiteral("（自己）"));
-  form2->addWidget(new QLabel(QStringLiteral("提醒时间"), this));
+  form2->addWidget(new QLabel(QStringLiteral("截止（deadline）"), this));
   form2->addWidget(due_);
   form2->addWidget(new QLabel(QStringLiteral("分配给"), this));
   form2->addWidget(assignee_, 1);
   layout->addLayout(form2);
+  // R27-6 类型＋开始时间：类型清单从服务端拉取（缺省=默认类型）；开始
+  // 时间勾选才生效（0=未设）
+  auto* form2b = new QHBoxLayout;
+  form2b->addWidget(new QLabel(QStringLiteral("类型"), this));
+  type_ = new QComboBox(this);
+  type_->setObjectName(QStringLiteral("task_type"));
+  form2b->addWidget(type_);
+  start_on_ = new QCheckBox(QStringLiteral("开始"), this);
+  start_on_->setObjectName(QStringLiteral("task_start_on"));
+  start_ = new QDateTimeEdit(this);
+  start_->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
+  start_->setCalendarPopup(true);
+  start_->setDateTime(QDateTime::currentDateTime());
+  start_->setEnabled(false);
+  form2b->addWidget(start_on_);
+  form2b->addWidget(start_, 1);
+  connect(start_on_, &QCheckBox::toggled, start_, &QDateTimeEdit::setEnabled);
+  layout->addLayout(form2b);
+  // R27-6 提醒开关同一处：开始到点提醒＋deadline 到期提醒（默认开，
+  // QSettings 持久；提醒仍走通知中心现口径，回执只提醒一次）
+  auto* form2c = new QHBoxLayout;
+  cb_start_remind_ = new QCheckBox(QStringLiteral("开始到点提醒"), this);
+  cb_start_remind_->setObjectName(QStringLiteral("task_remind_start"));
+  cb_due_remind_ = new QCheckBox(QStringLiteral("截止到期提醒"), this);
+  cb_due_remind_->setObjectName(QStringLiteral("task_remind_due"));
+  const QSettings rem(QStringLiteral("memex"), QStringLiteral("collab"));
+  cb_start_remind_->setChecked(
+      rem.value(QStringLiteral("task_remind_start"), true).toBool());
+  cb_due_remind_->setChecked(
+      rem.value(QStringLiteral("task_remind_due"), true).toBool());
+  connect(cb_start_remind_, &QCheckBox::toggled, this, [this](bool on) {
+    QSettings(QStringLiteral("memex"), QStringLiteral("collab"))
+        .setValue(QStringLiteral("task_remind_start"), on);
+  });
+  connect(cb_due_remind_, &QCheckBox::toggled, this, [this](bool on) {
+    QSettings(QStringLiteral("memex"), QStringLiteral("collab"))
+        .setValue(QStringLiteral("task_remind_due"), on);
+  });
+  form2c->addWidget(cb_start_remind_);
+  form2c->addWidget(cb_due_remind_);
+  form2c->addStretch(1);
+  layout->addLayout(form2c);
 
   // 外部任务登记区（R27-2）：provider（内置 L1 预设＋自定义模板）＋键
   //（「project#键」或完整链接）。登记前本地解析 detail URL——解析不出
@@ -192,14 +282,18 @@ void TaskDialog::build_ui() {
   btn_add_ = new QPushButton(QStringLiteral("添加任务"), this);
   btn_add_->setEnabled(false);
   btn_toggle_ = new QPushButton(QStringLiteral("完成/回退"), this);
+  btn_status_ = new QPushButton(QStringLiteral("开始"), this);
   btn_delete_ = new QPushButton(QStringLiteral("撤回"), this);
   btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
   btn_calendar_ = new QPushButton(QStringLiteral("日历"), this);
+  btn_kanban_ = new QPushButton(QStringLiteral("看板"), this);
   ops->addWidget(btn_add_);
   ops->addWidget(btn_toggle_);
+  ops->addWidget(btn_status_);
   ops->addWidget(btn_delete_);
   ops->addWidget(btn_refresh_);
   ops->addWidget(btn_calendar_);
+  ops->addWidget(btn_kanban_);
   ops->addStretch(1);
   layout->addLayout(ops);
 
@@ -230,7 +324,11 @@ void TaskDialog::build_ui() {
     const QString who = assignee_->currentText().trimmed();
     add_task(title_->text().trimmed(), note_->text().trimmed(),
              due_->dateTime().toMSecsSinceEpoch(),
-             who.startsWith(QStringLiteral("（")) ? QString() : who);
+             who.startsWith(QStringLiteral("（")) ? QString() : who,
+             type_->currentText(),
+             start_on_->isChecked()
+                 ? start_->dateTime().toMSecsSinceEpoch()
+                 : 0);
   });
   connect(btn_add_ext_, &QPushButton::clicked, this, [this] {
     if (add_external_task(ext_provider_->currentData().toString(),
@@ -241,6 +339,55 @@ void TaskDialog::build_ui() {
   });
   connect(btn_toggle_, &QPushButton::clicked, this,
           [this] { toggle_selected_done(); });
+  // R27-6 状态按钮：待办↔进行中（完成态走 完成/回退，服务端双写）
+  connect(btn_status_, &QPushButton::clicked, this, [this] {
+    const auto* item = list_->currentItem();
+    if (item == nullptr || item->data(Qt::UserRole + 6).toBool()) {
+      set_status(QStringLiteral("先选中一条本端任务"), true);
+      return;
+    }
+    set_selected_status(item->data(Qt::UserRole + 10).toString() ==
+                                QStringLiteral("进行中")
+                            ? QStringLiteral("待办")
+                            : QStringLiteral("进行中"));
+  });
+  connect(btn_kanban_, &QPushButton::clicked, this,
+          [this] { toggle_kanban(); });
+  // 选中态同步状态按钮文案（开始/暂停）
+  connect(list_, &QListWidget::itemSelectionChanged, this, [this] {
+    const auto* item = list_->currentItem();
+    btn_status_->setText(item != nullptr &&
+                                 item->data(Qt::UserRole + 10).toString() ==
+                                     QStringLiteral("进行中")
+                             ? QStringLiteral("暂停")
+                             : QStringLiteral("开始"));
+  });
+  // 看板卡片双击=推进状态（待办→进行中→完成→待办循环）；看板只收
+  // 本端数据（status 判权 owner-only，派出行不进看板）
+  connect(kanban_todo_, &QListWidget::itemDoubleClicked, this,
+          [this](QListWidgetItem* it) {
+            const qint64 id =
+                it ? it->data(Qt::UserRole).toLongLong() : -1;
+            if (id > 0) {
+              client_->set_task_status(id, QStringLiteral("进行中"));
+            }
+          });
+  connect(kanban_doing_, &QListWidget::itemDoubleClicked, this,
+          [this](QListWidgetItem* it) {
+            const qint64 id =
+                it ? it->data(Qt::UserRole).toLongLong() : -1;
+            if (id > 0) {
+              client_->set_task_status(id, QStringLiteral("完成"));
+            }
+          });
+  connect(kanban_done_, &QListWidget::itemDoubleClicked, this,
+          [this](QListWidgetItem* it) {
+            const qint64 id =
+                it ? it->data(Qt::UserRole).toLongLong() : -1;
+            if (id > 0) {
+              client_->set_task_status(id, QStringLiteral("待办"));
+            }
+          });
   connect(btn_delete_, &QPushButton::clicked, this, [this] {
     if (selected_id() < 0) {
       set_status(QStringLiteral("先选中一条任务"), true);
@@ -389,7 +536,8 @@ void TaskDialog::set_assignees(const QStringList& accounts) {
 }
 
 bool TaskDialog::add_task(const QString& title, const QString& note,
-                          qint64 due_ms, const QString& assignee) {
+                          qint64 due_ms, const QString& assignee,
+                          const QString& type, qint64 start_ms) {
   if (title.isEmpty()) {
     set_status(QStringLiteral("标题不能为空"), true);
     return false;
@@ -398,7 +546,8 @@ bool TaskDialog::add_task(const QString& title, const QString& note,
     set_status(QStringLiteral("未连接文件面"), true);
     return false;
   }
-  client_->create_task(title, note, due_ms, assignee);
+  client_->create_task(title, note, due_ms, assignee, QString(), QString(),
+                       type, start_ms);
   return true;
 }
 
@@ -462,6 +611,99 @@ bool TaskDialog::toggle_selected_done() {
   const bool cur = item->data(Qt::UserRole + 1).toBool();
   client_->set_task_done(id, !cur);
   return true;
+}
+
+// R27-6 状态切换：待办/进行中/完成（服务端判权 owner-only 并双写 done，
+// 读取以 status 为准——客户端只提交与展示）
+bool TaskDialog::set_selected_status(const QString& status) {
+  if (selected_row_pulled()) {
+    set_status(QStringLiteral("外部拉取行只读"), true);
+    return false;
+  }
+  const qint64 id = selected_id();
+  if (id < 0) {
+    set_status(QStringLiteral("先选中一条任务"), true);
+    return false;
+  }
+  client_->set_task_status(id, status);
+  return true;
+}
+
+// —— R27-6 看板（与列表同源同批数据，切换即重渲染）——
+
+void TaskDialog::toggle_kanban() {
+  const bool show = !kanban_->isVisible();
+  kanban_->setVisible(show);
+  list_->setVisible(!show);
+  btn_kanban_->setText(show ? QStringLiteral("列表") : QStringLiteral("看板"));
+  if (show) render_kanban();
+}
+
+void TaskDialog::render_kanban() {
+  // 卡片=标题 ·类型＋开始/截止；逾期红、临近黄（阈值 QSettings
+  // task_due_warn_days 缺省 3 天），完成灰
+  const QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
+  const qint64 warn =
+      settings.value(QStringLiteral("task_due_warn_days"), 3).toInt() *
+      86400000LL;
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  kanban_todo_->clear();
+  kanban_doing_->clear();
+  kanban_done_->clear();
+  for (const auto& v : mine_cache_) {
+    const auto t = v.toObject();
+    const bool done = t.value(QStringLiteral("done")).toBool();
+    const QString status = t.value(QStringLiteral("status")).toString();
+    const qint64 start = static_cast<qint64>(
+        t.value(QStringLiteral("start_ms")).toDouble());
+    const qint64 due =
+        static_cast<qint64>(t.value(QStringLiteral("due_ms")).toDouble());
+    QString extra;
+    if (start > 0) {
+      extra += QStringLiteral("  开始 %1")
+                   .arg(QDateTime::fromMSecsSinceEpoch(start)
+                            .toString(QStringLiteral("MM-dd HH:mm")));
+    }
+    if (due > 0) {
+      extra += QStringLiteral("  截止 %1")
+                   .arg(QDateTime::fromMSecsSinceEpoch(due)
+                            .toString(QStringLiteral("MM-dd HH:mm")));
+    }
+    auto* card = new QListWidgetItem(
+        QStringLiteral("%1 ·%2%3")
+            .arg(t.value(QStringLiteral("title")).toString(),
+                 t.value(QStringLiteral("type")).toString(), extra));
+    card->setData(Qt::UserRole,
+                  t.value(QStringLiteral("id")).toDouble());
+    QListWidget* col = kanban_todo_;
+    if (done || status == QStringLiteral("完成")) {
+      col = kanban_done_;
+      card->setForeground(Qt::gray);
+    } else if (status == QStringLiteral("进行中")) {
+      col = kanban_doing_;
+    }
+    if (!done && due > 0 && due <= now) {
+      card->setForeground(Qt::red); // 逾期
+    } else if (!done && due > 0 && due - now <= warn) {
+      card->setForeground(QColor(QStringLiteral("#b8860b"))); // 临近暗金黄
+    }
+    col->addItem(card);
+  }
+}
+
+int TaskDialog::kanban_count(int col) const {
+  const QListWidget* c = col == 0 ? kanban_todo_
+                         : col == 1 ? kanban_doing_
+                                    : kanban_done_;
+  return c != nullptr ? c->count() : -1;
+}
+
+QStringList TaskDialog::task_type_names() const {
+  QStringList out;
+  if (type_ != nullptr) {
+    for (int i = 0; i < type_->count(); ++i) out << type_->itemText(i);
+  }
+  return out;
 }
 
 bool TaskDialog::delete_selected() {
@@ -599,18 +841,38 @@ bool TaskDialog::selected_row_pulled() const {
 
 void TaskDialog::check_due() {
   if (!is_connected()) return;
+  // R27-6 两种提醒各给开关（默认开，QSettings 持久），同一处管理
+  const QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
+  const bool start_on =
+      settings.value(QStringLiteral("task_remind_start"), true).toBool();
+  const bool due_on =
+      settings.value(QStringLiteral("task_remind_due"), true).toBool();
   const qint64 now = QDateTime::currentMSecsSinceEpoch();
   for (int i = 0; i < list_->count(); ++i) {
     const auto* it = list_->item(i);
+    if (it->data(Qt::UserRole + 6).toBool()) continue; // ⇣ 只读镜像不提醒
     if (it->data(Qt::UserRole + 1).toBool()) continue; // 已完成不提醒
+    const qint64 id = it->data(Qt::UserRole).toLongLong();
+    // deadline 到期提醒（回执只提醒一次）
     const qint64 due = it->data(Qt::UserRole + 2).toLongLong();
     const qint64 reminded = it->data(Qt::UserRole + 3).toLongLong();
-    if (due <= 0 || due > now || reminded != 0) continue;
-    NotificationCenter::instance().on_notice(
-        QStringLiteral("任务提醒"), it->data(Qt::UserRole + 4).toString(),
-        QStringLiteral("任务已到期待办"), /*IMPORTANT*/ 2, QString(), now,
-        QStringLiteral("task-%1-%2").arg(it->data(Qt::UserRole).toLongLong()).arg(now));
-    client_->mark_task_reminded(it->data(Qt::UserRole).toLongLong());
+    if (due_on && due > 0 && due <= now && reminded == 0) {
+      NotificationCenter::instance().on_notice(
+          QStringLiteral("任务提醒"), it->data(Qt::UserRole + 4).toString(),
+          QStringLiteral("任务已到期待办"), /*IMPORTANT*/ 2, QString(), now,
+          QStringLiteral("task-%1-%2").arg(id).arg(now));
+      client_->mark_task_reminded(id);
+    }
+    // 开始到点提醒（R27-6；start_reminded_ms 回执独立，只提醒一次）
+    const qint64 start = it->data(Qt::UserRole + 7).toLongLong();
+    const qint64 srem = it->data(Qt::UserRole + 8).toLongLong();
+    if (start_on && start > 0 && start <= now && srem == 0) {
+      NotificationCenter::instance().on_notice(
+          QStringLiteral("任务提醒"), it->data(Qt::UserRole + 4).toString(),
+          QStringLiteral("任务已到开始时间"), /*IMPORTANT*/ 2, QString(), now,
+          QStringLiteral("task-start-%1-%2").arg(id).arg(now));
+      client_->mark_task_reminded(id, QStringLiteral("start"));
+    }
   }
 }
 
@@ -620,6 +882,8 @@ qint64 TaskDialog::selected_id() const {
 }
 
 void TaskDialog::populate(const QJsonArray& mine, const QJsonArray& assigned) {
+  mine_cache_ = mine;   // 看板同源数据（toggle_kanban 重渲染用）
+  assigned_cache_ = assigned;
   list_->clear();
   for (const auto& v : mine) {
     const auto t = v.toObject();
@@ -636,6 +900,18 @@ void TaskDialog::populate(const QJsonArray& mine, const QJsonArray& assigned) {
                       t.value(QStringLiteral("reminded_ms")).toDouble()));
     item->setData(Qt::UserRole + 4,
                   t.value(QStringLiteral("title")).toString());
+    // R27-6 开始/回执（start）/类型/状态（roles +7..+10）
+    item->setData(Qt::UserRole + 7,
+                  static_cast<qint64>(
+                      t.value(QStringLiteral("start_ms")).toDouble()));
+    item->setData(Qt::UserRole + 8,
+                  static_cast<qint64>(
+                      t.value(QStringLiteral("start_reminded_ms"))
+                          .toDouble()));
+    item->setData(Qt::UserRole + 9,
+                  t.value(QStringLiteral("type")).toString());
+    item->setData(Qt::UserRole + 10,
+                  t.value(QStringLiteral("status")).toString());
     if (!prov.isEmpty()) {
       // 外部任务（R27-2）：🌐 标注 provider·键原文，现解析 detail URL
       //（provider 未登记/键不合法=无跳转，行仍在、双击给状态提示）
@@ -661,13 +937,24 @@ void TaskDialog::populate(const QJsonArray& mine, const QJsonArray& assigned) {
                    .arg(QDateTime::fromMSecsSinceEpoch(due)
                             .toString(QStringLiteral("MM-dd HH:mm")));
       }
-      item->setText(QStringLiteral("%1%2  %3%4")
+      const qint64 start = item->data(Qt::UserRole + 7).toLongLong();
+      if (start > 0) {
+        when += QStringLiteral("  开始 %1")
+                    .arg(QDateTime::fromMSecsSinceEpoch(start)
+                             .toString(QStringLiteral("MM-dd HH:mm")));
+      }
+      const QString status = item->data(Qt::UserRole + 10).toString();
+      item->setText(QStringLiteral("%1%2 ·%3  %4%5%6")
                         .arg(done ? QStringLiteral("[x] ")
                                   : QStringLiteral("[ ] "),
                              t.value(QStringLiteral("title")).toString(),
+                             item->data(Qt::UserRole + 9).toString(),
                              self ? QStringLiteral("自建")
                                   : QStringLiteral("由 %1 分配")
                                         .arg(creator),
+                             status == QStringLiteral("进行中")
+                                 ? QStringLiteral("（进行中）")
+                                 : QString(),
                              when));
     }
     if (done) {
@@ -696,6 +983,9 @@ void TaskDialog::populate(const QJsonArray& mine, const QJsonArray& assigned) {
   // 日历视图：重标到期日＋重施筛选（30s 轮询刷新重建列表，筛选态保持）
   update_day_marks();
   apply_day_filter();
+  // R27-6 看板同批数据重渲染（隐藏时也保持最新，切换即现）＋状态按钮复位
+  render_kanban();
+  btn_status_->setText(QStringLiteral("开始"));
   set_status(QStringLiteral("清单已刷新（%1 项）").arg(mine.size()));
 }
 

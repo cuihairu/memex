@@ -699,13 +699,19 @@ void FilesClient::delete_file(qint64 file_id) {
 void FilesClient::create_task(const QString& title, const QString& note,
                               qint64 due_ms, const QString& assignee,
                               const QString& provider,
-                              const QString& ext_key) {
+                              const QString& ext_key, const QString& type,
+                              qint64 start_ms) {
   QJsonObject body{{QStringLiteral("title"), title}};
   if (!note.isEmpty()) body.insert(QStringLiteral("note"), note);
   if (due_ms > 0) body.insert(QStringLiteral("due_ms"), static_cast<double>(due_ms));
   if (!assignee.isEmpty()) body.insert(QStringLiteral("assignee"), assignee);
   if (!provider.isEmpty()) body.insert(QStringLiteral("provider"), provider);
   if (!ext_key.isEmpty()) body.insert(QStringLiteral("ext_key"), ext_key);
+  // R27-6：类型（空=服务端默认「任务」）与开始时间（0=未设）
+  if (!type.isEmpty()) body.insert(QStringLiteral("type"), type);
+  if (start_ms > 0) {
+    body.insert(QStringLiteral("start_ms"), static_cast<double>(start_ms));
+  }
   send_json(QStringLiteral("task.create"), QStringLiteral("POST"),
             QStringLiteral("/files/tasks"), body,
             [this](bool ok, int, const QJsonObject& resp, const QString&) {
@@ -728,6 +734,18 @@ void FilesClient::list_tasks() {
             });
 }
 
+void FilesClient::fetch_task_types() {
+  send_json(QStringLiteral("task.types"), QStringLiteral("GET"),
+            QStringLiteral("/files/task-types"), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit task_types_loaded(
+                    resp.value(QStringLiteral("types")).toArray(),
+                    resp.value(QStringLiteral("default")).toString());
+              }
+            });
+}
+
 void FilesClient::set_task_done(qint64 id, bool done) {
   send_json(QStringLiteral("task.done"), QStringLiteral("POST"),
             QStringLiteral("/files/tasks/done"),
@@ -738,10 +756,21 @@ void FilesClient::set_task_done(qint64 id, bool done) {
             });
 }
 
-void FilesClient::mark_task_reminded(qint64 id) {
+void FilesClient::set_task_status(qint64 id, const QString& status) {
+  send_json(QStringLiteral("task.status"), QStringLiteral("POST"),
+            QStringLiteral("/files/tasks/status"),
+            {{QStringLiteral("id"), static_cast<double>(id)},
+             {QStringLiteral("status"), status}},
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (ok) emit task_status_set(id);
+            });
+}
+
+void FilesClient::mark_task_reminded(qint64 id, const QString& kind) {
+  QJsonObject body{{QStringLiteral("id"), static_cast<double>(id)}};
+  if (!kind.isEmpty()) body.insert(QStringLiteral("kind"), kind);
   send_json(QStringLiteral("task.reminded"), QStringLiteral("POST"),
-            QStringLiteral("/files/tasks/reminded"),
-            {{QStringLiteral("id"), static_cast<double>(id)}},
+            QStringLiteral("/files/tasks/reminded"), body,
             [this, id](bool ok, int, const QJsonObject&, const QString&) {
               if (ok) emit task_reminded(id);
             });

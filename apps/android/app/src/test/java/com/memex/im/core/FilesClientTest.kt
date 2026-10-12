@@ -471,6 +471,112 @@ class FilesClientTest {
         }
     }
 
+    // ---------- 任务清单（R27-6：类型/开始/状态/看板同源端点） ----------
+
+    @Test
+    fun `任务列表解析 mine 与 assigned 双数组（R27-6 新列回读）`() {
+        loginFirst()
+        fake.handler = {
+            200 to """
+                {"ok":true,"tasks":[
+                  {"id":1,"owner":"alice","creator":"alice","title":"类型甲","note":"",
+                   "due_ms":0,"reminded_ms":0,"done":false,"done_ms":0,"created_ms":1,
+                   "provider":"","ext_key":"","start_ms":1700001000000,
+                   "start_reminded_ms":0,"type":"需求","status":"待办"}],
+                 "assigned_by_me":[
+                  {"id":2,"owner":"bob","title":"派出乙","note":"","due_ms":0,"done":false,
+                   "done_ms":0,"created_ms":2,"provider":"","ext_key":"","start_ms":0,
+                   "start_reminded_ms":0,"type":"任务","status":"进行中"}]}
+            """.trimIndent()
+        }
+        val board = client.listTasks()
+        assertEquals("/files/tasks", fake.requests.last().path)
+        assertEquals(1, board.mine.size)
+        val t = board.mine[0]
+        assertEquals(1L, t.id)
+        assertEquals("需求", t.type)
+        assertEquals("待办", t.status)
+        assertEquals(1700001000000L, t.startMs)
+        assertEquals(1, board.assignedByMe.size)
+        assertEquals("进行中", board.assignedByMe[0].status)
+        assertEquals("派出乙", board.assignedByMe[0].title)
+    }
+
+    @Test
+    fun `任务创建缺省不带 type 与 start_ms（服务端默认类型口径）`() {
+        loginFirst()
+        fake.handler = { 200 to """{"ok":true,"id":9}""" }
+        assertEquals(9L, client.createTask("标题", "备注", 1700000000000L, "bob"))
+        val sent = org.json.JSONObject(String(fake.requests.last().body, Charsets.UTF_8))
+        assertEquals("标题", sent.getString("title"))
+        assertEquals("bob", sent.getString("assignee"))
+        assertEquals(1700000000000L, sent.getLong("due_ms"))
+        assertTrue(!sent.has("type"))
+        assertTrue(!sent.has("start_ms"))
+        // 带 type/start：due/assignee 未带则不进体（与服务端可选语义对齐）
+        client.createTask("标题", "", 0, "", "缺陷", 1700001000000L)
+        val sent2 = org.json.JSONObject(String(fake.requests.last().body, Charsets.UTF_8))
+        assertEquals("缺陷", sent2.getString("type"))
+        assertEquals(1700001000000L, sent2.getLong("start_ms"))
+        assertTrue(!sent2.has("due_ms"))
+        assertTrue(!sent2.has("assignee"))
+    }
+
+    @Test
+    fun `任务状态与回执端点形态（kind=start 独立回执）`() {
+        loginFirst()
+        fake.handler = { 200 to """{"ok":true}""" }
+        client.setTaskStatus(5, "进行中")
+        var req = fake.requests.last()
+        assertEquals("POST", req.method)
+        assertEquals("/files/tasks/status", req.path)
+        var body = org.json.JSONObject(String(req.body, Charsets.UTF_8))
+        assertEquals(5L, body.getLong("id"))
+        assertEquals("进行中", body.getString("status"))
+        client.markTaskReminded(5, "start")
+        req = fake.requests.last()
+        assertEquals("/files/tasks/reminded", req.path)
+        body = org.json.JSONObject(String(req.body, Charsets.UTF_8))
+        assertEquals("start", body.getString("kind"))
+        // 缺省 kind 不进体（deadline 到期回执兼容现口径）
+        client.markTaskReminded(5)
+        body = org.json.JSONObject(String(fake.requests.last().body, Charsets.UTF_8))
+        assertTrue(!body.has("kind"))
+        client.deleteTask(5)
+        assertEquals("/files/tasks/delete", fake.requests.last().path)
+    }
+
+    @Test
+    fun `任务类型清单解析（默认类型位）`() {
+        loginFirst()
+        fake.handler = {
+            200 to """{"ok":true,"types":[
+              {"name":"任务","is_default":true},{"name":"需求","is_default":false},
+              {"name":"缺陷","is_default":false},{"name":"其他","is_default":false}],
+              "default":"任务"}"""
+        }
+        val types = client.taskTypes()
+        assertEquals("/files/task-types", fake.requests.last().path)
+        assertEquals(4, types.size)
+        assertEquals("任务", types[0].name)
+        assertTrue(types[0].isDefault)
+        assertTrue(!types[1].isDefault)
+    }
+
+    @Test
+    fun `任务状态未知值 400 转异常`() {
+        loginFirst()
+        fake.handler = { 400 to """{"ok":false,"error":"status 须为 待办|进行中|完成"}""" }
+        try {
+            client.setTaskStatus(5, "挂起")
+            fail("应抛 ApiException")
+        } catch (e: FilesClient.ApiException) {
+            assertEquals("task.status", e.op)
+            assertEquals(400, e.status)
+            assertTrue(e.error.isNotEmpty())
+        }
+    }
+
     // ---------- token 生命周期 ----------
 
     @Test

@@ -77,6 +77,11 @@ class MainActivity : AppCompatActivity(), ChatManager.Listener {
             startActivity(Intent(this, FileAssistantActivity::class.java))
         }
 
+        // 任务清单（R27-6）：列表/看板双视图，端点同桌面 TaskDialog
+        findViewById<Button>(R.id.btn_tasks).setOnClickListener {
+            startActivity(Intent(this, TasksActivity::class.java))
+        }
+
         findViewById<Button>(R.id.btn_me).setOnClickListener {
             startActivity(Intent(this, MeActivity::class.java))
         }

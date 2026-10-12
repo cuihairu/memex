@@ -741,6 +741,55 @@ const pages = {
     },
   },
 
+  tasktypes: {
+    title: "任务类型",
+    desc: "任务类型在服务端配置（初始四类：任务/需求/缺陷/其他，存量迁移为「任务」），桌面/手机端从服务端拉取同源展示。默认类型与有任务引用的类型拒删（存量任务不悬空）；增删均落审计。",
+    async render(el) {
+      el.innerHTML = `
+        <h2>任务类型</h2><p class="desc">${this.desc}</p>
+        <div class="card"><h3>类型清单</h3>
+          <form id="f-tt" class="inline">
+            <label>新类型名<input name="name" required></label>
+            <button type="submit">添加</button>
+          </form>
+          <table style="margin-top:10px"><thead><tr>
+            <th>类型</th><th>默认</th><th></th>
+          </tr></thead><tbody id="t-tt"></tbody></table>
+        </div>`;
+
+      const refresh = async () => {
+        const st = await api("/api/admin/task-types");
+        el.querySelector("#t-tt").innerHTML = st.types.map((t) => `
+          <tr><td>${esc(t.name)}</td>
+          <td>${t.is_default ? '<span class="pill">默认</span>' : ""}</td>
+          <td>${t.is_default ? "" : `<button data-del="${esc(t.name)}" type="button">删除</button>`}</td></tr>`).join("");
+        el.querySelectorAll("button[data-del]").forEach((b) => {
+          b.onclick = async () => {
+            if (!confirm(`删除任务类型「${b.dataset.del}」？默认类型与有任务引用的类型会被服务端拒。`)) return;
+            try {
+              await api("/api/admin/task-types/delete", { body: { name: b.dataset.del } });
+              toast("已删除");
+              await refresh();
+            } catch (err) { toast(err.message, true); }
+          };
+        });
+      };
+
+      el.querySelector("#f-tt").onsubmit = async (e) => {
+        e.preventDefault();
+        const f = Object.fromEntries(new FormData(e.target));
+        try {
+          await api("/api/admin/task-types", { body: { name: f.name.trim() } });
+          toast("已添加");
+          e.target.reset();
+          await refresh();
+        } catch (err) { toast(err.message, true); }
+      };
+
+      await refresh();
+    },
+  },
+
   files: {
     title: "文件与配额",
     desc: "文件台账（置顶/删除，删除＝台账行＋双面配额退费，对象字节留待过期清理对账）；两级配额（群+个人，仅 org-admin 写）；存储状态只读探活（up/down/compose 编排在宿主，后台不代启停）。",
