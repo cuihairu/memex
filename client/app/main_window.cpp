@@ -1,6 +1,7 @@
 #include "main_window.hpp"
 
 #include "rail_nav.hpp"
+#include "collab_defaults.hpp"
 
 #include <QAction>
 #include <QCloseEvent>
@@ -3144,14 +3145,14 @@ void MainWindow::show_collab_login_dialog() {
   lay->addLayout(form);
   QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
   auto* host = new QLineEdit(
-      settings.value(QStringLiteral("host"), QStringLiteral("127.0.0.1"))
+      settings.value(QStringLiteral("host"), default_collab_host())
           .toString(),
       &dlg);
   auto* port = new QLineEdit(
-      settings.value(QStringLiteral("port"), QStringLiteral("24360")).toString(),
+      settings.value(QStringLiteral("port"), default_collab_port()).toString(),
       &dlg);
   auto* files_port = new QLineEdit(
-      settings.value(QStringLiteral("files_port"), QStringLiteral("24362"))
+      settings.value(QStringLiteral("files_port"), default_files_port())
           .toString(),
       &dlg);
   auto* account = new QLineEdit(
@@ -4280,12 +4281,12 @@ bool MainWindow::files_ensure_login() {
   if (!collab_engine_.is_logged_in()) return false;
   const QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
   const quint16 files_port = static_cast<quint16>(
-      settings.value(QStringLiteral("files_port"), QStringLiteral("24561"))
+      settings.value(QStringLiteral("files_port"), default_files_port())
           .toUInt());
   if (files_port == 0) return false;
   const QString host = collab_host_.isEmpty()
                            ? settings.value(QStringLiteral("host"),
-                                            QStringLiteral("127.0.0.1"))
+                                            default_collab_host())
                                  .toString()
                            : collab_host_;
   files_client()->login(host, files_port, collab_engine_.account(),

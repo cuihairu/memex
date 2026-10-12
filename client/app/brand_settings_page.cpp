@@ -2,6 +2,7 @@
 // org-admin；accent #rrggbb 形态门、PNG 类型/大小/尺寸）——客户端只做
 // 本地形态预检（accent 坏形态不发网）与提交展示；403 状态行明示归属。
 #include "brand_settings_page.hpp"
+#include "collab_defaults.hpp"
 
 #include <QColorDialog>
 #include <QFileDialog>
@@ -93,7 +94,7 @@ void BrandSettingsDialog::build_ui() {
   port_->setMaximumWidth(90);
   QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
   port_->setText(settings.value(QStringLiteral("files_port"),
-                                QStringLiteral("24362"))
+                                default_files_port())
                      .toString());
   account_box_ = new QLineEdit(this);
   account_box_->setPlaceholderText(QStringLiteral("账号"));

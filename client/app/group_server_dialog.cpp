@@ -1,4 +1,5 @@
 #include "group_server_dialog.hpp"
+#include "collab_defaults.hpp"
 
 #include <QColor>
 #include <QDateTime>
@@ -249,11 +250,11 @@ void GroupServerDialog::build_ui() {
   QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
   auto* conn_row = new QHBoxLayout;
   host_ = new QLineEdit(
-      settings.value(QStringLiteral("host"), QStringLiteral("127.0.0.1"))
+      settings.value(QStringLiteral("host"), default_collab_host())
           .toString(),
       this);
   port_ = new QLineEdit(
-      settings.value(QStringLiteral("files_port"), QStringLiteral("24561"))
+      settings.value(QStringLiteral("files_port"), default_files_port())
           .toString(),
       this);
   port_->setMaximumWidth(90);
