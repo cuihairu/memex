@@ -90,6 +90,22 @@ std::string derive_tool_cred_key(const std::string& secret) {
   return std::string(reinterpret_cast<const char*>(md), 32);
 }
 
+// R27-5 服务端任务源拉取凭据：密码箱同水位派生（PBKDF2-HMAC-SHA256
+// 600000 轮，R24-3 口径）。盐用固定部署域串（服务端静态加密无用户口令
+// 参与；迭代次数扛离线爆破），派生 32B 作 AES-256-GCM 密钥。
+std::string derive_task_pull_key(const std::string& secret) {
+  if (secret.empty()) return {}; // 未配主密钥＝拉取凭据面未启用
+  const std::string salt = "memex/task-pull/v1";
+  unsigned char out[EVP_MAX_MD_SIZE];
+  if (PKCS5_PBKDF2_HMAC(secret.data(), static_cast<int>(secret.size()),
+                        reinterpret_cast<const unsigned char*>(salt.data()),
+                        static_cast<int>(salt.size()), 600000, EVP_sha256(),
+                        sizeof(out), out) != 1) {
+    return {};
+  }
+  return std::string(reinterpret_cast<const char*>(out), 32);
+}
+
 namespace {
 constexpr int kGcmNonceBytes = 12;
 constexpr int kGcmTagBytes = 16;

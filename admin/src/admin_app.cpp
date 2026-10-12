@@ -3393,6 +3393,71 @@ int setup(int argc, char** argv) {
             cb(json_resp(drogon::k200OK, out));
           });
 
+  // ============ 任务源拉取（R27-5：数据外发默认关硬口径——本面即默认关
+  // 闸的显式开启位；拉取另需主密钥在配，两道闸才开） ============
+  guarded("/api/admin/task-pull", {drogon::Get}, false,
+          [ctx](const drogon::HttpRequestPtr& req,
+              std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
+            if (auto deny = require_manage(*ctx, req, "task_pull.view")) {
+              cb(std::move(*deny));
+              return;
+            }
+            Json::Value out = ok_json();
+            std::lock_guard<std::mutex> lk(ctx->mu);
+            const auto flag = ctx->store->server_flag_get("task_pull_enabled");
+            const bool enabled = flag.has_value() && *flag == "1";
+            out["enabled"] = enabled;
+            Json::Value arr(Json::arrayValue);
+            for (const auto& c : ctx->store->task_pull_configs()) {
+              const auto sealed =
+                  ctx->store->task_source_cred_sealed(c.owner, c.provider);
+              Json::Value row;
+              row["owner"] = c.owner;
+              row["provider"] = c.provider;
+              row["repo"] = c.repo;
+              row["enabled"] = c.enabled;
+              row["interval_s"] = c.interval_s;
+              row["last_pull_ms"] = c.last_pull_ms;
+              row["cred_configured"] = sealed.has_value() && !sealed->empty();
+              arr.append(row);
+            }
+            out["sources"] = arr;
+            cb(json_resp(drogon::k200OK, out));
+          });
+
+  guarded("/api/admin/task-pull", {drogon::Post}, true,
+          [ctx](const drogon::HttpRequestPtr& req,
+              std::function<void(const drogon::HttpResponsePtr&)>&& cb) {
+            if (auto deny = require_manage(*ctx, req, "task_pull.config")) {
+              cb(std::move(*deny));
+              return;
+            }
+            const auto j = body_of(req);
+            if (!j || !j->isMember("enabled") || !(*j)["enabled"].isBool()) {
+              cb(err_resp(drogon::k400BadRequest, "缺少字段：enabled（布尔）"));
+              return;
+            }
+            const bool on = (*j)["enabled"].asBool();
+            const std::string account = session_account(req);
+            std::lock_guard<std::mutex> lk(ctx->mu);
+            if (!ctx->store->server_flag_set("task_pull_enabled", on ? "1" : "0",
+                                             now_ms())) {
+              cb(err_resp(drogon::k500InternalServerError, "开关落库失败"));
+              return;
+            }
+            // 开启即明示拉取范围（谁/何时/范围＝审计面留痕；拉取器逐拍
+            // 只读本键与配置行，别处不动）
+            Json::Value scope(Json::arrayValue);
+            for (const auto& c : ctx->store->task_pull_configs()) {
+              if (!c.enabled) continue;
+              scope.append(c.owner + "/" + c.provider + "/" + c.repo);
+            }
+            std::cout << "[MEMEX-ADMIN] task-pull enabled=" << (on ? "on" : "off")
+                      << " by=" << account << " scope=["
+                      << (on ? scope.toStyledString() : "—") << "]" << std::endl;
+            cb(json_resp(drogon::k200OK, ok_json()));
+          });
+
   guarded("/api/admin/memos", {drogon::Get}, false,
           [ctx](const drogon::HttpRequestPtr& req,
               std::function<void(const drogon::HttpResponsePtr&)>&& cb) {

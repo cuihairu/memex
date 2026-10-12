@@ -680,6 +680,67 @@ const pages = {
     },
   },
 
+  taskpull: {
+    title: "任务源拉取",
+    desc: "服务端定时拉取外部任务源（GitHub issues 起步）落成员个人任务清单并经既有通知长连接推送。数据外发默认关：总开关默认关闭且服务未配 --task-pull-secret 时整面不启用；源凭据只在服务端密封落库，后台只见「已配置」位，无明文无密文。",
+    async render(el) {
+      el.innerHTML = `
+        <h2>任务源拉取</h2><p class="desc">${this.desc}</p>
+        <div class="card"><h3>拉取总开关</h3>
+          <p class="muted" id="tp-scope" style="font-size:12px"></p>
+          <form id="f-tp" class="inline">
+            <label style="flex-direction:row;align-items:center"><input type="checkbox" name="enabled" id="tp-enabled" style="min-width:0"> 开启定时拉取（数据外发）</label>
+            <button type="submit">保存</button>
+          </form>
+        </div>
+        <div class="card"><h3>成员已登记源（盘点）</h3>
+          <table><thead><tr>
+            <th>属主</th><th>源</th><th>仓库</th><th>状态</th><th>间隔秒</th><th>最近拉取</th><th>凭据</th>
+          </tr></thead><tbody id="t-tp"></tbody></table>
+        </div>`;
+
+      const refresh = async () => {
+        const st = await api("/api/admin/task-pull");
+        el.querySelector("#tp-enabled").checked = !!st.enabled;
+        el.querySelector("#tp-scope").textContent =
+          (st.enabled ? "当前状态：开启。" : "当前状态：关闭（默认，零外呼）。") +
+          " 开启后的拉取范围＝下列「启用」状态的源；无启用源时开启不产生任何拉取。";
+        el.querySelector("#t-tp").innerHTML = st.sources.map((s) => `
+          <tr><td class="mono">${esc(s.owner)}</td>
+          <td>${esc(s.provider)}</td>
+          <td class="mono">${esc(s.repo)}</td>
+          <td>${s.enabled ? '<span class="pill">启用</span>' : '<span class="pill off">停用</span>'}</td>
+          <td>${s.interval_s}</td>
+          <td class="muted">${fmt_ms(s.last_pull_ms)}</td>
+          <td>${s.cred_configured ? '<span class="pill">已配置</span>' : '<span class="muted">未配置（公开源裸拉）</span>'}</td></tr>`).join("") ||
+          '<tr><td colspan="7" class="muted">暂无成员登记任务源</td></tr>';
+      };
+
+      el.querySelector("#f-tp").onsubmit = async (e) => {
+        e.preventDefault();
+        const on = el.querySelector("#tp-enabled").checked;
+        if (on) {
+          // 显式开启＝明示拉取范围（把将要被拉取的启用源列进确认框）
+          const st = await api("/api/admin/task-pull");
+          const scope = st.sources
+            .filter((s) => s.enabled)
+            .map((s) => `${s.owner}/${s.provider} ${s.repo}`);
+          const msg = scope.length
+            ? `开启定时拉取（数据外发）？\n将按各自间隔拉取以下已启用源：\n${scope.join("\n")}`
+            : "开启定时拉取（数据外发）？\n当前没有任何启用状态的源，开启后也不会产生拉取。";
+          if (!confirm(msg)) return;
+        }
+        try {
+          await api("/api/admin/task-pull", { body: { enabled: on } });
+          toast(on ? "已开启（审计已记拉取范围）" : "已关闭");
+          await refresh();
+        } catch (err) { toast(err.message, true); }
+      };
+
+      await refresh();
+    },
+  },
+
   files: {
     title: "文件与配额",
     desc: "文件台账（置顶/删除，删除＝台账行＋双面配额退费，对象字节留待过期清理对账）；两级配额（群+个人，仅 org-admin 写）；存储状态只读探活（up/down/compose 编排在宿主，后台不代启停）。",

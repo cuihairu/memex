@@ -25,6 +25,7 @@
 #include "files_server.hpp"
 #include "group_assistant.hpp"
 #include "model_gateway.hpp"
+#include "task_pull.hpp"
 #include "server.hpp"
 #include "storage.hpp"
 #include "store.hpp"
@@ -77,6 +78,9 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
   // R25-4 凭据面主密钥（缺省空＝凭据面未启用；建议随部署 env 走
   // ——旗标进 ps，值仅服务端内存内派生）
   std::string tool_cred_secret;
+  // R27-5 任务源拉取面主密钥（缺省空＝拉取面未启用＝零外呼；开关另在
+  // admin 后台，两道闸全开才拉）
+  std::string task_pull_secret;
   for (int i = 0; i < argc; ++i) {
     const std::string_view arg = argv[i];
     if (arg == "--port" && i + 1 < argc) {
@@ -140,6 +144,10 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
     } else if (arg == "--tool-cred-secret" && i + 1 < argc) {
       // R25-4 凭据面主密钥（服务端派生 GCM 密钥；不给=凭据面未启用）
       tool_cred_secret = argv[++i];
+    } else if (arg == "--task-pull-secret" && i + 1 < argc) {
+      // R27-5 任务源拉取面主密钥（PBKDF2 同水位派生；不给=拉取面未启用
+      // =零外呼，配置路由 503）
+      task_pull_secret = argv[++i];
     } else if (arg == "--s3-endpoint" && i + 1 < argc) {
       s3.endpoint = argv[++i];
     } else if (arg == "--s3-bucket" && i + 1 < argc) {
@@ -240,6 +248,9 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
     // 文件面（R23-2）：独立端口，绑定失败只降级为「文件面未启用」，
     // 消息主通道不受影响；存储实例空＝面内一律 503。
     std::unique_ptr<memex::server::FileServer> files;
+    // R27-5 任务源拉取器（配置面在文件面 /files/task-sources，故随文件
+    // 面装配；io.run() 之后析构＝在途拉取回调不会越过实例）
+    std::unique_ptr<memex::server::TaskPuller> puller;
     // 会话库两面共享一份（R23-4）：uplink 面启用时才显式建共享句柄，
     // scope 闸认得出跨面令牌；纯内网部署缺省自建，行为不变。
     std::shared_ptr<memex::server::FileSessions> file_sessions;
@@ -253,12 +264,16 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
             /*uplink_mode=*/false, file_sessions);
         // 工具结果卡片回群（R25-2）：走 deliver_notice 同一投递面（NOTICE
         // 信封＝离线入队＋归档＋在线扇出）；单 io_context 线程模型不加锁。
-        files->set_notice([&server](const std::string& target,
-                                    const std::string& title,
-                                    const std::string& content, int urgency) {
+        // 任务源拉取器复用同一 lambda（R27-5：新落/有变化的任务同一投递
+        // 面回推，客户端 30s 拉取降为兜底）。
+        const auto notice_fn = [&server](const std::string& target,
+                                         const std::string& title,
+                                         const std::string& content,
+                                         int urgency) {
           (void)memex::server::deliver_notice(server, target, title, content,
                                               urgency, "");
-        });
+        };
+        files->set_notice(notice_fn);
         // 群工具结果卡片回群（R26）：普通 TEXT 群消息（群会话气泡点开
         // 可见明细；离线入队＋归档＋在线扇出与手发消息同路）；from=操作者。
         files->set_group_text([&server](const std::string& target,
@@ -268,6 +283,12 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
         });
         // R25-4 凭据面：主密钥派生 GCM 密钥（空=未启用，凭据路由 503）
         files->set_tool_cred_secret(tool_cred_secret);
+        // R27-5 任务源拉取器：默认关硬口径三道闸（主密钥/admin 开关/单源
+        // 开关逐道短路＝零外呼）；主密钥未给＝不武装不建传输线程。
+        puller = std::make_unique<memex::server::TaskPuller>(io, store);
+        puller->set_key(memex::server::derive_task_pull_key(task_pull_secret));
+        puller->set_notice(notice_fn);
+        puller->start();
       } catch (const std::exception& e) {
         std::cerr << "[MEMEX] 文件面端口绑定失败，文件面未启用"
                      "（消息主通道不受影响）：" << e.what() << std::endl;

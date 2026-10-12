@@ -120,6 +120,11 @@ class FileServer {
   // 空串＝凭据面未启用（两路由一律 503）；凭据永不回客户端。
   void set_tool_cred_secret(const std::string& secret);
 
+  // R27-5 任务源拉取面主密钥（derive_task_pull_key 派生 32B）：未设或
+  // 空串＝拉取面未启用（/files/task-sources 一律 503）；源凭据密封落库、
+  // 永不回客户端。
+  void set_task_pull_secret(const std::string& secret);
+
   // 连接处理内部类（匿名空间）需触达：公开类型、私有成员不可触达
   struct Impl;
   std::unique_ptr<Impl> impl_;

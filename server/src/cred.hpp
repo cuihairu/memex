@@ -21,6 +21,11 @@ std::string sha256_hex(const std::string& data);
 // SHA-256；凭据永不回客户端，代理调用时仅内存内解密）——
 // 32B 密钥（raw bytes；secret 空=返回空串＝凭据面未启用）
 std::string derive_tool_cred_key(const std::string& secret);
+
+// —— R27-5 服务端任务源拉取凭据密钥：密码箱同水位（PBKDF2-HMAC-SHA256
+// 600000 轮＋固定部署盐派生 32B；AES-256-GCM 密封落库）——
+// 32B 密钥（raw bytes；secret 空=返回空串＝拉取凭据面未启用）
+std::string derive_task_pull_key(const std::string& secret);
 // 密封：hex(nonce12 || ct || tag16)；失败返回空串（口令/参数非法）
 std::string gcm_seal(const std::string& key32, const std::string& plaintext);
 // 开封：验签通过回明文；篡改/错钥/非法串返回空串

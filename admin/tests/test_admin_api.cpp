@@ -207,6 +207,19 @@ int main() {
     CHECK(seed.tool_cred_set(gid, "ci", std::string(32, '0'), "root",
                              1700000311000));
     seed.tool_audit_add(gid, "ci", "call", "m1", "{}", "{}", 1700000312000);
+    // 任务源拉取腿：m1 的 github 源（启用＋凭据已配——admin 面盘点与开关）
+    {
+      memex::server::ServerStore::TaskPullConfig tp;
+      tp.owner = "m1";
+      tp.provider = "github";
+      tp.repo = "acme/api";
+      tp.enabled = true;
+      tp.interval_s = 60;
+      tp.updated_ms = 1700000313000;
+      CHECK(seed.task_pull_config_set(tp));
+      CHECK(seed.task_source_cred_set("m1", "github", "deadbeef-sealed",
+                                      1700000313001));
+    }
     // 业务流程面腿：部门与汇报线（团队聚合）＋日报＋审批（待决/已决）＋
     // 办公室位置图（3F 两席）＋任务与备忘录＋远程协助会话与放行策略
     const int dept_rd = seed.ensure_department_path("研发部");
@@ -1583,6 +1596,40 @@ int main() {
     CHECK(http("GET", "/api/admin/emoji?account=m1", {}, m1ck).code == 403);
     CHECK(http("GET", "/api/admin/avatar?account=m1&size=64", {}, m1ck).code ==
           403);
+  }
+
+  // ㊹ 任务源拉取：盘点回读（缺行＝默认关）、源行掩码（只见
+  //    cred_configured 位，无明文无密文）、开关写回读、缺字段 400、
+  //    member 越权 403
+  {
+    const auto g = http("GET", "/api/admin/task-pull", {}, root_cookie);
+    CHECK(g.code == 200);
+    const Json::Value st = jbody(g.text);
+    CHECK(st["enabled"].asBool() == false); // 缺行＝默认关（数据外发默认关）
+    CHECK(st["sources"].size() == 1);
+    CHECK(st["sources"][0]["owner"].asString() == "m1");
+    CHECK(st["sources"][0]["provider"].asString() == "github");
+    CHECK(st["sources"][0]["repo"].asString() == "acme/api");
+    CHECK(st["sources"][0]["enabled"].asBool() == true);
+    CHECK(st["sources"][0]["interval_s"].asInt64() == 60);
+    CHECK(st["sources"][0]["cred_configured"].asBool() == true);
+    CHECK(g.text.find("deadbeef-sealed") == std::string::npos); // 密文不出
+    // 开关写：开→回读真值→关（测试库不留外发面开启态）
+    CHECK(http("POST", "/api/admin/task-pull", R"({"enabled":true})",
+               root_cookie).code == 200);
+    CHECK(jbody(http("GET", "/api/admin/task-pull", {}, root_cookie)
+                    .text)["enabled"].asBool() == true);
+    CHECK(http("POST", "/api/admin/task-pull", R"({"enabled":false})",
+               root_cookie).code == 200);
+    CHECK(jbody(http("GET", "/api/admin/task-pull", {}, root_cookie)
+                    .text)["enabled"].asBool() == false);
+    // 缺字段 400；member 读写都 403
+    CHECK(http("POST", "/api/admin/task-pull", "{}", root_cookie).code == 400);
+    const auto lm1 =
+        http("POST", "/api/login", R"({"account":"m1","password":"m1-pw"})");
+    CHECK(http("GET", "/api/admin/task-pull", {}, lm1.set_cookie).code == 403);
+    CHECK(http("POST", "/api/admin/task-pull", R"({"enabled":true})",
+               lm1.set_cookie).code == 403);
   }
 
   // ㊷ 登出后会话失效

@@ -7,6 +7,9 @@ find_package(aws-cpp-sdk-s3 CONFIG REQUIRED)
 # storage.cpp 直接消费 aws-cpp-sdk-core 符号（SecureMemClear 等）：部分 vcpkg
 # 安装树里 s3 包不传递 core，按「显式声明依赖」规矩单独 find+链接。
 find_package(aws-cpp-sdk-core CONFIG REQUIRED)
+# R27-5 任务源拉取出网传输走 drogon HttpClient（与 admin 面同一依赖，
+# vcpkg DrogonConfig.cmake 大小写敏感同 admin 口径）
+find_package(Drogon CONFIG REQUIRED)
 
 # 服务端核心库：会话、账号、存储、S3 抽象层（测试直链，不起进程）
 add_library(memex_server_core STATIC
@@ -19,7 +22,8 @@ add_library(memex_server_core STATIC
   src/webhook.cpp
   src/model_gateway.cpp
   src/group_assistant.cpp
-  src/storage.cpp)
+  src/storage.cpp
+  src/task_pull.cpp)
 target_include_directories(memex_server_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_features(memex_server_core PUBLIC cxx_std_17)
 target_link_libraries(memex_server_core PUBLIC
@@ -28,7 +32,8 @@ target_link_libraries(memex_server_core PUBLIC
   OpenSSL::Crypto
   unofficial::sqlite3::sqlite3
   aws-cpp-sdk-s3
-  aws-cpp-sdk-core)
+  aws-cpp-sdk-core
+  Drogon::Drogon)
 
 add_executable(memex_server src/main.cpp)
 target_compile_features(memex_server PRIVATE cxx_std_17)
@@ -235,4 +240,13 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_files_verify PRIVATE memex_server_core)
   add_test(NAME files_verify COMMAND test_files_verify)
   set_tests_properties(files_verify PROPERTIES TIMEOUT 60)
+
+  # R27-5 任务源拉取验收：三道闸零外呼/拉取链（去重与 done 不回写）/凭据
+  # 密封面（无明文无密文回包）/路由判权 401/400/503/真传输腿（drogon×本地
+  # http 桩＋deadline 收口）；PBKDF2 60 万轮多次派生按覆盖率构建预算
+  # TIMEOUT 120（R27-3 同口径先例）
+  add_executable(test_task_pull tests/test_task_pull.cpp)
+  target_link_libraries(test_task_pull PRIVATE memex_server_core)
+  add_test(NAME task_pull COMMAND test_task_pull)
+  set_tests_properties(task_pull PROPERTIES TIMEOUT 120)
 endif()

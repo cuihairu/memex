@@ -212,6 +212,9 @@ struct FileServer::Impl {
   // R25-4 凭据面 GCM 密钥（主密钥 SHA-256 派生 32B raw；空＝主密钥未
   // 配置＝凭据面未启用，路由 503）
   std::string tool_cred_key;
+  // R27-5 任务源拉取面 GCM 密钥（derive_task_pull_key 派生 32B raw；空＝
+  // 主密钥未配置＝拉取面未启用，/files/task-sources 一律 503）
+  std::string task_pull_key;
   // 远程协助媒体槽（二期）：会话 id → 最新帧＋待取输入事件。跨连接共享
   // 故挂 Impl（推/拉分属两条连接）；单 io_context 线程不加锁。屏幕帧
   // 只存最新一笔且不落库（内容敏感），会话终态即擦槽。
@@ -861,6 +864,18 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/tasks/delete" && method_ == "POST") {
       return route_task_delete(body);
+    }
+    // R27-5 任务源拉取面（默认关硬口径：admin 开关＋主密钥两道闸在拉取
+    // 器；本面只管配置与凭据密封）：POST 设源（可选带凭据）、GET 掩码列
+    // 表（只回本人行）、DELETE 撤源（配置＋凭据同撤）
+    if (path_ == "/files/task-sources" && method_ == "POST") {
+      return route_task_source_set(body);
+    }
+    if (path_ == "/files/task-sources" && method_ == "GET") {
+      return route_task_sources_list();
+    }
+    if (path_ == "/files/task-sources" && method_ == "DELETE") {
+      return route_task_source_delete();
     }
     // 二期·审批（请假起步）：申请/双列表/决定/撤回；判权 az
     // approval-decide（直属上级现查或无上级 org-admin 兜底）
@@ -1558,6 +1573,174 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       respond_json(404, {{"ok", false}, {"error", "任务不存在"}});
       return;
     }
+    respond_json(200, {{"ok", true}});
+  }
+
+  // —— R27-5 任务源拉取面（主密钥未配 503；owner=会话本人＝自建语义；
+  // 源凭据 AES-256-GCM 密封落库、列表只见掩码位，明文与密文都不回客户端
+  // 不进日志；admin 全局开关与主密钥在拉取器侧兜底——本面只管配置）——
+
+  void route_task_source_set(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    if (impl_.task_pull_key.empty()) {
+      respond_json(503, {{"ok", false},
+                         {"error", "任务源拉取面未启用（服务端未配主密钥）"}});
+      return;
+    }
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("provider") ||
+        !j["provider"].is_string() ||
+        j["provider"].get<std::string>().empty() ||
+        !j.contains("repo") || !j["repo"].is_string()) {
+      respond_json(400,
+                   {{"ok", false},
+                    {"error", "缺少字段：provider（非空）/repo"}});
+      return;
+    }
+    const std::string provider = j["provider"].get<std::string>();
+    const std::string repo = j["repo"].get<std::string>();
+    // provider 白名单＝honest 拒绝（gitlab/jira/linear 随后按需接入）
+    if (provider != "github") {
+      respond_json(400, {{"ok", false},
+                         {"error", "provider 未接入（现只接 github）"}});
+      return;
+    }
+    if (repo.empty() || repo.find('/') == std::string::npos ||
+        repo.front() == '/' || repo.back() == '/') {
+      respond_json(400,
+                   {{"ok", false}, {"error", "repo 须为 owner/repo 形态"}});
+      return;
+    }
+    // 部分语义：body 未携带的字段保留原行现值（clear_secret 单独扳闸不回吹
+    // 其它字段）；新行缺省 enabled=true / interval_s=300
+    bool enabled = true;
+    int interval_s = 300;
+    for (const auto& old : impl_.store.task_pull_configs()) {
+      if (old.owner == account && old.provider == provider) {
+        enabled = old.enabled;
+        interval_s = old.interval_s;
+        break;
+      }
+    }
+    if (j.contains("enabled")) {
+      if (!j["enabled"].is_boolean()) {
+        respond_json(400, {{"ok", false}, {"error", "enabled 须为布尔"}});
+        return;
+      }
+      enabled = j["enabled"].get<bool>();
+    }
+    if (j.contains("interval_s")) {
+      if (!j["interval_s"].is_number_integer()) {
+        respond_json(400,
+                     {{"ok", false}, {"error", "interval_s 须为整数秒"}});
+        return;
+      }
+      interval_s = j["interval_s"].get<int>();
+      if (interval_s < 0) {
+        respond_json(400, {{"ok", false},
+                           {"error", "interval_s 须 ≥0（0=每拍都拉，测试口径）"}});
+        return;
+      }
+    }
+    std::string secret;
+    if (j.contains("secret")) {
+      if (!j["secret"].is_string()) {
+        respond_json(400, {{"ok", false}, {"error", "secret 须为字符串"}});
+        return;
+      }
+      secret = j["secret"].get<std::string>();
+    }
+    const bool clear_secret =
+        j.contains("clear_secret") && j["clear_secret"].is_boolean() &&
+        j["clear_secret"].get<bool>();
+    ServerStore::TaskPullConfig c;
+    c.owner = account;
+    c.provider = provider;
+    c.repo = repo;
+    c.enabled = enabled;
+    c.interval_s = interval_s;
+    c.updated_ms = now_ms();
+    if (!impl_.store.task_pull_config_set(c)) {
+      respond_json(500, {{"ok", false}, {"error", "任务源配置落库失败"}});
+      return;
+    }
+    const char* cred_op = "kept";
+    if (!secret.empty()) {
+      // 密封后落库（GCM；密封失败＝不给落明文）
+      const std::string sealed = gcm_seal(impl_.task_pull_key, secret);
+      if (sealed.empty()) {
+        respond_json(500, {{"ok", false}, {"error", "凭据密封失败"}});
+        return;
+      }
+      impl_.store.task_source_cred_set(account, provider, sealed, now_ms());
+      cred_op = "set";
+    } else if (clear_secret) {
+      impl_.store.task_source_cred_delete(account, provider);
+      cred_op = "cleared";
+    }
+    // 审计行：凭据明文与密文都不出现（只记操作位）
+    std::cout << "[MEMEX] files task-source set account=" << account
+              << " provider=" << provider << " repo=" << repo
+              << " enabled=" << (c.enabled ? 1 : 0)
+              << " interval_s=" << c.interval_s << " cred=" << cred_op
+              << std::endl;
+    respond_json(200, {{"ok", true}});
+  }
+
+  void route_task_sources_list() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    if (impl_.task_pull_key.empty()) {
+      respond_json(503, {{"ok", false},
+                         {"error", "任务源拉取面未启用（服务端未配主密钥）"}});
+      return;
+    }
+    json arr = json::array();
+    for (const auto& c : impl_.store.task_pull_configs()) {
+      if (c.owner != account) continue; // 自建语义：只回本人行
+      const auto sealed =
+          impl_.store.task_source_cred_sealed(c.owner, c.provider);
+      json row = {{"provider", c.provider},
+                  {"repo", c.repo},
+                  {"enabled", c.enabled},
+                  {"interval_s", c.interval_s},
+                  {"last_pull_ms", c.last_pull_ms},
+                  {"updated_ms", c.updated_ms},
+                  {"cred_configured", sealed.has_value() && !sealed->empty()}};
+      arr.push_back(std::move(row));
+    }
+    respond_json(200, {{"ok", true}, {"sources", arr}});
+  }
+
+  void route_task_source_delete() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    if (impl_.task_pull_key.empty()) {
+      respond_json(503, {{"ok", false},
+                         {"error", "任务源拉取面未启用（服务端未配主密钥）"}});
+      return;
+    }
+    const std::string provider = query_param(query_, "provider");
+    if (provider.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少参数：provider"}});
+      return;
+    }
+    // 撤源＝配置＋凭据同撤（拉取器下一拍即不再触达）
+    const bool gone = impl_.store.task_pull_config_delete(account, provider);
+    impl_.store.task_source_cred_delete(account, provider);
+    if (!gone) {
+      respond_json(404, {{"ok", false}, {"error", "任务源不存在"}});
+      return;
+    }
+    std::cout << "[MEMEX] files task-source delete account=" << account
+              << " provider=" << provider << std::endl;
     respond_json(200, {{"ok", true}});
   }
 
@@ -6086,6 +6269,12 @@ void FileServer::set_group_text(GroupTextFn fn) {
 void FileServer::set_tool_cred_secret(const std::string& secret) {
   // 派生空（secret 空）＝凭据面未启用；只存派生密钥，明文主密钥不驻留
   impl_->tool_cred_key = derive_tool_cred_key(secret);
+}
+
+void FileServer::set_task_pull_secret(const std::string& secret) {
+  // R27-5 任务源拉取面：PBKDF2 同水位派生（空=未启用，/files/task-sources
+  // 一律 503）；明文主密钥不驻留
+  impl_->task_pull_key = derive_task_pull_key(secret);
 }
 
 void FileServer::start_accept() {
