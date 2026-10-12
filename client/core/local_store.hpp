@@ -38,6 +38,9 @@ struct StoredMessage {
   // 回执态（需求批⑦，仅我发出的协作消息有意义）：''=无 / delivered=
   // 已送达对方客户端 / read=已读。接收方向与直连域恒空。
   std::string receipt;
+  // 模糊检索相关度（仅关键词查询时非 0；无关键词=0，不参与排序）：
+  // Σ(命中次数×1000 + 首命中位置提前量封顶 999)。见 search_messages。
+  std::int64_t score{0};
 };
 
 // —— R23-5 杀毒扫描白名单（本地侧）——
@@ -112,6 +115,13 @@ public:
   // 复合索引（本地索引面），与 history 同构。
   QList<StoredMessage> history_between(const QString& peer, qint64 from_ms,
                                        qint64 until_ms, int limit = 200) const;
+  // 模糊检索（多词子串 AND + 相关度排序）：分词（ASCII 空白／半角逗号／
+  // 全角逗号）后每词独立子串命中并 AND 组合（全部命中才出）；英文大小写
+  // 不敏感、中文按字符直接匹配；命中行按相关度倒序、同分按时间倒序
+  // （相关度优先）。口径与服务端 ServerStore::search_messages 一致。
+  // keyword 为空=不过滤（返回空表）。
+  QList<StoredMessage> search_messages(const QString& keyword,
+                                       int limit = 200) const;
   // 有历史的对端列表（按最近消息时间倒序）。source 过滤：
   // 空=全部，"collab"=协作会话（T2.4 会话列表），"direct"=直连会话。
   QStringList peers(const QString& source = {}) const;

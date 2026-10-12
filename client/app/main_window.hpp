@@ -50,6 +50,7 @@ class OfficeMapDialog;
 class AssistDialog;
 class GroupToolsDialog;
 class BrandSettingsDialog;
+class MessageSearchDialog;
 class ShortcutSettingsDialog;
 class AwayLockSettingsDialog;
 class NetRemoteSettingsDialog;
@@ -458,6 +459,7 @@ private:
   QPointer<ShortcutSettingsDialog> shortcut_dialog_; // 二期·快捷键设置页（懒建）
   QPointer<AwayLockSettingsDialog> away_dialog_; // 二期·离开锁屏设置页（懒建）
   QPointer<NetRemoteSettingsDialog> net_dialog_; // 二期·网络与远程设置页（懒建）
+  QPointer<MessageSearchDialog> message_search_; // 聊天记录模糊搜索窗（懒建）
 
   QLabel* device_count_{nullptr};
   RailNav* rail_{nullptr};        // 原型 rail 面：最左图标导航栏
@@ -501,6 +503,7 @@ private:
   QPushButton* color_btn_{nullptr};
   QPushButton* nudge_btn_{nullptr};
   QPushButton* date_btn_{nullptr}; // 「按日期」（需求批⑧：跳转/筛选入口）
+  QPushButton* chat_search_btn_{nullptr}; // 🔍（聊天记录模糊搜索窗入口）
 
   // 品牌物料（设计稿 docs/design/品牌物料.md）：侧栏品牌行（无牌隐藏=
   // 没配就不变）＋brand_applied 驱动的整窗换牌（标题/图标/托盘）

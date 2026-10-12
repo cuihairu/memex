@@ -98,6 +98,8 @@ qt_add_executable(memex_client
   app/assist_dialog.hpp
   app/group_memo_dialog.cpp
   app/group_memo_dialog.hpp
+  app/message_search_dialog.cpp
+  app/message_search_dialog.hpp
   app/group_ci_dialog.cpp
   app/group_ci_dialog.hpp
   app/group_pack_dialog.cpp
@@ -581,6 +583,7 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
+    app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
@@ -640,6 +643,7 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
+    app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
@@ -795,6 +799,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
     app/main_window.cpp
+    app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
@@ -861,6 +866,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_live_shots
     tests/test_live_shots.cpp
     app/main_window.cpp
+    app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
@@ -922,6 +928,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_tray
     tests/test_tray.cpp
     app/main_window.cpp
+    app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
@@ -984,6 +991,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_screenshot
     tests/test_screenshot.cpp
     app/main_window.cpp
+    app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
@@ -1068,6 +1076,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_icon
     tests/test_icon.cpp
     app/main_window.cpp
+    app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
@@ -1131,6 +1140,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_theme
     tests/test_theme.cpp
     app/main_window.cpp
+    app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
@@ -1192,6 +1202,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_chat_actions
     tests/test_chat_actions.cpp
     app/main_window.cpp
+    app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp
@@ -1251,11 +1262,27 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 60)
 
+  # 聊天记录模糊检索验收：本机库核心口径腿（多词 AND／大小写不敏感／
+  # 中文按字符／半词命中／相关度排序／分词）＋搜索窗离屏冒烟（绑定本机库→
+  # 检索→命中列表→选中回传对端键）。本机库直查不触网，不起服务端进程
+  add_executable(test_local_search
+    tests/test_local_search.cpp
+    app/message_search_dialog.cpp)
+  target_include_directories(test_local_search PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_local_search PRIVATE
+    memex_core Qt6::Widgets Qt6::Sql)
+  add_test(NAME local_search COMMAND test_local_search)
+  set_tests_properties(local_search PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
+
   # 新消息闪烁提醒验收：真直连对端发消息→主窗 alert_count（非激活才闪/
   # 合并窗 2s 内不叠加/开关关了不闪/开关落盘往返）；链接面同 test_chat_actions
   add_executable(test_flash_alert
     tests/test_flash_alert.cpp
     app/main_window.cpp
+    app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
     app/crop_dialog.cpp

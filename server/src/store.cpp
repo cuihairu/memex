@@ -2375,13 +2375,59 @@ std::vector<ArchivedMessage> ServerStore::messages(const std::string& account,
   return search_messages(q);
 }
 
-// T3.2 条件检索：账号（收发双侧）／时间窗（含端点）／关键词（子串，LIKE 转义）AND 组合
+// T3.2 条件检索：账号（收发双侧）／时间窗（含端点）／关键词（多词子串 AND + 相关度排序）
 std::vector<ArchivedMessage> ServerStore::search_messages(
     const MessageSearch& q) {
   std::vector<ArchivedMessage> out;
+
+  // 关键词分词：ASCII 空白 + 半角逗号 + 全角逗号「，」(EF BC 8C)。
+  // 每词独立子串命中并 AND 组合（全部命中才出）；空词丢弃。
+  std::vector<std::string> toks;
+  {
+    std::string cur;
+    const auto flush = [&]() {
+      if (!cur.empty()) {
+        toks.push_back(cur);
+        cur.clear();
+      }
+    };
+    for (std::size_t i = 0; i < q.keyword.size(); ++i) {
+      const unsigned char c = static_cast<unsigned char>(q.keyword[i]);
+      if (c == 0xEF && i + 2 < q.keyword.size() &&
+          static_cast<unsigned char>(q.keyword[i + 1]) == 0xBC &&
+          static_cast<unsigned char>(q.keyword[i + 2]) == 0x8C) {
+        flush();
+        i += 2;
+      } else if (c == ' ' || c == '\t' || c == '\n' || c == '\r' ||
+                 c == '\f' || c == '\v' || c == ',') {
+        flush();
+      } else {
+        cur += q.keyword[i];
+      }
+    }
+    flush();
+    // ASCII 转小写（SQLite lower() 对中文为恒等，中文即按字符直接匹配）
+    for (auto& t : toks)
+      for (auto& ch : t)
+        if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch + ('a' - 'A'));
+  }
+  const bool has_kw = !toks.empty();
+
+  // 相关度 = Σ(每词：命中次数×1000 + 首命中位置提前量（越靠前越高，第 1000 位起为 0))。
+  // 占位符出现次序：SELECT 相关度表达式（每词 3 个）→ WHERE 账号 → WHERE peer
+  // → WHERE LIKE（每词 1 个）→ 时间窗 → LIMIT。
   std::string sql =
-      "SELECT msg_id, from_account, to_account, type, text, ts_ms, recall"
-      " FROM messages WHERE 1=1";
+      "SELECT msg_id, from_account, to_account, type, text, ts_ms, recall";
+  if (has_kw) {
+    sql += ", (";
+    for (std::size_t i = 0; i < toks.size(); ++i) {
+      if (i > 0) sql += " + ";
+      sql += "((length(lower(text)) - length(replace(lower(text), ?, '')))"
+             " / length(?) * 1000 + max(0, 1000 - instr(lower(text), ?)))";
+    }
+    sql += ") AS score";
+  }
+  sql += " FROM messages WHERE 1=1";
   if (!q.account.empty()) {
     // 收发双侧 ＋ 该账号所在群的群消息（to="group:<群号>"）
     sql += " AND (from_account = ? OR to_account = ? OR to_account IN"
@@ -2402,25 +2448,43 @@ std::vector<ArchivedMessage> ServerStore::search_messages(
              " (from_account = ? AND to_account = ?))";
     }
   }
-  // 关键词子串匹配：%／_／转义符先转义，避免用户输入被当通配符
-  std::string like;
-  if (!q.keyword.empty()) {
-    like.reserve(q.keyword.size() + 8);
-    for (const char c : q.keyword) {
-      if (c == '%' || c == '_' || c == '\\') like += '\\';
-      like += c;
+  // 关键词子串匹配：%／_／转义符先转义，避免用户输入被当通配符；
+  // lower() 双侧统一小写 → 英文大小写不敏感、中文按字符直接匹配。
+  std::vector<std::string> pats;
+  if (has_kw) {
+    pats.reserve(toks.size());
+    for (const auto& t : toks) {
+      std::string pat;
+      pat.reserve(t.size() + 2);
+      pat += '%';
+      for (const char c : t) {
+        if (c == '%' || c == '_' || c == '\\') pat += '\\';
+        pat += c;
+      }
+      pat += '%';
+      pats.push_back(std::move(pat));
+      sql += " AND lower(text) LIKE ? ESCAPE '\\'";
     }
-    sql += " AND text LIKE ? ESCAPE '\\'";
   }
   if (q.since_ms > 0) sql += " AND ts_ms >= ?";
   if (q.until_ms > 0) sql += " AND ts_ms <= ?";
-  sql += " ORDER BY id DESC LIMIT ?;";
+  if (has_kw) {
+    sql += " ORDER BY score DESC, ts_ms DESC, id DESC LIMIT ?;";
+  } else {
+    sql += " ORDER BY id DESC LIMIT ?;";
+  }
 
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) {
     return out;
   }
   int idx = 1;
+  // SELECT 里的相关度占位符（每词 3 个，先于 WHERE 子句出现）
+  for (const auto& t : toks) {
+    sqlite3_bind_text(st, idx++, t.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, idx++, t.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, idx++, t.c_str(), -1, SQLITE_TRANSIENT);
+  }
   if (!q.account.empty()) {
     sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, idx++, q.account.c_str(), -1, SQLITE_TRANSIENT);
@@ -2437,9 +2501,8 @@ std::vector<ArchivedMessage> ServerStore::search_messages(
       sqlite3_bind_text(st, idx++, q.peer.c_str(), -1, SQLITE_TRANSIENT);
     }
   }
-  if (!like.empty()) {
-    const std::string pat = "%" + like + "%";
-    sqlite3_bind_text(st, idx++, pat.c_str(), -1, SQLITE_TRANSIENT);
+  for (const auto& p : pats) {
+    sqlite3_bind_text(st, idx++, p.c_str(), -1, SQLITE_TRANSIENT);
   }
   if (q.since_ms > 0) sqlite3_bind_int64(st, idx++, q.since_ms);
   if (q.until_ms > 0) sqlite3_bind_int64(st, idx++, q.until_ms);
@@ -2455,6 +2518,7 @@ std::vector<ArchivedMessage> ServerStore::search_messages(
     m.text = text_ptr ? text_ptr : "";
     m.ts_ms = sqlite3_column_int64(st, 5);
     m.recalled = sqlite3_column_int(st, 6) != 0;
+    if (has_kw) m.score = sqlite3_column_int64(st, 7);
     out.push_back(std::move(m));
   }
   sqlite3_finalize(st);

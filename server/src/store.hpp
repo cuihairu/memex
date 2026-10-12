@@ -53,6 +53,9 @@ struct ArchivedMessage {
   std::string text;
   std::int64_t ts_ms{0};
   bool recalled{false};
+  // 模糊检索相关度（仅关键词查询时非 0；无关键词=0，不参与排序）：
+  // Σ(命中次数×1000 + 首命中位置提前量封顶 999)。见 search_messages。
+  std::int64_t score{0};
 };
 
 // 成员资料（T2.6 组织架构）：直属上级为独立字段——单列存储，
@@ -87,7 +90,10 @@ struct OrgImportResult {
 //（test_nudge 等四处因此踩过 std::string(int) 的 null 构造崩溃）。
 struct MessageSearch {
   std::string account;  // 该账号收发两侧都命中；空=全部
-  std::string keyword;  // 正文包含（子串）；空=不过滤
+  // 正文包含（子串，模糊）；空=不过滤。支持多关键词：按空白与逗号分词，
+  // 每词独立子串命中并 AND 组合（全部命中才出）。英文大小写不敏感、中文
+  // 按字符直接匹配；命中行按相关度倒序、同分按时间倒序（相关度优先）。
+  std::string keyword;
   std::int64_t since_ms{0}; // 起始时间（含），0=不限
   std::int64_t until_ms{0}; // 截止时间（含），0=不限
   int limit{200};

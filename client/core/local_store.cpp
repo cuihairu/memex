@@ -276,6 +276,96 @@ QList<StoredMessage> LocalStore::history_between(const QString& peer,
   return out;
 }
 
+// 模糊检索（多词子串 AND + 相关度排序）：口径与服务端 search_messages 一致。
+QList<StoredMessage> LocalStore::search_messages(const QString& keyword,
+                                                 int limit) const {
+  QList<StoredMessage> out;
+  if (!open_) return out;
+  // 分词：ASCII 空白 + 半角逗号 + 全角逗号「，」(U+FF0C)；空词丢弃。
+  QStringList toks;
+  {
+    QString cur;
+    const auto flush = [&]() {
+      if (!cur.isEmpty()) {
+        toks.push_back(cur);
+        cur.clear();
+      }
+    };
+    for (const QChar ch : keyword) {
+      const auto u = ch.unicode();
+      if (u == 0xFF0C || u == u' ' || u == u'\t' || u == u'\n' ||
+          u == u'\r' || u == u'\f' || u == u'\v' || u == u',') {
+        flush();
+      } else {
+        cur += ch;
+      }
+    }
+    flush();
+    for (auto& t : toks) t = t.toLower();  // 中文 toLower 恒等，按字符直接匹配
+  }
+  if (toks.isEmpty()) return out;
+
+  // 相关度 = Σ(每词：命中次数×1000 + 首命中位置提前量（越靠前越高，第 1000 位起为 0))。
+  // 占位符出现次序：SELECT 相关度表达式（每词 3 个）→ WHERE LIKE（每词 1 个）→ LIMIT。
+  QString sql = QStringLiteral(
+      "SELECT id, peer, from_id, to_id, seq, ts_ms, text, source, msg_id,"
+      " recalled, sync_state, receipt, (");
+  for (int i = 0; i < toks.size(); ++i) {
+    if (i > 0) sql += QStringLiteral(" + ");
+    sql += QStringLiteral(
+        "((length(lower(text)) - length(replace(lower(text), ?, '')))"
+        " / length(?) * 1000 + max(0, 1000 - instr(lower(text), ?)))");
+  }
+  sql += QStringLiteral(
+      ") AS score FROM messages WHERE 1=1");
+  QStringList pats;
+  for (const auto& t : toks) {
+    QString pat = QStringLiteral("%");
+    for (const QChar ch : t) {
+      const auto u = ch.unicode();
+      if (u == u'%' || u == u'_' || u == u'\\') pat += QLatin1Char('\\');
+      pat += ch;
+    }
+    pat += QLatin1Char('%');
+    pats.push_back(pat);
+    sql += QStringLiteral(" AND lower(text) LIKE ? ESCAPE '\\'");
+  }
+  sql += QStringLiteral(" ORDER BY score DESC, ts_ms DESC, id DESC LIMIT ?");
+
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(sql);
+  // SELECT 里的相关度占位符（每词 3 个，先于 WHERE 子句出现）
+  for (const auto& t : toks) {
+    q.addBindValue(t);
+    q.addBindValue(t);
+    q.addBindValue(t);
+  }
+  for (const auto& p : pats) q.addBindValue(p);
+  q.addBindValue(limit);
+  if (!q.exec()) {
+    qWarning() << "[本地库] 模糊检索失败：" << q.lastError().text();
+    return out;
+  }
+  while (q.next()) {
+    StoredMessage m;
+    m.id = q.value(0).toLongLong();
+    m.peer = q.value(1).toString().toStdString();
+    m.from = q.value(2).toString().toStdString();
+    m.to = q.value(3).toString().toStdString();
+    m.seq = static_cast<std::uint64_t>(q.value(4).toLongLong());
+    m.ts_ms = q.value(5).toLongLong();
+    m.text = q.value(6).toString().toStdString();
+    m.source = q.value(7).toString().toStdString();
+    m.msg_id = q.value(8).toString().toStdString();
+    m.recalled = q.value(9).toInt() != 0;
+    m.sync_state = q.value(10).toString().toStdString();
+    m.receipt = q.value(11).toString().toStdString();
+    m.score = q.value(12).toLongLong();
+    out.push_back(std::move(m));
+  }
+  return out;
+}
+
 QStringList LocalStore::peers(const QString& source) const {
   QStringList out;
   if (!open_) return out;

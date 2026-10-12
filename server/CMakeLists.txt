@@ -139,6 +139,13 @@ if(MEMEX_BUILD_TESTS)
   add_test(NAME avatar COMMAND test_avatar)
   set_tests_properties(avatar PROPERTIES TIMEOUT 60)
 
+  # 聊天记录模糊检索验收：子串匹配 + 多关键词 AND + 相关度排序的口径正确性，
+  # 以及规模账实测（20000 条磁盘语料 × 样例查询 × 200 次的命中数与 p50/p95）
+  add_executable(test_search_fuzzy tests/test_search_fuzzy.cpp)
+  target_link_libraries(test_search_fuzzy PRIVATE memex_server_core)
+  add_test(NAME search_fuzzy COMMAND test_search_fuzzy)
+  set_tests_properties(search_fuzzy PROPERTIES TIMEOUT 240)
+
   # T4.6 通讯录可见性验收（A20）：库级过滤／脱敏／上级引用抹除／落盘重开＋
   # CLI 配置面（org hide|fields|allow|visibility list）＋协议级 ORG_QUERY
   # 按查询者过滤（被隐藏者不可见不可搜——数据不出服务端）

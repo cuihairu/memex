@@ -52,6 +52,7 @@
 #include "assist_dialog.hpp"
 #include "audit_dialog.hpp"
 #include "office_map_dialog.hpp"
+#include "message_search_dialog.hpp"
 #include <QMessageBox>
 #include <QBuffer>
 #include <QPainter>
@@ -662,6 +663,46 @@ void MainWindow::build_ui() {
   chat_meta_ = new QLabel(QStringLiteral("未选择设备"), head);
   auto* local_badge = new QLabel(QStringLiteral("本机保存"), head);
   local_badge_ = local_badge;
+  auto* chat_search_btn = new QPushButton(QStringLiteral("🔍"), head);
+  chat_search_btn_ = chat_search_btn;
+  chat_search_btn->setFlat(true);
+  chat_search_btn->setToolTip(
+      QStringLiteral("搜索聊天记录（本机）：只记一半、词在中间、多词 AND"));
+  connect(chat_search_btn, &QPushButton::clicked, this, [this] {
+    if (!message_search_) {
+      message_search_ = new MessageSearchDialog(this);
+      message_search_->setAttribute(Qt::WA_DeleteOnClose);
+      connect(message_search_, &MessageSearchDialog::open_message, this,
+              [this](const QString& peer, const QString& msg_id) {
+                if (peer.isEmpty()) return;
+                // 对端键→会话类型：群键＝group；协作会话列表内＝collab；
+                // 其余（含直连设备）＝direct。
+                QString kind = QStringLiteral("direct");
+                if (peer.startsWith(QStringLiteral("group:"))) {
+                  kind = QStringLiteral("group");
+                } else if (collab_engine_.is_logged_in() &&
+                           collab_peers_.contains(peer)) {
+                  kind = QStringLiteral("collab");
+                }
+                open_chat(kind, peer);
+                // 命中定位（尽力而为）：气泡无单条锚点，退一级滚到命中所在日
+                if (!msg_id.isEmpty()) {
+                  for (const ChatRow& r : chat_rows_) {
+                    if (!r.system && r.msg_id == msg_id) {
+                      scroll_to_day(
+                          QDateTime::fromMSecsSinceEpoch(r.ts_ms).date());
+                      break;
+                    }
+                  }
+                }
+              });
+    }
+    message_search_->bind_store(direct_engine_.store());
+    message_search_->show();
+    message_search_->raise();
+    message_search_->activateWindow();
+    if (message_search_->search_box()) message_search_->search_box()->setFocus();
+  });
   auto* close_chat_btn = new QPushButton(QStringLiteral("✕"), head);
   close_chat_btn->setFlat(true);
   close_chat_btn->setToolTip(QStringLiteral("关闭会话（回到列表态）"));
@@ -671,6 +712,7 @@ void MainWindow::build_ui() {
   head_layout->addWidget(chat_meta_);
   head_layout->addStretch();
   head_layout->addWidget(local_badge);
+  head_layout->addWidget(chat_search_btn);
   head_layout->addWidget(close_chat_btn);
 
   // 「未归档」语义标记：常驻不可关（留痕铁律的界面表达）；
