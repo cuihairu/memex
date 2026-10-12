@@ -147,6 +147,16 @@ std::string test_png(std::uint32_t w, std::uint32_t h, std::size_t pad = 0) {
   return b;
 }
 
+// test_png 返回临时串——同一表达式里调两次得到两个不同临时对象，
+// (begin, end) 跨临时取迭代器对＝越界指针差（未定义：临时布局凑巧挨着
+// 则侥幸可用，凑巧相距则 std::length_error 直接 abort——CI 假 abort 根因）。
+// 先落命名局部再取区间。
+std::vector<unsigned char> png_bytes(std::uint32_t w, std::uint32_t h,
+                                     std::size_t pad = 0) {
+  const std::string s = test_png(w, h, pad);
+  return std::vector<unsigned char>(s.begin(), s.end());
+}
+
 } // namespace
 
 int main() {
@@ -326,24 +336,11 @@ int main() {
     PHASE("seed-branding");
     CHECK(seed.branding_set("Memex", "#1a73e8", "企业协作套件", 1700001100000) >
           0);
-    CHECK(seed.branding_set_logo(
-              std::vector<unsigned char>(test_png(1, 1).begin(),
-                                         test_png(1, 1).end()),
-              1700001200000) > 0);
-    CHECK(seed.branding_set_splash(
-              std::vector<unsigned char>(test_png(2, 2).begin(),
-                                         test_png(2, 2).end()),
-              1700001300000) > 0);
-    CHECK(seed.emoji_add("m1", "ok",
-                         std::vector<unsigned char>(test_png(64, 64).begin(),
-                                                    test_png(64, 64).end()),
-                         1700001400000) > 0);
-    CHECK(seed.emoji_add("m1", "hi",
-                         std::vector<unsigned char>(test_png(64, 64).begin(),
-                                                    test_png(64, 64).end()),
-                         1700001500000) > 0);
-    const std::vector<unsigned char> av_bytes(
-        test_png(32, 32).begin(), test_png(32, 32).end());
+    CHECK(seed.branding_set_logo(png_bytes(1, 1), 1700001200000) > 0);
+    CHECK(seed.branding_set_splash(png_bytes(2, 2), 1700001300000) > 0);
+    CHECK(seed.emoji_add("m1", "ok", png_bytes(64, 64), 1700001400000) > 0);
+    CHECK(seed.emoji_add("m1", "hi", png_bytes(64, 64), 1700001500000) > 0);
+    const std::vector<unsigned char> av_bytes = png_bytes(32, 32);
     CHECK(seed.avatar_put("m1", 32, "image/png", av_bytes, 1700001600000));
     CHECK(seed.avatar_put("m1", 64, "image/png", av_bytes, 1700001600000));
     CHECK(seed.avatar_put("m1", 128, "image/png", av_bytes, 1700001600000));
