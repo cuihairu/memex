@@ -3105,6 +3105,103 @@ int main() {
     CHECK(tl.body.find("\"assignee\":\"\"") == std::string::npos);
   }
 
+  // —— R27-7 领导视角：下属=直接下属（只一级跨级关闭）/az 写死只有直属
+  //     上级可读（平级/跨级/org-admin 一律不可见）/负荷三数口径写死
+  //    （未完成=status≠完成、已逾期=due 已过未完成、7 天内到期）——
+  {
+    // 干净链路：lead7（领导）← sub7（下属）← admin1（跨级上级）；
+    // admin2=有 admin 角色但无任何下属（org-admin 无兜底腿）
+    CHECK(store.create_account("lead7", "pw-lead7", "lead7"));
+    CHECK(store.create_account("sub7", "pw-sub7", "sub7"));
+    CHECK(store.create_account("admin2", "pw-admin2", "admin2", "admin"));
+    CHECK(store.reporting_set("sub7", "lead7", 1700001400000));
+    CHECK(store.reporting_set("lead7", "admin1", 1700001400001));
+    for (const char* a : {"lead7", "sub7", "admin2"}) {
+      const auto r = http(port, "POST", "/files/session", {},
+                          "{\"account\":\"" + std::string(a) +
+                              "\",\"password\":\"pw-" + std::string(a) +
+                              "\"}");
+      CHECK(r.status == 200);
+      tok[a] = jstr(r.body, "token");
+      CHECK(!tok[a].empty());
+    }
+    // 未登录 401
+    CHECK(http(port, "GET", "/files/tasks/team", {}, "").status == 401);
+    // 播 sub7 的任务面（现在时锚定：逾期=昨天、临期=3 天后、远期=30 天后）
+    const auto now7 = static_cast<std::int64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
+    const auto day = 86400000LL;
+    CHECK(http(port, "POST", "/files/tasks", H("sub7"),
+               "{\"title\":\"泳道待办\"}").status == 200);
+    CHECK(http(port, "POST", "/files/tasks", H("sub7"),
+               "{\"title\":\"泳道逾期\",\"due_ms\":" +
+                   std::to_string(now7 - day) + "}")
+              .status == 200);
+    CHECK(http(port, "POST", "/files/tasks", H("sub7"),
+               "{\"title\":\"泳道临期\",\"due_ms\":" +
+                   std::to_string(now7 + 3 * day) + "}")
+              .status == 200);
+    const auto t7far = http(port, "POST", "/files/tasks", H("sub7"),
+                            "{\"title\":\"泳道远期\",\"due_ms\":" +
+                                std::to_string(now7 + 30 * day) + "}");
+    CHECK(t7far.status == 200);
+    const auto t7done = http(port, "POST", "/files/tasks", H("sub7"),
+                             "{\"title\":\"泳道已完成\"}");
+    CHECK(t7done.status == 200);
+    // 完成腿：done 双写后不计入任何口径
+    CHECK(http(port, "POST", "/files/tasks/done", H("sub7"),
+               "{\"id\":" + std::to_string(jint(t7done.body, "id")) +
+                   ",\"done\":true}")
+              .status == 200);
+    // 直属上级 GET 200：恰一条泳道（自己的任务不进自己的视角）
+    const auto tm7 = http(port, "GET", "/files/tasks/team", H("lead7"), "");
+    CHECK(tm7.status == 200);
+    CHECK(tm7.body.find("\"account\":\"sub7\"") != std::string::npos);
+    CHECK(tm7.body.find("\"account\":\"lead7\"") == std::string::npos);
+    // 负荷三数口径：未完成=4（含待办+进行中+逾期+远期）、逾期=1、
+    // 7 天内到期=1（30 天远期不入窗）；已完成行在 tasks 里但不计数
+    CHECK(tm7.body.find("\"open\":4") != std::string::npos);
+    CHECK(tm7.body.find("\"overdue\":1") != std::string::npos);
+    CHECK(tm7.body.find("\"due_soon\":1") != std::string::npos);
+    CHECK(tm7.body.find("泳道已完成") != std::string::npos);
+    // 口径跟 status 走：待办→进行中仍计未完成；进行中→完成则退出
+    CHECK(http(port, "POST", "/files/tasks/status", H("sub7"),
+               "{\"id\":" + std::to_string(jint(t7far.body, "id")) +
+                   ",\"status\":\"进行中\"}")
+              .status == 200);
+    auto tm7b = http(port, "GET", "/files/tasks/team", H("lead7"), "");
+    CHECK(tm7b.status == 200);
+    CHECK(tm7b.body.find("\"open\":4") != std::string::npos);
+    CHECK(http(port, "POST", "/files/tasks/status", H("sub7"),
+               "{\"id\":" + std::to_string(jint(t7far.body, "id")) +
+                   ",\"status\":\"完成\"}")
+              .status == 200);
+    tm7b = http(port, "GET", "/files/tasks/team", H("lead7"), "");
+    CHECK(tm7b.status == 200);
+    CHECK(tm7b.body.find("\"open\":3") != std::string::npos);
+    CHECK(tm7b.body.find("\"due_soon\":1") != std::string::npos); // 临期仍在
+    // 跨级关闭：admin1 是 lead7 的直属上级（看得见 lead7 泳道），
+    // 但 sub7 是跨级——lead7 泳道在、sub7 泳道与其任务不在
+    const auto ta7 = http(port, "GET", "/files/tasks/team", H("admin1"), "");
+    CHECK(ta7.status == 200);
+    CHECK(ta7.body.find("\"account\":\"lead7\"") != std::string::npos);
+    CHECK(ta7.body.find("\"account\":\"sub7\"") == std::string::npos);
+    CHECK(ta7.body.find("泳道逾期") == std::string::npos);
+    // org-admin 无兜底：admin2 有 admin 角色但无任何下属=空 team
+    const auto tm7a = http(port, "GET", "/files/tasks/team", H("admin2"), "");
+    CHECK(tm7a.status == 200);
+    CHECK(tm7a.body.find("\"account\"") == std::string::npos);
+    // 无下属账号（owner1）=200 空 team；平级（admin2 看不到 sub7）
+    const auto tm7o = http(port, "GET", "/files/tasks/team", H("owner1"), "");
+    CHECK(tm7o.status == 200);
+    CHECK(tm7o.body.find("\"account\"") == std::string::npos);
+    // 清场：汇报线拆除，不留到后续腿
+    CHECK(store.reporting_clear("sub7"));
+    CHECK(store.reporting_clear("lead7"));
+  }
+
   io.stop();
   th.join();
 

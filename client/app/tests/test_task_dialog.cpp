@@ -10,6 +10,7 @@
 #include <QElapsedTimer>
 #include <QDateTime>
 #include <QDir>
+#include <QGroupBox>
 #include <QListWidget>
 #include <QProcess>
 #include <QPushButton>
@@ -116,6 +117,14 @@ int main(int argc, char** argv) {
             {QStringLiteral("org"), QStringLiteral("role"),
              QStringLiteral("grant"), QStringLiteral("alice"),
              QStringLiteral("group_creator"), QStringLiteral("--by"),
+             QStringLiteral("alice"), QStringLiteral("--db"),
+             db}) == 0);
+
+  // R27-7 领导视角夹具：bob ← alice（直属上级=看下属泳道的唯一判权）
+  CHECK(QProcess::execute(
+            server_bin,
+            {QStringLiteral("org"), QStringLiteral("reporting"),
+             QStringLiteral("set"), QStringLiteral("bob"),
              QStringLiteral("alice"), QStringLiteral("--db"),
              db}) == 0);
 
@@ -701,6 +710,58 @@ int main(int argc, char** argv) {
     }, 8000));
     dlg.toggle_kanban(); // 回列表视图（后续日历腿与抓图按列表面走查）
     CHECK(!dlg.is_kanban());
+  }
+
+  // —— R27-7 领导视角：bob←alice 汇报线 → alice 端缺省开、每直属下属
+  //     一条泳道（负荷三数随任务面走）、关=隐藏＋持久化、再开=重拉 ——
+  {
+    auto* cb_lead =
+        dlg.findChild<QCheckBox*>(QStringLiteral("task_lead_view"));
+    CHECK(cb_lead != nullptr && cb_lead->isChecked()); // 缺省开
+    // bob 无任务时泳道也在（0 计数）：登录首拉已随连接发生
+    CHECK(wait_until([&] { return dlg.lead_lane_count() == 1; }, 8000));
+    // 播 bob 的任务面（alice 派：同群可派）：无期/逾期/临期
+    const qint64 now7 = QDateTime::currentMSecsSinceEpoch();
+    CHECK(dlg.add_task(QStringLiteral("泳道无期"), QString(), 0,
+                       QStringLiteral("bob")));
+    CHECK(dlg.add_task(QStringLiteral("泳道逾期"), QString(),
+                       now7 - 86400000LL, QStringLiteral("bob")));
+    CHECK(dlg.add_task(QStringLiteral("泳道临期"), QString(),
+                       now7 + 2 * 86400000LL, QStringLiteral("bob")));
+    // 关＝隐藏＋QSettings 落 false；再开＝重拉（不等 30s 轮询）。
+    // 泳道数据走 QNAM 连接池（GET 与前置 POST 不保序）——节流重开关
+    // 重拉对齐（同回执落库竞态的节流重拉口径）
+    cb_lead->setChecked(false);
+    CHECK(dlg.lead_lane_count() == 0);
+    {
+      QSettings s(QStringLiteral("memex"), QStringLiteral("collab"));
+      CHECK(!s.value(QStringLiteral("task_lead_view"), true).toBool());
+    }
+    cb_lead->setChecked(true);
+    const QString lane_title =
+        QStringLiteral("bob（未完成 3 · 逾期 1 · 7 天内到期 1）");
+    qint64 last_toggle = 0;
+    CHECK(wait_until(
+        [&] {
+          for (auto* box : dlg.findChildren<QGroupBox*>()) {
+            if (box->title() == lane_title) {
+              auto* cards = box->findChild<QListWidget*>();
+              return cards != nullptr && cards->count() == 3;
+            }
+          }
+          const qint64 now = QDateTime::currentMSecsSinceEpoch();
+          if (now - last_toggle > 700) {
+            last_toggle = now;
+            cb_lead->setChecked(false);
+            cb_lead->setChecked(true); // 再拉一次（吞 GET/POST 连接池乱序）
+          }
+          return false;
+        },
+        8000));
+    {
+      QSettings s(QStringLiteral("memex"), QStringLiteral("collab"));
+      s.remove(QStringLiteral("task_lead_view")); // 收尾回缺省开
+    }
   }
 
   // —— R27-1 余量 日历视图：月历标到期日＋点日筛选该日到期 ——

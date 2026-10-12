@@ -343,6 +343,20 @@ struct FileServer::Impl {
                   const auto chain = store.manager_chain(author);
                   return !chain.empty() && chain.front() == q.subject;
                 });
+    // 显式允许：下属任务与看板（R27-6 领导视角，设计 §6.4）——只有下属
+    // 的直属上级可读（manager_chain front() 现查命中；不递归=只一级，
+    // 跨级关闭）；平级与其他部门领导一律不可见，本规则**无 org-admin
+    // 兜底**（按回执原文写死，与 report-read 的直属上级分支同口径）；
+    // 未命中 default-deny（幽灵账号同 403 不泄露存在性）
+    az.add_rule(RuleEffect::ExplicitAllow, "task-team-read",
+                [this](const AuthzQuery& q) {
+                  if (q.action != "task:team-read") return false;
+                  const std::string owner =
+                      resource_owner_prefix(q.resource);
+                  if (owner.empty()) return false;
+                  const auto chain = store.manager_chain(owner);
+                  return !chain.empty() && chain.front() == q.subject;
+                });
     // 显式允许：会话审计查阅（二期）——持 auditor 有效角色者（平台-6
     // 口径：SecurityAuditor≠SystemAdmin，admin 有效角色不自动可读消息）；
     // 被拒尝试在路由层落 audit.denied（与 CLI T3.2 同款，审计自身被拒
@@ -912,6 +926,9 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (path_ == "/files/reports/team" && method_ == "GET") {
       return route_reports_team();
     }
+    if (path_ == "/files/tasks/team" && method_ == "GET") {
+      return route_tasks_team();
+    }
     // 会话审计（二期）：在线检索＋查阅日志（持 auditor 有效角色）
     if (path_ == "/files/audit/search" && method_ == "POST") {
       return route_audit_search(body);
@@ -1480,46 +1497,78 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     respond_json(200, {{"ok", true}, {"id", id}});
   }
 
+  // 任务行统一序列化（列表 mine/assigned 与领导视角泳道同形；assigned
+  // 行 owner 为动作主体，creator 同带上不碍事）
+  json task_row_json(const ServerStore::TaskRow& t) {
+    return {{"id", t.id},
+            {"owner", t.owner},
+            {"creator", t.creator},
+            {"title", t.title},
+            {"note", t.note},
+            {"due_ms", t.due_ms},
+            {"reminded_ms", t.reminded_ms},
+            {"done", t.done},
+            {"done_ms", t.done_ms},
+            {"created_ms", t.created_ms},
+            {"provider", t.provider},
+            {"ext_key", t.ext_key},
+            {"start_ms", t.start_ms},
+            {"start_reminded_ms", t.start_reminded_ms},
+            {"type", t.type},
+            {"status", t.status}};
+  }
+
   void route_tasks_list() {
     const std::string account = account_or_respond();
     if (account.empty()) return;
     json mine = json::array();
     for (const auto& t : impl_.store.tasks_of(account)) {
-      mine.push_back({{"id", t.id},
-                      {"creator", t.creator},
-                      {"title", t.title},
-                      {"note", t.note},
-                      {"due_ms", t.due_ms},
-                      {"reminded_ms", t.reminded_ms},
-                      {"done", t.done},
-                      {"done_ms", t.done_ms},
-                      {"created_ms", t.created_ms},
-                      {"provider", t.provider},
-                      {"ext_key", t.ext_key},
-                      {"start_ms", t.start_ms},
-                      {"start_reminded_ms", t.start_reminded_ms},
-                      {"type", t.type},
-                      {"status", t.status}});
+      mine.push_back(task_row_json(t));
     }
     json assigned = json::array();
     for (const auto& t : impl_.store.tasks_assigned_by(account)) {
-      assigned.push_back({{"id", t.id},
-                          {"owner", t.owner},
-                          {"title", t.title},
-                          {"note", t.note},
-                          {"due_ms", t.due_ms},
-                          {"done", t.done},
-                          {"done_ms", t.done_ms},
-                          {"created_ms", t.created_ms},
-                          {"provider", t.provider},
-                          {"ext_key", t.ext_key},
-                          {"start_ms", t.start_ms},
-                          {"start_reminded_ms", t.start_reminded_ms},
-                          {"type", t.type},
-                          {"status", t.status}});
+      assigned.push_back(task_row_json(t));
     }
     respond_json(200, {{"ok", true}, {"tasks", mine},
                        {"assigned_by_me", assigned}});
+  }
+
+  // 领导视角（R27-6 设计 §6.4）：直属下属逐人聚合其任务清单＋负荷统计。
+  // 下属集合=org_reporting_lines 反查（只一级，不递归跨级关闭）；逐人
+  // 再过 az 与单读同源（task-team-read：只有直属上级可读，平级/其他部
+  // 门领导/org-admin 一律不可见，转岗即时生效）。负荷统计口径写死：
+  // 未完成数（status≠完成）、已逾期数（due_ms 已过且未完成）、7 天内
+  // 到期数（0<due_ms−now≤7 天且未完成）。
+  void route_tasks_team() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    const std::int64_t now = now_ms();
+    const std::int64_t week = 7LL * 86400000;
+    json team = json::array();
+    for (const auto& sub : impl_.store.direct_reports(account)) {
+      const Decision d = impl_.az.authorize(
+          {account, "task:team-read", "user:" + sub, "owner=" + sub});
+      if (!d.allowed) continue;
+      int open = 0;
+      int overdue = 0;
+      int due_soon = 0;
+      json rows = json::array();
+      for (const auto& t : impl_.store.tasks_of(sub)) {
+        const bool done = t.done || t.status == "完成";
+        if (!done) {
+          ++open;
+          if (t.due_ms > 0 && t.due_ms <= now) ++overdue;
+          if (t.due_ms > now && t.due_ms - now <= week) ++due_soon;
+        }
+        rows.push_back(task_row_json(t));
+      }
+      team.push_back({{"account", sub},
+                      {"loads", {{"open", open},
+                                 {"overdue", overdue},
+                                 {"due_soon", due_soon}}},
+                      {"tasks", std::move(rows)}});
+    }
+    respond_json(200, {{"ok", true}, {"team", std::move(team)}});
   }
 
   void route_task_done(const std::string& body) {

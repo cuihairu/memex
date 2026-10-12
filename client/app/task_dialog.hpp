@@ -30,6 +30,7 @@ class QLineEdit;
 class QListWidget;
 class QListWidgetItem;
 class QPushButton;
+class QScrollArea;
 class QSplitter;
 class QWidget;
 
@@ -107,6 +108,12 @@ class TaskDialog : public QDialog {
   bool is_kanban() const { return kanban_ != nullptr && kanban_->isVisible(); }
   // 看板列卡片数（0=待办 1=进行中 2=完成）
   int kanban_count(int col) const;
+  // —— R27-7 领导视角（设计 §6.4）——
+  // 下属=R14 直接下属（manager 反查，只一级跨级关闭）；az 写死只有直属
+  // 上级可读（平级/跨级/org-admin 不可见）；负荷统计口径写死（未完成/
+  // 已逾期/7 天内到期）；A 泳道式=每直属下属一条泳道。默认开（个人可
+  // 关，QSettings task_lead_view），无下属时泳道自动隐藏
+  int lead_lane_count() const; // 泳道数（未开/无下属/判权过滤后=0）
   // —— 走查/测试观察点 ——
   QString status_text() const;
   int task_count() const;      // 列表总条数（我的清单＋我派出的）
@@ -129,6 +136,8 @@ class TaskDialog : public QDialog {
   void render_ext_rows();
   // 看板重渲染（mine_cache_ 三列分桶＋逾期红/临近黄着色）
   void render_kanban();
+  // 领导视角泳道重渲染（team_cache_ 每下属一条泳道＋负荷统计标头）
+  void render_lead();
   bool selected_row_pulled() const;
   // 日历视图：重标到期日（先清全表再标，刷新后重入不叠色）
   void update_day_marks();
@@ -186,6 +195,10 @@ class TaskDialog : public QDialog {
   QCheckBox* cb_due_remind_{nullptr};   // deadline 到期提醒开关（默认开）
   QJsonArray mine_cache_;               // 看板渲染数据源（同批数据）
   QJsonArray assigned_cache_;
+  // —— R27-7 领导视角 ——
+  QCheckBox* cb_lead_{nullptr};    // 领导视角开关（默认开，个人可关）
+  QScrollArea* lead_scroll_{nullptr}; // 泳道容器（无下属/未勾选=隐藏）
+  QJsonArray team_cache_;          // 服务端泳道数据（下属→任务＋负荷）
 };
 
 } // namespace memex::client

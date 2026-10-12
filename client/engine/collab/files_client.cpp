@@ -746,6 +746,17 @@ void FilesClient::fetch_task_types() {
             });
 }
 
+void FilesClient::fetch_team_tasks() {
+  send_json(QStringLiteral("task.team"), QStringLiteral("GET"),
+            QStringLiteral("/files/tasks/team"), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit team_tasks_loaded(
+                    resp.value(QStringLiteral("team")).toArray());
+              }
+            });
+}
+
 void FilesClient::set_task_done(qint64 id, bool done) {
   send_json(QStringLiteral("task.done"), QStringLiteral("POST"),
             QStringLiteral("/files/tasks/done"),

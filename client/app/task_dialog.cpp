@@ -8,6 +8,7 @@
 #include <QCheckBox>
 #include <QColor>
 #include <QComboBox>
+#include <QGroupBox>
 #include <QDateTime>
 #include <QDateTimeEdit>
 #include <QDesktopServices>
@@ -24,6 +25,7 @@
 #include <QPalette>
 #include <QPushButton>
 #include <QSettings>
+#include <QScrollArea>
 #include <QSplitter>
 #include <QTextCharFormat>
 #include <QTimer>
@@ -75,10 +77,15 @@ TaskDialog::TaskDialog(QWidget* parent, TaskHttp* http,
     btn_add_ext_->setEnabled(true);
     refresh();
     client_->fetch_task_types(); // R27-6 类型清单（admin 后台可增删改）
+    if (cb_lead_->isChecked()) client_->fetch_team_tasks(); // 领导视角默认开
     if (!findChild<QTimer*>("task_poll")) {
       auto* poll = new QTimer(this);
       poll->setObjectName(QStringLiteral("task_poll"));
-      connect(poll, &QTimer::timeout, this, [this] { check_due(); refresh(); });
+      connect(poll, &QTimer::timeout, this, [this] {
+        check_due();
+        refresh();
+        if (cb_lead_->isChecked()) client_->fetch_team_tasks();
+      });
       poll->start(kPollMs);
     }
   });
@@ -119,6 +126,17 @@ TaskDialog::TaskDialog(QWidget* parent, TaskHttp* http,
             } else {
               const int di = type_->findText(def);
               type_->setCurrentIndex(di >= 0 ? di : 0);
+            }
+          });
+  // R27-7 领导视角泳道：服务端按直属关系与 az 裁决后下发（判权不过的
+  // 下属整条泳道不出现不泄露存在性）
+  connect(client_, &FilesClient::team_tasks_loaded, this,
+          [this](const QJsonArray& team) {
+            team_cache_ = team;
+            render_lead();
+            if (cb_lead_->isChecked()) {
+              set_status(
+                  QStringLiteral("领导视角已刷新（%1 名下属）").arg(team.size()));
             }
           });
   connect(client_, &FilesClient::task_deleted, this, [this](qint64) {
@@ -194,6 +212,23 @@ void TaskDialog::build_ui() {
   kanban_done_ = mkcol(QStringLiteral("完成"), QStringLiteral("kanban_done"));
   kanban_->setVisible(false);
   layout->addWidget(kanban_, 1);
+
+  // R27-7 领导视角：直属下属任务泳道（A 泳道式=每下属一条，一眼看压
+  // 力分布；负荷统计口径写死 未完成/已逾期/7 天内到期）。默认开（个人
+  // 可关，QSettings task_lead_view）；无下属或判权全过滤时自动隐藏
+  cb_lead_ = new QCheckBox(QStringLiteral("领导视角"), this);
+  cb_lead_->setObjectName(QStringLiteral("task_lead_view"));
+  {
+    const QSettings s(QStringLiteral("memex"), QStringLiteral("collab"));
+    cb_lead_->setChecked(
+        s.value(QStringLiteral("task_lead_view"), true).toBool());
+  }
+  lead_scroll_ = new QScrollArea(this);
+  lead_scroll_->setObjectName(QStringLiteral("task_lead_pane"));
+  lead_scroll_->setWidgetResizable(true);
+  lead_scroll_->setMinimumHeight(170);
+  lead_scroll_->setVisible(false);
+  layout->addWidget(lead_scroll_);
 
   // 录入区：标题＋备注＋到期＋分配给
   auto* form1 = new QHBoxLayout;
@@ -294,6 +329,7 @@ void TaskDialog::build_ui() {
   ops->addWidget(btn_refresh_);
   ops->addWidget(btn_calendar_);
   ops->addWidget(btn_kanban_);
+  ops->addWidget(cb_lead_);
   ops->addStretch(1);
   layout->addLayout(ops);
 
@@ -353,6 +389,13 @@ void TaskDialog::build_ui() {
   });
   connect(btn_kanban_, &QPushButton::clicked, this,
           [this] { toggle_kanban(); });
+  // 领导视角开关：持久化（默认开）＋开启即拉泳道
+  connect(cb_lead_, &QCheckBox::toggled, this, [this](bool on) {
+    QSettings(QStringLiteral("memex"), QStringLiteral("collab"))
+        .setValue(QStringLiteral("task_lead_view"), on);
+    if (on && is_connected()) client_->fetch_team_tasks();
+    render_lead();
+  });
   // 选中态同步状态按钮文案（开始/暂停）
   connect(list_, &QListWidget::itemSelectionChanged, this, [this] {
     const auto* item = list_->currentItem();
@@ -704,6 +747,85 @@ QStringList TaskDialog::task_type_names() const {
     for (int i = 0; i < type_->count(); ++i) out << type_->itemText(i);
   }
   return out;
+}
+
+// —— R27-7 领导视角（只读泳道；动作仍归下属本人清单）——
+
+int TaskDialog::lead_lane_count() const {
+  return lead_scroll_->isVisible() ? team_cache_.size() : 0;
+}
+
+void TaskDialog::render_lead() {
+  // 泳道=每直属下属一条（服务端已按直属关系与 az 裁决过滤）；标头带
+  // 负荷统计三数，卡片带类型与开始/截止，逾期红/临近黄/完成灰
+  const bool show = cb_lead_->isChecked() && !team_cache_.isEmpty();
+  lead_scroll_->setVisible(show);
+  if (!show) return;
+  const QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
+  const qint64 warn =
+      settings.value(QStringLiteral("task_due_warn_days"), 3).toInt() *
+      86400000LL;
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  auto* lanes = new QWidget;
+  auto* lay = new QHBoxLayout(lanes);
+  lay->setContentsMargins(0, 0, 0, 0);
+  for (const auto& v : team_cache_) {
+    const auto lane = v.toObject();
+    const auto loads = lane.value(QStringLiteral("loads")).toObject();
+    const int open = loads.value(QStringLiteral("open")).toInt();
+    const int overdue = loads.value(QStringLiteral("overdue")).toInt();
+    const int due_soon = loads.value(QStringLiteral("due_soon")).toInt();
+    auto* box = new QGroupBox(
+        QStringLiteral("%1（未完成 %2 · 逾期 %3 · 7 天内到期 %4）")
+            .arg(lane.value(QStringLiteral("account")).toString(),
+                 QString::number(open), QString::number(overdue),
+                 QString::number(due_soon)),
+        lanes);
+    auto* vlay = new QVBoxLayout(box);
+    auto* cards = new QListWidget(box);
+    for (const auto& tv : lane.value(QStringLiteral("tasks")).toArray()) {
+      const auto t = tv.toObject();
+      const bool done = t.value(QStringLiteral("done")).toBool() ||
+                        t.value(QStringLiteral("status")).toString() ==
+                            QStringLiteral("完成");
+      const qint64 start = static_cast<qint64>(
+          t.value(QStringLiteral("start_ms")).toDouble());
+      const qint64 due =
+          static_cast<qint64>(t.value(QStringLiteral("due_ms")).toDouble());
+      QString extra;
+      if (start > 0) {
+        extra += QStringLiteral("  开始 %1")
+                     .arg(QDateTime::fromMSecsSinceEpoch(start)
+                              .toString(QStringLiteral("MM-dd HH:mm")));
+      }
+      if (due > 0) {
+        extra += QStringLiteral("  截止 %1")
+                     .arg(QDateTime::fromMSecsSinceEpoch(due)
+                              .toString(QStringLiteral("MM-dd HH:mm")));
+      }
+      auto* card = new QListWidgetItem(
+          QStringLiteral("%1 ·%2%3%4")
+              .arg(t.value(QStringLiteral("title")).toString(),
+                   t.value(QStringLiteral("type")).toString(),
+                   t.value(QStringLiteral("status")).toString() ==
+                           QStringLiteral("进行中")
+                       ? QStringLiteral("（进行中）")
+                       : QString(),
+                   extra));
+      if (done) {
+        card->setForeground(Qt::gray);
+      } else if (due > 0 && due <= now) {
+        card->setForeground(Qt::red); // 逾期
+      } else if (due > 0 && due - now <= warn) {
+        card->setForeground(QColor(QStringLiteral("#b8860b"))); // 临近
+      }
+      cards->addItem(card);
+    }
+    vlay->addWidget(cards);
+    lay->addWidget(box);
+  }
+  lay->addStretch(1);
+  lead_scroll_->setWidget(lanes); // 旧泳道容器由 QScrollArea 回收
 }
 
 bool TaskDialog::delete_selected() {

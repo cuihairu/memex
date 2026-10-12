@@ -170,6 +170,9 @@ class FilesClient : public QObject {
   void list_tasks();
   // R27-6 任务类型清单（服务端配置，建任务下拉与校验的数据源）
   void fetch_task_types();
+  // 领导视角（R27-6 设计 §6.4）：直属下属任务＋负荷统计（服务端 az
+  // 判权——只有直属上级可读，平级/跨级/org-admin 不可见）
+  void fetch_team_tasks();
   // 完成/回退（仅清单主人）
   void set_task_done(qint64 id, bool done);
   // R27-6 状态切换（待办/进行中/完成——服务端双写 done，读取以 status
@@ -366,6 +369,8 @@ class FilesClient : public QObject {
   void task_created(qint64 id);
   void tasks_listed(const QJsonArray& mine, const QJsonArray& assigned_by_me);
   void task_types_loaded(const QJsonArray& types, const QString& def);
+  // 领导视角泳道（[{account, loads:{open,overdue,due_soon}, tasks:[…]}]）
+  void team_tasks_loaded(const QJsonArray& team);
   void task_done_set(qint64 id);
   void task_status_set(qint64 id);
   void task_reminded(qint64 id);
