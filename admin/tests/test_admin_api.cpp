@@ -96,6 +96,7 @@ int main() {
   std::filesystem::create_directories(tmp);
   const std::string db = (tmp / "memex.db").string();
   std::uint64_t gid = 0; // 通知与集成腿：webhook 群级目标用
+  std::int64_t file_a = 0, file_b = 0; // 文件与配额腿：群文件 A／个人文件 B
   {
     memex::server::ServerStore seed;
     if (!seed.open(db)) {
@@ -113,6 +114,32 @@ int main() {
     // 群（webhook group: 目标校验与三级盘点群名解析用）
     gid = seed.create_group("盘点群", "root", {"m1"});
     CHECK(gid > 0);
+    // 文件台账（文件与配额腿）：群文件 A（1000B）＋个人文件 B（500B）；
+    // 扣费基线按 files 面上传双面计费同口径（群文件群+个人都计）
+    {
+      memex::server::ServerStore::FileMeta fa;
+      fa.owner = "m1";
+      fa.belong_gid = std::to_string(gid);
+      fa.file_name = "group-a.bin";
+      fa.file_size = 1000;
+      fa.file_hash = "hash-file-a";
+      fa.object_key = "obj-file-a";
+      fa.upload_ts = 1700000100000;
+      file_a = seed.create_file_meta(fa);
+      CHECK(file_a > 0);
+      memex::server::ServerStore::FileMeta fb;
+      fb.owner = "m1";
+      fb.belong_uid = "m1";
+      fb.file_name = "personal-b.txt";
+      fb.file_size = 500;
+      fb.file_hash = "hash-file-b";
+      fb.object_key = "obj-file-b";
+      fb.upload_ts = 1700000200000;
+      file_b = seed.create_file_meta(fb);
+      CHECK(file_b > 0);
+      CHECK(seed.add_group_quota_used(std::to_string(gid), 1000));
+      CHECK(seed.add_user_quota_used("m1", 1500));
+    }
     seed.close();
   }
 
@@ -548,7 +575,144 @@ int main() {
           403);
   }
 
-  // ㉔ 登出后会话失效
+  // ㉔ 文件与配额·台账与置顶：全量台账回读（群/个人两行）、pin 回读、
+  //    未知 id 404、member 读写 403
+  {
+    const auto l = http("GET", "/api/admin/files", {}, root_cookie);
+    CHECK(l.code == 200);
+    CHECK(l.text.find("group-a.bin") != std::string::npos);
+    CHECK(l.text.find("personal-b.txt") != std::string::npos);
+    Json::StreamWriterBuilder wb;
+    Json::Value pinb;
+    pinb["id"] = file_a;
+    pinb["pin"] = true;
+    CHECK(http("POST", "/api/admin/files/pin", Json::writeString(wb, pinb),
+               root_cookie).code == 200);
+    const Json::Value f1 =
+        jbody(http("GET", "/api/admin/files?limit=50", {}, root_cookie)
+                  .text)["files"];
+    bool pinned = false;
+    for (const auto& x : f1) {
+      if (x["id"].asInt64() == file_a) pinned = x["pin"].asBool();
+    }
+    CHECK(pinned); // pin 回读
+    pinb["pin"] = false;
+    CHECK(http("POST", "/api/admin/files/pin", Json::writeString(wb, pinb),
+               root_cookie).code == 200);
+    Json::Value nof;
+    nof["id"] = 999999;
+    nof["pin"] = true;
+    CHECK(http("POST", "/api/admin/files/pin", Json::writeString(wb, nof),
+               root_cookie).code == 404);
+    // member 越权：读台账与写置顶都 403
+    const auto lr = http("POST", "/api/login",
+                         R"({"account":"m1","password":"m1-pw"})");
+    CHECK(http("GET", "/api/admin/files", {}, lr.set_cookie).code == 403);
+    CHECK(http("POST", "/api/admin/files/pin",
+               Json::writeString(wb, pinb), lr.set_cookie).code == 403);
+  }
+
+  // ㉕ 文件与配额·删除：台账行消失＋个人配额退费（回读对账）、二次删除 404
+  {
+    Json::StreamWriterBuilder wb;
+    Json::Value d;
+    d["id"] = file_b;
+    CHECK(http("POST", "/api/admin/files/delete", Json::writeString(wb, d),
+               root_cookie).code == 200);
+    const auto l = http("GET", "/api/admin/files?limit=50", {}, root_cookie);
+    CHECK(l.code == 200);
+    CHECK(l.text.find("personal-b.txt") == std::string::npos); // 行已删
+    CHECK(l.text.find("group-a.bin") != std::string::npos);    // A 不受影响
+    CHECK(http("POST", "/api/admin/files/delete", Json::writeString(wb, d),
+               root_cookie).code == 404);
+  }
+
+  // ㉖ 文件与配额·两级配额：群/个人写入回读一致（含删除退费对账：
+  //    m1 used=1500-500=1000）、校验面（坏 scope/负限/缺 target 400、
+  //    未知群/未知号 404）、member 403
+  {
+    Json::StreamWriterBuilder wb;
+    Json::Value sg;
+    sg["scope"] = "group";
+    sg["target"] = std::to_string(gid);
+    sg["limit_bytes"] = 10000;
+    CHECK(http("POST", "/api/admin/quotas", Json::writeString(wb, sg),
+               root_cookie).code == 200);
+    Json::Value su;
+    su["scope"] = "user";
+    su["target"] = "m1";
+    su["limit_bytes"] = 5000;
+    CHECK(http("POST", "/api/admin/quotas", Json::writeString(wb, su),
+               root_cookie).code == 200);
+    const Json::Value q =
+        jbody(http("GET", "/api/admin/quotas", {}, root_cookie).text);
+    bool gok = false, uok = false;
+    for (const auto& g : q["groups"]) {
+      if (g["target"].asString() == std::to_string(gid)) {
+        gok = g["limit_bytes"].asInt64() == 10000 &&
+              g["used_bytes"].asInt64() == 1000;
+      }
+    }
+    for (const auto& u : q["users"]) {
+      if (u["target"].asString() == "m1") {
+        uok = u["limit_bytes"].asInt64() == 5000 &&
+              u["used_bytes"].asInt64() == 1000; // B 删除退费 500 后
+      }
+    }
+    CHECK(gok);
+    CHECK(uok);
+    // 校验面
+    Json::Value bad;
+    bad["scope"] = "org"; // 非 group|user
+    bad["target"] = "1";
+    bad["limit_bytes"] = 1;
+    CHECK(http("POST", "/api/admin/quotas", Json::writeString(wb, bad),
+               root_cookie).code == 400);
+    bad["scope"] = "group";
+    bad["limit_bytes"] = -1; // 负限
+    CHECK(http("POST", "/api/admin/quotas", Json::writeString(wb, bad),
+               root_cookie).code == 400);
+    bad["target"] = "";
+    bad["limit_bytes"] = 1; // 缺 target
+    CHECK(http("POST", "/api/admin/quotas", Json::writeString(wb, bad),
+               root_cookie).code == 400);
+    bad["target"] = "999999"; // 未知群
+    CHECK(http("POST", "/api/admin/quotas", Json::writeString(wb, bad),
+               root_cookie).code == 404);
+    Json::Value gu;
+    gu["scope"] = "user";
+    gu["target"] = "ghost"; // 未知账号
+    gu["limit_bytes"] = 1;
+    CHECK(http("POST", "/api/admin/quotas", Json::writeString(wb, gu),
+               root_cookie).code == 404);
+    // member 越权写 403
+    const auto lr = http("POST", "/api/login",
+                         R"({"account":"m1","password":"m1-pw"})");
+    CHECK(http("POST", "/api/admin/quotas", Json::writeString(wb, su),
+               lr.set_cookie).code == 403);
+  }
+
+  // ㉗ 存储状态只读断言：GET 回注记（只读不代启停）与未配置口径、写入口
+  //    不存在（POST 同路径 404）、member 403
+  {
+    const auto r = http("GET", "/api/admin/storage/status", {}, root_cookie);
+    CHECK(r.code == 200);
+    const Json::Value st = jbody(r.text);
+    CHECK(std::string(st["note"].asString()).find("只读") != std::string::npos);
+    CHECK(std::string(st["files"].asString()).find("未配置") !=
+          std::string::npos); // 测试进程未配 MEMEX_FILES_URL
+    CHECK(st["storage"].isString());
+    // 无写入口：路由只注册 GET，POST 同路径必须拒（404/405，框架口径）
+    const int post_code =
+        http("POST", "/api/admin/storage/status", "{}", root_cookie).code;
+    CHECK(post_code == 404 || post_code == 405);
+    const auto lr = http("POST", "/api/login",
+                         R"({"account":"m1","password":"m1-pw"})");
+    CHECK(http("GET", "/api/admin/storage/status", {}, lr.set_cookie).code ==
+          403);
+  }
+
+  // ㉘ 登出后会话失效
   {
     CHECK(http("POST", "/api/logout", "{}", root_cookie).code == 200);
     CHECK(http("GET", "/api/whoami", {}, root_cookie).code == 401);

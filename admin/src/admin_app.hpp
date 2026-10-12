@@ -17,6 +17,8 @@ namespace memex::admin {
 //   --db P              服务端 SQLite 库路径（env MEMEX_ADMIN_DB）
 //   --www D             静态页目录（env MEMEX_ADMIN_WWW，默认 ./www）
 //   --files-url U       文件面基地址（env MEMEX_FILES_URL；空＝健康页不探）
+//   --storage-url U     对象存储基地址（env MEMEX_STORAGE_URL；空＝存储状态
+//                       页显「未配置」；只读探活，无凭据）
 //   --session-ttl S     会话超时秒（env MEMEX_ADMIN_SESSION_TTL，默认 1800）
 int setup(int argc, char** argv);
 

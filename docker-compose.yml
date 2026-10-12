@@ -95,6 +95,8 @@ services:
     environment:
       # 文件面探活（健康页显示 up/down；不配则健康页显「未配置」）
       MEMEX_FILES_URL: "http://server:24561"
+      # 对象存储探活（文件与配额页存储状态只读显示 up/down；探活无凭据）
+      MEMEX_STORAGE_URL: "http://rustfs:9000"
     volumes:
       - server-data:/var/lib/memex
     ports:
