@@ -174,7 +174,7 @@ void FileAssistantDialog::build_ui() {
   root->addWidget(status_);
 
   connect(btn_connect_, &QPushButton::clicked, this, [this] {
-    connect_to(host_->text().trimmed(),
+    connect_to(resolve_conn_host(host_->text().trimmed()),
                static_cast<quint16>(port_->text().toUInt()),
                account_->text().trimmed(), password_->text());
   });

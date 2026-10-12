@@ -517,6 +517,10 @@ void MainWindow::build_ui() {
     brand_settings_dialog_->raise();
     brand_settings_dialog_->activateWindow();
   });
+  // —— 连接设置（部署批 424：域名解析覆盖，局域网直连）——
+  auto* act_conn = opt_menu->addAction(QStringLiteral("连接设置…"));
+  connect(act_conn, &QAction::triggered, this,
+          &MainWindow::show_conn_settings_dialog);
   // —— 快捷键设置（用户令 2026-10-08 ③：截图键可改＋冲突检测）——
   auto* act_shortcut = opt_menu->addAction(QStringLiteral("快捷键…"));
   connect(act_shortcut, &QAction::triggered, this, [this] {
@@ -1398,8 +1402,11 @@ void MainWindow::wire_collab() {
 void MainWindow::login_collab(const QString& host, quint16 port,
                               const QString& account,
                               const QString& password) {
-  collab_host_ = host; // 需求批⑫：文件面同源主机默认（端口走 QSettings）
-  collab_engine_.login(host, port, account, password);
+  // 域名解析覆盖（部署批 424）：命中规则回 IP，未命中原样；collab_host_
+  // 存已解析值，文件面同源回退（空 collab_host_ 读设置处）不再二次处理
+  const QString resolved = resolve_conn_host(host);
+  collab_host_ = resolved; // 需求批⑫：文件面同源主机默认（端口走 QSettings）
+  collab_engine_.login(resolved, port, account, password);
 }
 
 void MainWindow::logout_collab() {
@@ -3177,12 +3184,53 @@ void MainWindow::show_collab_login_dialog() {
                     files_port->text().trimmed());
   settings.setValue(QStringLiteral("account"), account->text().trimmed());
   // 品牌拉取（免鉴权 GET 不依赖登录成败；accept 后 host/文件口已知，
-  // 比登录成功后拉取更早见效——设计稿 §4 差异如实注明）
-  BrandKit::instance().fetch(host->text().trimmed(),
-                             static_cast<quint16>(files_port->text().toUInt()));
-  login_collab(host->text().trimmed(),
+  // 比登录成功后拉取更早见效——设计稿 §4 差异如实注明）；host 先过
+  // 解析覆盖（部署批 424），品牌与登录同源
+  const QString resolved_host = resolve_conn_host(host->text().trimmed());
+  BrandKit::instance().fetch(
+      resolved_host, static_cast<quint16>(files_port->text().toUInt()));
+  login_collab(resolved_host,
                static_cast<quint16>(port->text().toUInt()),
                account->text().trimmed(), password->text());
+}
+
+// 连接设置（部署批 424）：域名→IP 解析覆盖编辑。规则串 host_overrides
+// （空=不覆盖，公网解析不受影响）；hosts/内网 DNS 等标准做法见 README
+// 「公网接入：Cloudflare tunnel」节——此处只管本机客户端覆盖项。
+void MainWindow::show_conn_settings_dialog() {
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("连接设置"));
+  auto* lay = new QVBoxLayout(&dlg);
+  auto* form = new QFormLayout;
+  lay->addLayout(form);
+  QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
+  auto* overrides = new QLineEdit(
+      settings.value(QStringLiteral("host_overrides")).toString(), &dlg);
+  overrides->setPlaceholderText(
+      QStringLiteral("server.memex.cuihairu.site=192.168.5.5"));
+  overrides->setToolTip(QStringLiteral(
+      "域名=IP，多条用分号分隔；留空=不覆盖（公网走正常解析）。"
+      "命中后该域名的连接直连内网 IP，不过 tunnel。"));
+  form->addRow(QStringLiteral("域名解析覆盖"), overrides);
+  auto* hint = new QLabel(
+      QStringLiteral("仅影响本机连接目标（优先于系统 DNS）；局域网也可用 "
+                     "hosts 或内网 DNS 强制解析——见 README 接入文档。"),
+      &dlg);
+  hint->setWordWrap(true);
+  hint->setStyleSheet(QStringLiteral("color: #7d7169;"));
+  lay->addWidget(hint);
+  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok |
+                                       QDialogButtonBox::Cancel, &dlg);
+  lay->addWidget(buttons);
+  connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  if (dlg.exec() != QDialog::Accepted) return;
+  const QString rules = overrides->text().trimmed();
+  if (rules.isEmpty()) {
+    settings.remove(QStringLiteral("host_overrides")); // 默认不覆盖：清项
+  } else {
+    settings.setValue(QStringLiteral("host_overrides"), rules);
+  }
 }
 
 // —— 原型 rail 面（docs/design/prototypes 桌面屏 .rail，用户令 2026-10-10
@@ -4285,9 +4333,10 @@ bool MainWindow::files_ensure_login() {
           .toUInt());
   if (files_port == 0) return false;
   const QString host = collab_host_.isEmpty()
-                           ? settings.value(QStringLiteral("host"),
-                                            default_collab_host())
-                                 .toString()
+                           ? resolve_conn_host(
+                                 settings.value(QStringLiteral("host"),
+                                                default_collab_host())
+                                     .toString())
                            : collab_host_;
   files_client()->login(host, files_port, collab_engine_.account(),
                         collab_engine_.password());

@@ -2,6 +2,7 @@
 // auditor 有效角色；无角色检索 403 且被拒尝试服务端留痕可对账）——
 // 客户端只提交条件与展示结果。
 #include "audit_dialog.hpp"
+#include "collab_defaults.hpp"
 
 #include <QCheckBox>
 #include <QDate>
@@ -81,7 +82,7 @@ void AuditDialog::build_ui() {
   layout->addLayout(conn);
   connect(btn_connect_, &QPushButton::clicked, this,
           [this, host, port, account_box, password] {
-            connect_to(host->text(), port->text().toUShort(),
+            connect_to(resolve_conn_host(host->text()), port->text().toUShort(),
                        account_box->text(), password->text());
           });
 

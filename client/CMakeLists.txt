@@ -742,6 +742,17 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # 部署批 424：域名→IP 解析覆盖规则解析（纯函数）——命中回 IP／未命中・
+  # 空规则・非法项透传／大小写不敏感／多条首中即回
+  add_executable(test_host_override tests/test_host_override.cpp)
+  target_link_libraries(test_host_override PRIVATE Qt6::Core)
+  target_include_directories(test_host_override PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME host_override COMMAND test_host_override)
+  set_tests_properties(host_override PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 30)
+
   # 二期·办公室位置图窗口冒烟：真服务端进程 × 离屏 QDialog——member1
   # 无权编辑 403 状态行明示→admin1（org-admin）建座＋拖拽落位保存回查→
   # 同层互见（工位即楼层归属）→搜索过滤→绑定/解绑。判权协议腿走

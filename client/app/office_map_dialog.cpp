@@ -2,6 +2,7 @@
 // can_manage 服务端现裁回带）——客户端画布只提交落位与展示；拖拽松手
 // 即保存（高频不高敏，改位不刷服务端日志）。
 #include "office_map_dialog.hpp"
+#include "collab_defaults.hpp"
 
 #include <QHBoxLayout>
 #include <QJsonArray>
@@ -244,7 +245,7 @@ void OfficeMapDialog::build_ui() {
   layout->addLayout(conn);
   connect(btn_connect_, &QPushButton::clicked, this,
           [this, host, port, account_box, password] {
-            connect_to(host->text(), port->text().toUShort(),
+            connect_to(resolve_conn_host(host->text()), port->text().toUShort(),
                        account_box->text(), password->text());
           });
 

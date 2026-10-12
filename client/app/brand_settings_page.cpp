@@ -175,7 +175,7 @@ void BrandSettingsDialog::build_ui() {
   layout->addWidget(status_);
 
   connect(btn_connect_, &QPushButton::clicked, this, [this] {
-    connect_to(host_->text(), port_->text().toUShort(),
+    connect_to(resolve_conn_host(host_->text()), port_->text().toUShort(),
                account_box_->text(), password_->text());
   });
   connect(btn_color, &QPushButton::clicked, this, [this] {

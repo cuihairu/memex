@@ -2,6 +2,7 @@
 // 撤回归主人或分配人、分配按「同群/同部门」现查现裁）——客户端只提交
 // 与展示，不自造规则。
 #include "task_dialog.hpp"
+#include "collab_defaults.hpp"
 
 #include <QCalendarWidget>
 #include <QColor>
@@ -222,7 +223,7 @@ void TaskDialog::build_ui() {
   layout->addWidget(status_);
 
   connect(btn_connect_, &QPushButton::clicked, this, [this] {
-    connect_to(host_->text(), port_->text().toUShort(),
+    connect_to(resolve_conn_host(host_->text()), port_->text().toUShort(),
                account_box_->text(), password_->text());
   });
   connect(btn_add_, &QPushButton::clicked, this, [this] {

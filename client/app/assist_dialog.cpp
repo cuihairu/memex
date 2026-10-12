@@ -4,6 +4,7 @@
 // 渲染＋点画面发鼠标事件；受控方拉输入事件（鼠标移动应用 QCursor 这
 // 一可移植原语，深度注入属平台层留后续）。
 #include "assist_dialog.hpp"
+#include "collab_defaults.hpp"
 #include <app/net_guard.hpp>
 
 #include <QApplication>
@@ -262,7 +263,7 @@ void AssistDialog::build_ui() {
   layout->addLayout(conn);
   connect(btn_connect_, &QPushButton::clicked, this,
           [this, host, port, account_box, password] {
-            connect_to(host->text(), port->text().toUShort(),
+            connect_to(resolve_conn_host(host->text()), port->text().toUShort(),
                        account_box->text(), password->text());
           });
 

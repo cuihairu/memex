@@ -297,6 +297,7 @@ private:
   void update_banner();          // 按当前形态切换归档提示条
   void seed_collab_peers();      // 登录后从本地库补入历史协作会话
   void show_collab_login_dialog();
+  void show_conn_settings_dialog(); // 连接设置：域名解析覆盖（部署批 424）
   void show_org_dialog();        // 菜单入口：查询＋组织架构弹窗（T3.1）
   void build_org_tree(const QString& org_json); // 弹窗内构建部门/成员树
   void apply_policy(const QString& org_json); // 解析本人生效策略（T3.4）
