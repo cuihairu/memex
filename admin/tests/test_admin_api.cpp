@@ -45,7 +45,8 @@ struct Resp {
 };
 
 Resp http(const std::string& method, const std::string& path,
-          const std::string& body = {}, const std::string& cookie = {}) {
+          const std::string& body = {}, const std::string& cookie = {},
+          const std::string& ctype = "application/json") {
   static trantor::EventLoopThread loop;
   static auto client = [&] {
     loop.run(); // getLoop() 只回指针不起线程——不起 IO 线程同步请求永挂
@@ -55,7 +56,7 @@ Resp http(const std::string& method, const std::string& path,
   req->setMethod(method == "GET" ? drogon::Get : drogon::Post);
   req->setPath(path);
   if (!body.empty()) {
-    req->setContentTypeString("application/json");
+    req->setContentTypeString(ctype); // 品牌素材上传走 image/png 原始字节体
     req->setBody(body);
   }
   if (!cookie.empty()) req->addHeader("Cookie", cookie);
@@ -85,6 +86,27 @@ bool has_role(const Json::Value& j, const char* role) {
     if (r.asString() == role) return true;
   }
   return false;
+}
+
+// 品牌/头像测试素材：最小合法 PNG（magic 8 字节＋IHDR 尺寸位，CRC 不验）。
+// w/h 按大端写进固定偏移 16/20（png_asset_check 只读这两处）。
+std::string test_png(std::uint32_t w, std::uint32_t h, std::size_t pad = 0) {
+  static const unsigned char kHead[24] = {
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG magic
+      0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, // IHDR chunk
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // w/h 占位
+  };
+  std::string b(reinterpret_cast<const char*>(kHead), sizeof(kHead));
+  auto put32 = [&](std::size_t off, std::uint32_t v) {
+    b[off] = static_cast<char>((v >> 24) & 0xFF);
+    b[off + 1] = static_cast<char>((v >> 16) & 0xFF);
+    b[off + 2] = static_cast<char>((v >> 8) & 0xFF);
+    b[off + 3] = static_cast<char>(v & 0xFF);
+  };
+  put32(16, w);
+  put32(20, h);
+  b.append(pad, '\0');
+  return b;
 }
 
 } // namespace
@@ -224,6 +246,32 @@ int main() {
     ra_id = seed.assist_request("m1", "aud1", 3, 1700001000000);
     CHECK(!ra_id.empty());
     CHECK(seed.assist_policy_resolve("m1"));
+    // 品牌与外观腿：品牌文本三件＋logo/splash 素材（最小合法 PNG）；m1
+    // 表情包 2 张（ts 递增，清点按 ts 倒序）；m1 头像 32/64/128 三档
+    // （256 档故意不配，测 404「未设置头像」）
+    CHECK(seed.branding_set("Memex", "#1a73e8", "企业协作套件", 1700001100000) >
+          0);
+    CHECK(seed.branding_set_logo(
+              std::vector<unsigned char>(test_png(1, 1).begin(),
+                                         test_png(1, 1).end()),
+              1700001200000) > 0);
+    CHECK(seed.branding_set_splash(
+              std::vector<unsigned char>(test_png(2, 2).begin(),
+                                         test_png(2, 2).end()),
+              1700001300000) > 0);
+    CHECK(seed.emoji_add("m1", "ok",
+                         std::vector<unsigned char>(test_png(64, 64).begin(),
+                                                    test_png(64, 64).end()),
+                         1700001400000) > 0);
+    CHECK(seed.emoji_add("m1", "hi",
+                         std::vector<unsigned char>(test_png(64, 64).begin(),
+                                                    test_png(64, 64).end()),
+                         1700001500000) > 0);
+    const std::vector<unsigned char> av_bytes(
+        test_png(32, 32).begin(), test_png(32, 32).end());
+    CHECK(seed.avatar_put("m1", 32, "image/png", av_bytes, 1700001600000));
+    CHECK(seed.avatar_put("m1", 64, "image/png", av_bytes, 1700001600000));
+    CHECK(seed.avatar_put("m1", 128, "image/png", av_bytes, 1700001600000));
     seed.close();
   }
 
@@ -1417,6 +1465,124 @@ int main() {
           404);
     CHECK(http("GET", "/api/admin/tasks?account=m1", {}, m1ck).code == 403);
     CHECK(http("GET", "/api/admin/memos?account=m1", {}, m1ck).code == 403);
+  }
+
+  // ㊸ 品牌与外观：品牌读回（文本三件＋素材有无/大小/版本）、文本保存
+  //    （空串清空、accent 形态门、无可写字段 400、布尔形态门）、素材字节
+  //    回读、上传（非 PNG 415／2049 宽 413／超 512KiB 413）、清除后字节
+  //    面 404、表情包元数据清点（仅元数据无字节）、头像代读（三档/未配
+  //    404/档位门 400/未知账号 404）；未登录 401、成员 403
+  {
+    const auto br = http("GET", "/api/admin/branding", {}, root_cookie);
+    CHECK(br.code == 200);
+    const auto jb = jbody(br.text);
+    CHECK(jb["company_name"].asString() == "Memex");
+    CHECK(jb["accent"].asString() == "#1a73e8");
+    CHECK(jb["slogan"].asString() == "企业协作套件");
+    CHECK(jb["has_logo"].asBool());
+    CHECK(jb["has_splash"].asBool());
+    CHECK(jb["logo_size"].asInt64() >= 24);
+    CHECK(jb["version"].asInt64() > 0);
+    // 素材字节回读（PNG magic 逐字对，长度与台账一致）
+    const auto lg = http("GET", "/api/admin/branding/logo", {}, root_cookie);
+    CHECK(lg.code == 200);
+    CHECK(lg.text.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0);
+    CHECK(lg.text.size() == static_cast<std::size_t>(jb["logo_size"].asInt64()));
+    const auto sp = http("GET", "/api/admin/branding/splash", {}, root_cookie);
+    CHECK(sp.code == 200);
+    CHECK(sp.text.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0);
+    // 文本保存：空串清标语（三件同提交，版本 bump 一次）
+    const auto sv = http("POST", "/api/admin/branding",
+                         R"({"company_name":"Memex","accent":"#1a73e8","slogan":""})",
+                         root_cookie);
+    CHECK(sv.code == 200);
+    const std::int64_t v_after = jbody(sv.text)["version"].asInt64();
+    CHECK(v_after > jb["version"].asInt64());
+    const auto rb = http("GET", "/api/admin/branding", {}, root_cookie);
+    CHECK(jbody(rb.text)["slogan"].asString().empty());
+    CHECK(jbody(rb.text)["company_name"].asString() == "Memex");
+    CHECK(jbody(rb.text)["version"].asInt64() == v_after);
+    // 形态门与坏体
+    CHECK(http("POST", "/api/admin/branding", R"({"accent":"1a73e8"})",
+               root_cookie).code == 400);
+    CHECK(http("POST", "/api/admin/branding", R"({"accent":"#1a73e"})",
+               root_cookie).code == 400);
+    CHECK(http("POST", "/api/admin/branding", R"({})", root_cookie).code == 400);
+    CHECK(http("POST", "/api/admin/branding", "not json", root_cookie).code ==
+          400);
+    CHECK(http("POST", "/api/admin/branding", R"({"clear_logo":"true"})",
+               root_cookie).code == 400);
+    // 素材上传（原始字节体，content-type image/png）
+    CHECK(http("POST", "/api/admin/branding/logo", test_png(4, 4), root_cookie,
+               "image/png").code == 200);
+    CHECK(http("POST", "/api/admin/branding/logo", "not a png", root_cookie,
+               "image/png").code == 415);
+    CHECK(http("POST", "/api/admin/branding/logo", test_png(2049, 1), root_cookie,
+               "image/png").code == 413);
+    CHECK(http("POST", "/api/admin/branding/logo", test_png(1, 1, 512 * 1024),
+               root_cookie, "image/png").code == 413);
+    CHECK(http("POST", "/api/admin/branding/splash", test_png(4, 4), root_cookie,
+               "image/png").code == 200);
+    // 清除（各 bump 一次）→ 字节面回 404
+    const auto cl = http("POST", "/api/admin/branding", R"({"clear_logo":true})",
+                         root_cookie);
+    CHECK(cl.code == 200);
+    const std::int64_t v_cl = jbody(cl.text)["version"].asInt64();
+    CHECK(v_cl > v_after);
+    CHECK(http("POST", "/api/admin/branding", R"({"clear_splash":true})",
+               root_cookie).code == 200);
+    const auto rb2 = http("GET", "/api/admin/branding", {}, root_cookie);
+    CHECK(!jbody(rb2.text)["has_logo"].asBool());
+    CHECK(!jbody(rb2.text)["has_splash"].asBool());
+    CHECK(jbody(rb2.text)["logo_size"].asInt64() == 0);
+    CHECK(http("GET", "/api/admin/branding/logo", {}, root_cookie).code ==
+          404);
+    CHECK(http("GET", "/api/admin/branding/splash", {}, root_cookie).code ==
+          404);
+    // 表情包元数据清点：ts 倒序、仅元数据（无字节/无内容键）
+    const auto em = http("GET", "/api/admin/emoji?account=m1", {}, root_cookie);
+    CHECK(em.code == 200);
+    const auto je = jbody(em.text);
+    CHECK(je["account"].asString() == "m1");
+    CHECK(je["emoji"].size() == 2);
+    CHECK(je["emoji"][0]["name"].asString() == "hi");
+    CHECK(je["emoji"][1]["name"].asString() == "ok");
+    CHECK(je["emoji"][0]["size"].asInt64() > 0);
+    CHECK(je["emoji"][0]["ts_ms"].asInt64() > je["emoji"][1]["ts_ms"].asInt64());
+    CHECK(!je["emoji"][0].isMember("bytes"));
+    CHECK(!je["emoji"][0].isMember("content"));
+    // 缺账号 400、未知账号 404
+    CHECK(http("GET", "/api/admin/emoji", {}, root_cookie).code == 400);
+    CHECK(http("GET", "/api/admin/emoji?account=ghost", {}, root_cookie).code ==
+          404);
+    // 头像代读（组织内互见口径）：三档可读、256 未配 404、档位门 400
+    const auto av = http("GET", "/api/admin/avatar?account=m1&size=32", {},
+                         root_cookie);
+    CHECK(av.code == 200);
+    CHECK(av.text.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0);
+    CHECK(http("GET", "/api/admin/avatar?account=m1&size=64", {}, root_cookie).code ==
+          200);
+    CHECK(http("GET", "/api/admin/avatar?account=m1&size=128", {}, root_cookie)
+              .code == 200);
+    CHECK(http("GET", "/api/admin/avatar?account=m1&size=256", {}, root_cookie)
+              .code == 404);
+    CHECK(http("GET", "/api/admin/avatar?account=m1", {}, root_cookie).code ==
+          400);
+    CHECK(http("GET", "/api/admin/avatar?account=m1&size=99", {}, root_cookie)
+              .code == 400);
+    CHECK(http("GET", "/api/admin/avatar?account=ghost&size=64", {}, root_cookie)
+              .code == 404);
+    // 未登录 401、成员 403（后台无代取字节/代删入口——只清点与代读）
+    CHECK(http("GET", "/api/admin/branding").code == 401);
+    CHECK(http("GET", "/api/admin/branding/logo").code == 401);
+    CHECK(http("GET", "/api/admin/emoji?account=m1").code == 401);
+    CHECK(http("GET", "/api/admin/avatar?account=m1&size=64").code == 401);
+    CHECK(http("GET", "/api/admin/branding", {}, m1ck).code == 403);
+    CHECK(http("POST", "/api/admin/branding", R"({"slogan":"x"})", m1ck).code ==
+          403);
+    CHECK(http("GET", "/api/admin/emoji?account=m1", {}, m1ck).code == 403);
+    CHECK(http("GET", "/api/admin/avatar?account=m1&size=64", {}, m1ck).code ==
+          403);
   }
 
   // ㊷ 登出后会话失效
