@@ -27,6 +27,11 @@ if(MEMEX_BUILD_TESTS)
   target_include_directories(test_admin_api PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(test_admin_api PRIVATE memex_admin_core)
+  # CI 假 abort 排障：terminate 钩子的 backtrace 要能对回符号（dladdr
+  # 只解析动态符号表），测试二进制导出自身符号（Linux/glibc）
+  if(UNIX AND NOT APPLE)
+    target_link_options(test_admin_api PRIVATE -rdynamic)
+  endif()
   target_compile_definitions(test_admin_api PRIVATE
     MEMEX_ADMIN_WWW_DIR="${CMAKE_CURRENT_SOURCE_DIR}/www")
   add_test(NAME admin_api COMMAND test_admin_api)

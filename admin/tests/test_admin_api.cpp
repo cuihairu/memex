@@ -29,11 +29,49 @@ int g_failures = 0;
 #define CHECK(cond)                                                          \
   do {                                                                       \
     if (!(cond)) {                                                           \
-      std::cerr << "FAIL " << __FILE__ << ":" << __LINE__ << " " << #cond    \
-                << "\n";                                                     \
+      std::cerr << "FAIL " << g_phase << " " << __FILE__ << ":" << __LINE__ \
+                << " " << #cond << "\n";                                                     \
       ++g_failures;                                                          \
     }                                                                        \
   } while (false)
+
+// —— CI 排障脚手架（CI 假 abort 诊断用；本机全绿保持不变）——
+// abort 无输出无法定位：stderr 相位标记（无缓冲，崩前已出）＋ terminate
+// 钩子回放当前异常与调用栈地址，下一轮 CI 红跑即可读出抛点。
+const char* g_phase = "start";
+#define PHASE(p)                                                             \
+  do {                                                                       \
+    g_phase = (p);                                                           \
+    std::cerr << "[phase] " << (p) << "\n";                                   \
+  } while (false)
+
+#if defined(__GLIBC__)
+#include <execinfo.h>
+void diag_backtrace() {
+  void* frames[64];
+  const int n = backtrace(frames, 64);
+  backtrace_symbols_fd(frames, n, STDERR_FILENO);
+}
+#else
+void diag_backtrace() {}
+#endif
+
+struct DiagTerminateHook {
+  DiagTerminateHook() {
+    std::set_terminate([] {
+      std::cerr << "[diag] terminate; phase=" << g_phase << '\n';
+      try {
+        if (auto e = std::current_exception()) std::rethrow_exception(e);
+      } catch (const std::exception& ex) {
+        std::cerr << "[diag] exception: " << ex.what() << '\n';
+      } catch (...) {
+        std::cerr << "[diag] exception: unknown\n";
+      }
+      diag_backtrace();
+      std::abort();
+    });
+  }
+} const g_diag_hook;
 
 const std::string kBase = "http://127.0.0.1:18089";
 
@@ -113,6 +151,7 @@ std::string test_png(std::uint32_t w, std::uint32_t h, std::size_t pad = 0) {
 
 int main() {
   // —— 造库：org-admin（base admin + 追加 org-admin）、auditor、member ——
+  PHASE("seed-begin");
   const auto tmp = std::filesystem::temp_directory_path() /
                    ("memex-admin-test-" + std::to_string(::getpid()));
   std::filesystem::create_directories(tmp);
@@ -145,6 +184,7 @@ int main() {
     gid = seed.create_group("盘点群", "root", {"m1"});
     CHECK(gid > 0);
     // 群组-1：群资料主题/目的（admin 台账同源回带腿）
+    PHASE("seed-group-profile");
     CHECK(seed.group_set_profile(gid, "root", "季度盘点", "全量盘点迁移项"));
     // 群组-2：群记录导出留痕（定案③）——与检索/导出同表同口径，
     //   admin 后台可查（不新表；auditor 判权不变）
@@ -159,6 +199,7 @@ int main() {
       rec.ts_ms = 1700000060000;
       CHECK(seed.add_audit_read(rec));
     }
+    PHASE("seed-files");
     // 文件台账（文件与配额腿）：群文件 A（1000B）＋个人文件 B（500B）；
     // 扣费基线按 files 面上传双面计费同口径（群文件群+个人都计）
     {
@@ -188,6 +229,7 @@ int main() {
     // 群组管理面腿：空箱群（密码箱未建立 404 口径）＋备忘录修订史／密码
     // 箱条目与审计／明+匿名两投票／群任务／CI 流水线与 run／服务器与远程
     // 会话／工具凭据与动作审计（哈希/密文列只填合法形状占位——store 不验）
+    PHASE("seed-group-admin");
     gid2 = seed.create_group("空箱群", "root", {"m1"});
     CHECK(gid2 > 0);
     memo_id = seed.create_group_memo(gid, "盘点群公告", "v1 内容", "root",
@@ -238,6 +280,7 @@ int main() {
       CHECK(seed.task_create("aud1", "aud1", "盘点任务", "", 0,
                              1700000314000, "", "", "运维") > 0);
     }
+    PHASE("seed-bizflow");
     // 业务流程面腿：部门与汇报线（团队聚合）＋日报＋审批（待决/已决）＋
     // 办公室位置图（3F 两席）＋任务与备忘录＋远程协助会话与放行策略
     const int dept_rd = seed.ensure_department_path("研发部");
@@ -280,6 +323,7 @@ int main() {
     // 品牌与外观腿：品牌文本三件＋logo/splash 素材（最小合法 PNG）；m1
     // 表情包 2 张（ts 递增，清点按 ts 倒序）；m1 头像 32/64/128 三档
     // （256 档故意不配，测 404「未设置头像」）
+    PHASE("seed-branding");
     CHECK(seed.branding_set("Memex", "#1a73e8", "企业协作套件", 1700001100000) >
           0);
     CHECK(seed.branding_set_logo(
@@ -306,6 +350,7 @@ int main() {
     seed.close();
   }
 
+  PHASE("seed-done");
   // —— 起 admin（进程内另线程跑主循环）——
   const std::string port = "18089";
   std::vector<std::string> args = {"test_admin_api", "--port", port, "--db", db,
@@ -313,9 +358,11 @@ int main() {
   std::vector<char*> argv;
   for (auto& a : args) argv.push_back(a.data());
   argv.push_back(nullptr);
+  PHASE("setup-call");
   CHECK(memex::admin::setup(static_cast<int>(argv.size()) - 1, argv.data()) == 0);
   std::thread loop([] { drogon::app().run(); });
 
+  PHASE("setup-done");
   // 等监听就绪（探 whoami 通即可，401/200 都算活着）
   bool up = false;
   for (int i = 0; i < 100 && !up; ++i) {
@@ -324,10 +371,12 @@ int main() {
   }
   CHECK(up);
 
+  PHASE("leg-1");
   // ① 未登录：whoami 401；管理面同样 401
   CHECK(http("GET", "/api/whoami").code == 401);
   CHECK(http("GET", "/api/admin/accounts").code == 401);
 
+  PHASE("leg-2");
   // ② CSRF 轻闸：缺 X-Memex-Admin 头的登录 403（测试客户端恒带头，
   //    这里临时绕开＝直接打原始请求）
   {
@@ -346,6 +395,7 @@ int main() {
           static_cast<int>(resp->getStatusCode()) == 403);
   }
 
+  PHASE("leg-3");
   // ③ 错口令 401
   {
     const auto r = http("POST", "/api/login",
@@ -353,6 +403,7 @@ int main() {
     CHECK(r.code == 401);
   }
 
+  PHASE("leg-4");
   // ④ root 登录：org-admin 在生效角色（base admin＋追加授权并集）
   std::string root_cookie;
   {
@@ -364,6 +415,7 @@ int main() {
     CHECK(!root_cookie.empty());
   }
 
+  PHASE("leg-5");
   // ⑤ whoami 带会话
   {
     const auto r = http("GET", "/api/whoami", {}, root_cookie);
@@ -371,6 +423,7 @@ int main() {
     CHECK(jbody(r.text)["account"].asString() == "root");
   }
 
+  PHASE("leg-6");
   // ⑥ member 越权：登录通过但管理面 403（default-deny 口径）
   {
     const auto lr = http("POST", "/api/login",
@@ -384,6 +437,7 @@ int main() {
     CHECK(ar.code == 403);
   }
 
+  PHASE("leg-7");
   // ⑦ 基础 admin≠org-admin：base1 无追加授权，管理面 403
   {
     const auto lr = http("POST", "/api/login",
@@ -394,6 +448,7 @@ int main() {
     CHECK(r.code == 403);
   }
 
+  PHASE("leg-8");
   // ⑧ 建号：成功/重名 409/坏角色 400
   {
     const auto r = http("POST", "/api/admin/accounts",
@@ -408,6 +463,7 @@ int main() {
                root_cookie).code == 400);
   }
 
+  PHASE("leg-9");
   // ⑨ 部门：建树＋列表回读（JSON 解析比对——jsoncpp 应答非 ASCII 转义，
   //    原文 find 不可靠）
   {
@@ -426,6 +482,7 @@ int main() {
     CHECK(dept_seen);
   }
 
+  PHASE("leg-10");
   // ⑩ 归属与资料：加部门 200、重复 409、汇报环 409、自为上级 409
   {
     const auto mems = http("GET", "/api/admin/departments", {}, root_cookie);
@@ -454,6 +511,7 @@ int main() {
                Json::writeString(wb, prof), root_cookie).code == 409);
   }
 
+  PHASE("leg-11");
   // ⑪ 角色授权：给 m1 再授 auditor→whoami 可见；吊销后消失
   {
     CHECK(http("POST", "/api/admin/roles",
@@ -476,6 +534,7 @@ int main() {
                    "auditor") == false);
   }
 
+  PHASE("leg-12");
   // ⑫ 策略下发：全局行写入＋列表回读
   {
     CHECK(http("POST", "/api/admin/policy",
@@ -489,6 +548,7 @@ int main() {
     CHECK(row["allow_forward_file"].asBool() == false);
   }
 
+  PHASE("leg-13");
   // ⑬ 留存：配置 30 天；purge 双人审批红线（自审 409、缺理由 400、合规 200）
   {
     CHECK(http("POST", "/api/admin/retention",
@@ -511,6 +571,7 @@ int main() {
     CHECK(jbody(r.text)["id"].asInt64() > 0);
   }
 
+  PHASE("leg-14");
   // ⑭ 审计红线：root（org-admin 无 auditor）检索 403；auditor 检索命中真
   //    消息；查阅日志含 root 的 audit.denied 留痕
   {
@@ -537,6 +598,7 @@ int main() {
     CHECK(http("GET", "/api/admin/audit-reads", {}, root_cookie).code == 403);
   }
 
+  PHASE("leg-15");
   // ⑮ 导出：auditor 导出命中、JSONL 体、落 audit.message.export
   {
     const auto lr = http("POST", "/api/login",
@@ -552,11 +614,13 @@ int main() {
     CHECK(reads.text.find("group_record_export") != std::string::npos);
   }
 
+  PHASE("leg-16");
   // ⑯ 设备与登录台账（空表 200；登录台账已有本次测试的 /files 面外记录＝
   //    admin 登录不走 login_records，表应为空——只验面通）
   CHECK(http("GET", "/api/admin/devices", {}, root_cookie).code == 200);
   CHECK(http("GET", "/api/admin/logins", {}, root_cookie).code == 200);
 
+  PHASE("leg-17");
   // ⑰ 健康：ok＋db open（未配 files-url＝显式「未配置」）
   {
     const auto r = http("GET", "/api/admin/health", {}, root_cookie);
@@ -567,6 +631,7 @@ int main() {
     CHECK(std::string(h["files"].asString()).find("未配置") != std::string::npos);
   }
 
+  PHASE("leg-18");
   // ⑱ 静态页：/ 回 index.html
   {
     static trantor::EventLoopThread loop3;
@@ -582,6 +647,7 @@ int main() {
           resp->getBody().find("Memex 管理后台") != std::string::npos);
   }
 
+  PHASE("leg-20");
   // ⑳ 通知与集成·webhook：create token 仅此一次（明文不再出现在任何
   //    list 应答）、目标校验（不存在 404）、member 越权 403、吊销二次 404
   std::string whk_token;
@@ -626,6 +692,7 @@ int main() {
                Json::writeString(wb, rev), root_cookie).code == 404);
   }
 
+  PHASE("leg-21");
   // ㉑ bot：add token 仅此一次、':' 名 400、重名 409、禁用回读、移除二次 404
   {
     CHECK(http("POST", "/api/admin/bots", "{}", root_cookie).code == 400);
@@ -662,6 +729,7 @@ int main() {
                R"({"name":"testbot"})", root_cookie).code == 404);
   }
 
+  PHASE("leg-22");
   // ㉒ 模型网关端点：api_key 只写不回显（list 应答无原文）、http:// 与
   //    ':' 名校验、重名 409、停用回读、移除二次 404
   {
@@ -713,6 +781,7 @@ int main() {
     CHECK(http("GET", "/api/admin/model/calls", {}, root_cookie).code == 200);
   }
 
+  PHASE("leg-23");
   // ㉓ 三级通知偏好只读盘点：全局计数对账＋群/个人分档（群名解析）＋
   //    member 越权 403；纯读不改（台账现值聚合，无写入口）
   {
@@ -740,6 +809,7 @@ int main() {
           403);
   }
 
+  PHASE("leg-24");
   // ㉔ 文件与配额·台账与置顶：全量台账回读（群/个人两行）、pin 回读、
   //    未知 id 404、member 读写 403
   {
@@ -777,6 +847,7 @@ int main() {
                Json::writeString(wb, pinb), lr.set_cookie).code == 403);
   }
 
+  PHASE("leg-25");
   // ㉕ 文件与配额·删除：台账行消失＋个人配额退费（回读对账）、二次删除 404
   {
     Json::StreamWriterBuilder wb;
@@ -792,6 +863,7 @@ int main() {
                root_cookie).code == 404);
   }
 
+  PHASE("leg-26");
   // ㉖ 文件与配额·两级配额：群/个人写入回读一致（含删除退费对账：
   //    m1 used=1500-500=1000）、校验面（坏 scope/负限/缺 target 400、
   //    未知群/未知号 404）、member 403
@@ -857,6 +929,7 @@ int main() {
                lr.set_cookie).code == 403);
   }
 
+  PHASE("leg-27");
   // ㉗ 存储状态只读断言：GET 回注记（只读不代启停）与未配置口径、写入口
   //    不存在（POST 同路径 404）、member 403
   {
@@ -886,6 +959,7 @@ int main() {
     m1ck = lr.set_cookie;
   }
 
+  PHASE("leg-29");
   // ㉙ 群台账与能力：台账回读（成员数/管理员/备忘录开关/七能力生效值）、
   //    能力停用→台账生效值翻转（store 落查阅台账 group.capability 与 CLI
   //    同径）、词汇表外 400、未知群 404、member 403
@@ -1319,6 +1393,7 @@ int main() {
     CHECK(r.code == 200);
     CHECK(jbody(r.text)["manager"].asString() == "root");
     const Json::Value team = jbody(r.text)["team"];
+    PHASE("leg-10");
     // ⑩ 的 m2 建档也在 root 线下（org_reporting_lines 权威表）——逐人过滤
     CHECK(team.size() == 3); // aud1 + m1 + m2
     bool m1_seen = false, m2_seen = false;
@@ -1697,9 +1772,11 @@ int main() {
   std::filesystem::remove_all(tmp);
 
   if (g_failures == 0) {
+    PHASE("done");
     std::cout << "admin api tests: all passed\n";
     return 0;
   }
-  std::cerr << "admin api tests: " << g_failures << " failure(s)\n";
+  PHASE("done-fail");
+    std::cerr << "admin api tests: " << g_failures << " failure(s)\n";
   return 1;
 }
