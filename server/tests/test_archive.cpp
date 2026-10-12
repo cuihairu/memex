@@ -16,6 +16,8 @@
 
 #include <memex/protocol/messages.hpp>
 
+#include <sqlite3.h>
+
 #include "cred.hpp"
 #include "server.hpp"
 #include "store.hpp"
@@ -407,6 +409,143 @@ int main() {
     // 幽灵消息：recalled/edited 对不存在消息拒（投影 0 行=拒）
     CHECK(!store.append_message_event("mid-幽灵", "recalled", "alice", "", 1));
     CHECK(!store.append_message_event("mid-幽灵", "edited", "alice", "x", 1));
+  }
+
+  // —— 453 归档完整性账：分块封账＋链式摘要＋校验（远期加固） ——
+  {
+    const std::string chain_db = "/tmp/memex-archive-chain.db";
+    std::remove(chain_db.c_str());
+    // 直连同一库文件的篡改手（校验链要证明的正是「DB 级管理员可改库」）
+    const auto raw_exec = [](const std::string& path, const std::string& sql) {
+      sqlite3* raw = nullptr;
+      if (sqlite3_open(path.c_str(), &raw) != SQLITE_OK) {
+        sqlite3_close(raw);
+        return false;
+      }
+      char* err = nullptr;
+      const bool ok =
+          sqlite3_exec(raw, sql.c_str(), nullptr, nullptr, &err) == SQLITE_OK;
+      sqlite3_free(err);
+      sqlite3_close(raw);
+      return ok;
+    };
+
+    ServerStore chain;
+    CHECK(chain.open(chain_db));
+    // 空账（无块）校验恒真——存量库升级不破口径
+    CHECK(chain.archive_chain_verify().ok);
+
+    // 65 条事件：满 64 同事务自动封一块，剩 1 条开尾（不落账本行）
+    for (int i = 0; i < 65; ++i) {
+      CHECK(chain.append_message_event(
+          "mid-chain-" + std::to_string(i), "read", "alice", "{}", now_ms()));
+    }
+    auto blocks = chain.archive_chain_list();
+    CHECK(blocks.size() == 1);
+    if (blocks.size() == 1) {
+      CHECK(blocks[0].first_event_id == 1);
+      CHECK(blocks[0].last_event_id == 64);
+      CHECK(blocks[0].event_count == 64);
+      CHECK(blocks[0].prev_hash == std::string(64, '0')); // genesis
+      CHECK(blocks[0].chain_hash.size() == 64);
+      CHECK(blocks[0].sealed_ms > 0);
+    }
+    auto v = chain.archive_chain_verify();
+    CHECK(v.ok);
+    CHECK(v.blocks == 1 && v.open_tail == 1 && v.events == 65);
+
+    // CLI seal 收尾：开尾封成第二块（≤64 条/块）
+    CHECK(chain.archive_chain_seal());
+    blocks = chain.archive_chain_list();
+    CHECK(blocks.size() == 2);
+    if (blocks.size() == 2) {
+      CHECK(blocks[1].first_event_id == 65 && blocks[1].last_event_id == 65);
+      CHECK(blocks[1].prev_hash == blocks[0].chain_hash); // 链式链接
+    }
+    v = chain.archive_chain_verify();
+    CHECK(v.ok && v.blocks == 2 && v.open_tail == 0 && v.events == 65);
+
+    // CLI 级：status／verify（完好）／verify 留痕可查
+    {
+      const std::string out =
+          run_cli("archive status --db " + chain_db);
+      CHECK(out.find("封账块数：2") != std::string::npos);
+      CHECK(out.find("开尾（未封事件）：0 条") != std::string::npos);
+    }
+    {
+      const std::string cmd = std::string("\"" MEMEX_SERVER_BIN
+                                          "\" archive verify --db ") +
+                              chain_db + " > /tmp/memex-chain-verify.txt 2>&1";
+      CHECK(std::system(cmd.c_str()) == 0); // 完好 exit 0——巡检脚本可挂
+      CHECK(read_file("/tmp/memex-chain-verify.txt").find("完好") !=
+            std::string::npos);
+    }
+    {
+      const std::string out = run_cli("audit 10 --db " + chain_db);
+      CHECK(out.find("audit.archive.verify") != std::string::npos);
+    }
+
+    // 篡改腿①：改已封事件正文 → 逐块重放对不上账
+    CHECK(raw_exec(chain_db,
+                   "UPDATE message_events SET payload='{\"x\":1}'"
+                   " WHERE id = 5;"));
+    v = chain.archive_chain_verify();
+    CHECK(!v.ok);
+    CHECK(v.broken_at.find("块") != std::string::npos);
+    // 还原后账目复原（改回原文即可再对上——校验不修复，只断言）
+    CHECK(raw_exec(chain_db,
+                   "UPDATE message_events SET payload='{}' WHERE id = 5;"));
+    CHECK(chain.archive_chain_verify().ok);
+
+    // 篡改腿②：改账本行 chain_hash → 与重放链头对不上
+    CHECK(raw_exec(chain_db,
+                   "UPDATE archive_chain SET chain_hash = 'a' ||"
+                   " substr(chain_hash, 2) WHERE id = 1;"));
+    CHECK(!chain.archive_chain_verify().ok);
+    CHECK(raw_exec(chain_db,
+                   "UPDATE archive_chain SET chain_hash = substr(chain_hash, 2)"
+                   " WHERE id = 1;")); // 还原（首字符本就不是 'a' 也不对——重放再核）
+    v = chain.archive_chain_verify();
+    // 上面还原式写错了链头——真口径：置回正确值需重放；此处直接验证
+    // 校验器如实报断（还原失败也算断，不留假绿）
+    if (!v.ok) {
+      // 由篡改腿①的已知好值重算回填：删账重建不行（append-only 思路），
+      // 依法取第二块的 prev_hash（=第一块正确 chain_hash）回填
+      auto bs = chain.archive_chain_list();
+      CHECK(bs.size() == 2);
+      if (bs.size() == 2) {
+        CHECK(raw_exec(chain_db,
+                       "UPDATE archive_chain SET chain_hash = '" +
+                           bs[1].prev_hash + "' WHERE id = 1;"));
+      }
+    }
+    CHECK(chain.archive_chain_verify().ok);
+
+    // 篡改腿③：幽灵远端行（未封区间）——如实报开尾不判错（未封尾口径）
+    CHECK(raw_exec(chain_db,
+                   "INSERT INTO message_events(id, msg_id, event, by_account,"
+                   " payload, ts_ms) VALUES(9999, 'mid-ghost', 'read',"
+                   " 'mallory', '{}', 0);"));
+    v = chain.archive_chain_verify();
+    CHECK(v.ok);
+    CHECK(v.open_tail == 9999 - 65); // 66..9999 全按未封开尾计
+    CHECK(raw_exec(chain_db, "DELETE FROM message_events WHERE id = 9999;"));
+    CHECK(chain.archive_chain_verify().ok);
+
+    // 篡改腿④：删已封事件行 → 边界/计数断裂（不留还原态——后续腿作废库）
+    CHECK(raw_exec(chain_db, "DELETE FROM message_events WHERE id = 65;"));
+    v = chain.archive_chain_verify();
+    CHECK(!v.ok);
+    {
+      const std::string cmd = std::string("\"" MEMEX_SERVER_BIN
+                                          "\" archive verify --db ") +
+                              chain_db + " > /tmp/memex-chain-verify2.txt 2>&1";
+      CHECK(std::system(cmd.c_str()) != 0); // 已断 exit 1
+      CHECK(read_file("/tmp/memex-chain-verify2.txt").find("已断") !=
+            std::string::npos);
+    }
+    chain.close();
+    std::remove(chain_db.c_str());
   }
 
   // —— 平台-5 留存策略与 Retention Purge：白名单天数、部门链继承、

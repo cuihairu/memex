@@ -89,6 +89,29 @@ memex_server files verify \
 - 隔离/过期行同样算引用面（其字节不算孤儿），但只核 normal 行的存在性
   与大小。
 
+## 归档完整性账：`archive seal` / `archive verify`（评审四·远期加固）
+
+消息归档（`message_events` 事件流）的防篡改账本——**不引入区块链**，分块
+封账＋链式摘要：每 64 条事件在落库同事务自动封一块（`archive_chain` 表，
+不可变封账行；未封开尾不落行），块内链式摘要
+`h = sha256_hex(h + 事件摘要)`（首块 prev=64 个 `0`），单事件摘要用长度
+前缀框架（`<len>:<bytes>`）防 payload 拼接歧义。
+
+DB 级管理员可改库＝「append-only 表名≠不可篡改」——校验链断裂即可信性
+断言：改／删／插任一已封事件行、或改账本行本身，逐块重放对不上账即如实
+报断（`archive verify` 退出码 1，巡检脚本可挂）；未封开尾如实报告不判错
+（正常态，待 seal 收尾）。
+
+```bash
+memex_server archive status   # 块数／开尾条数／链头摘要
+memex_server archive seal     # 开尾收尾封账（定期运维动作，可挂日报）
+memex_server archive verify   # 全账校验；完好 exit 0、已断 exit 1；
+                              # 每次 verify 落 audit_reads 留痕可查
+```
+
+恢复场景的对账口径：库恢复后先 `archive verify`——事件流与账本逐位对上
+才算恢复面完好；「校验不修复，只断言」（发现断链须从备份重放，不代修）。
+
 ## 演练（A14 可执行验证）
 
 ### 单库演练

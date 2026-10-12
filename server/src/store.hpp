@@ -454,6 +454,39 @@ public:
   // 重放事件重建当前态（created 建 行、recalled 置标记、edited 替正文）
   std::vector<ArchivedMessage> rebuild_messages_from_events();
 
+  // —— 归档完整性账（评审四·远期加固）：message_events 事件流的哈希链
+  //     清单——不引入区块链，分块封账＋链式摘要：事件落库满
+  //     kArchiveChainBlockEvents 条即同事务封一块，`archive seal` 定期
+  //     收尾。DB 级管理员可改库（append-only 表名≠不可篡改）——校验链
+  //     断裂即可信性断言：改/删/插任一已封事件行都使逐块重放对不上账。
+  static constexpr int kArchiveChainBlockEvents = 64;
+  struct ArchiveChainBlock {
+    std::int64_t id{0};
+    std::int64_t first_event_id{0}; // 本块首事件 id（连续 id 段）
+    std::int64_t last_event_id{0};
+    std::int64_t event_count{0};
+    std::string prev_hash;  // 前块 chain_hash（首块=64 个 '0'）
+    std::string chain_hash; // 本块链式摘要（hex；改任一成员行即断）
+    std::int64_t sealed_ms{0};
+  };
+  // 校验结论：ok=账本与事件流逐块对上；broken_at=首个断点描述（空=完好）
+  struct ArchiveChainVerdict {
+    bool ok{false};
+    std::string broken_at;
+    std::int64_t blocks{0};    // 已封块数
+    std::int64_t open_tail{0}; // 未封尾事件条数（正常态，待 seal）
+    std::int64_t events{0};    // 事件总数
+  };
+  // 封账：自上块之后的事件封成一块（≤kArchiveChainBlockEvents 条；
+  // 无新事件=true 空账不算错）。事件落库满块时 server 同事务自动封，
+  // 运维可另 `archive seal` 定期收尾（日报/巡检节奏）。
+  bool archive_chain_seal();
+  // 账本列表（id 序）
+  std::vector<ArchiveChainBlock> archive_chain_list();
+  // 校验：重放事件流折叠链头并与账本逐块对账（块边界连续性＋计数＋
+  // 链式摘要＋prev 链接＋账本行自身完整性）；未封尾如实报告不判错。
+  ArchiveChainVerdict archive_chain_verify();
+
   // —— 平台-5 留存策略（Retention Policy）：废除「永久留存」一刀切——
   //     生命周期由管理员配置（30/180/365/1095 天或 0=Indefinite）；
   //     删除=Retention Purge（who/when/what/why/policy/approval 台账，
@@ -1603,6 +1636,11 @@ private:
   bool ensure_schema();
   // 白名单收紧扫尾：名单非空时退掉名单外全部群（见 bot_allow_group 注）
   void bot_prune_group_membership(const std::string& name);
+
+  // 453 满块自动封的免查缓存：-1=未加载（首次 append 时读账本）。只决定
+  // 「何时调 seal」，账本真值恒以库为准——CLI 另进程 seal 只会多封，缓存
+  // 偏差最多推迟一次自动封；封账后置 -1 失忆（回滚安全，下次重读）。
+  std::int64_t archive_last_sealed_cache_{-1};
 
   sqlite3* db_{nullptr};
   std::function<void(const std::string&)> enqueue_hook_;

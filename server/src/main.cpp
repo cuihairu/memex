@@ -2875,6 +2875,68 @@ int self_test() {
   return 0;
 }
 
+// archive status|seal|verify：归档完整性账（453 远期加固）运维面。
+//   status  块数／开尾事件数／链头摘要
+//   seal    开尾收尾封账（定期运维动作；满 64 条落库时同事务自动封）
+//   verify  全账校验（断点／位置如实打印；留痕 audit_reads；
+//           完好 exit 0、已断 exit 1——巡检脚本可挂）
+int cmd_archive(int argc, char** argv, const std::string& db_path) {
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "打不开库：" << db_path << "\n";
+    return 1;
+  }
+  const std::string action =
+      argc >= 1 ? std::string(argv[0]) : std::string("status");
+  if (action == "status") {
+    const auto blocks = store.archive_chain_list();
+    const auto v = store.archive_chain_verify();
+    std::cout << "封账块数：" << v.blocks << "\n";
+    std::cout << "开尾（未封事件）：" << v.open_tail << " 条\n";
+    if (!blocks.empty())
+      std::cout << "链头：" << blocks.back().chain_hash << "\n";
+    else
+      std::cout << "链头：（空账）\n";
+    return 0;
+  }
+  if (action == "seal") {
+    if (!store.archive_chain_seal()) {
+      std::cerr << "封账失败（无新事件或写入失败）\n";
+      return 1;
+    }
+    const auto blocks = store.archive_chain_list();
+    std::cout << "已封账：共 " << blocks.size() << " 块";
+    if (!blocks.empty())
+      std::cout << "，链头 " << blocks.back().chain_hash;
+    std::cout << "\n";
+    return 0;
+  }
+  if (action == "verify") {
+    const auto v = store.archive_chain_verify();
+    memex::server::AuditReadRow audit;
+    audit.op_account = cli_operator();
+    audit.action = "audit.archive.verify";
+    audit.filters = "blocks=" + std::to_string(v.blocks) +
+                    ",open_tail=" + std::to_string(v.open_tail) +
+                    ",events=" + std::to_string(v.events);
+    audit.result_count = static_cast<int>(v.blocks);
+    audit.ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::system_clock::now().time_since_epoch())
+                      .count();
+    store.add_audit_read(audit);
+    if (v.ok) {
+      std::cout << "归档完整性校验：完好（封账 " << v.blocks << " 块，覆盖 "
+                << v.events << " 条事件，开尾 " << v.open_tail
+                << " 条未封）\n";
+      return 0;
+    }
+    std::cerr << "归档完整性校验：已断——" << v.broken_at << "\n";
+    return 1;
+  }
+  std::cerr << "用法：memex_server archive status|seal|verify [--db 库]\n";
+  return 2;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -2906,6 +2968,7 @@ int main(int argc, char** argv) {
     if (cmd == "device") return cmd_device(sub_argc, sub_argv, db_path);
     if (cmd == "messages") return cmd_messages(sub_argc, sub_argv, db_path);
     if (cmd == "retention") return cmd_retention(sub_argc, sub_argv, db_path);
+    if (cmd == "archive") return cmd_archive(sub_argc, sub_argv, db_path);
     if (cmd == "audit") return cmd_audit(sub_argc, sub_argv, db_path);
     if (cmd == "cross") return cmd_cross(sub_argc, sub_argv, db_path);
     if (cmd == "favs") return cmd_favs(sub_argc, sub_argv, db_path);
@@ -2928,6 +2991,7 @@ int main(int argc, char** argv) {
                  "messages [账号] [--keyword K] [--since T] "
                  "[--until T] [--limit N] [--export 文件] | audit [N] | "
                  "cross [N] | favs <账号> | org … | group list|set-role | "
+                 "archive status|seal|verify | "
                  "webhook create|list|revoke | "
                  "bot add|list|remove|disable|enable|join|leave | "
                  "model endpoint add|list|remove|enable|disable|local | calls | "
