@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <optional>
 
 #include "cred.hpp"
 #include "webhook.hpp" // R24-1 公告联动三级推送（deliver_notice）
@@ -107,12 +108,13 @@ void Session::handle_bytes(std::size_t n) {
 // （sha256(from:seq)）落归档并检查返回值——首插即返回；撞键（false）时按
 // msg_id 查既有行比对 (to_account,type,text,ts_ms)：全同＝真补传（维持现状
 // 全链，补传幂等原样保留），有异＝重用死 seq 的新消息（换盐重排
-// sha256(from:to:ts:随机盐)，NOTICE 同式零持久状态）；查无此行＝库错（维持
-// 现状照常受理，归档失败另有事件台账不在本范围）。返回最终 msg_id。
-std::string archive_and_resolve(CollabServer& server,
-                                const memex::protocol::Message& msg,
-                                const std::string& text,
-                                const std::string& derived_id) {
+// sha256(from:to:ts:随机盐)，NOTICE 同式零持久状态）；查无此行或重排落库
+// 失败＝库错，返回 nullopt（评审 P0-2：归档失败不谎报成功——调用方不投递
+// 不回 ACK，发送端在途行保持 SENDING 随断线补传重试）。返回最终 msg_id。
+std::optional<std::string> archive_and_resolve(CollabServer& server,
+                                               const memex::protocol::Message& msg,
+                                               const std::string& text,
+                                               const std::string& derived_id) {
   const std::int64_t ts = msg.ts_ms() > 0 ? msg.ts_ms() : now_ms();
   const std::string from = msg.from();
   const std::string to = msg.to();
@@ -121,14 +123,16 @@ std::string archive_and_resolve(CollabServer& server,
     return derived_id; // 首插：常规路径
   }
   const auto existing = server.store().message_by_id(derived_id);
-  if (!existing) return derived_id; // 库错：维持现状照常受理
+  if (!existing) return std::nullopt; // 库错：归档失败不谎报成功
   const bool same = existing->to_account == to && existing->type == type &&
                     existing->text == text && existing->ts_ms == ts;
   if (same) return derived_id; // 真补传：维持现状全链（离线队列 OR-IGNORE）
   // 重用死 seq 的新消息：换盐重排（时间戳＋随机盐）
   const std::string reshuffled = sha256_hex(
       from + ":" + to + ":" + std::to_string(ts) + ":" + random_salt_hex());
-  server.store().store_message(reshuffled, from, to, type, text, ts);
+  if (!server.store().store_message(reshuffled, from, to, type, text, ts)) {
+    return std::nullopt; // 重排落库失败：同样不谎报
+  }
   return reshuffled;
 }
 
@@ -266,14 +270,21 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     // BUG-007：成员校验通过后派生 msg_id 落归档消歧（撞键内容异则换盐重排）
     const std::string derived =
         sha256_hex(msg.from() + ":" + std::to_string(msg.seq()));
-    const std::string msg_id =
+    const auto msg_id =
         archive_and_resolve(server_, msg, msg.text().text(), derived);
+    if (!msg_id) {
+      // 评审 P0-2 归档失败不谎报成功：不入离线队列、不投在线、不回 ACK、
+      // 不刷常用联系人——发送端在途行保持 SENDING，随断线补传重试
+      //（重发按派生 id 幂等，恢复后重试恰一次入档）
+      log("归档失败暂不受理（seq " + std::to_string(msg.seq()) + "）");
+      break;
+    }
     memex::protocol::Message out = msg;
-    out.set_msg_id(msg_id);
+    out.set_msg_id(*msg_id);
     const std::string blob = out.SerializeAsString();
 
     for (const auto& to : recipients) {
-      server_.store().queue_offline(msg_id, to, blob);
+      server_.store().queue_offline(*msg_id, to, blob);
     }
     // 在线即投（桌面＋手机都在则都投，任一端 ACK 即清该端队列）
     for (const auto& to : recipients) {
@@ -287,7 +298,7 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     ack.set_type(v1::ACK);
     ack.set_seq(msg.seq());
     ack.set_to(msg.from());
-    ack.mutable_ack()->set_msg_id(msg_id);
+    ack.mutable_ack()->set_msg_id(*msg_id);
     send(memex::protocol::encode(ack));
     // T4.5 常用联系人最近刷新：发送方 ↔ 会话（单聊对端／群）
     const std::int64_t fav_ts = msg.ts_ms() > 0 ? msg.ts_ms() : now_ms();
@@ -723,10 +734,16 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     // BUG-007：同 TEXT 口径先落归档消歧（撞键内容异则换盐重排）
     const std::string derived =
         sha256_hex(msg.from() + ":" + std::to_string(msg.seq()));
-    const std::string msg_id =
+    const auto msg_id =
         archive_and_resolve(server_, msg, std::string("[振屏]"), derived);
+    if (!msg_id) {
+      // 评审 P0-2：归档失败不谎报成功——不投在线不回 ACK（限频已计，
+      // 重试由发送端下一次振屏承担）
+      log("振屏归档失败暂不受理（seq " + std::to_string(msg.seq()) + "）");
+      break;
+    }
     memex::protocol::Message out = msg;
-    out.set_msg_id(msg_id);
+    out.set_msg_id(*msg_id);
     log("振屏：" + account_ + " → " + msg.to());
     for (const auto& target : server_.online_sessions(msg.to())) {
       target->deliver_frame(out.SerializeAsString());
@@ -736,7 +753,7 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     ack.set_type(v1::ACK);
     ack.set_seq(msg.seq());
     ack.set_to(msg.from());
-    ack.mutable_ack()->set_msg_id(msg_id);
+    ack.mutable_ack()->set_msg_id(*msg_id);
     send(memex::protocol::encode(ack));
     break;
   }

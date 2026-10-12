@@ -119,11 +119,19 @@ if(MEMEX_BUILD_TESTS)
   set_tests_properties(nudge PROPERTIES TIMEOUT 60)
 
   # BUG-007 msg_id 撞 id 消歧：V1 重演两行齐＋换盐重排、补传幂等、
-  # Ack.msg_id 三态回带、群消息撞键同口径、库错受理行为不变
+  # Ack.msg_id 三态回带、群消息撞键同口径、库错不谎报（不投递不回执）
   add_executable(test_msg_dedupe tests/test_msg_dedupe.cpp)
   target_link_libraries(test_msg_dedupe PRIVATE memex_server_core)
   add_test(NAME msg_dedupe COMMAND test_msg_dedupe)
   set_tests_properties(msg_dedupe PROPERTIES TIMEOUT 60)
+
+  # 评审 P0-2 消息与归档一致性故障注入矩阵：断网重复发送、重启后补传、
+  # 重复 ACK、撤回交错、DB 写失败不谎报（丢表＋瞬态锁注入）、崩溃恢复——
+  # 幂等去重×暂存补传交叉路径（注入全在测试层，不改生产路径）
+  add_executable(test_msg_faults tests/test_msg_faults.cpp)
+  target_link_libraries(test_msg_faults PRIVATE memex_server_core)
+  add_test(NAME msg_faults COMMAND test_msg_faults)
+  set_tests_properties(msg_faults PROPERTIES TIMEOUT 120)
 
   # 表情包素材（需求批②，服务端面）：个人素材 BLOB 落库——上传 magic/
   # 1MiB 校验、清单属主隔离、下载字节往返＋Content-Type 嗅探、删除属主裁决

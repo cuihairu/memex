@@ -5,7 +5,8 @@
 //    在线重投照发；
 // ③ Ack.msg_id 回带腿（常规派生／重排新值／补传原值三态各自断言）；
 // ④ 群消息撞 id 腿（群扇出同口径消歧）；
-// ⑤ 库错（非撞键 false）受理行为不变腿——DROP messages 后照常投递回执。
+// ⑤ 库错（非撞键 false）不谎报成功腿——DROP messages 后不投递不回执
+//    不入队、会话存活（评审 P0-2；恢复后重试见 test_msg_faults 腿⑤）。
 // 服务端核心库直链运行（io 线程驱动，不起进程）。
 #include <asio.hpp>
 
@@ -131,6 +132,17 @@ memex::protocol::Message make_ack(const std::string& from,
   m.set_to("server");
   m.set_ts_ms(now_ms());
   m.mutable_ack()->set_msg_id(msg_id);
+  return m;
+}
+
+// 探活帧：负向断言「不该来的帧不来」用——同一连接按序处理，TEXT 若谎报
+// 受理（回 ACK）会排在本帧的 PONG 之前被 read() 先读到
+memex::protocol::Message make_ping(const std::string& from) {
+  memex::protocol::Message m;
+  m.set_type(memex::protocol::v1::PING);
+  m.set_from(from);
+  m.set_to("server");
+  m.set_ts_ms(now_ms());
   return m;
 }
 
@@ -279,8 +291,8 @@ int main() {
   io.stop();
   io_thread.join();
 
-  // —— ⑤ 库错（非撞键 false）受理行为不变腿：DROP messages 后照常
-  //     受理投递回执、不崩不吞帧（独立文件库实例，不污染主 store） ——
+  // —— ⑤ 库错（非撞键 false）不谎报成功腿：DROP messages 后不投递不回执
+  //     不入队、会话存活（评审 P0-2；独立文件库实例，不污染主 store） ——
   {
     const std::string db5 = "/tmp/memex-msg-dedupe-5.db";
     std::remove(db5.c_str());
@@ -299,7 +311,7 @@ int main() {
       b.send(make_login("bob", "pb-1", "pc-bob"));
       CHECK(b.read().login_result().ok());
       // 外部连接 DROP messages 表：store_message 非撞键失败（prepare 报错），
-      // message_by_id 查无此行 → 维持现状照常受理（派生 id 回带）
+      // message_by_id 查无此行 → 库错不谎报：不投在线、不回 ACK、不入队
       sqlite3* raw = nullptr;
       CHECK(sqlite3_open(db5.c_str(), &raw) == SQLITE_OK);
       char* err = nullptr;
@@ -308,17 +320,19 @@ int main() {
       CHECK(rc == SQLITE_OK);
       sqlite3_free(err);
       sqlite3_close(raw);
-      a.send(make_text("alice", "bob", 1, "库错受理", now_ms()));
-      const auto got5 = b.read(); // 在线照投
-      CHECK(got5.type() == memex::protocol::v1::TEXT);
-      CHECK(got5.text().text() == "库错受理");
-      CHECK(got5.msg_id() == memex::server::sha256_hex("alice:1"));
-      const auto ack5 = a.read();
-      CHECK(ack5.type() == memex::protocol::v1::ACK);
-      CHECK(ack5.seq() == 1);
-      CHECK(ack5.ack().msg_id() == memex::server::sha256_hex("alice:1"));
+      a.send(make_text("alice", "bob", 1, "库错不谎报", now_ms()));
+      // 探活序断言：库错诚实面下 PONG 之前不该有 ACK（谎报受理则 ACK 先到）
+      a.send(make_ping("alice"));
+      const auto probe5 = a.read();
+      CHECK(probe5.type() == memex::protocol::v1::PONG);
+      // 收件侧同口径：PONG 之前不该有 TEXT（照投则 TEXT 先到）
+      b.send(make_ping("bob"));
+      const auto probe5b = b.read();
+      CHECK(probe5b.type() == memex::protocol::v1::PONG);
+      CHECK(store5.offline_count("bob") == 0); // 不入离线队列
       CHECK(!store5.message_by_id(memex::server::sha256_hex("alice:1"))
                  .has_value()); // 未落档（库错口径）
+      // 会话存活：探活已过（PONG 正常回），后续消息照常受理不受污染
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(50)); // EOF 收尸
     io5.stop();
