@@ -334,6 +334,8 @@ bool ServerStore::ensure_schema() {
       "  name TEXT NOT NULL,"
       "  owner TEXT NOT NULL,"
       "  announcement TEXT NOT NULL DEFAULT '',"
+      "  topic TEXT NOT NULL DEFAULT '',"
+      "  purpose TEXT NOT NULL DEFAULT '',"
       "  created_ms INTEGER NOT NULL);"
       "CREATE TABLE IF NOT EXISTS group_members ("
       "  group_id INTEGER NOT NULL,"
@@ -815,6 +817,14 @@ bool ServerStore::ensure_schema() {
   // 旧库迁移（R24-2）：群备忘录开放编辑开关（默认关=管理员维护）
   sqlite3_exec(db_, "ALTER TABLE groups ADD COLUMN"
                     " open_memo_edit INTEGER NOT NULL DEFAULT 0",
+              nullptr, nullptr, nullptr);
+  // 旧库迁移（群组-1）：群资料主题/目的（TEXT DEFAULT ''＝存量落空串
+  // 即「未填」态——定案①展示口径：群名下方不显示该行）
+  sqlite3_exec(db_, "ALTER TABLE groups ADD COLUMN"
+                    " topic TEXT NOT NULL DEFAULT ''",
+              nullptr, nullptr, nullptr);
+  sqlite3_exec(db_, "ALTER TABLE groups ADD COLUMN"
+                    " purpose TEXT NOT NULL DEFAULT ''",
               nullptr, nullptr, nullptr);
   // 旧库迁移（R27-2）：任务表补外部任务引用列（provider/ext_key 成对，
   // 空=本地任务；R27-1 建的库无此两列）
@@ -3779,9 +3789,10 @@ std::vector<std::pair<int, std::string>> ServerStore::visible_departments(
 
 // —— T4.1 群聊 ——
 
-std::uint64_t ServerStore::create_group(const std::string& name,
-                                        const std::string& owner,
-                                        const std::vector<std::string>& members) {
+std::uint64_t ServerStore::create_group(
+    const std::string& name, const std::string& owner,
+    const std::vector<std::string>& members, const std::string& topic,
+    const std::string& purpose) {
   if (name.empty() || owner.empty()) return 0;
   // 成员账号存在性校验（建群者一并校验）；去重
   std::vector<std::string> uniq;
@@ -3797,8 +3808,8 @@ std::uint64_t ServerStore::create_group(const std::string& name,
 
   sqlite3_exec(db_, "BEGIN;", nullptr, nullptr, nullptr);
   const char* sql =
-      "INSERT INTO groups(name, owner, announcement, created_ms)"
-      " VALUES(?, ?, '', ?);";
+      "INSERT INTO groups(name, owner, announcement, topic, purpose,"
+      " created_ms) VALUES(?, ?, '', ?, ?, ?);";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
     sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
@@ -3806,7 +3817,9 @@ std::uint64_t ServerStore::create_group(const std::string& name,
   }
   sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
   sqlite3_bind_text(st, 2, owner.c_str(), -1, SQLITE_TRANSIENT);
-  sqlite3_bind_int64(st, 3, now_ms());
+  sqlite3_bind_text(st, 3, topic.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, purpose.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, now_ms());
   if (sqlite3_step(st) != SQLITE_DONE) {
     sqlite3_finalize(st);
     sqlite3_exec(db_, "ROLLBACK;", nullptr, nullptr, nullptr);
@@ -4900,8 +4913,8 @@ std::optional<ServerStore::SeatRow> ServerStore::seat_of(
 
 std::optional<GroupInfo> ServerStore::group_info(std::uint64_t group_id) {
   const char* sql =
-      "SELECT group_id, name, owner, announcement FROM groups"
-      " WHERE group_id = ?;";
+      "SELECT group_id, name, owner, announcement, topic, purpose"
+      " FROM groups WHERE group_id = ?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
     return std::nullopt;
@@ -4918,6 +4931,8 @@ std::optional<GroupInfo> ServerStore::group_info(std::uint64_t group_id) {
     g.name = text_of(1);
     g.owner = text_of(2);
     g.announcement = text_of(3);
+    g.topic = text_of(4);
+    g.purpose = text_of(5);
     g.members = group_members(group_id);
     out = std::move(g);
   }
@@ -4928,16 +4943,22 @@ std::optional<GroupInfo> ServerStore::group_info(std::uint64_t group_id) {
 std::vector<GroupInfo> ServerStore::groups_list() {
   std::vector<GroupInfo> out;
   const char* sql =
-      "SELECT group_id, name, owner, announcement FROM groups"
-      " ORDER BY group_id;";
+      "SELECT group_id, name, owner, announcement, topic, purpose"
+      " FROM groups ORDER BY group_id;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
   while (sqlite3_step(st) == SQLITE_ROW) {
     GroupInfo g;
     g.group_id = static_cast<std::uint64_t>(sqlite3_column_int64(st, 0));
-    g.name = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
-    g.owner = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
-    g.announcement = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    const auto text_of = [&st](int col) {
+      const char* p = reinterpret_cast<const char*>(sqlite3_column_text(st, col));
+      return p ? std::string(p) : std::string{};
+    };
+    g.name = text_of(1);
+    g.owner = text_of(2);
+    g.announcement = text_of(3);
+    g.topic = text_of(4);
+    g.purpose = text_of(5);
     g.members = group_members(g.group_id); // 含群主
     out.push_back(std::move(g));
   }
@@ -5059,6 +5080,32 @@ bool ServerStore::group_announce(std::uint64_t group_id,
   }
   sqlite3_exec(db_, "COMMIT;", nullptr, nullptr, nullptr);
   return true;
+}
+
+// 群资料（群组-1 主题/目的）设置：权沿群公告先例（群主/管理员）；
+// 两字段整组覆盖＝留空即清除（空串=「未填」态）。不入公告编辑历史
+//（设计未要求资料编辑留痕，公告历史口径不动）。
+bool ServerStore::group_set_profile(std::uint64_t group_id,
+                                    const std::string& account,
+                                    const std::string& topic,
+                                    const std::string& purpose) {
+  const auto info = group_info(group_id);
+  if (!info.has_value()) return false;
+  if (info->owner != account && group_role(group_id, account) != "admin") {
+    return false;
+  }
+  const char* sql =
+      "UPDATE groups SET topic = ?, purpose = ? WHERE group_id = ?;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
+    return false;
+  }
+  sqlite3_bind_text(st, 1, topic.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, purpose.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 3, static_cast<sqlite3_int64>(group_id));
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  return ok;
 }
 
 std::vector<ServerStore::AnnouncementRevision>

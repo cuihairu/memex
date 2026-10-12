@@ -6,11 +6,15 @@
 
 #include <array>
 #include <chrono>
+#include <cstdio>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <sqlite3.h>
+#include <unistd.h>
 
 #include <memex/protocol/messages.hpp>
 
@@ -114,12 +118,15 @@ public:
     }
     CHECK(false);
   }
-  // 群命令；返回回执
+  // 群命令；返回回执。群组-1：topic/purpose 随建群落、profile 后期编辑
+  // （均可空＝跳过，老调用点默认空串行为不变）
   memex::protocol::Message group_cmd(const std::string& op,
                                      std::uint64_t gid = 0,
                                      const std::vector<std::string>& members = {},
                                      const std::string& name = "",
-                                     const std::string& announcement = "") {
+                                     const std::string& announcement = "",
+                                     const std::string& topic = "",
+                                     const std::string& purpose = "") {
     memex::protocol::Message m;
     m.set_type(memex::protocol::v1::GROUP_CMD);
     m.set_from(account_);
@@ -131,10 +138,25 @@ public:
     for (const auto& a : members) c->add_members(a);
     c->set_name(name);
     c->set_announcement(announcement);
+    c->set_topic(topic);
+    c->set_purpose(purpose);
     send(m);
     memex::protocol::Message r = read();
     CHECK(r.type() == memex::protocol::v1::GROUP_RESULT);
     CHECK(r.group_result().op() == op);
+    return r;
+  }
+  // 群列表查询（GROUP_QUERY→GROUP_DATA）；群组-1 的 topic/purpose
+  // 经此帧回带
+  memex::protocol::Message query_groups() {
+    memex::protocol::Message m;
+    m.set_type(memex::protocol::v1::GROUP_QUERY);
+    m.set_from(account_);
+    m.set_to("server");
+    m.set_ts_ms(now_ms());
+    send(m);
+    memex::protocol::Message r = read();
+    CHECK(r.type() == memex::protocol::v1::GROUP_DATA);
     return r;
   }
   std::string account_;
@@ -236,6 +258,82 @@ int main() {
     s.close();
   }
 
+  // —— 群组-1 群资料（主题/目的）：建群随群落＋group_info/groups_list
+  //     回带、group_set_profile 沿群公告判权（群主/管理员）、留空即清除、
+  //     存量库 ALTER 迁移落空串 ——
+  {
+    memex::server::ServerStore s;
+    CHECK(s.open(":memory:"));
+    for (const char* a : {"alice", "bob", "carol"}) {
+      CHECK(s.create_account(a, "pw", a));
+    }
+    // 建群随群落资料；缺省参数＝两列空串（老调用点行为不变＝「未填」态）
+    const auto gid = s.create_group("资料群", "alice", {"bob", "carol"},
+                                    "每周对齐", "推进 X 项目");
+    CHECK(gid > 0);
+    const auto info = s.group_info(gid);
+    CHECK(info.has_value() && info->topic == "每周对齐" &&
+          info->purpose == "推进 X 项目");
+    const auto gid2 = s.create_group("空资料群", "alice", {"bob"});
+    CHECK(gid2 > 0);
+    CHECK(s.group_info(gid2)->topic.empty() &&
+          s.group_info(gid2)->purpose.empty());
+    // 群主可设（两字段整组覆盖）；留空即清除（空串=「未填」，非错误）
+    CHECK(s.group_set_profile(gid, "alice", "主题二", "目的二"));
+    CHECK(s.group_info(gid)->topic == "主题二" &&
+          s.group_info(gid)->purpose == "目的二");
+    CHECK(s.group_set_profile(gid, "alice", "", ""));
+    CHECK(s.group_info(gid)->topic.empty() &&
+          s.group_info(gid)->purpose.empty());
+    // 管理员代设（群公告同款判权）；普通成员拒；幽灵群拒
+    CHECK(s.group_set_role(gid, "bob", "admin"));
+    CHECK(s.group_set_profile(gid, "bob", "bob 代设主题", "bob 代设目的"));
+    CHECK(s.group_info(gid)->topic == "bob 代设主题");
+    CHECK(!s.group_set_profile(gid, "carol", "越权主题", ""));
+    CHECK(!s.group_set_profile(99999, "alice", "幽灵群", ""));
+    // groups_list/groups_of 同源回带
+    CHECK(s.groups_list().size() == 2);
+    CHECK(s.groups_of("carol").size() == 1 &&
+          s.groups_of("carol")[0].purpose == "bob 代设目的");
+    s.close();
+
+    // 存量库迁移：旧库 groups 无 topic/purpose 列→open 走 ALTER 落
+    // 空串（定案①展示口径「未填」态），可补填
+    const std::string legacy_db =
+        "memex_test_legacy_group_" + std::to_string(::getpid()) + ".db";
+    std::remove(legacy_db.c_str());
+    sqlite3* raw = nullptr;
+    CHECK(sqlite3_open(legacy_db.c_str(), &raw) == SQLITE_OK);
+    char* err = nullptr;
+    sqlite3_exec(
+        raw,
+        "CREATE TABLE groups (group_id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " name TEXT NOT NULL, owner TEXT NOT NULL,"
+        " announcement TEXT NOT NULL DEFAULT '', created_ms INTEGER NOT NULL);"
+        "CREATE TABLE group_members (group_id INTEGER NOT NULL,"
+        " account TEXT NOT NULL, joined_ms INTEGER NOT NULL,"
+        " PRIMARY KEY(group_id, account));"
+        "CREATE TABLE accounts (account TEXT PRIMARY KEY,"
+        " display_name TEXT NOT NULL, salt TEXT NOT NULL,"
+        " digest TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'member',"
+        " created_ms INTEGER NOT NULL);"
+        "INSERT INTO groups(name, owner, created_ms)"
+        " VALUES('老群','alice',1);"
+        "INSERT INTO accounts(account, display_name, salt, digest, created_ms)"
+        " VALUES('alice','alice','s','d',1);",
+        nullptr, nullptr, &err);
+    CHECK(err == nullptr);
+    sqlite3_close(raw);
+    memex::server::ServerStore s2;
+    CHECK(s2.open(legacy_db));
+    const auto li = s2.group_info(1);
+    CHECK(li.has_value() && li->topic.empty() && li->purpose.empty());
+    CHECK(s2.group_set_profile(1, "alice", "补填主题", "补填目的"));
+    CHECK(s2.group_info(1)->topic == "补填主题");
+    s2.close();
+    std::remove(legacy_db.c_str());
+  }
+
   // —— 协议级：建群→扇出投递→归档→检索→补投→越权拒绝 ——
   {
     memex::server::ServerStore s;
@@ -269,6 +367,47 @@ int main() {
     CHECK(created.group_result().ok());
     const auto gid = created.group_result().group_id();
     CHECK(gid > 0);
+
+    // —— 群组-1 协议腿：建群随群落资料→GROUP_DATA 回带 topic/purpose；
+    //     profile 沿群公告判权（非群主/管理员拒）；留空即清除；空
+    //     topic/purpose 帧＝老客户端行为不变（proto3 空串不上线）——
+    const auto created7 =
+        a.group_cmd("create", 0, {"carol"}, "资料群", "", "每周对齐",
+                    "推进 X 项目");
+    CHECK(created7.group_result().ok());
+    const auto gid7 = created7.group_result().group_id();
+    CHECK(gid7 > 0);
+    {
+      const auto gdata = a.query_groups();
+      bool seen7 = false;
+      for (const auto& g : gdata.group_data().groups()) {
+        if (g.group_id() == gid7) {
+          seen7 = g.topic() == "每周对齐" && g.purpose() == "推进 X 项目";
+        }
+      }
+      CHECK(seen7);
+    }
+    // 非群主/管理员编辑拒（bob 对资料群无任何身份）
+    CHECK(!b.group_cmd("profile", gid7, {}, "", "", "越权主题", "")
+               .group_result()
+               .ok());
+    // 群主编辑可（两字段整组覆盖）；留空即清除
+    CHECK(a.group_cmd("profile", gid7, {}, "", "", "改后的主题", "")
+              .group_result()
+              .ok());
+    CHECK(s.group_info(gid7)->topic == "改后的主题");
+    CHECK(s.group_info(gid7)->purpose.empty());
+    CHECK(a.group_cmd("profile", gid7, {}, "", "", "", "")
+              .group_result()
+              .ok());
+    CHECK(s.group_info(gid7)->topic.empty());
+    // 老协议帧（不带新字段）建群成功且两列为空串
+    const auto created_old = a.group_cmd("create", 0, {"carol"}, "老帧群");
+    CHECK(created_old.group_result().ok());
+    CHECK(s.group_info(created_old.group_result().group_id())
+              ->topic.empty());
+    CHECK(s.group_info(created_old.group_result().group_id())
+              ->purpose.empty());
 
     // group_creator 追加角色放行 bob（平台-3 时间窗机制授予）
     CHECK(s.role_grant("bob", "group_creator", "", 0, 0, "alice", 2) > 0);

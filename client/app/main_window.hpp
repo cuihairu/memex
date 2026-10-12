@@ -333,6 +333,8 @@ private:
     QString name;
     QString owner;
     QString announcement; // 空=未设
+    QString topic;        // 群组-1 主题（空=未填＝群名下方不显示该行）
+    QString purpose;      // 群组-1 目的（空=未填＝群名下方不显示该块）
     QStringList members;  // 含群主
   };
   // 群列表数据到达（GROUP_DATA）：解析入 groups_ 并刷新列表／当前会话标题
@@ -346,6 +348,9 @@ private:
   // 拉人进群／设置群公告弹窗（成员数据源：组织架构成员）
   void group_invite_dialog(quint64 group_id);
   void group_announce_dialog(quint64 group_id);
+  // 群资料（群组-1 主题/目的）编辑弹窗：权沿群公告先例（群主/管理员，
+  // 服务端裁决回执）；两字段整组覆盖＝留空即清除
+  void group_profile_dialog(quint64 group_id);
   // 公告编辑历史查看（R24-1）：请求→等专用回执（超时兜底）→列表展示
   void group_announce_history_dialog(quint64 group_id);
   // 免服务端临时群（直连态多选设备扇出，不进归档）

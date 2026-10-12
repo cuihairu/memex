@@ -325,7 +325,8 @@ void CollabEngine::set_signature(const QString& signature) {
 
 // —— T4.1 群聊 ——
 
-void CollabEngine::create_group(const QString& name, const QStringList& members) {
+void CollabEngine::create_group(const QString& name, const QStringList& members,
+                                const QString& topic, const QString& purpose) {
   if (!logged_in_) return;
   Message m;
   m.set_type(MsgType::GROUP_CMD);
@@ -336,6 +337,26 @@ void CollabEngine::create_group(const QString& name, const QStringList& members)
   c->set_op("create");
   c->set_name(name.toStdString());
   for (const QString& a : members) c->add_members(a.toStdString());
+  c->set_topic(topic.toStdString()); // 群组-1：空串=跳过（proto3 缺省同形）
+  c->set_purpose(purpose.toStdString());
+  send_frame(m);
+}
+
+// 群组-1 群资料（主题/目的）后期编辑：权沿群公告先例（群主/管理员，
+// 服务端裁决），两字段整组覆盖＝留空即清除
+void CollabEngine::set_group_profile(quint64 group_id, const QString& topic,
+                                     const QString& purpose) {
+  if (!logged_in_) return;
+  Message m;
+  m.set_type(MsgType::GROUP_CMD);
+  m.set_from(account_.toStdString());
+  m.set_to("server");
+  m.set_ts_ms(QDateTime::currentMSecsSinceEpoch());
+  auto* c = m.mutable_group_cmd();
+  c->set_op("profile");
+  c->set_group_id(group_id);
+  c->set_topic(topic.toStdString());
+  c->set_purpose(purpose.toStdString());
   send_frame(m);
 }
 
@@ -747,6 +768,8 @@ void CollabEngine::handle_frame(const QByteArray& payload) {
       gj["name"] = g.name();
       gj["owner"] = g.owner();
       gj["announcement"] = g.announcement();
+      gj["topic"] = g.topic(); // 群组-1：空=未填＝展示层不显示该行
+      gj["purpose"] = g.purpose();
       gj["members"] = nlohmann::json::array();
       for (const auto& m : g.members()) gj["members"].push_back(m);
       j.push_back(std::move(gj));

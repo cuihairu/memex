@@ -927,7 +927,7 @@ const pages = {
         <h2>群组管理面</h2><p class="desc">${this.desc}</p>
         <div class="card"><h3>群台账与能力</h3>
           <table><thead><tr>
-            <th>群号</th><th>名称</th><th>群主</th><th>成员</th><th>管理员</th><th>备忘录开放编辑</th><th>能力（生效）</th>
+            <th>群号</th><th>名称</th><th>群主</th><th>主题</th><th>目的</th><th>成员</th><th>管理员</th><th>备忘录开放编辑</th><th>能力（生效）</th>
           </tr></thead><tbody id="t-groups"></tbody></table>
           <form id="f-cap" class="inline" style="margin-top:10px">
             <label>群号<input name="gid" required></label>
@@ -1047,12 +1047,14 @@ const pages = {
             <td class="mono">${r.gid}</td>
             <td>${esc(r.name)}</td>
             <td class="mono">${esc(r.owner)}</td>
+            <td>${r.topic ? esc(r.topic) : '<span class="muted">—</span>'}</td>
+            <td>${r.purpose ? esc(r.purpose) : '<span class="muted">—</span>'}</td>
             <td>${(r.members || []).length}</td>
             <td>${admins}</td>
             <td>${r.memo_open_edit ? '<span class="pill">开放</span>' : '<span class="muted">关闭</span>'}</td>
             <td>${caps}</td>
           </tr>`;
-        }).join("") || '<tr><td colspan="7" class="muted">无群</td></tr>';
+        }).join("") || '<tr><td colspan="9" class="muted">无群</td></tr>';
         // 点击行=填能力表单群号
         el.querySelectorAll("#t-groups tr td:first-child").forEach((td) => {
           td.style.cursor = "pointer";

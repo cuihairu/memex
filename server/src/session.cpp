@@ -354,7 +354,10 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       } else {
         std::vector<std::string> members(cmd.members().begin(),
                                          cmd.members().end());
-        gid = server_.store().create_group(cmd.name(), account_, members);
+        // 群组-1：建群随群落资料（主题/目的均可空＝「未填」，定案①跳过
+        // ＝直接建群；老客户端不填→空串行为不变）
+        gid = server_.store().create_group(cmd.name(), account_, members,
+                                           cmd.topic(), cmd.purpose());
         ok = gid > 0;
         if (!ok) reason = "建群失败（群名空或成员账号不存在）";
       }
@@ -411,6 +414,15 @@ void Session::handle_message(const memex::protocol::Message& msg) {
         ok = true;
         want_history = true;
       }
+    } else if (cmd.op() == "profile") {
+      // 群组-1 群资料（主题/目的）后期编辑：权沿群公告先例（群主/管理员，
+      // store 层裁决）；两字段整组覆盖＝留空即清除。不属群能力开关七项
+      // 词汇表（资料非能力，不扩词表）。
+      ok = server_.store().group_set_profile(cmd.group_id(), account_,
+                                             cmd.topic(), cmd.purpose());
+      if (!ok) {
+        reason = "群资料设置失败（仅群主/管理员可设，或群不存在）";
+      }
     } else {
       break;
     }
@@ -450,6 +462,8 @@ void Session::handle_message(const memex::protocol::Message& msg) {
       gi->set_name(g.name);
       gi->set_owner(g.owner);
       gi->set_announcement(g.announcement);
+      gi->set_topic(g.topic); // 群组-1：空=未填＝客户端不显示该行
+      gi->set_purpose(g.purpose);
       for (const auto& m : g.members) gi->add_members(m);
     }
     send(memex::protocol::encode(out));

@@ -1974,6 +1974,9 @@ int setup(int argc, char** argv) {
               row["gid"] = static_cast<Json::Int64>(g.group_id);
               row["name"] = g.name;
               row["owner"] = g.owner;
+              // 群组-1：群资料主题/目的同源回带（空=未填）
+              row["topic"] = g.topic;
+              row["purpose"] = g.purpose;
               Json::Value members(Json::arrayValue);
               Json::Value admins(Json::arrayValue);
               for (const auto& m : g.members) {

@@ -64,10 +64,17 @@ public slots:
   // profile_result（服务端受理回执，长度门 120 字）
   void set_signature(const QString& signature);
   // —— 群聊（T4.1）：命令走 GROUP_CMD，回执经 group_result；群列表 query_groups ——
-  void create_group(const QString& name, const QStringList& members);
+  // 群组-1：topic/purpose 均可空（定案①跳过＝直接建群，服务端落空串）
+  void create_group(const QString& name, const QStringList& members,
+                    const QString& topic = QString(),
+                    const QString& purpose = QString());
   void invite_group(quint64 group_id, const QStringList& members);
   void leave_group(quint64 group_id);
   void announce_group(quint64 group_id, const QString& announcement);
+  // 群组-1 群资料（主题/目的）后期编辑：权沿群公告先例（群主/管理员，
+  // 服务端裁决），两字段整组覆盖＝留空即清除；回执经 group_result
+  void set_group_profile(quint64 group_id, const QString& topic,
+                         const QString& purpose);
   // 公告编辑历史查询（R24-1）：回执经 announcement_history_received
   void announce_history(quint64 group_id);
   void query_groups();

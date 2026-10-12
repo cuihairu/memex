@@ -152,6 +152,8 @@ struct GroupInfo {
   std::string name;
   std::string owner;
   std::string announcement;        // 空=未设
+  std::string topic;               // 群组-1 主题（空=未填＝展示层不显示该行）
+  std::string purpose;             // 群组-1 目的（空=未填＝展示层不显示该块）
   std::vector<std::string> members; // 含群主
 };
 
@@ -728,10 +730,13 @@ public:
 
   // —— T4.1 群聊 ——
   // 建群：群主（owner）自动入群；members 须全部为已建账号（含去重）。
-  // 返回群号（>0）；任何成员账号不存在返回 0。
+  // 返回群号（>0）；任何成员账号不存在返回 0。topic/purpose＝群组-1 群
+  // 资料（均可空＝「未填」，服务端不强拒——定案①跳过＝直接建群）。
   std::uint64_t create_group(const std::string& name,
                              const std::string& owner,
-                             const std::vector<std::string>& members);
+                             const std::vector<std::string>& members,
+                             const std::string& topic = "",
+                             const std::string& purpose = "");
   // 群详情；不存在返回 nullopt
   std::optional<GroupInfo> group_info(std::uint64_t group_id);
   // 全量群列表（运维面：组织架构树/CLI group list）
@@ -748,6 +753,11 @@ public:
   // 编辑历史（谁/何时/改成了什么——清除也落，content 空串即「清除」一笔）。
   bool group_announce(std::uint64_t group_id, const std::string& account,
                       const std::string& announcement);
+  // 群资料（群组-1 主题/目的）设置：权沿群公告先例（群主/管理员可设）；
+  // 两字段整组覆盖＝留空即清除（空串=「未填」态，非错误）。
+  bool group_set_profile(std::uint64_t group_id, const std::string& account,
+                         const std::string& topic,
+                         const std::string& purpose);
   // 群公告编辑历史（R24-1：倒序，新者在前；只附加不删改）
   struct AnnouncementRevision {
     std::int64_t id{0};

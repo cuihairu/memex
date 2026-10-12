@@ -24,6 +24,7 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QInputDialog>
+#include <QTextEdit>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QLabel>
@@ -1308,6 +1309,10 @@ void MainWindow::wire_collab() {
             if (ok) {
               show_status(QStringLiteral("群操作成功（%1，群 %2）")
                               .arg(op, QString::number(group_id)));
+              // 群组-1：资料（主题/目的）落定后重拉群列表对齐 meta 展示
+              if (op == QStringLiteral("profile")) {
+                collab_engine_.query_groups();
+              }
             } else {
               show_status(QStringLiteral("群操作失败（%1）：%2").arg(op, reason));
             }
@@ -2173,6 +2178,15 @@ void MainWindow::create_group_dialog() {
   auto* name = new QLineEdit(&dlg);
   name->setPlaceholderText(QStringLiteral("例如：研发部日常"));
   form->addRow(QStringLiteral("群名"), name);
+  // 群组-1：主题（一句话）＋目的（多行说明）均可留空（定案①跳过＝
+  // 直接建群；空主题落空串＝群名下方不显示该行）
+  auto* topic = new QLineEdit(&dlg);
+  topic->setPlaceholderText(QStringLiteral("一句话主题（可空）"));
+  form->addRow(QStringLiteral("主题"), topic);
+  auto* purpose = new QTextEdit(&dlg);
+  purpose->setPlaceholderText(QStringLiteral("群目的说明（可空）"));
+  purpose->setFixedHeight(64);
+  form->addRow(QStringLiteral("目的"), purpose);
   auto* members = new QListWidget(&dlg);
   const QString me = collab_engine_.account();
   for (const QString& a : org_accounts()) {
@@ -2207,7 +2221,8 @@ void MainWindow::create_group_dialog() {
     const QString a = part.trimmed();
     if (!a.isEmpty() && !picked.contains(a)) picked << a;
   }
-  collab_engine_.create_group(gname, picked);
+  collab_engine_.create_group(gname, picked, topic->text().trimmed(),
+                              purpose->toPlainText().trimmed());
   show_status(QStringLiteral("建群请求已发送（%1 名成员）").arg(picked.size()));
 }
 
@@ -2288,6 +2303,8 @@ void MainWindow::apply_groups(const QString& groups_json) {
     e.owner = QString::fromStdString(g.value("owner", std::string{}));
     e.announcement =
         QString::fromStdString(g.value("announcement", std::string{}));
+    e.topic = QString::fromStdString(g.value("topic", std::string{}));
+    e.purpose = QString::fromStdString(g.value("purpose", std::string{}));
     if (g.contains("members")) {
       for (const auto& m : g["members"]) {
         e.members << QString::fromStdString(m.get<std::string>());
@@ -2304,6 +2321,16 @@ void MainWindow::apply_groups(const QString& groups_json) {
                          .arg(current_group_id());
       if (!g->announcement.isEmpty()) {
         meta.prepend(QStringLiteral("公告：%1　·　").arg(g->announcement));
+      }
+      // 群组-1 展示口径：主题/目的非空才显示（空=「未填」＝不显示该行）；
+      // meta 行单行化（目的内部换行折「／」，全文在群资料窗可见）
+      if (!g->topic.isEmpty()) {
+        meta.prepend(QStringLiteral("主题：%1　·　").arg(g->topic));
+      }
+      if (!g->purpose.isEmpty()) {
+        QString p = g->purpose;
+        p.replace(QChar('\n'), QStringLiteral("／"));
+        meta += QStringLiteral("　·　目的：%1").arg(p);
       }
       chat_meta_->setText(meta);
     } else {
@@ -2359,6 +2386,7 @@ void MainWindow::show_group_menu(const QPoint& pos) {
     const quint64 gid = id.mid(QStringLiteral("group:").size()).toULongLong();
     auto* act_invite = menu.addAction(QStringLiteral("拉人进群…"));
     auto* act_ann = menu.addAction(QStringLiteral("设置群公告…"));
+    auto* act_profile = menu.addAction(QStringLiteral("设置群资料…"));
     auto* act_hist = menu.addAction(QStringLiteral("公告编辑历史…"));
     auto* act_memo = menu.addAction(QStringLiteral("群备忘录…"));
     auto* act_vault = menu.addAction(QStringLiteral("群密码箱…"));
@@ -2371,6 +2399,8 @@ void MainWindow::show_group_menu(const QPoint& pos) {
             [this, gid] { group_invite_dialog(gid); });
     connect(act_ann, &QAction::triggered, this,
             [this, gid] { group_announce_dialog(gid); });
+    connect(act_profile, &QAction::triggered, this,
+            [this, gid] { group_profile_dialog(gid); });
     connect(act_hist, &QAction::triggered, this,
             [this, gid] { group_announce_history_dialog(gid); });
     connect(act_memo, &QAction::triggered, this, [this, gid] {
@@ -2514,6 +2544,32 @@ void MainWindow::group_announce_dialog(quint64 group_id) {
   if (!ok) return;
   collab_engine_.announce_group(group_id, text.trimmed());
   show_status(QStringLiteral("群公告设置请求已发送（全员将收到重要级通知）"));
+}
+
+// 群资料（群组-1 主题/目的）编辑：权沿群公告先例（群主/管理员，服务端
+// 裁决回执）；两字段整组覆盖＝留空即清除。回执落定后重拉群列表对齐。
+void MainWindow::group_profile_dialog(quint64 group_id) {
+  const auto it = groups_.find(group_id);
+  if (it == groups_.end()) return;
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("群资料（群 %1）").arg(group_id));
+  dlg.resize(420, 300);
+  auto* form = new QFormLayout(&dlg);
+  auto* topic = new QLineEdit(it->topic, &dlg);
+  topic->setPlaceholderText(QStringLiteral("一句话主题（可空）"));
+  form->addRow(QStringLiteral("主题"), topic);
+  auto* purpose = new QTextEdit(it->purpose, &dlg);
+  purpose->setPlaceholderText(QStringLiteral("群目的说明（可空）"));
+  form->addRow(QStringLiteral("目的"), purpose);
+  auto* buttons = new QDialogButtonBox(
+      QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
+  form->addRow(buttons);
+  QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+  QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+  if (dlg.exec() != QDialog::Accepted) return;
+  collab_engine_.set_group_profile(group_id, topic->text().trimmed(),
+                                   purpose->toPlainText().trimmed());
+  show_status(QStringLiteral("群资料设置请求已发送（群主/管理员可设）"));
 }
 
 // 公告编辑历史（R24-1）：请求后等专用回执（超时兜底），倒序列出
@@ -3665,6 +3721,15 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
                        .arg(gid);
     if (!g.announcement.isEmpty()) {
       meta.prepend(QStringLiteral("公告：%1　·　").arg(g.announcement));
+    }
+    // 群组-1 展示口径：主题/目的非空才显示（空=「未填」＝不显示该行）
+    if (!g.topic.isEmpty()) {
+      meta.prepend(QStringLiteral("主题：%1　·　").arg(g.topic));
+    }
+    if (!g.purpose.isEmpty()) {
+      QString p = g.purpose;
+      p.replace(QChar('\n'), QStringLiteral("／"));
+      meta += QStringLiteral("　·　目的：%1").arg(p);
     }
     chat_meta_->setText(meta);
   } else if (kind == QStringLiteral("dgroup")) {

@@ -144,6 +144,8 @@ int main() {
     // 群（webhook group: 目标校验与三级盘点群名解析用）
     gid = seed.create_group("盘点群", "root", {"m1"});
     CHECK(gid > 0);
+    // 群组-1：群资料主题/目的（admin 台账同源回带腿）
+    CHECK(seed.group_set_profile(gid, "root", "季度盘点", "全量盘点迁移项"));
     // 文件台账（文件与配额腿）：群文件 A（1000B）＋个人文件 B（500B）；
     // 扣费基线按 files 面上传双面计费同口径（群文件群+个人都计）
     {
@@ -879,7 +881,9 @@ int main() {
     bool seen = false;
     for (const auto& g : gs) {
       if (g["gid"].asInt64() != static_cast<Json::Int64>(gid)) continue;
-      seen = g["owner"].asString() == "root" && g["members"].size() == 2;
+      seen = g["owner"].asString() == "root" && g["members"].size() == 2 &&
+             g["topic"].asString() == "季度盘点" &&
+             g["purpose"].asString() == "全量盘点迁移项";
       for (const auto& c : g["capabilities"]) {
         if (c["capability"].asString() == "memo") {
           CHECK(c["configured"].asBool() == false);
