@@ -81,6 +81,16 @@ td .pill.auditor { background: #e5f2e8; color: #226b34; }
 .muted { color: #8fa1b3; }
 .mono { font-family: Consolas, monospace; font-size: 12px; }
 
+/* 通知与集成：token 一次性显示框＋盘点统计行 */
+.token-once {
+  margin: 10px 0; padding: 10px 12px; border: 1px dashed #c98a1b;
+  background: #fff8e9; border-radius: 6px; font-size: 13px; color: #6b4d0a;
+}
+.token-once code { word-break: break-all; font-weight: 600; }
+.stat-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.stat-row .pill { padding: 3px 10px; font-size: 12px; }
+.card h4 { margin: 14px 0 8px; font-size: 13px; color: #33475b; }
+
 /* 提示条 */
 .toast {
   position: fixed; right: 20px; bottom: 20px; padding: 10px 16px;
