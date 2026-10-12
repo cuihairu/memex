@@ -351,6 +351,8 @@ private:
   // 群资料（群组-1 主题/目的）编辑弹窗：权沿群公告先例（群主/管理员，
   // 服务端裁决回执）；两字段整组覆盖＝留空即清除
   void group_profile_dialog(quint64 group_id);
+  // 群组-2 群记录导出（定案②全员可导；区间＋AI 档；逐页拼接存 .md）
+  void group_record_export_dialog(quint64 group_id);
   // 公告编辑历史查看（R24-1）：请求→等专用回执（超时兜底）→列表展示
   void group_announce_history_dialog(quint64 group_id);
   // 免服务端临时群（直连态多选设备扇出，不进归档）

@@ -111,6 +111,15 @@ class FilesClient : public QObject {
   // 群配置快照导出（仅群主/管理员；密文面永不进导出）
   void group_export(quint64 gid);
 
+  // —— 群记录导出（群组-2 /files/group-record-export，Markdown 三段）——
+  // 定案②：本群成员即可导（非群成员 403）；定案③：服务端一次导出落
+  // audit_reads 一行。单页返回 Markdown 片段＋游标（has_more/next_after_id）
+  // 与截断标记（单次上限触顶→尾部 truncated，不静默截尾）；AI 档现降级为
+  // 普通文档（模型未接线＝R11 三期），回包 ai_enabled 恒 false。
+  void group_record_export(quint64 gid, qint64 from_ms, qint64 to_ms,
+                           bool with_ai, qint64 after_id, qint64 fetched,
+                           int page_size = 1000, int cap = 10000);
+
   // —— 工具凭据面（R25-4 /files/group-tools/credential[s]）——
   // 上/覆盖凭据（仅群主/管理员；服务端加密落库，客户端零凭据：
   // 回包只有掩码元数据，明文只此一次出门）
@@ -349,6 +358,12 @@ class FilesClient : public QObject {
   void pack_listed(const QJsonArray& artifacts);
   void pack_deleted();
   void group_exported(const QJsonObject& snapshot);
+  // 群记录导出单页回包（md 片段＋count/has_more/next_after_id/truncated/
+  // ai_enabled；gid 在响应里）
+  void group_record_export_page(const QJsonObject& page);
+  // 导出页请求失败（403 非本群成员／404 群不存在／网络失败；err 为服务端
+  // 错误消息——如实呈现，不吞）
+  void group_record_export_failed(const QString& err);
   void tool_cred_saved(qint64 gid, const QString& tool);
   void tool_cred_removed(qint64 gid, const QString& tool);
   void tool_credentials_listed(const QJsonArray& credentials);

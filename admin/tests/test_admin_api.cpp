@@ -146,6 +146,19 @@ int main() {
     CHECK(gid > 0);
     // 群组-1：群资料主题/目的（admin 台账同源回带腿）
     CHECK(seed.group_set_profile(gid, "root", "季度盘点", "全量盘点迁移项"));
+    // 群组-2：群记录导出留痕（定案③）——与检索/导出同表同口径，
+    //   admin 后台可查（不新表；auditor 判权不变）
+    {
+      memex::server::AuditReadRow rec;
+      rec.op_account = "m1";
+      rec.action = "group_record_export";
+      rec.filters = "{\"gid\":" + std::to_string(gid) +
+                    ",\"from_ms\":1700000000000,\"to_ms\":1700000060000,"
+                    "\"with_ai\":false}";
+      rec.result_count = 7;
+      rec.ts_ms = 1700000060000;
+      CHECK(seed.add_audit_read(rec));
+    }
     // 文件台账（文件与配额腿）：群文件 A（1000B）＋个人文件 B（500B）；
     // 扣费基线按 files 面上传双面计费同口径（群文件群+个人都计）
     {
@@ -535,6 +548,8 @@ int main() {
     CHECK(r.text.find("msg-1") != std::string::npos);
     const auto reads = http("GET", "/api/admin/audit-reads", {}, lr.set_cookie);
     CHECK(reads.text.find("audit.message.export") != std::string::npos);
+    // 群组-2 群记录导出留痕同表同口径（不新表；admin 后台可查）
+    CHECK(reads.text.find("group_record_export") != std::string::npos);
   }
 
   // ⑯ 设备与登录台账（空表 200；登录台账已有本次测试的 /files 面外记录＝

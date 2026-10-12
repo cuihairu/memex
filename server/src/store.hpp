@@ -56,6 +56,16 @@ struct ArchivedMessage {
   // 模糊检索相关度（仅关键词查询时非 0；无关键词=0，不参与排序）：
   // Σ(命中次数×1000 + 首命中位置提前量封顶 999)。见 search_messages。
   std::int64_t score{0};
+  // messages 自增主键（keyset 分页游标；默认 0＝附加字段，既有消费方不受影响）
+  std::int64_t row_id{0};
+};
+
+// 群成员明细（群组-2 群记录导出「参与人」段）：成员＋角色＋加入时间。
+// 离开时间现库不留痕（退群即摘行）——导出如实注记。
+struct GroupMemberRow {
+  std::string account;
+  std::string role;      // owner／admin／member（group_role 口径）
+  std::int64_t joined_ms{0};
 };
 
 // 成员资料（T2.6 组织架构）：直属上级为独立字段——单列存储，
@@ -101,6 +111,12 @@ struct MessageSearch {
   // account 非空为前提（群靠成员关系联入；单聊叠加为「我与该对端」双向）。
   // 新代码请用字段名赋值，勿依赖位置。
   std::string peer;
+  // 排序方向：默认 false＝倒序（CLI/管理台/会话历史现行）；true＝升序（群组-2
+  // 导出的分页序，升序键序＝对话体自然序）。
+  bool asc{false};
+  // keyset 游标（群组-2）：仅 asc 生效——AND id > ?（messages 自增主键
+  // 单调≈时序，无重无漏）；0＝不过滤。倒序分页不游标（默认分支不动）。
+  std::int64_t after_id{0};
 };
 
 // 查阅日志（T3.2）：每次检索／导出都落一条——谁、何时、用了什么条件、命中几条。
@@ -154,6 +170,7 @@ struct GroupInfo {
   std::string announcement;        // 空=未设
   std::string topic;               // 群组-1 主题（空=未填＝展示层不显示该行）
   std::string purpose;             // 群组-1 目的（空=未填＝展示层不显示该块）
+  std::int64_t created_ms{0};      // 群组-2 群记录导出「时间范围」段（建群时间）
   std::vector<std::string> members; // 含群主
 };
 
@@ -745,6 +762,9 @@ public:
   std::vector<GroupInfo> groups_of(const std::string& account);
   // 是否群成员
   bool is_group_member(std::uint64_t group_id, const std::string& account);
+  // 群成员明细（群组-2 导出「参与人」段）：account＋role＋joined_ms，
+  // 按 joined_ms 升序；群不存在返回空。
+  std::vector<GroupMemberRow> group_members_detail(std::uint64_t group_id);
   // 拉人（成员须为已建账号且不在群里）
   bool group_invite(std::uint64_t group_id, const std::string& account);
   // 退群（群主退群=解散：删成员表记录；群号与归档保留）

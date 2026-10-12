@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <ctime>
 #include <cstdlib>
 #include <iostream>
 #include <map>
@@ -1159,6 +1160,190 @@ int main() {
                          "");
     CHECK(ea.body.find("\"tool\":\"export\"") != std::string::npos);
   }
+
+  // —— 群组-2 群记录导出（Markdown 三段定案④／权限定案②全员＝本群成员／
+  //     定案③ audit_reads 恰一行／AI 档降级注明／归档只读副本口径）——
+  {
+    const auto g2 = store.create_group("records", "owner1",
+                                       {"owner1", "admin1", "member1"});
+    CHECK(g2 > 0);
+    CHECK(store.group_set_role(g2, "admin1", "admin"));
+    const std::string g2s = std::to_string(g2);
+    const std::string g2t = "group:" + g2s;
+    // 固定时刻的消息序列：升序时刻即升序 id（导出升序分页的页序基准）；
+    // 含一条撤回（撤回标记可见）与一条区间外（不该进导出）
+    const std::int64_t base = 1700000000000LL;
+    CHECK(store.store_message("rec-1", "owner1", g2t, 10, "第一条记录", base + 1000));
+    CHECK(store.store_message("rec-2", "member1", g2t, 10, "第二条记录", base + 2000));
+    CHECK(store.store_message("rec-3", "owner1", g2t, 10, "第三条记录", base + 3000));
+    CHECK(store.recall_message("rec-3", "owner1", base + 3500));
+    CHECK(store.store_message("rec-4", "member1", g2t, 10, "第四条记录", base + 4000));
+    CHECK(store.store_message("rec-5", "owner1", g2t, 10, "第五条记录", base + 5000));
+    CHECK(store.store_message("rec-out", "owner1", g2t, 10, "区间外消息", base - 60000));
+    const std::string from = std::to_string(base - 1000);
+    const std::string to = std::to_string(base + 6000);
+    const std::string exp = "/files/group-record-export?gid=" + g2s +
+                            "&from=" + from + "&to=" + to;
+    // 归档基线（副本口径：导出前后逐位一致——R3 只读断言）
+    const auto archive_snap = [&]() {
+      memex::server::MessageSearch qs;
+      qs.account = "owner1";
+      qs.peer = g2t;
+      qs.limit = 1000;
+      std::vector<std::pair<std::string, std::string> > v;
+      for (const auto& m : store.search_messages(qs)) {
+        v.emplace_back(m.msg_id, m.text);
+      }
+      std::sort(v.begin(), v.end());
+      return v;
+    };
+    const auto before = archive_snap();
+    CHECK(before.size() == 6);
+    // 参与人明细（角色＋加入时间；导出「参与人」段同源）
+    const auto parts = store.group_members_detail(g2);
+    CHECK(parts.size() == 3);
+    bool saw_member1 = false;
+    for (const auto& p : parts) {
+      if (p.account == "member1") {
+        saw_member1 = true;
+        CHECK(p.role == "member");
+        CHECK(p.joined_ms > 0);
+      }
+    }
+    CHECK(saw_member1);
+    // 权限：未带令牌 401；坏 gid 400；幽灵群 404；非群成员 403（定案②）
+    CHECK(http(port, "GET", exp, {}, "").status == 401);
+    CHECK(http(port, "GET",
+               "/files/group-record-export?gid=x&from=" + from + "&to=" + to,
+               H("owner1"), "").status == 400);
+    CHECK(http(port, "GET",
+               "/files/group-record-export?gid=999999&from=" + from + "&to=" + to,
+               H("owner1"), "").status == 404);
+    CHECK(http(port, "GET", exp, H("outsider"), "").status == 403);
+    // 本群普通成员 200（定案②全员＝本群成员，非仅群主/管理员）
+    const auto r1 = http(port, "GET", exp, H("member1"), "");
+    CHECK(r1.status == 200);
+    const std::string md1 = jstr(r1.body, "md");
+    CHECK(md1.find("# 群记录：records") != std::string::npos);
+    CHECK(md1.find("## 参与人") != std::string::npos);
+    CHECK(md1.find("## 时间范围") != std::string::npos);
+    CHECK(md1.find("## 聊天记录") != std::string::npos);
+    // 参与人：名单＋角色＋加入时间
+    CHECK(md1.find("owner1（owner）") != std::string::npos);
+    CHECK(md1.find("admin1（admin）") != std::string::npos);
+    CHECK(md1.find("member1（member）") != std::string::npos);
+    CHECK(md1.find("加入于 ") != std::string::npos);
+    CHECK(md1.find("离开时间不含") != std::string::npos);
+    // 时间范围：建群时间（groups.created_ms 真值，与导出同一时间格式）＋
+    // 所选区间
+    const auto g2info = store.group_info(g2);
+    CHECK(g2info.has_value());
+    std::time_t ct = static_cast<std::time_t>(g2info->created_ms / 1000);
+    std::tm tmv{};
+    localtime_r(&ct, &tmv);
+    char cb[32];
+    std::strftime(cb, sizeof(cb), "%Y-%m-%d %H:%M:%S", &tmv);
+    CHECK(md1.find(std::string("建群时间：") + cb) != std::string::npos);
+    CHECK(md1.find("导出区间：") != std::string::npos);
+    // 聊天记录：发送人＋时间戳；撤回行带标记；区间外不进导出
+    CHECK(md1.find("owner1: 第一条记录") != std::string::npos);
+    CHECK(md1.find("member1: 第二条记录") != std::string::npos);
+    CHECK(md1.find("（撤回）") != std::string::npos);
+    CHECK(md1.find("区间外消息") == std::string::npos);
+    CHECK(jint(r1.body, "count") == 5);
+    CHECK(r1.body.find("\"has_more\":false") != std::string::npos);
+    CHECK(r1.body.find("\"truncated\":false") != std::string::npos);
+    // AI 档降级：ai_enabled=false＋「AI 未启用」注明，无「总结」章节占位
+    CHECK(r1.body.find("\"ai_enabled\":false") != std::string::npos);
+    CHECK(md1.find("AI 未启用") == std::string::npos); // 未勾选 AI＝不加注明
+    const auto ra = http(port, "GET", exp + "&with_ai=1", H("admin1"), "");
+    CHECK(ra.status == 200);
+    CHECK(ra.body.find("\"ai_enabled\":false") != std::string::npos);
+    CHECK(jstr(ra.body, "md").find("AI 未启用") != std::string::npos);
+    CHECK(jstr(ra.body, "md").find("## 总结") == std::string::npos);
+    // 定案③：导出留痕（谁/何时/哪个群/区间/条数/是否含 AI 总结；不新表）
+    const auto export_rows = [&]() {
+      std::vector<memex::server::AuditReadRow> v;
+      for (const auto& a : store.audit_reads(200)) {
+        if (a.action == "group_record_export") v.push_back(a);
+      }
+      return v;
+    };
+    {
+      const auto rows = export_rows();
+      CHECK(rows.size() == 2);
+      bool saw_ai = false, saw_plain = false;
+      for (const auto& a : rows) {
+        CHECK(a.op_account == "member1" || a.op_account == "admin1");
+        CHECK(a.filters.find("\"gid\":" + g2s) != std::string::npos);
+        CHECK(a.filters.find("\"from_ms\":" + from) != std::string::npos);
+        CHECK(a.filters.find("\"to_ms\":" + to) != std::string::npos);
+        CHECK(a.result_count == 5);
+        CHECK(a.ts_ms > 0);
+        if (a.filters.find("\"with_ai\":true") != std::string::npos) {
+          saw_ai = true;
+        } else {
+          saw_plain = true;
+        }
+      }
+      CHECK(saw_ai && saw_plain); // AI 标记可查（定案③）
+    }
+    // 分页：升序页序无重无漏（keyset 游标续传；续页不带三段头）
+    const auto fetch_page = [&](const std::string& acct, int page_size,
+                                int fetched, int cap, std::int64_t after_id) {
+      return http(port, "GET",
+                  exp + "&page_size=" + std::to_string(page_size) +
+                      "&cap=" + std::to_string(cap) + "&fetched=" +
+                          std::to_string(fetched) + "&after_id=" +
+                          std::to_string(after_id),
+                  H(acct.c_str()), "");
+    };
+    const auto p1 = fetch_page("member1", 2, 0, 10000, 0);
+    CHECK(p1.status == 200);
+    CHECK(jint(p1.body, "count") == 2);
+    CHECK(p1.body.find("\"has_more\":true") != std::string::npos);
+    const std::string md_a = jstr(p1.body, "md");
+    CHECK(md_a.find("## 参与人") != std::string::npos);
+    CHECK(md_a.find("第一条记录") != std::string::npos);
+    CHECK(md_a.find("第二条记录") != std::string::npos);
+    CHECK(md_a.find("第三条记录") == std::string::npos);
+    const std::int64_t nid1 = std::atoll(jstr(p1.body, "next_after_id").c_str());
+    CHECK(nid1 > 0);
+    const auto p2 = fetch_page("member1", 2, 2, 10000, nid1);
+    CHECK(jint(p2.body, "count") == 2);
+    CHECK(p2.body.find("\"has_more\":true") != std::string::npos);
+    const std::string md_b = jstr(p2.body, "md");
+    CHECK(md_b.find("## 参与人") == std::string::npos); // 续页只带聊天记录行
+    CHECK(md_b.find("第三条记录") != std::string::npos);
+    CHECK(md_b.find("第四条记录") != std::string::npos);
+    CHECK(md_b.find("第一条记录") == std::string::npos);
+    const std::int64_t nid2 = std::atoll(jstr(p2.body, "next_after_id").c_str());
+    CHECK(nid2 > nid1);
+    const auto p3 = fetch_page("member1", 2, 4, 10000, nid2);
+    CHECK(jint(p3.body, "count") == 1);
+    CHECK(p3.body.find("\"has_more\":false") != std::string::npos);
+    const std::string md_c = jstr(p3.body, "md");
+    CHECK(md_c.find("第五条记录") != std::string::npos);
+    CHECK(md_c.find("第二条记录") == std::string::npos); // 无重无漏
+    // 截断：单次上限触顶→truncated（客户端据此停止；不静默截尾）
+    const auto t1 = fetch_page("member1", 2, 0, 3, 0);
+    CHECK(jint(t1.body, "count") == 2);
+    CHECK(t1.body.find("\"has_more\":true") != std::string::npos);
+    const std::int64_t tnid = std::atoll(jstr(t1.body, "next_after_id").c_str());
+    const auto t2 = fetch_page("member1", 2, 2, 3, tnid);
+    CHECK(jint(t2.body, "count") == 1);
+    CHECK(t2.body.find("\"truncated\":true") != std::string::npos);
+    CHECK(t2.body.find("\"has_more\":false") != std::string::npos);
+    CHECK(export_rows().size() == 4); // 两次单页＋两次分页导出各一行
+    // 退群即失权：同请求 403（不参与审计）
+    CHECK(store.group_leave(g2, "member1"));
+    CHECK(http(port, "GET", exp, H("member1"), "").status == 403);
+    CHECK(export_rows().size() == 4);
+    CHECK(store.group_members_detail(g2).size() == 2); // 退群即摘行
+    // 归档只读：导出前后逐位一致（R3 副本口径）
+    CHECK(archive_snap() == before);
+  }
+
 
   // —— R25-4 工具凭据面：服务端静态加密（AES-256-GCM，主密钥 SHA-256
   //     派生）、掩码元数据（回包绝不回显 value/sealed_hex）、未配主密钥

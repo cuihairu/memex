@@ -2489,7 +2489,9 @@ std::vector<ArchivedMessage> ServerStore::search_messages(
     }
     sql += ") AS score";
   }
-  sql += " FROM messages WHERE 1=1";
+  // row_id＝messages 自增主键（keyset 游标，群组-2 导出分页）；附加在 score
+  // 之后，既有消费方按索引取 score(7) 不受影响。
+  sql += ", id AS row_id FROM messages WHERE 1=1";
   if (!q.account.empty()) {
     // 收发双侧 ＋ 该账号所在群的群消息（to="group:<群号>"）
     sql += " AND (from_account = ? OR to_account = ? OR to_account IN"
@@ -2530,8 +2532,12 @@ std::vector<ArchivedMessage> ServerStore::search_messages(
   }
   if (q.since_ms > 0) sql += " AND ts_ms >= ?";
   if (q.until_ms > 0) sql += " AND ts_ms <= ?";
+  // keyset 游标（群组-2）：升序分页续传——AND id > ?（主键单调≈时序，无重无漏）。
+  if (q.asc && q.after_id > 0) sql += " AND id > ?";
   if (has_kw) {
     sql += " ORDER BY score DESC, ts_ms DESC, id DESC LIMIT ?;";
+  } else if (q.asc) {
+    sql += " ORDER BY id ASC LIMIT ?;";
   } else {
     sql += " ORDER BY id DESC LIMIT ?;";
   }
@@ -2568,6 +2574,7 @@ std::vector<ArchivedMessage> ServerStore::search_messages(
   }
   if (q.since_ms > 0) sqlite3_bind_int64(st, idx++, q.since_ms);
   if (q.until_ms > 0) sqlite3_bind_int64(st, idx++, q.until_ms);
+  if (q.asc && q.after_id > 0) sqlite3_bind_int64(st, idx++, q.after_id);
   sqlite3_bind_int(st, idx, q.limit);
   while (sqlite3_step(st) == SQLITE_ROW) {
     ArchivedMessage m;
@@ -2580,6 +2587,8 @@ std::vector<ArchivedMessage> ServerStore::search_messages(
     m.text = text_ptr ? text_ptr : "";
     m.ts_ms = sqlite3_column_int64(st, 5);
     m.recalled = sqlite3_column_int(st, 6) != 0;
+    // row_id 附加在 score 之后：无关键词在列 7、有关键词在列 8（score 仍占 7）。
+    m.row_id = sqlite3_column_int64(st, has_kw ? 8 : 7);
     if (has_kw) m.score = sqlite3_column_int64(st, 7);
     out.push_back(std::move(m));
   }
@@ -3862,6 +3871,29 @@ std::vector<std::string> ServerStore::group_members(std::uint64_t group_id) {
   return out;
 }
 
+// 群成员明细（群组-2 导出「参与人」段）：account＋role＋joined_ms。
+std::vector<GroupMemberRow> ServerStore::group_members_detail(
+    std::uint64_t group_id) {
+  std::vector<GroupMemberRow> out;
+  const char* sql =
+      "SELECT account, role, joined_ms FROM group_members WHERE group_id = ?"
+      " ORDER BY joined_ms ASC, account ASC;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
+  sqlite3_bind_int64(st, 1, static_cast<sqlite3_int64>(group_id));
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    GroupMemberRow row;
+    const char* a = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    const char* r = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    if (a) row.account = a;
+    if (r) row.role = r;
+    row.joined_ms = sqlite3_column_int64(st, 2);
+    out.push_back(std::move(row));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
 // —— 平台-12 群能力开关（权限模型「群能力管理员配全」）——
 
 const std::vector<std::string>& ServerStore::group_capability_names() {
@@ -4913,7 +4945,7 @@ std::optional<ServerStore::SeatRow> ServerStore::seat_of(
 
 std::optional<GroupInfo> ServerStore::group_info(std::uint64_t group_id) {
   const char* sql =
-      "SELECT group_id, name, owner, announcement, topic, purpose"
+      "SELECT group_id, name, owner, announcement, topic, purpose, created_ms"
       " FROM groups WHERE group_id = ?;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
@@ -4933,6 +4965,7 @@ std::optional<GroupInfo> ServerStore::group_info(std::uint64_t group_id) {
     g.announcement = text_of(3);
     g.topic = text_of(4);
     g.purpose = text_of(5);
+    g.created_ms = sqlite3_column_int64(st, 6);
     g.members = group_members(group_id);
     out = std::move(g);
   }
@@ -4943,7 +4976,7 @@ std::optional<GroupInfo> ServerStore::group_info(std::uint64_t group_id) {
 std::vector<GroupInfo> ServerStore::groups_list() {
   std::vector<GroupInfo> out;
   const char* sql =
-      "SELECT group_id, name, owner, announcement, topic, purpose"
+      "SELECT group_id, name, owner, announcement, topic, purpose, created_ms"
       " FROM groups ORDER BY group_id;";
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
@@ -4959,6 +4992,7 @@ std::vector<GroupInfo> ServerStore::groups_list() {
     g.announcement = text_of(3);
     g.topic = text_of(4);
     g.purpose = text_of(5);
+    g.created_ms = sqlite3_column_int64(st, 6);
     g.members = group_members(g.group_id); // 含群主
     out.push_back(std::move(g));
   }

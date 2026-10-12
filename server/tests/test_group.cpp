@@ -334,6 +334,94 @@ int main() {
     std::remove(legacy_db.c_str());
   }
 
+  // —— 群组-2 群记录导出数据面：group_members_detail（参与人＝成员＋角色＋
+  //     加入时间；群主身份在 groups.owner 不在此列）、search_messages 升序
+  //     分页（asc＋after_id keyset 游标＝无重无漏；默认倒序口径不变）、
+  //     ArchivedMessage.row_id＝messages.id（附加字段，既有消费方默认 0） ——
+  {
+    memex::server::ServerStore s;
+    CHECK(s.open(":memory:"));
+    for (const char* a : {"alice", "bob", "carol"}) {
+      CHECK(s.create_account(a, "pw", a));
+    }
+    const auto gid = s.create_group("导出群", "alice", {"bob", "carol"});
+    CHECK(gid > 0);
+    CHECK(s.group_set_role(gid, "bob", "admin"));
+    CHECK(s.group_members_detail(99999).empty()); // 幽灵群＝空
+    const auto parts = s.group_members_detail(gid);
+    CHECK(parts.size() == 3);
+    bool saw_admin = false, saw_member = false;
+    for (const auto& p : parts) {
+      if (p.joined_ms <= 0) CHECK(false); // 加入时间必有值
+      if (p.account == "bob") {
+        saw_admin = true;
+        CHECK(p.role == "admin");
+      }
+      if (p.account == "carol") {
+        saw_member = true;
+        CHECK(p.role == "member");
+      }
+    }
+    CHECK(saw_admin && saw_member);
+    // 群主身份在 groups.owner（role 列默认 member——导出面按 owner 现查映射）
+    bool saw_owner = false;
+    for (const auto& p : parts) {
+      if (p.account == "alice") {
+        saw_owner = true;
+        CHECK(p.role == "member");
+      }
+    }
+    CHECK(saw_owner && s.group_info(gid)->owner == "alice");
+    // 退群即摘行（参与人段随之不含退出者）
+    CHECK(s.group_leave(gid, "carol"));
+    CHECK(s.group_members_detail(gid).size() == 2);
+
+    const std::string peer = "group:" + std::to_string(gid);
+    for (int i = 1; i <= 5; ++i) {
+      CHECK(s.store_message("grp-" + std::to_string(i), "alice", peer, 1,
+                            "第" + std::to_string(i) + "条",
+                            1700000000000 + i));
+    }
+    // 倒序口径不变＋附加字段 row_id＝messages.id（单调≈时序）
+    memex::server::MessageSearch desc;
+    desc.account = "alice";
+    desc.peer = peer;
+    desc.limit = 200;
+    const auto d = s.search_messages(desc);
+    CHECK(d.size() == 5);
+    CHECK(d.front().row_id > 0);
+    CHECK(d.front().row_id > d.back().row_id);
+    // 升序分页：asc＋after_id keyset 游标，逐页无重无漏
+    memex::server::MessageSearch asc;
+    asc.account = "alice";
+    asc.peer = peer;
+    asc.asc = true;
+    asc.limit = 2;
+    const auto p1 = s.search_messages(asc);
+    CHECK(p1.size() == 2 && p1.front().text == "第1条");
+    memex::server::MessageSearch asc2 = asc;
+    asc2.after_id = p1.back().row_id;
+    const auto p2 = s.search_messages(asc2);
+    CHECK(p2.size() == 2 && p2.front().text == "第3条");
+    memex::server::MessageSearch asc3 = asc2;
+    asc3.after_id = p2.back().row_id;
+    const auto p3 = s.search_messages(asc3);
+    CHECK(p3.size() == 1 && p3.front().text == "第5条");
+    // 时间窗（含端点）与成员资格同源：非成员视角 peer=group 联不上＝空结果
+    memex::server::MessageSearch win = asc;
+    win.since_ms = 1700000000002;
+    win.until_ms = 1700000000003;
+    win.limit = 200;
+    CHECK(s.search_messages(win).size() == 2);
+    CHECK(s.create_account("eve", "pw", "eve"));
+    memex::server::MessageSearch outsider = asc;
+    outsider.account = "eve";
+    outsider.limit = 200;
+    CHECK(s.search_messages(outsider).empty());
+    s.close();
+  }
+
+
   // —— 协议级：建群→扇出投递→归档→检索→补投→越权拒绝 ——
   {
     memex::server::ServerStore s;

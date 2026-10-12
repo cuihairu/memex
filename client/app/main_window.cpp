@@ -11,6 +11,8 @@
 #include <QCursor>
 #include <QDateTime>
 #include <QDateEdit>
+#include <QDateTimeEdit>
+#include <QCheckBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -2392,6 +2394,7 @@ void MainWindow::show_group_menu(const QPoint& pos) {
     auto* act_vault = menu.addAction(QStringLiteral("群密码箱…"));
     auto* act_ci = menu.addAction(QStringLiteral("CI/CD 流水线…"));
     auto* act_pack = menu.addAction(QStringLiteral("打包与导出…"));
+    auto* act_record = menu.addAction(QStringLiteral("导出群记录…"));
     auto* act_server = menu.addAction(QStringLiteral("服务器…"));
     menu.addSeparator();
     auto* act_leave = menu.addAction(QStringLiteral("退出群聊"));
@@ -2451,6 +2454,8 @@ void MainWindow::show_group_menu(const QPoint& pos) {
       group_pack_->raise();
       group_pack_->activateWindow();
     });
+    connect(act_record, &QAction::triggered, this,
+            [this, gid] { group_record_export_dialog(gid); });
     connect(act_server, &QAction::triggered, this, [this, gid] {
       // R26-2 群服务器面板：独立文件面会话窗口（懒建复用，换群重拉）
       const auto it = groups_.find(gid);
@@ -2570,6 +2575,171 @@ void MainWindow::group_profile_dialog(quint64 group_id) {
   collab_engine_.set_group_profile(group_id, topic->text().trimmed(),
                                    purpose->toPlainText().trimmed());
   show_status(QStringLiteral("群资料设置请求已发送（群主/管理员可设）"));
+}
+
+// 群组-2 群记录导出（定案②全员：本群成员即可导，服务端判权；定案③留痕：
+// 服务端一次导出落 audit_reads 一行；定案④ Markdown .md）：区间＋AI 档两
+// 选项→逐页拉取（keyset 游标续传、可中断、触顶 truncated 不静默截尾）→
+// 拼接后存 .md（含「AI 未启用」降级注明——模型未接线）。
+void MainWindow::group_record_export_dialog(quint64 group_id) {
+  const auto it = groups_.find(group_id);
+  if (it == groups_.end()) return;
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("导出群记录（群 %1）").arg(group_id));
+  dlg.resize(480, 240);
+  auto* form = new QFormLayout(&dlg);
+  auto* from_edit =
+      new QDateTimeEdit(QDateTime::currentDateTime().addDays(-7), &dlg);
+  from_edit->setCalendarPopup(true);
+  from_edit->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+  form->addRow(QStringLiteral("起始时间（含）"), from_edit);
+  auto* to_edit = new QDateTimeEdit(QDateTime::currentDateTime(), &dlg);
+  to_edit->setCalendarPopup(true);
+  to_edit->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+  form->addRow(QStringLiteral("截止时间（含）"), to_edit);
+  auto* cb_ai = new QCheckBox(
+      QStringLiteral("生成 AI 总结（未接线则自动降级为普通文档）"), &dlg);
+  form->addRow(QStringLiteral("总结档"), cb_ai);
+  auto* progress = new QLabel(QStringLiteral("尚未导出"), &dlg);
+  form->addRow(QStringLiteral("进度"), progress);
+  auto* buttons = new QDialogButtonBox(&dlg);
+  auto* btn_start = buttons->addButton(QStringLiteral("开始导出"),
+                                       QDialogButtonBox::ActionRole);
+  auto* btn_save = buttons->addButton(QStringLiteral("保存为 Markdown…"),
+                                      QDialogButtonBox::ActionRole);
+  auto* btn_close =
+      buttons->addButton(QStringLiteral("关闭"), QDialogButtonBox::RejectRole);
+  btn_save->setEnabled(false);
+  form->addRow(buttons);
+
+  // 导出会话状态（逐页累积；随对话框销毁自动作废）
+  struct ExportState {
+    quint64 gid = 0;
+    qint64 from_ms = 0;
+    qint64 to_ms = 0;
+    bool with_ai = false;
+    qint64 fetched = 0;
+    qint64 after_id = 0;
+    int pages = 0;
+    QString md;
+  };
+  QSharedPointer<ExportState> st(new ExportState());
+
+  auto finish = [&](const QString& msg, bool can_save) {
+    progress->setText(msg);
+    btn_start->setEnabled(true);
+    btn_save->setEnabled(can_save);
+  };
+  auto begin_export = [&]() {
+    progress->setText(QStringLiteral("导出中…（第 1 页）"));
+    files_client()->group_record_export(st->gid, st->from_ms, st->to_ms,
+                                       st->with_ai, 0, 0);
+  };
+  auto start = [&]() {
+    btn_start->setEnabled(false);
+    btn_save->setEnabled(false);
+    st->gid = group_id;
+    st->from_ms = from_edit->dateTime().toMSecsSinceEpoch();
+    st->to_ms = to_edit->dateTime().toMSecsSinceEpoch();
+    st->with_ai = cb_ai->isChecked();
+    st->fetched = 0;
+    st->after_id = 0;
+    st->pages = 0;
+    st->md.clear();
+    if (!files_ensure_login()) {
+      finish(QStringLiteral("文件面未连接（files_port 未配置或协作未登录）"),
+             false);
+      return;
+    }
+    if (!files_client()->is_logged_in()) {
+      progress->setText(QStringLiteral("文件面连接中…"));
+      // 异步登录：logged_in 到后开拉（SingleShot＝一次导出只触发一次）
+      QObject::connect(files_client(), &FilesClient::logged_in, &dlg,
+                       [&]() { begin_export(); }, Qt::SingleShotConnection);
+      QObject::connect(files_client(), &FilesClient::login_failed, &dlg,
+                       [this, &dlg, finish](const QString& err) {
+                         finish(QStringLiteral("文件面登录失败：%1").arg(err),
+                                false);
+                       });
+      return;
+    }
+    begin_export();
+  };
+  auto save = [&]() {
+    const QString suggested = QStringLiteral("group-%1-record.md").arg(st->gid);
+    const QString path = QFileDialog::getSaveFileName(
+        &dlg, QStringLiteral("保存群记录"), suggested,
+        QStringLiteral("Markdown（.md）;;所有文件"));
+    if (path.isEmpty()) return;
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+      show_status(QStringLiteral("保存失败：%1").arg(path));
+      return;
+    }
+    f.write(st->md.toUtf8());
+    f.close();
+    show_status(QStringLiteral("群记录已保存（%1）").arg(path));
+  };
+
+  QObject::connect(btn_start, &QPushButton::clicked, &dlg,
+                   [&]() { start(); });
+  QObject::connect(btn_save, &QPushButton::clicked, &dlg, [&]() { save(); });
+  QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg,
+                   &QDialog::reject);
+  // 单页回包：拼 md＋续页（游标续传；触顶 truncated 即收尾，不静默截尾）
+  QObject::connect(files_client(), &FilesClient::group_record_export_page, &dlg,
+                   [this, &dlg, st, progress, &finish, &save](
+                       const QJsonObject& page) {
+                     if (page.value(QStringLiteral("gid")).toVariant().toULongLong() !=
+                         st->gid) {
+                       return; // 其他群的回执不接
+                     }
+                     const QString md =
+                         page.value(QStringLiteral("md")).toString();
+                     st->md += md;
+                     st->pages += 1;
+                     st->fetched += page.value(QStringLiteral("count")).toInt();
+                     const bool has_more =
+                         page.value(QStringLiteral("has_more")).toBool();
+                     const bool truncated =
+                         page.value(QStringLiteral("truncated")).toBool();
+                     const qint64 next_id =
+                         page.value(QStringLiteral("next_after_id"))
+                             .toVariant()
+                             .toLongLong();
+                     if (has_more && !truncated && next_id > 0) {
+                       progress->setText(
+                           QStringLiteral("导出中…（第 %1 页，已 %2 条）")
+                               .arg(st->pages + 1)
+                               .arg(st->fetched));
+                       files_client()->group_record_export(
+                           st->gid, st->from_ms, st->to_ms, st->with_ai,
+                           next_id, st->fetched);
+                       return;
+                     }
+                     QString msg = QStringLiteral("导出完成（%1 页 %2 条）")
+                                       .arg(st->pages)
+                                       .arg(st->fetched);
+                     if (truncated) {
+                       msg += QStringLiteral("（已达单次上限，尾部 truncated 标"
+                                            "注；续传用 after_id=%1）")
+                                    .arg(next_id);
+                     }
+                     finish(msg, true);
+                     if (st->with_ai &&
+                         !page.value(QStringLiteral("ai_enabled")).toBool()) {
+                       // 降级口径：AI 未接线＝普通文档＋「AI 未启用」注明
+                       show_status(QStringLiteral(
+                           "AI 未启用：已导出为普通文档（模型未接线/网关不可达"
+                           "自动降级）"));
+                     }
+                     save();
+                   });
+  QObject::connect(files_client(), &FilesClient::group_record_export_failed,
+                   &dlg, [&dlg, st, finish](const QString& err) {
+                     finish(QStringLiteral("导出失败：%1").arg(err), false);
+                   });
+  dlg.exec();
 }
 
 // 公告编辑历史（R24-1）：请求后等专用回执（超时兜底），倒序列出

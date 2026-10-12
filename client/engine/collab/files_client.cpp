@@ -476,6 +476,33 @@ void FilesClient::group_export(quint64 gid) {
             });
 }
 
+void FilesClient::group_record_export(quint64 gid, qint64 from_ms,
+                                      qint64 to_ms, bool with_ai,
+                                      qint64 after_id, qint64 fetched,
+                                      int page_size, int cap) {
+  const QString url =
+      QStringLiteral(
+          "/files/group-record-export?gid=%1&from=%2&to=%3&with_ai=%4"
+          "&page_size=%5&cap=%6&fetched=%7&after_id=%8")
+          .arg(gid)
+          .arg(from_ms)
+          .arg(to_ms)
+          .arg(with_ai ? 1 : 0)
+          .arg(page_size)
+          .arg(cap)
+          .arg(fetched)
+          .arg(after_id);
+  send_json(QStringLiteral("group-record.export"), QStringLiteral("GET"), url,
+            {},
+            [this](bool ok, int, const QJsonObject& resp, const QString& err) {
+              if (!ok) {
+                emit group_record_export_failed(err);
+                return;
+              }
+              emit group_record_export_page(resp);
+            });
+}
+
 // —— R25-4 工具凭据面（value 只此一次出门；服务端回包不回显）——
 
 void FilesClient::tool_cred_set(quint64 gid, const QString& tool,

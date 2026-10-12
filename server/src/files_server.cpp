@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <chrono>
+#include <ctime>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
@@ -1105,6 +1106,11 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     if (path_ == "/files/group-export" && method_ == "GET") {
       return route_group_export();
+    }
+    // 群组-2 群记录导出（Markdown 三段：参与人/时间范围/聊天记录；
+    // 判权＝本群成员，非群成员 403；一次导出落 audit_reads 一行）
+    if (path_ == "/files/group-record-export" && method_ == "GET") {
+      return route_group_record_export();
     }
     // R25-4 凭据面：写/删凭据（管理面 memo:config；回包绝不回显 value）
     // 与掩码元数据列表（客户端零凭据——明文只在服务端代理内存内）
@@ -5153,6 +5159,168 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     std::cout << "[MEMEX] files group-export account=" << account
               << " gid=" << gid << std::endl;
     respond_json(200, {{"ok", true}, {"gid", gid}, {"snapshot", snapshot}});
+  }
+
+  // 群组-2 群记录导出（定案④ Markdown .md；定案② 全员＝本群成员；
+  // 定案③ 一次导出落 audit_reads 恰一行）：
+  //   GET /files/group-record-export?gid&from&to&with_ai&page_size&cap&fetched&after_id
+  // 首页（after_id=0）组装三段头＋聊天记录行；续页仅聊天记录行（客户端拼接）。
+  // 权限定案②：导出者须为本群成员（group_members 现查），非群成员 403——
+  // 路由层判权（与 search_messages 的成员资格子查询同源，退群天然失权）。
+  // 归档只读：本路由对 messages 只 SELECT，不写不动（R3 副本口径）。
+  void route_group_record_export() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::uint64_t gid = 0;
+    if (!parse_gid_param(query_param(query_, "gid"), &gid)) {
+      respond_json(400, {{"ok", false}, {"error", "gid 须为正整数群号"}});
+      return;
+    }
+    const auto info = impl_.store.group_info(gid);
+    if (!info.has_value()) {
+      respond_json(404, {{"ok", false}, {"error", "群不存在"}});
+      return;
+    }
+    // 定案②判权：全员＝本群成员（路由层 az；非群成员一律不可导）
+    if (!impl_.store.is_group_member(gid, account)) {
+      respond_json(
+          403, {{"ok", false}, {"error", "无权导出（非本群成员）"}});
+      return;
+    }
+    auto ms_param = [](const std::string& s, std::int64_t* out) {
+      if (s.empty()) return false;
+      if (s.find_first_not_of("0123456789") != std::string::npos) return false;
+      *out = std::strtoll(s.c_str(), nullptr, 10);
+      return true;
+    };
+    std::int64_t from_ms = 0, to_ms = 0;
+    ms_param(query_param(query_, "from"), &from_ms);
+    ms_param(query_param(query_, "to"), &to_ms);
+    const bool with_ai = query_param(query_, "with_ai") == "1";
+    int page_size = 1000;
+    std::int64_t ps = 0;
+    if (ms_param(query_param(query_, "page_size"), &ps) && ps > 0) {
+      page_size = ps > 1000 ? 1000 : static_cast<int>(ps);
+    }
+    std::int64_t cap = 10000;
+    std::int64_t cp = 0;
+    if (ms_param(query_param(query_, "cap"), &cp) && cp > 0) {
+      cap = cp > 10000 ? 10000 : cp;
+    }
+    std::int64_t fetched = 0;
+    ms_param(query_param(query_, "fetched"), &fetched);
+    std::int64_t after_id = 0;
+    ms_param(query_param(query_, "after_id"), &after_id);
+    const bool first_page = after_id == 0;
+
+    // 单次上限截断：剩余额度即本页上限（不静默截尾——尾部 truncated 标注）
+    std::int64_t remaining = cap - fetched;
+    if (remaining <= 0) {
+      respond_json(200, {{"ok", true},
+                         {"gid", gid},
+                         {"md", ""},
+                         {"count", 0},
+                         {"has_more", false},
+                         {"next_after_id", 0},
+                         {"truncated", true},
+                         {"ai_enabled", false}});
+      return;
+    }
+    const int limit_used =
+        static_cast<int>(remaining < page_size ? remaining : page_size);
+
+    MessageSearch q;
+    q.account = account;
+    q.peer = "group:" + std::to_string(gid);
+    q.since_ms = from_ms;
+    q.until_ms = to_ms;
+    q.limit = limit_used;
+    q.asc = true;           // 升序＝对话体自然序
+    q.after_id = after_id;  // keyset 游标续传
+    const auto rows = impl_.store.search_messages(q);
+
+    // 首页三段头（续页仅聊天记录行，客户端逐页拼接）
+    std::string md;
+    if (first_page) {
+      const auto fmt_ms = [](std::int64_t ts) -> std::string {
+        if (ts <= 0) return "不限";
+        std::time_t t = static_cast<std::time_t>(ts / 1000);
+        std::tm tmv{};
+        localtime_r(&t, &tmv);
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmv);
+        return buf;
+      };
+      md += "# 群记录：" + info->name + "（群号 " + std::to_string(gid) +
+             "）\n\n";
+      md += "> 导出者：" + account + "　导出时间：" + fmt_ms(now_ms()) + "\n\n";
+      md += "## 参与人\n";
+      for (const auto& m : impl_.store.group_members_detail(gid)) {
+        // 群主身份在 groups.owner（不在 group_members.role 列）——
+        // 明细行的 role 列默认为 member，此处按群主现查映射。
+        const std::string role =
+            (info->owner == m.account) ? "owner" : m.role;
+        md += "- " + m.account + "（" + role + "）加入于 " +
+               fmt_ms(m.joined_ms) + "\n";
+      }
+      md += "> 离开时间不含：退群即摘行，现库不留痕。\n\n";
+      md += "## 时间范围\n";
+      md += "- 建群时间：" + fmt_ms(info->created_ms) + "\n";
+      md += "- 导出区间：" + fmt_ms(from_ms) + " ~ " + fmt_ms(to_ms) + "\n\n";
+      if (with_ai) {
+        // 定案③降级口径：模型未接线（R11 三期）→ 普通文档＋「AI 未启用」
+        // 注明；不许假装有总结、不许空总结章节占位。
+        md += "> AI 未启用：本次导出为普通文档（模型未接线/网关不可达自动降"
+              "级）。\n\n";
+      }
+      md += "## 聊天记录\n";
+    }
+    for (const auto& m : rows) {
+      std::time_t t = static_cast<std::time_t>(m.ts_ms / 1000);
+      std::tm tmv{};
+      localtime_r(&t, &tmv);
+      char buf[32];
+      std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmv);
+      md += "[";
+      md += buf;
+      md += "] ";
+      md += m.from_account;
+      if (m.recalled) md += "（撤回）: ";
+      else md += ": ";
+      md += m.text;
+      md += "\n";
+    }
+
+    const bool reached_cap = fetched + static_cast<std::int64_t>(rows.size()) >= cap;
+    const bool has_more = !rows.empty() && rows.size() == static_cast<std::size_t>(limit_used) && !reached_cap;
+    // 定案③：一次导出恰一行审计——导出收尾页（无更多或触顶）落
+    // audit_reads（谁/何时/哪个群/区间/条数/是否含 AI 总结；filters 不含正文）。
+    // first_page 兜底：单页装完（无更多）时首页即收尾，只此一页落行——
+    // 客户端在 has_more=false 时不再发请求，杜绝同一导出重复落行。
+    if (!has_more || reached_cap) {
+      const std::int64_t total = fetched + static_cast<std::int64_t>(rows.size());
+      json filters = {{"gid", gid},
+                      {"from_ms", from_ms},
+                      {"to_ms", to_ms},
+                      {"with_ai", with_ai}};
+      impl_.store.add_audit_read({0, account, "group_record_export",
+                                  filters.dump(), static_cast<int>(total),
+                                  now_ms()});
+      std::cout << "[MEMEX] files group-record-export account=" << account
+                << " gid=" << gid << " rows=" << total
+                << (with_ai ? " ai_requested=1" : "") << std::endl;
+    }
+    respond_json(200, {{"ok", true},
+                       {"gid", gid},
+                       {"md", md},
+                       {"count", static_cast<int>(rows.size())},
+                       {"has_more", has_more},
+                       {"next_after_id",
+                        has_more && !rows.empty()
+                            ? static_cast<std::int64_t>(rows.back().row_id)
+                            : 0},
+                       {"truncated", reached_cap},
+                       {"ai_enabled", false}});
   }
 
   // —— R25-4 凭据面：工具外部凭据只存服务端密文（gcm_seal hex 落库，
