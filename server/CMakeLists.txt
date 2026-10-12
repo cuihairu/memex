@@ -228,4 +228,11 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_s3_e2e PRIVATE memex_server_core)
   add_test(NAME s3_e2e COMMAND test_s3_e2e)
   set_tests_properties(s3_e2e PROPERTIES TIMEOUT 300)
+
+  # 评审 P0-3 files verify 一致性核对（内存假存储）：全一致/缺对象/大小
+  # 不符/孤儿告警不判死/隔离过期行引用面/空 object_key 行跳过
+  add_executable(test_files_verify tests/test_files_verify.cpp)
+  target_link_libraries(test_files_verify PRIVATE memex_server_core)
+  add_test(NAME files_verify COMMAND test_files_verify)
+  set_tests_properties(files_verify PROPERTIES TIMEOUT 60)
 endif()

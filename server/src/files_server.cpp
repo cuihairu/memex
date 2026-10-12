@@ -9,6 +9,7 @@
 #include <iostream>
 #include <map>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <unordered_map>
 
@@ -6121,6 +6122,33 @@ void FileServer::do_accept() {
         std::make_shared<FileConn>(std::move(socket), *impl_)->start();
         do_accept();
       });
+}
+
+FilesVerifyReport verify_file_objects(ServerStore& store, S3Storage& storage) {
+  FilesVerifyReport rep;
+  std::set<std::string> referenced;
+  const auto rows = store.list_files("", "", 1000000, 0, -1);
+  for (const auto& m : rows) {
+    if (m.object_key.empty()) continue; // 无字节面行不核（不入对象存储）
+    referenced.insert(m.object_key);    // 引用面含全部状态行（隔离/过期同算）
+    if (m.status != ServerStore::FileStatus::Normal) continue;
+    ++rep.checked;
+    std::int64_t size = 0;
+    if (!storage.head_object(m.object_key, &size)) {
+      rep.missing.push_back(m.object_key); // 元数据在、对象缺＝不一致
+      continue;
+    }
+    if (size != m.file_size) {
+      rep.mismatches.push_back({m.object_key, m.file_size, size});
+    }
+  }
+  for (const auto& key : storage.list_objects("", 1000000)) {
+    ++rep.objects;
+    if (referenced.find(key) == referenced.end()) {
+      rep.orphans.push_back(key); // 对象在、无元数据引用＝孤儿（告警不判死）
+    }
+  }
+  return rep;
 }
 
 } // namespace memex::server

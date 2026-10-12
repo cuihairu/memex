@@ -2681,6 +2681,82 @@ int cmd_group(int argc, char** argv, const std::string& db_path) {
   return 2;
 }
 
+// 评审 P0-3（todo 452）：对象存储字节面一致性核对——R23 文件元数据 ↔
+// 对象字节双面核对。备份恢复预案（docs/src/guide/backup-restore.md）的
+// 恢复后核对工具；只读不改（孤儿清理属运维决策，工具不代删）。
+int cmd_files(int argc, char** argv, const std::string& db_path) {
+  if (argc < 1 || std::string_view(argv[0]) != "verify") {
+    std::cerr << "用法：files verify [--s3-endpoint E --s3-bucket B "
+                 "--s3-access-key A --s3-secret-key K] [--s3-region R]"
+                 " [--s3-use-ssl]\n"
+              << "  核对 R23 文件元数据 ↔ 对象字节：缺对象/大小不符→"
+                 "退出码 1；孤儿对象只告警\n"
+              << "  S3 旗标缺省回落环境变量 MEMEX_S3_ENDPOINT/MEMEX_S3_BUCKET"
+                 "/MEMEX_S3_ACCESS_KEY/MEMEX_S3_SECRET_KEY（与 serve 同族）\n";
+    return 2;
+  }
+  memex::server::S3Config s3;
+  s3.path_style = true;
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view opt = argv[i];
+    if (opt == "--s3-endpoint" && i + 1 < argc) s3.endpoint = argv[++i];
+    else if (opt == "--s3-bucket" && i + 1 < argc) s3.bucket = argv[++i];
+    else if (opt == "--s3-access-key" && i + 1 < argc) s3.access_key = argv[++i];
+    else if (opt == "--s3-secret-key" && i + 1 < argc) s3.secret_key = argv[++i];
+    else if (opt == "--s3-region" && i + 1 < argc) s3.region = argv[++i];
+    else if (opt == "--s3-use-ssl") s3.use_ssl = true;
+    else {
+      std::cerr << "未知选项：" << opt << "\n";
+      return 2;
+    }
+  }
+  // 环境变量兜底（旗标优先）——与 serve 同族变量名，容器部署密钥走 env
+  const auto env_or = [](const char* name) {
+    const char* v = std::getenv(name);
+    return v != nullptr ? std::string(v) : std::string();
+  };
+  if (s3.endpoint.empty()) s3.endpoint = env_or("MEMEX_S3_ENDPOINT");
+  if (s3.bucket.empty()) s3.bucket = env_or("MEMEX_S3_BUCKET");
+  if (s3.access_key.empty()) s3.access_key = env_or("MEMEX_S3_ACCESS_KEY");
+  if (s3.secret_key.empty()) s3.secret_key = env_or("MEMEX_S3_SECRET_KEY");
+  if (s3.region.empty()) s3.region = "auto";
+  if (s3.endpoint.empty() || s3.bucket.empty() || s3.access_key.empty() ||
+      s3.secret_key.empty()) {
+    std::cerr << "S3 配置不齐（--s3-endpoint/--s3-bucket/--s3-access-key/"
+                 "--s3-secret-key 或对应 MEMEX_S3_* 环境变量）\n";
+    return 2;
+  }
+  memex::server::ServerStore store;
+  if (!store.open(db_path)) {
+    std::cerr << "开库失败：" << db_path << "\n";
+    return 1;
+  }
+  auto storage = memex::server::S3Storage::create(s3);
+  if (!storage) {
+    std::cerr << "对象存储连接失败：" << s3.endpoint << "\n";
+    return 1;
+  }
+  const auto rep = memex::server::verify_file_objects(store, *storage);
+  std::cout << "受检元数据行（normal）：" << rep.checked
+            << "　桶内对象：" << rep.objects << "\n";
+  for (const auto& k : rep.missing) std::cout << "缺对象：" << k << "\n";
+  for (const auto& m : rep.mismatches) {
+    std::cout << "大小不符：" << m.key << " 元数据=" << m.expected
+              << " 实际=" << m.actual << "\n";
+  }
+  for (const auto& k : rep.orphans) {
+    std::cout << "孤儿对象（无元数据引用，仅告警）：" << k << "\n";
+  }
+  if (!rep.missing.empty() || !rep.mismatches.empty()) {
+    std::cout << "不一致：缺 " << rep.missing.size() << " 条、大小不符 "
+              << rep.mismatches.size() << " 条\n";
+    return 1;
+  }
+  std::cout << "一致：元数据与对象字节核对通过（孤儿 " << rep.orphans.size()
+            << " 条）\n";
+  return 0;
+}
+
 // R23-1 RustFS compose 集成面：生成 compose／起停容器／健康检查。
 // 客户端永不直连对象存储——本子命令只管部署编排，不做任何数据面操作。
 int cmd_storage(int argc, char** argv, const std::string& /*db_path*/) {
@@ -2820,6 +2896,7 @@ int main(int argc, char** argv) {
     if (cmd == "model") return cmd_model(sub_argc, sub_argv, db_path);
     if (cmd == "webhook") return cmd_webhook(sub_argc, sub_argv, db_path);
     if (cmd == "storage") return cmd_storage(sub_argc, sub_argv, db_path);
+    if (cmd == "files") return cmd_files(sub_argc, sub_argv, db_path);
     if (cmd == "branding") return cmd_branding(sub_argc, sub_argv, db_path);
     std::cerr << "未知子命令：" << cmd << "\n"
               << "用法：memex_server [serve [--port N] [--webhook-port N] "
@@ -2835,7 +2912,8 @@ int main(int argc, char** argv) {
                  "model endpoint add|list|remove|enable|disable|local | calls | "
                  "assist policy|request|approve|deny|start|end|show|list|audit"
                  " | "
-                 "storage compose|up|down|health | --version | --self-test\n";
+                 "storage compose|up|down|health | files verify | "
+                 "--version | --self-test\n";
     return 2;
   }
   return cmd_serve(0, argv, kDefaultDb);

@@ -50,6 +50,25 @@ struct FileSessions;
 // 建两面共享的会话库句柄（实体私有，FileSession 不外泄）
 std::shared_ptr<FileSessions> make_file_sessions();
 
+// 备份恢复一致性核对（评审 P0-3，todo 452）：R23 文件元数据 ↔ 对象字节
+// 双面核对。status=normal 行逐一 head 对象：缺=missing、大小不符=mismatch
+//（两者都算不一致，退出码 1）；全桶 list 出「无任何元数据行引用」的孤儿
+// 对象（隔离/过期行同样算引用面；孤儿多为「落字节成功→元数据落库前崩溃」
+// 窗口残留，只告警不判死——清理属运维决策，工具不代删）。
+struct FilesVerifyMismatch {
+  std::string key;
+  std::int64_t expected{0}; // 元数据 file_size
+  std::int64_t actual{0};   // 对象实际大小（缺对象场景不走本项）
+};
+struct FilesVerifyReport {
+  std::size_t checked{0};    // 受检 status=normal 行数
+  std::size_t objects{0};    // 桶内对象总数（全前缀 list）
+  std::vector<std::string> missing;            // 元数据在、对象缺
+  std::vector<FilesVerifyMismatch> mismatches; // 大小不符
+  std::vector<std::string> orphans;            // 对象在、无元数据引用
+};
+FilesVerifyReport verify_file_objects(ServerStore& store, S3Storage& storage);
+
 // R23-5 外网面防护参数（只作用于 uplink_mode=true 实例；按「安全默认」
 // 原则：缺省只让危险扩展黑名单生效，其余防护一律显式开启）
 struct UplinkPolicy {

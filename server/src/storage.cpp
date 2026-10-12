@@ -136,18 +136,31 @@ class S3StorageImpl final : public S3Storage {
 
   std::vector<std::string> list_objects(const std::string& prefix,
                                         int max_keys) override {
+    // 服务端单请求上限 1000：要大清单（如 files verify 全桶核对）须按
+    // continuation token 翻页，max_keys 仍是返回总量上限
     std::vector<std::string> keys;
-    Aws::S3::Model::ListObjectsV2Request req;
-    req.SetBucket(cfg_.bucket);
-    req.SetPrefix(prefix);
-    req.SetMaxKeys(max_keys);
-
-    auto outcome = client_->ListObjectsV2(req);
-    if (!outcome.IsSuccess()) {
-      return keys;
+    Aws::String token;
+    for (;;) {
+      Aws::S3::Model::ListObjectsV2Request req;
+      req.SetBucket(cfg_.bucket);
+      req.SetPrefix(prefix);
+      req.SetMaxKeys(1000);
+      if (!token.empty()) req.SetContinuationToken(token);
+      auto outcome = client_->ListObjectsV2(req);
+      if (!outcome.IsSuccess()) {
+        return keys; // 中途失败：返回已取得部分（调用方按短清单处理）
+      }
+      for (const auto& obj : outcome.GetResult().GetContents()) {
+        keys.push_back(obj.GetKey());
+      }
+      if (!outcome.GetResult().GetIsTruncated() ||
+          static_cast<int>(keys.size()) >= max_keys) {
+        break;
+      }
+      token = outcome.GetResult().GetNextContinuationToken();
     }
-    for (const auto& obj : outcome.GetResult().GetContents()) {
-      keys.push_back(obj.GetKey());
+    if (static_cast<int>(keys.size()) > max_keys) {
+      keys.resize(static_cast<std::size_t>(max_keys));
     }
     return keys;
   }
