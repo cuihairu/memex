@@ -159,6 +159,84 @@ cloudflared tunnel list && cloudflared tunnel info <tunnel>
 #    directly — no tunnel in the path.
 ```
 
+**LAN direct connect: domain resolution override.** Default is no override — on the
+public internet the domain resolves through normal DNS into the tunnel. Inside the
+LAN you can pin `server.memex.cuihairu.site` to the real server IP so traffic never
+leaves the segment; pick one of:
+
+- **Client setting (built-in)**: Memex menu 设置 → 连接设置…, fill 域名解析覆盖 as
+  `域名=IP` (`server.memex.cuihairu.site=192.168.5.5`; several entries separated by
+  `;`). The override applies to this machine's connections only and takes precedence
+  over system DNS; clearing the field restores normal resolution.
+- **hosts file**: point the domain at the server IP on each LAN machine —
+  Linux/macOS `/etc/hosts`, Windows `C:\Windows\System32\drivers\etc\hosts`, line:
+  `192.168.5.5  server.memex.cuihairu.site`.
+- **Internal DNS**: a split-horizon A record for the domain pointing at the server's
+  LAN address — zero per-machine setup, needs control over the LAN resolver.
+
+### Domains and access
+
+All names below are **optional**. With none of them configured, everything still
+works — LAN clients connect straight to `<server-host>:<port>`, and an entry
+without a mapping is simply not exposed. Mappings live on the user's Cloudflare
+side (tunnel); this repo does not manage them — it only owns the host-port
+contract each name maps to.
+
+#### server.memex.cuihairu.site — collaboration plane (TCP 8088)
+
+- **Purpose**: public entry for desktop/mobile clients — login, messaging, archive
+  retrieval. TCP through the Cloudflare tunnel to the origin host's **8088**
+  (compose maps host 8088 → container 24360).
+- **Where configured**: user-side Cloudflare tunnel (`… → tcp://<origin-host>:8088`).
+  The repo-side contract is just: publish the collaboration plane on host 8088 and
+  point the origin at the machine actually running `docker compose up`.
+- **Override** (LAN direct connect): client setting 设置 → 连接设置… (`域名=IP`),
+  hosts file, or split-horizon DNS — see "LAN direct connect" above.
+- **Optional**: without it, LAN clients use `<host>:8088` directly; the name only
+  buys public reachability. The deep-dive is the tunnel section above.
+
+#### admin.memex.cuihairu.site — admin web console (HTTP 8089)
+
+- **Purpose**: browser admin console — org, policy, retention, audit export,
+  device/login ledger, health.
+- **Where configured**: user-side tunnel HTTP mapping `… → http://<origin-host>:8089`
+  (repo-side contract: compose publishes 8089; keep it off the open internet or
+  front it with an authenticating proxy — see the console section below).
+- **Override**: browsers have no client-side override — hosts file or internal
+  split DNS; on the LAN, `http://<host>:8089` directly.
+- **Optional**: without it the console stays LAN-only at `http://<host>:8089`.
+
+#### webhook 24361 — no domain today
+
+- **Purpose**: inbound `POST /hook/<token>` notices (automation/bot entry).
+- **Where configured**: nowhere today — no name maps to it. Public exposure needs
+  its own HTTP ingress (user-side; not managed in this repo). The hook token is a
+  bearer secret — prefer LAN-only.
+- **Override**: hosts / split DNS if you ever name it; LAN clients use
+  `<host>:24361` directly.
+- **Optional**: feature surface, not an entry point anyone depends on.
+
+#### file plane 24561 — no domain today
+
+- **Purpose**: `GET/POST /files/*` — files, avatars, branding, group-tool
+  attachments; every client file byte flows through this plane.
+- **Where configured**: nowhere today; clients set the port in the login dialog
+  (文件口) and talk to `<host>:24561`.
+- **Override**: hosts / split DNS if a name is ever wanted; default is LAN direct.
+- **Optional**: required for file features, but as a *port*, not a name. If a
+  public entry is ever needed, this plane — not RustFS — is the right candidate.
+
+#### File sharing and RustFS: why there is no rustfs domain
+
+RustFS (the S3-compatible object store) listens on `http://rustfs:9000` **inside
+the compose network only**. The server is its only client: it holds the S3
+credentials and proxies every object byte for clients (files never go
+client → object store directly). A `rustfs.memex.cuihairu.site` is therefore
+neither needed nor wanted — publishing object storage would only widen the
+attack surface around a credential-bearing endpoint. If remote file access is
+ever required, the candidate for a public name is the **file plane (24561)**
+itself, which stays authenticated and server-mediated.
+
 ### Admin web console (port 8089)
 
 `memex-admin` is an independent Drogon process that opens the same SQLite database as the server (busy-timeout concurrency, same-CLI data plane) and serves the org-management surface on **8089**: accounts & org tree, policy push, retention (dual-approval purge), archived-message search/export + online audit trail, device/login ledger, health. Authorization reuses the server's az engine and role semantics: managing requires the **org-admin** effective role, reading archived messages requires the **auditor** role (an org-admin is *not* automatically able to read messages — denied attempts are logged); sessions time out after 30 minutes of inactivity.
