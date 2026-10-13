@@ -783,9 +783,11 @@ QString ThemeManager::stylesheet_for(const ThemeTokens& tokens) {
       "QTabBar::tab:selected { background: %surface_raised%; color: %text%; "
       "border-bottom: 1px solid %brand%; }\n"
       "QTabWidget::pane { border: 1px solid %border%; }\n"
+      // 铁律：不给 ::indicator 设 border/background/image（drawable）。
+      // QSS 一旦接管 indicator 绘制，勾选框/圆点的勾与点就不再画
+      // （状态仍切换、信号仍发，视觉全空）——勾选框看着"点不动"的根因。
+      // 指示框交回原生样式按调色板（theme.cpp:833 setPalette）绘制。
       "QCheckBox, QRadioButton { color: %text%; spacing: 6px; }\n"
-      "QCheckBox::indicator, QRadioButton::indicator { "
-      "border: 1px solid %border%; background: %input_bg%; }\n"
       "QSplitter::handle { background: %divider%; }\n"
       "QScrollBar:vertical, QScrollBar:horizontal { background: transparent; "
       "margin: 0; }\n"

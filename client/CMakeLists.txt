@@ -463,6 +463,28 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
+  # 勾选框可点性回归（缺陷单 2026-10-13）：真主题 QSS × 逐设置页逐项点击
+  # ——isChecked 翻转＋指示框像素变化双断言；防 ::indicator drawable 规则复活
+  add_executable(test_checkbox_glyph
+    app/tests/test_checkbox_glyph.cpp
+    app/away_settings.cpp
+    app/lock_screen.cpp
+    app/net_remote_settings.cpp
+    app/net_guard.cpp
+    app/theme.cpp
+    app/theme_pack.cpp
+    app/theme_settings_page.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp)
+  target_link_libraries(test_checkbox_glyph PRIVATE
+    memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
+  target_include_directories(test_checkbox_glyph PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME checkbox_glyph COMMAND test_checkbox_glyph)
+  set_tests_properties(checkbox_glyph PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
   # 二期·审批窗口冒烟：真服务端进程 × 离屏 QDialog——连接→member1 发起
   # 请假→直属上级 owner1 待决可见并批准→member1 见终态→新申请撤回。
   # 判权矩阵（自审 403/无权 403/已决 409/白名单外 400）走 test_files_api
