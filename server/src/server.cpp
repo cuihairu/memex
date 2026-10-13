@@ -32,11 +32,48 @@ std::string ctx_value(const std::string& ctx, const std::string& key) {
 } // namespace
 
 CollabServer::CollabServer(asio::io_context& io, ServerStore& store,
-                           std::uint16_t port)
-    : io_(io), store_(store),
+                           std::uint16_t port, LdapDirectory* ldap)
+    : io_(io), store_(store), ldap_(ldap), ldap_sweep_timer_(io),
       acceptor_(io, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port)) {
   setup_file_rules();
   setup_group_rules();
+}
+
+// 544 目录禁用 × 存量会话：复检一轮后重排下一轮（async_wait 链式；
+// 析构随 io_context 停转自然终止，无显式 cancel 面）。
+void CollabServer::start_ldap_sweep() {
+  if (ldap_ == nullptr || !ldap_->config().kick_disabled ||
+      ldap_->config().recheck_seconds <= 0)
+    return;
+  ldap_sweep_timer_.expires_after(
+      std::chrono::seconds(ldap_->config().recheck_seconds));
+  ldap_sweep_timer_.async_wait([this](const std::error_code& ec) {
+    if (ec) return; // 被取消（io 停转）——不再续排
+    ldap_sweep();
+  });
+}
+
+void CollabServer::ldap_sweep() {
+  for (const auto& a : online_accounts()) {
+    const auto b = find_ldap_binding(store_, a);
+    if (!b) continue; // 本地账号不参与目录复检（本地账号常备口径）
+    const auto v = ldap_->check_disabled(b->subject);
+    if (v.outcome == LdapVerdict::Outcome::Disabled) {
+      // KICK 通知＋下线（与单点互踢同一投递面）；online 表由会话读循环
+      // 退出时的 unregister 自然清（与互踢路径一致）
+      for (const auto& s : online_sessions(a))
+        s->kick("目录账号已禁用", "");
+      std::cerr << "[MEMEX] LDAP 复检：账号 " << a
+                << " 目录侧已禁用，存量会话踢下线\n";
+    }
+    // Unavailable（目录不可达）不动会话——宁可不踢不能误伤
+  }
+  ldap_sweep_timer_.expires_after(
+      std::chrono::seconds(ldap_->config().recheck_seconds));
+  ldap_sweep_timer_.async_wait([this](const std::error_code& ec) {
+    if (ec) return;
+    ldap_sweep();
+  });
 }
 
 // 平台-10 直连文件旁路四问（蓝图§十九）：①A 可发？——发送方持有效登录

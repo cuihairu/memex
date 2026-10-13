@@ -13,6 +13,7 @@
 #include <asio.hpp>
 
 #include "authz.hpp"
+#include "ldap.hpp"
 #include "store.hpp"
 
 namespace memex::server {
@@ -22,7 +23,9 @@ class Session;
 class CollabServer {
 public:
   // db 须已 open。port=0 由系统分配（测试用），实际端口经 port() 取。
-  CollabServer(asio::io_context& io, ServerStore& store, std::uint16_t port);
+  // ldap 缺省空＝未配目录（认证全走本地；轻量部署行为与旧版一致）。
+  CollabServer(asio::io_context& io, ServerStore& store, std::uint16_t port,
+               LdapDirectory* ldap = nullptr);
 
   // 开始接受连接（io.run() 前调用一次）。
   void start_accept();
@@ -60,8 +63,20 @@ public:
   // 此注册，Session 的 GROUP_CMD create 处理器调 authorize。
   AuthorizationService& group_az() { return group_az_; }
 
+  // 544 LDAP 企业身份：可空＝未配目录（判登全本地）。
+  LdapDirectory* ldap() { return ldap_; }
+
+  // 544 目录禁用 × 存量会话策略：定时复检在线账号的目录侧禁用态，
+  // affirmative Disabled 才踢（目录不可达不踢——故障不算账，宁可不踢
+  // 不能误伤）。仅服务模式可查（模板模式无凭据自查，ldap 配置层返回
+  // Ok+说明，此循环空转）；间隔=recheck_seconds，0 或 kick_disabled=false
+  // 不启动。io.run() 前调用一次。
+  void start_ldap_sweep();
+
 private:
   void do_accept();
+
+  void ldap_sweep();
 
   void setup_file_rules();
 
@@ -72,6 +87,8 @@ private:
 
   asio::io_context& io_;
   ServerStore& store_;
+  LdapDirectory* ldap_{nullptr};
+  asio::steady_timer ldap_sweep_timer_; // 构造初始化（io_ 之后）
   AuthorizationService file_az_;
   AuthorizationService group_az_;
   asio::ip::tcp::acceptor acceptor_;

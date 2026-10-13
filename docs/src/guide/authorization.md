@@ -64,10 +64,46 @@ resource, context)` 单一入口，三档规则按 **ExplicitDeny > ExplicitAllo
    （文件权限即边界）；唯一例外是检索导出面强制 auditor 凭据并落 `audit_reads`。
 8. **登录前帧静默丢弃**：协作面对未登录帧不返错误帧，无审计留痕（无凭据无从归因）。
 
+## 企业目录认证（LDAP/AD）
+
+todo 544（外部建议三步走第②步；③ OIDC 待明确需求）：可插拔认证后端，不改轻量
+部署与免登录直连的独立信任模型——**不配 `--ldap-host` 零 LDAP 路径**（构造都不
+发生），本地账号（平台-2 口令）常备＝独立内网与应急恢复入口。
+
+红线口径（实现 `server/src/ldap.hpp`/`ldap.cpp`，最小 BER 客户端自写，无 openldap
+依赖）：
+
+| 红线 | 落法 |
+| --- | --- |
+| 目录不可用不绕过认证 | fail-closed：绑定 issuer=ldap 的账号在目录不可达/未配置/配置半齐时一律拒登（`LdapUnavailable`），绝不回落本地口令——回落即绕过目录。错误明示入日志与拒绝原因，不静默降级 |
+| 密码不明文 | 口令只在 bind 报文走一次：不落盘、不进日志/LoginRecord/审计正文（审计只记谁/何时/方式/成败，LDAP 登录成功记 `ok_ldap`）。TLS 三态恰一：`--ldap-ssl`（ldaps 整连接）/`--ldap-starttls`/`--ldap-allow-plain`（默认拒明文，启动校验违者退出码 2）；自签证书 `--ldap-tls-insecure`（启动警告） |
+| 组→角色显式映射 | `--ldap-group-role 组DN=角色名`（可重复；env `MEMEX_LDAP_GROUP_ROLE` 逗号分隔）。映射表外组一律忽略＝普通成员；表为空＝不做任何自动授权；表不含 admin 就永不授管理员——目录管理员组不隐式提权（显式映射含 admin 时启动警告） |
+| 目录禁用 | 新登录直接拒（服务模式绑定前查禁用三元组＝服务权限口径；AD 停用位 `userAccountControl`+规则 `1.2.840.113556.1.4.803`+值 `2`，属性可配）。存量会话：`--ldap-kick-disabled`（默认 1＝踢）＋`--ldap-recheck-seconds`（默认 60s）复检，affirmative Disabled 才踢——目录不可达不误踢 |
+| 首登身份绑定 | identities 表：issuer=`ldap://<host>`，subject=用户 DN（模板模式为转义后绑定 DN）。默认不自动绑定：`--ldap-auto-bind`（已有账号无绑定→目录认证成功即绑）、`--ldap-auto-provision`（账号不存在→建影子账号，本地口令随机不可知＝仅目录可登）都默认关；关闭时只有 `identity bind` CLI 显式绑定的账号走目录判登 |
+| 本地账号常备 | 未绑定 issuer=ldap 的账号走原本地判登（目录零触达，不做任何探测）；目录面故障不影响本地账号与免登录直连 |
+
+绑定路径二选一：模板直绑（`--ldap-bind-dn-template uid={u},ou=...`，OpenLDAP
+常用）或服务账号先查后绑（`--ldap-bind-dn`+口令，AD 常用——DN 拼不出须先定位
+`--ldap-user-base`/`--ldap-user-attr`）。服务账号口令走 env
+`MEMEX_LDAP_BIND_PASSWORD` 注入（不进 shell 历史/ps；配置文件须 0600）。
+
+熔断：一次目录不可达后 30s 冷却 fail-fast（目录挂掉时不让每次登录拖住协作会话
+一个超时时长）。目录不可用判定与组映射口径的完整使用者视角见
+`packaging/ldap.env.example`（带注释示例配置）。
+
+测试：`server/tests/test_ldap.cpp` 16 腿（假目录＝进程内 POSIX 监听，脚本化
+bind/search 应答）：TLS 姿态、服务/模板双模式线上核对、口令错 49、查无此人、
+禁用命中（用户绑定不发生）、不可达＋熔断 fail-fast、DN/过滤器转义、路由矩阵
+（未绑定默认 Local 零触达／绑定→LdapOk／口令错→LdapBad／目录未配→Unavailable）、
+auto_bind/auto_provision 默认关、组未映射零授权、会话级真登录链（成功＋角色
+同步／fail-closed 拒登／禁用拒／本地账号照常）、存量会话踢下线。LDAP 不可用/
+组未映射/目录禁用三类必测用例分别对应腿 6/13/5+16。
+
 ## 测试索引
 
 `server/tests/test_authz.cpp`（引擎）、`test_accounts.cpp`（设备闸与登录）、
 `test_archive.cpp`（归档与越权撤回）、`test_group.cpp`（群关系与权限载体）、
 `test_files_api.cpp`（文件面全链 401/403/404）、`test_uplink.cpp`（令牌作用域双闸）、
 `test_webhook.cpp` / `test_bot.cpp`（接入面）、`test_authz_audit.cpp`（本轮补漏）、
+`test_ldap.cpp`（企业目录认证 16 腿）、
 `admin/tests/test_admin_api.cpp`（后台面 19 腿）。

@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "authz.hpp"
+#include "ldap.hpp" // 544 /files/session 目录判登同源（路由＋角色同步）
 #include "scan.hpp"
 #include "storage.hpp"
 #include "store.hpp"
@@ -102,7 +103,8 @@ class FileServer {
              std::shared_ptr<S3Storage> storage, std::uint16_t port,
              bool uplink_mode = false,
              std::shared_ptr<FileSessions> sessions = {},
-             UplinkPolicy uplink_policy = {});
+             UplinkPolicy uplink_policy = {},
+             LdapDirectory* ldap = nullptr);
   ~FileServer();
 
   FileServer(const FileServer&) = delete;

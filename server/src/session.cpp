@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "cred.hpp"
+#include "ldap.hpp" // 544 企业身份判登路由（route_authentication）
 #include "webhook.hpp" // R24-1 公告联动三级推送（deliver_notice）
 
 namespace memex::server {
@@ -860,38 +861,63 @@ void Session::handle_login(const memex::protocol::Message& msg) {
   rec.version = in.client_version();
 
   const auto row = server_.store().find_account(account_);
-  // 平台-2：口令凭据独立（credentials 表为判登唯一来源；accounts 行内
-  // salt/digest 仅作老列兼容保留）
-  const auto cred = server_.store().find_credential(account_, "password");
+  // 判登路由（544 LDAP 企业身份）：绑定 issuer=ldap 的账号走目录判登
+  // （fail-closed——目录不可达/未配目录一律拒，绝不回落本地口令＝回落
+  // 即绕过目录）；未绑定账号走原本地判登（平台-2 credentials 表，路径
+  // 不动）。设备台账闸（停用/新设备审批）对两条路径一视同仁。
+  const auto route = route_authentication(server_.store(), server_.ldap(),
+                                          account_, in.password());
   bool ok = false;
   std::string reason;
-  if (!row || !cred) {
+  bool pwd_ok = false;
+  if (!row) {
     reason = "账号不存在";
     rec.result = "no_account";
+  } else if (route.path == AuthRoute::Path::LdapUnavailable) {
+    reason = "目录认证不可用（fail-closed，不回落本地口令）";
+    rec.result = "directory_unavailable";
+  } else if (route.path == AuthRoute::Path::LdapDisabled) {
+    reason = "目录账号已禁用：请联系管理员";
+    rec.result = "directory_disabled";
+  } else if (route.path == AuthRoute::Path::LdapBad) {
+    reason = "口令不符";
+    rec.result = "bad_password";
+  } else if (route.path == AuthRoute::Path::LdapOk) {
+    pwd_ok = true;
+    // 显式映射角色落库（幂等；granted_by=ldap-connector 台账可查来源）
+    sync_ldap_roles(server_.store(), account_, route.roles, now_ms());
   } else {
-    const std::string digest =
-        pbkdf2_sha256_hex(in.password(), cred->salt_hex, 60000);
-    if (digest == cred->digest_hex) {
-      // T3.3 设备台账：已停用设备拒绝登录（启停即时生效）
-      const auto dev = server_.store().find_device(device_fingerprint_);
-      if (dev && !dev->enabled) {
-        reason = "设备已停用：请联系管理员";
-        rec.result = "device_disabled";
-      } else if (!dev && server_.store().resolve_policy(account_)
-                               .new_device_approval) {
-        // T3.4 新设备审批：首登即建档为停用（待审批），管理员 device approve 后放行
-        server_.store().upsert_device(device_fingerprint_, kind_, device_name_,
-                                      now_ms());
-        server_.store().set_device_enabled(device_fingerprint_, false);
-        reason = "新设备待审批：请联系管理员";
-        rec.result = "pending_approval";
-      } else {
-        ok = true;
-        rec.result = "ok";
-      }
+    const auto cred = server_.store().find_credential(account_, "password");
+    if (!cred) {
+      reason = "账号不存在";
+      rec.result = "no_account";
+    } else if (pbkdf2_sha256_hex(in.password(), cred->salt_hex, 60000) ==
+               cred->digest_hex) {
+      pwd_ok = true;
     } else {
       reason = "口令不符";
       rec.result = "bad_password";
+    }
+  }
+  if (pwd_ok) {
+    // T3.3 设备台账：已停用设备拒绝登录（启停即时生效）
+    const auto dev = server_.store().find_device(device_fingerprint_);
+    if (dev && !dev->enabled) {
+      reason = "设备已停用：请联系管理员";
+      rec.result = "device_disabled";
+    } else if (!dev && server_.store().resolve_policy(account_)
+                           .new_device_approval) {
+      // T3.4 新设备审批：首登即建档为停用（待审批），管理员 device approve 后放行
+      server_.store().upsert_device(device_fingerprint_, kind_, device_name_,
+                                    now_ms());
+      server_.store().set_device_enabled(device_fingerprint_, false);
+      reason = "新设备待审批：请联系管理员";
+      rec.result = "pending_approval";
+    } else {
+      ok = true;
+      // 审计口径「用什么方式」：目录判登标 ok_ldap（本地仍为 ok）——
+      // 密码永不入 rec（LoginRecord 无密码字段，口径即结构）
+      rec.result = route.path == AuthRoute::Path::LdapOk ? "ok_ldap" : "ok";
     }
   }
   server_.store().add_login_record(rec);

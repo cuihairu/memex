@@ -23,13 +23,15 @@ add_library(memex_server_core STATIC
   src/model_gateway.cpp
   src/group_assistant.cpp
   src/storage.cpp
-  src/task_pull.cpp)
+  src/task_pull.cpp
+  src/ldap.cpp)
 target_include_directories(memex_server_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_compile_features(memex_server_core PUBLIC cxx_std_17)
 target_link_libraries(memex_server_core PUBLIC
   memex_common
   asio::asio
   OpenSSL::Crypto
+  OpenSSL::SSL
   unofficial::sqlite3::sqlite3
   aws-cpp-sdk-s3
   aws-cpp-sdk-core
@@ -71,6 +73,14 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_authz_audit PRIVATE memex_server_core)
   add_test(NAME authz_audit COMMAND test_authz_audit)
   set_tests_properties(authz_audit PROPERTIES TIMEOUT 60)
+
+  # 544 LDAP/AD 企业身份后端验收：最小 BER 客户端（假目录）＋判登路由
+  # fail-closed＋组→角色显式映射＋目录禁用（新登录拒＋存量会话踢下线）＋
+  # 首登自动绑定/影子账号（默认全关）＋本地账号常备
+  add_executable(test_ldap tests/test_ldap.cpp)
+  target_link_libraries(test_ldap PRIVATE memex_server_core)
+  add_test(NAME ldap COMMAND test_ldap)
+  set_tests_properties(ldap PROPERTIES TIMEOUT 120)
 
   # T2.3 消息归档验收：全量落库、撤回仅置标记不清正文、撤回事件独立留痕、越权拒绝
   add_executable(test_archive tests/test_archive.cpp)

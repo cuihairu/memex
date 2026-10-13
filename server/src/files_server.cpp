@@ -198,6 +198,8 @@ std::shared_ptr<FileSessions> make_file_sessions() {
 struct FileServer::Impl {
   ServerStore& store;
   std::shared_ptr<S3Storage> storage;
+  // 544 LDAP 企业身份：可空＝未配目录（判登全本地）。
+  LdapDirectory* ldap{nullptr};
   AuthorizationService az;
   // R23-4：true=外网单向面实例（只挂 /uplink/* 写入端点）
   bool uplink_mode{false};
@@ -229,8 +231,8 @@ struct FileServer::Impl {
   explicit Impl(ServerStore& s, std::shared_ptr<S3Storage> st,
                 bool uplink = false,
                 std::shared_ptr<FileSessions> shared_sessions = {},
-                UplinkPolicy policy = {})
-      : store(s), storage(std::move(st)), uplink_mode(uplink),
+                UplinkPolicy policy = {}, LdapDirectory* l = nullptr)
+      : store(s), storage(std::move(st)), ldap(l), uplink_mode(uplink),
         uplink_policy(std::move(policy)),
         sessions(shared_sessions ? std::move(shared_sessions)
                                  : std::make_shared<FileSessions>()) {
@@ -1232,15 +1234,36 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         return;
       }
     }
-    // 与消息面同源口令校验（credentials 表判登，平台-2；token 只存哈希）
-    const auto cred = impl_.store.find_credential(account, "password");
+    // 与消息面同源判登（credentials 表，平台-2；token 只存哈希）。
+    // 544：绑定 issuer=ldap 的账号走目录判登（route_authentication 同一
+    // 路由——fail-closed 与消息面同口径），角色同步随登录幂等落库。
+    const auto route =
+        route_authentication(impl_.store, impl_.ldap, account, password);
     std::string token;
-    if (cred.has_value()) {
-      // 摘要比对用常量时间思路不引入（内网面 v1 与消息面同口径）
-      token = pbkdf2_sha256_hex(password, cred->salt_hex, 60000) ==
-                      cred->digest_hex
-                  ? impl_.mint_session(account, uplink)
-                  : "";
+    if (route.path == AuthRoute::Path::LdapOk) {
+      sync_ldap_roles(impl_.store, account, route.roles, now_ms());
+      token = impl_.mint_session(account, uplink);
+    } else if (route.path == AuthRoute::Path::LdapBad ||
+               route.path == AuthRoute::Path::LdapDisabled ||
+               route.path == AuthRoute::Path::LdapUnavailable) {
+      // 口径回包（不落 500：目录不可达是环境态；密码永不进回包）
+      respond_json(401,
+                   {{"ok", false},
+                    {"error", route.path == AuthRoute::Path::LdapBad
+                                  ? "账号或口令错误"
+                                  : route.path == AuthRoute::Path::LdapDisabled
+                                        ? "目录账号已禁用"
+                                        : "目录认证不可用（fail-closed）"}});
+      return;
+    } else {
+      const auto cred = impl_.store.find_credential(account, "password");
+      if (cred.has_value()) {
+        // 摘要比对用常量时间思路不引入（内网面 v1 与消息面同口径）
+        token = pbkdf2_sha256_hex(password, cred->salt_hex, 60000) ==
+                        cred->digest_hex
+                    ? impl_.mint_session(account, uplink)
+                    : "";
+      }
     }
     if (token.empty()) {
       respond_json(401, {{"ok", false}, {"error", "账号或口令错误"}});
@@ -6566,10 +6589,10 @@ FileServer::FileServer(asio::io_context& io, ServerStore& store,
                        std::shared_ptr<S3Storage> storage, std::uint16_t port,
                        bool uplink_mode,
                        std::shared_ptr<FileSessions> sessions,
-                       UplinkPolicy uplink_policy)
+                       UplinkPolicy uplink_policy, LdapDirectory* ldap)
     : impl_(std::make_unique<Impl>(store, std::move(storage), uplink_mode,
                                    std::move(sessions),
-                                   std::move(uplink_policy))),
+                                   std::move(uplink_policy), ldap)),
       acceptor_(io, asio::ip::tcp::endpoint(asio::ip::tcp::v4(), port)) {}
 
 FileServer::~FileServer() {

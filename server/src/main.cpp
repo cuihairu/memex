@@ -24,6 +24,7 @@
 #include "cred.hpp"
 #include "files_server.hpp"
 #include "group_assistant.hpp"
+#include "ldap.hpp"
 #include "model_gateway.hpp"
 #include "task_pull.hpp"
 #include "server.hpp"
@@ -75,6 +76,9 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
   memex::server::UplinkPolicy uplink_policy;
   memex::server::S3Config s3;
   s3.region = "auto";
+  // 544 LDAP 企业身份（可选）：缺省 host 空＝不启用（判登全本地，
+  // 轻量部署行为不变）
+  memex::server::LdapConfig ldap_cfg;
   // R25-4 凭据面主密钥（缺省空＝凭据面未启用；建议随部署 env 走
   // ——旗标进 ps，值仅服务端内存内派生）
   std::string tool_cred_secret;
@@ -160,6 +164,75 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
       s3.region = argv[++i];
     } else if (arg == "--s3-use-ssl") {
       s3.use_ssl = true;
+    } else if (arg == "--ldap-host" && i + 1 < argc) {
+      ldap_cfg.host = argv[++i];
+    } else if (arg == "--ldap-port" && i + 1 < argc) {
+      const int p = std::atoi(argv[++i]);
+      if (p <= 0 || p > 65535) {
+        std::cerr << "无效 --ldap-port\n";
+        return 2;
+      }
+      ldap_cfg.port = static_cast<std::uint16_t>(p);
+    } else if (arg == "--ldap-ssl") {
+      // ldaps:// 整连接 TLS（证书主机名校验必开）；StartTLS 不支持
+      ldap_cfg.use_ssl = true;
+    } else if (arg == "--ldap-timeout-ms" && i + 1 < argc) {
+      ldap_cfg.timeout_ms = std::atoi(argv[++i]);
+    } else if (arg == "--ldap-user-base" && i + 1 < argc) {
+      ldap_cfg.user_base = argv[++i];
+    } else if (arg == "--ldap-user-attr" && i + 1 < argc) {
+      ldap_cfg.user_attr = argv[++i];
+    } else if (arg == "--ldap-bind-dn-template" && i + 1 < argc) {
+      // 模板直绑（OpenLDAP 常用）：{u} 替换用户名
+      ldap_cfg.bind_dn_template = argv[++i];
+    } else if (arg == "--ldap-bind-dn" && i + 1 < argc) {
+      // 服务账号先查后绑（AD 常用）；口令走 --ldap-bind-password 或
+      // env MEMEX_LDAP_BIND_PASSWORD（env 优先——旗标进 ps）
+      ldap_cfg.bind_dn = argv[++i];
+    } else if (arg == "--ldap-bind-password" && i + 1 < argc) {
+      ldap_cfg.bind_password = argv[++i];
+    } else if (arg == "--ldap-memberof-attr" && i + 1 < argc) {
+      ldap_cfg.memberof_attr = argv[++i];
+    } else if (arg == "--ldap-disabled-attr" && i + 1 < argc) {
+      // 禁用检测三元组（可选）：AD 停用位＝attr userAccountControl、
+      // rule 1.2.840.113556.1.4.803、value 2
+      ldap_cfg.disabled_attr = argv[++i];
+    } else if (arg == "--ldap-disabled-rule" && i + 1 < argc) {
+      ldap_cfg.disabled_rule = argv[++i];
+    } else if (arg == "--ldap-disabled-value" && i + 1 < argc) {
+      ldap_cfg.disabled_value = argv[++i];
+    } else if (arg == "--ldap-group-role" && i + 1 < argc) {
+      // 组→角色显式映射（可重复）：--ldap-group-role 组DN=角色名。
+      // 映射表外组一概忽略；表里不配 admin 就永不授管理员。
+      const std::string kv = argv[++i];
+      const auto eq = kv.find('=');
+      if (eq == std::string::npos || eq == 0 || eq + 1 == kv.size()) {
+        std::cerr << "无效 --ldap-group-role（须 组=角色）\n";
+        return 2;
+      }
+      ldap_cfg.group_roles.emplace_back(kv.substr(0, eq), kv.substr(eq + 1));
+    } else if (arg == "--ldap-starttls") {
+      // 明连 389 后升级 TLS（AD/OpenLDAP 常态）；与 --ldap-ssl 互斥
+      ldap_cfg.starttls = true;
+    } else if (arg == "--ldap-allow-plain") {
+      // 明文 bind 显式放行（默认拒——密码不明文红线；仅限测试/受控内网）
+      ldap_cfg.allow_plain = true;
+    } else if (arg == "--ldap-tls-insecure") {
+      // 自签证书：跳过证书校验（启动明示警告）
+      ldap_cfg.insecure_tls = true;
+    } else if (arg == "--ldap-auto-bind") {
+      // 已有本地账号无绑定：目录认证成功即自动绑定（默认关）
+      ldap_cfg.auto_bind = true;
+    } else if (arg == "--ldap-auto-provision") {
+      // 账号不存在：目录认证成功即建影子账号（默认关；本地口令随机
+      // 不可知＝LDAP-only）
+      ldap_cfg.auto_provision = true;
+    } else if (arg == "--ldap-kick-disabled" && i + 1 < argc) {
+      // 目录禁用 × 存量会话策略（默认 1=踢下线；0=仅拒新登录）
+      ldap_cfg.kick_disabled = std::atoi(argv[++i]) != 0;
+    } else if (arg == "--ldap-recheck-seconds" && i + 1 < argc) {
+      // 存量会话复检间隔（默认 60s；0=不复检；仅服务模式可查）
+      ldap_cfg.recheck_seconds = std::atoi(argv[++i]);
     }
   }
   // S3 配置环境变量兜底（旗标优先）：容器部署密钥走 env 免进 ps/日志的
@@ -173,6 +246,34 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
   if (s3.bucket.empty()) s3.bucket = env_or("MEMEX_S3_BUCKET");
   if (s3.access_key.empty()) s3.access_key = env_or("MEMEX_S3_ACCESS_KEY");
   if (s3.secret_key.empty()) s3.secret_key = env_or("MEMEX_S3_SECRET_KEY");
+  // LDAP env 兜底（旗标优先）：host/port/user-base/bind-dn-template/
+  // bind-dn/bind-password/memberof-attr/group-role（组=角色，逗号分隔）；
+  // 服务账号口令建议只走 env（不进 ps）
+  if (ldap_cfg.host.empty()) ldap_cfg.host = env_or("MEMEX_LDAP_HOST");
+  if (ldap_cfg.user_base.empty())
+    ldap_cfg.user_base = env_or("MEMEX_LDAP_USER_BASE");
+  if (ldap_cfg.bind_dn_template.empty())
+    ldap_cfg.bind_dn_template = env_or("MEMEX_LDAP_BIND_DN_TEMPLATE");
+  if (ldap_cfg.bind_dn.empty()) ldap_cfg.bind_dn = env_or("MEMEX_LDAP_BIND_DN");
+  if (ldap_cfg.bind_password.empty())
+    ldap_cfg.bind_password = env_or("MEMEX_LDAP_BIND_PASSWORD");
+  if (ldap_cfg.memberof_attr.empty())
+    ldap_cfg.memberof_attr = env_or("MEMEX_LDAP_MEMBEROF_ATTR");
+  if (const char* gr = std::getenv("MEMEX_LDAP_GROUP_ROLE");
+      gr != nullptr && *gr != '\0') {
+    for (std::size_t i = 0;;) {
+      const auto comma = std::string_view(gr).find(',', i);
+      const std::string kv(comma == std::string_view::npos
+                               ? std::string_view(gr).substr(i)
+                               : std::string_view(gr).substr(i, comma - i));
+      const auto eq = kv.find('=');
+      if (eq != std::string::npos && eq > 0 && eq + 1 < kv.size())
+        ldap_cfg.group_roles.emplace_back(kv.substr(0, eq),
+                                          kv.substr(eq + 1));
+      if (comma == std::string_view::npos) break;
+      i = comma + 1;
+    }
+  }
   // 文件面装配（R23-2）：端口给了但 S3 没配齐 → 明示降级（面整体 503）；
   // S3 配齐但端口没给 → 文件面不开。内网 http + path-style 为默认。
   std::shared_ptr<memex::server::S3Storage> s3_storage;
@@ -242,9 +343,54 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
           std::chrono::system_clock::now().time_since_epoch())
           .count());
 
+  // 544 LDAP 企业身份装配：host 给了且配置齐才起目录面；绑定 issuer=ldap
+  // 的账号登录走目录判登（identity bind 账号 ldap 目录用户名 显式绑定
+  // ——不按账号名自动猜）。fail-closed：目录不可达/未配一律拒，不回落
+  // 本地口令；未绑定账号本地判登不变（本地账号常备＝应急恢复入口）。
+  std::unique_ptr<memex::server::LdapDirectory> ldap;
+  if (!ldap_cfg.host.empty()) {
+    if (const std::string tls_err = ldap_cfg.tls_posture_error();
+        !tls_err.empty()) {
+      std::cerr << "[MEMEX] 目录认证未启用：" << tls_err << "\n";
+      return 2;
+    }
+    if (ldap_cfg.ready()) {
+      ldap = std::make_unique<memex::server::LdapDirectory>(ldap_cfg);
+      std::cout << "[MEMEX] 企业目录认证已启用（" << ldap_cfg.placeholder()
+                << "）\n";
+      if (ldap_cfg.insecure_tls)
+        std::cerr << "[MEMEX] 警告：--ldap-tls-insecure 已开——目录证书不校验"
+                     "（自签场景专用；生产建议入受信链）\n";
+      if (ldap_cfg.allow_plain)
+        std::cerr << "[MEMEX] 警告：--ldap-allow-plain 已开——bind 口令明网"
+                     "明文（仅限测试/受控内网）\n";
+      if (!ldap_cfg.auto_bind || !ldap_cfg.auto_provision) {
+        std::cerr << "[MEMEX] 首登策略：自动绑定="
+                  << (ldap_cfg.auto_bind ? "开" : "关")
+                  << "／影子账号=" << (ldap_cfg.auto_provision ? "开" : "关")
+                  << "（默认全关＝只认 identity bind 显式绑定）\n";
+      }
+      bool maps_admin = false;
+      for (const auto& [g, role] : ldap_cfg.group_roles)
+        if (role == "admin") maps_admin = true;
+      if (maps_admin)
+        std::cerr << "[MEMEX] 警告：组→角色映射含 admin（显式配置允许，"
+                     "属运维决定——连接器本身永不隐式授管理员）\n";
+      if (ldap_cfg.kick_disabled && ldap_cfg.recheck_seconds > 0 &&
+          (ldap_cfg.bind_dn.empty() || ldap_cfg.disabled_attr.empty()))
+        std::cerr << "[MEMEX] 目录禁用踢下线：存量会话复检仅在服务账号模式"
+                     "＋禁用检测配置齐时生效（模板模式无凭据自查，只拒新登录）\n";
+    } else {
+      std::cerr << "[MEMEX] --ldap-host 已给但目录配置不齐（须 --ldap-user-base"
+                   "＋绑定路径：--ldap-bind-dn-template 或 --ldap-bind-dn＋口令"
+                   "）——目录认证未启用，登录全走本地\n";
+    }
+  }
+
   try {
     asio::io_context io;
-    memex::server::CollabServer server(io, store, port);
+    memex::server::CollabServer server(io, store, port, ldap.get());
+    server.start_ldap_sweep(); // 544 目录禁用×存量会话（未配目录=空转）
     // 文件面（R23-2）：独立端口，绑定失败只降级为「文件面未启用」，
     // 消息主通道不受影响；存储实例空＝面内一律 503。
     std::unique_ptr<memex::server::FileServer> files;
@@ -261,7 +407,8 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
         }
         files = std::make_unique<memex::server::FileServer>(
             io, store, s3_storage, static_cast<std::uint16_t>(files_port),
-            /*uplink_mode=*/false, file_sessions);
+            /*uplink_mode=*/false, file_sessions,
+            memex::server::UplinkPolicy{}, ldap.get());
         // 工具结果卡片回群（R25-2）：走 deliver_notice 同一投递面（NOTICE
         // 信封＝离线入队＋归档＋在线扇出）；单 io_context 线程模型不加锁。
         // 任务源拉取器复用同一 lambda（R27-5：新落/有变化的任务同一投递
@@ -301,7 +448,7 @@ int cmd_serve(int argc, char** argv, const std::string& db_path) {
       try {
         uplink = std::make_unique<memex::server::FileServer>(
             io, store, s3_storage, static_cast<std::uint16_t>(uplink_port),
-            /*uplink_mode=*/true, file_sessions, uplink_policy);
+            /*uplink_mode=*/true, file_sessions, uplink_policy, ldap.get());
       } catch (const std::exception& e) {
         std::cerr << "[MEMEX] uplink 端口绑定失败，外网入口未启用"
                      "（内网面不受影响）：" << e.what() << std::endl;
