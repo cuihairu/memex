@@ -4,7 +4,7 @@
 > 到哪一档就写哪一档。本页把「平台 × 通信模式 × 账号状态 × 网络状态 × 权限角色」
 > 的组合如实分档，报告引用平台能力时以本页为准，不得混写。
 > 核验日期：2026-10-13。证据只取仓库内：CI 工作流定义（`.github/workflows/`）、
-> ctest 测试名（82 项）、各端 README/BUGS 记录、带日期的实跑页
+> ctest 测试名（83 项，ctest 名去重）、各端 README/BUGS 记录、带日期的实跑页
 > （`platform-adapter.md`、`wan-drill.md` 均为 2026-10-03 记录）。
 
 ## 分档定义
@@ -30,10 +30,10 @@ deb/rpm 只是同架构产物，未在目标系统安装过；**Windows** 只有
 | 桌面客户端可构建 | ✅ ci+nightly | 🔧 nightly | ⬛ | ⬛ | 🔧 nightly | — | — | — |
 | 移动端 App 可构建 | — | — | — | — | — | 🔧 ¹ | ⬛ ² | 🔧 ³ |
 | 安装包产物 | 🔧 tar+deb/rpm | 🔧 zip+setup.exe | 🔧 ⁴ | 🔧 ⁴ | 🔧 dmg×2 | 🔧 apk(debug) | ⬛ | — |
-| 安装后自检冒烟（--self-test） | 🔧 nightly | 🔧 nightly | ⬛ | ⬛ | 🔧 nightly | — | — | — |
-| 全量自动化测试（ctest 82 项） | ✅ ci.yml | ⬛ | ⬛ | ⬛ | ⬛ | — | — | — |
+| 安装后自检冒烟（--self-test 仅服务端；客户端＝--version/--smoke） | 🔧 nightly | 🔧 nightly | ⬛ | ⬛ | 🔧 nightly | — | — | — |
+| 全量自动化测试（ctest 83 项） | ✅ ci.yml | ⬛ | ⬛ | ⬛ | ⬛ | — | — | — |
 
-¹ `assembleDebug` 本地产物（BUGS.md 记录在案）；无 CI 作业，release 变体单测偶发红＝BUG-005（登记未修）。
+¹ `assembleDebug` 本地产物（BUGS.md 记录在案）；无 CI 作业。release 变体单测偶发红＝BUG-005，2026-10-10 已修（定性后修测试面断言，双变体 84/84×2 全绿收口）。
 ² ArkTS HAP 编译腿无 OHOS runner——harmony.yml 明示「不在此伪造编译通过」；纯逻辑层有 CI（见下表）。
 ³ ios.yml（macos-26）：swift test ＋ 模拟器构建；真机未验证。
 ⁴ nightly 通用 x86-64 deb/rpm 与 Ubuntu 同源同架构，未在 UOS/麒麟实机安装——实机验收＝`platform-adapter.md` 现场待补清单。
@@ -51,9 +51,9 @@ deb/rpm 只是同架构产物，未在目标系统安装过；**Windows** 只有
 | 三级通知（普通/重要/紧急确认收悉） | ✅ notify（桌面） | ⬛ | ⬛ | ⬛ | ⬛ | ✅ ⁶ | ✅ ⁷ | ⬛ |
 
 ⁵ R18：直连态／免登录能力仅存在于桌面端，移动端全部为协作态——设计排除，非验证档。
-⁶ Android：实测层级＝JVM 单测 57 项（真 socket 假服务端；debug 变体），**非真机 UI 端到端**；聊天文件直传为桌面端专属能力（Android README 口径），文件面走 FilesClientTest。
+⁶ Android：实测层级＝JVM 单测 95 项（真 socket 假服务端；debug 变体），**非真机 UI 端到端**；聊天文件直传为桌面端专属能力（Android README 口径），文件面走 FilesClientTest。
 ⁷ 鸿蒙：实测层级＝纯 TS 逻辑层 Node 22 单测（harmony.yml CI 全绿，wire 与桌面端字节级交叉验证）；**HAP 内真实运行未验证**（无 OHOS runner）。
-⁸ iOS：实测层级＝MemexKit core 单测 37 项（真 socket 假服务端，ios.yml macos-26）；应用 UI 未验证。
+⁸ iOS：实测层级＝MemexKit core 单测 53 项（真 socket 假服务端，ios.yml macos-26）；应用 UI 未验证。
 
 ## 表2 · 平台 × 账号状态
 
@@ -62,7 +62,7 @@ deb/rpm 只是同架构产物，未在目标系统安装过；**Windows** 只有
 | 免登录直连态（桌面专属，R1） | ✅ discovery/mode_switch | ⬛ | ⬛ | ⬛ | ⬛ | — ⁵ | — ⁵ | — ⁵ |
 | 正常登录/登出（桌面含双态切换不重启，R5） | ✅ mode_switch/accounts | ⬛ | ⬛ | ⬛ | ⬛ | ✅ ⁶ R17 向导/R18 | ✅ ⁷ | ⬛ |
 | 单点互踢（KICK，R4） | ✅ accounts | ⬛ | ⬛ | ⬛ | ⬛ | ✅ ⁶ | ✅ ⁷ | ⬛ |
-| 新设备待审批（T3.4） | ✅ accounts | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ |
+| 新设备待审批（T3.4） | ✅ org | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ |
 | 设备停用（T3.3） | ✅ authz_audit | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ |
 | LDAP 绑定账号（目录判登，544） | ✅ ldap | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ |
 | LDAP 影子账号（auto_provision，544） | ✅ ldap | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ | ⬛ |
@@ -118,7 +118,7 @@ Linux。非 Linux 平台连判权都未跑过，整列 ⬛。
    收发/文件/高 DPI、X11＋Wayland 各一次、降级提示逐项）。补测通过后本页 UOS/
    麒麟列才可升档。
 3. **跨网段实机（A13）**：`wan-drill.md` 核查清单未执行，现全列 ⬛。
-4. **Android**：无 CI 作业（本地 gradle 手跑）；release 变体 BUG-005；断线重连、
-   新设备审批、设备停用未入单测。
+4. **Android**：无 CI 作业（本地 gradle 手跑）；release 变体 BUG-005 已修（2026-10-10，
+   双变体 84/84×2 全绿）；断线重连、新设备审批、设备停用未入单测。
 5. **鸿蒙 HAP**：编译腿与真机功能面待 OHOS runner／实机。
 6. **iOS**：模拟器构建之外，UI 与真机未验证。

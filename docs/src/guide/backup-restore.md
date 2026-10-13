@@ -43,7 +43,9 @@ cp memex-server.db memex-server.db.$(date +%Y%m%d-%H%M%S).bak
 以「同一时刻」为基准——只备卷不备库（或反之），恢复后就是半套。
 
 ```bash
-# compose 部署（宿主目录挂载 /var/lib/memex/rustfs）：维护窗口内打 tar
+# compose 部署（`storage compose` 生成的 rustfs-compose.yml，宿主目录挂载
+# /var/lib/memex/rustfs；仓库根 docker-compose.yml 用命名卷 rustfs-data，
+# tar 口径只适用于前者）：维护窗口内打 tar
 tar czf rustfs-$(date +%Y%m%d-%H%M%S).tgz -C /var/lib/memex rustfs
 # 或 S3 侧同步（不停机口径；恢复时须与某一库备份对拍核对）
 mc mirror --overwrite local/memex-files /backup/memex-files   # 或 aws s3 sync

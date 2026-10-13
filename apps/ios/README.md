@@ -14,7 +14,7 @@ apps/ios/
 │   │   │                      #   长连接会话、探测/登录、路由守卫
 │   │   └── Proto/             # memex.proto 生成代码（CI 生成，不入库）
 │   └── MemexApp/              # SwiftUI：初始化向导/登录/会话列表/聊天页/推送
-└── Tests/MemexKitTests/       # 核心单测（37 用例，真 socket 假服务端）
+└── Tests/MemexKitTests/       # 核心单测（53 用例，真 socket 假服务端）
 ```
 
 ## 构建与测试（macOS）

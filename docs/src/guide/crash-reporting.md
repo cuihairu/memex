@@ -89,4 +89,6 @@
      [qobjectdefs_impl.h:548]`（即触发 lambda），`main.cpp:71` 可见；
      crash 原因 `SIGSEGV / SEGV_MAPERR @ 0x0`（空指针写入）；
   4. ctest 全量 61/61 绿（新增 crash 腿约 3.3s）。
+     注记：61/61 是 2026-10-08 时点基线；现基线已扩至 83 项注册测试（ctest 名去重，
+     见[交付验收矩阵](/guide/delivery-matrix)）。
 

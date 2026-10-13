@@ -2,18 +2,18 @@
 
 ## 环境要求
 
-- CMake 4.x、C++17 编译器（GCC 15 或 MSVC）
+- CMake 4.x、C++17 编译器（GCC 15 或 MSVC；CI 工具链未钉版——`ci.yml` 以 ubuntu-latest 镜像自带编译器为准）
 - [vcpkg](https://github.com/microsoft/vcpkg)：所有第三方依赖经 manifest 管理
 - Linux 编译 Qt 客户端所需的系统开发包（vcpkg 不代管 X11/GL 等系统库；Ubuntu 参考：
   `autoconf autoconf-archive automake libtool`（gperf 等 autotools 端口源码构建所需，缺则 qtbase 依赖链在 gperf 处失败）；
   `libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev libxcb-icccm4-dev libxcb-util-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-glx0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev libfontconfig1-dev libfreetype-dev libdbus-1-dev libicu-dev`；
   与 CI 工作流的安装清单一致）
-- 文档站：Node 22 + pnpm
+- 文档站：Node 24 + pnpm（CI 口径，`docs-check.yml`／`docs-deploy.yml`）
 
 ## 依赖管理（vcpkg manifest）
 
 仓库根 `vcpkg.json` 声明全部第三方依赖（asio、protobuf、nlohmann-json、sqlite3、
-openssl、aws-sdk-cpp:s3、qtbase），
+openssl、aws-sdk-cpp:s3、qtbase、drogon、crashpad），
 版本由 `builtin-baseline` 钉在 vcpkg 上游某一次提交；个别需要锁版本的包写进
 `overrides`（当前为空占位）。CI 与每日构建把 vcpkg 钉在同一 commit，
 启用 GitHub Actions 二进制缓存（`x-gha`）+ 安装树缓存，跨 run 复用编译产物。
@@ -29,6 +29,8 @@ openssl、aws-sdk-cpp:s3、qtbase），
 | `openssl` | 凭据 PBKDF2、设备指纹 SHA-256（仅 libcrypto） | 默认安装（底座，双端共用） |
 | `aws-sdk-cpp` | R23 存储抽象层（S3 兼容对象存储客户端） | `server` feature，启用 `s3` |
 | `qtbase` | 客户端界面框架 | `client` feature，启用 `glib`／`xkb`／`xkbcommon-x11` |
+| `drogon` | 管理后台 HTTP 框架（admin 独立进程监听 8089） | `admin` feature（2026-10-11 拍板引入；`third_party/组件清单.md` 登记待补） |
+| `crashpad` | 客户端崩溃采集（独立 handler 进程落 minidump，dump 只本地落盘） | `crashpad` feature（随 `client` 构建启用） |
 | `gcovr` | CI 覆盖率汇总 | vcpkg 无此 port，由 CI 系统包提供（宿主工具，不随产物分发） |
 
 底座（不启用 feature）只装双端共享依赖（protobuf／nlohmann-json／openssl）；
@@ -75,17 +77,23 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-Preset 一览（`CMakePresets.json`，Ninja 生成器，vcpkg 安装树统一在 `vcpkg_installed/`）：
+Preset 一览（`CMakePresets.json`，Ninja 生成器；本机 Linux 构建 vcpkg 安装树统一在 `vcpkg_installed/`，跨平台 preset 各自独立安装树）：
 
 | Preset | 用途 | 构建目录 | 配置 |
 | --- | --- | --- | --- |
-| `dev` | 本地开发 | `build/` | Release · 服务端+客户端+测试 |
-| `ci` | CI 门禁 | `build-ci/` | Debug · `--coverage` · 全量 |
-| `server-release` | 每日构建 · 服务端 | `build-server/` | Release · 仅服务端 |
-| `client-release` | 每日构建 · 客户端 | `build-client/` | Release · 服务端+客户端 |
+| `base` | 公共基线（hidden，各 preset 继承） | `build/` | Ninja · vcpkg toolchain · `x64-linux-dynamic` |
+| `dev` | 本地开发 | `build/` | Release · 服务端+客户端+测试（manifest `server;client;crashpad;admin`） |
+| `ci` | CI 门禁 | `build-ci/` | Debug · `--coverage` · 全量（manifest `server;client;crashpad;admin`） |
+| `server-release` | 每日构建 · 服务端 | `build-server/` | Release · 仅服务端（manifest `server;admin`） |
+| `client-release` | 每日构建 · 客户端 | `build-client/` | Release · 仅客户端（manifest `client;crashpad`） |
+| `client-release-win` | 每日构建 · 客户端（Windows x64） | `build-client-win/` | Release · 官方 Qt + vcpkg 非 Qt 依赖（manifest `crashpad`） |
+| `client-release-mac` | 每日构建 · 客户端（macOS arm64） | `build-client-mac/` | Release · 官方 Qt + vcpkg 静态非 Qt 依赖（manifest `crashpad`） |
+| `client-release-ohos` | 每日构建 · 客户端（鸿蒙 arm64 交叉） | `build-client-ohos/` | Release · Qt for OpenHarmony + vcpkg ohos 依赖（manifest `client`） |
+| `server-release-mac` | 每日构建 · 服务端（macOS arm64） | `build-server-mac/` | Release · vcpkg 静态依赖，单二进制分发 |
 
 各 preset 独立构建目录，互不污染缓存；vcpkg 安装树由 manifest 统一管理，
-带 Qt 的构建共用 `vcpkg_installed/`，服务端 preset 用 `vcpkg_installed-server/`。
+本机 Linux 的带 Qt 构建共用 `vcpkg_installed/`，服务端 preset 用 `vcpkg_installed-server/`，
+win／mac／ohos preset 各用 `vcpkg_installed-{win,mac,ohos}[-server]/`。
 
 二进制缓存：本机默认 `~/.cache/vcpkg/archives`（可用 `VCPKG_DEFAULT_BINARY_CACHE`
 换目录）。manifest 未变化时，二次配置从缓存恢复编译产物，秒级完成。

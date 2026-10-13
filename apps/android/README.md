@@ -9,8 +9,9 @@
    紧急＝常驻需「确认收悉」）、通知渠道、Android 13+ POST_NOTIFICATIONS 运行时申请、
    进会话清未读、长按复制消息。
 
-单测 57/57 绿（debug 变体；release 变体在本机存在 2–3 处偶发红，时序敏感，
-登记 BUGS.md BUG-005 只登记未修）。遗留：会话本地持久化（现内存实现，SQLite 随需要补）。
+单测 95 项（debug 变体；release 变体单测偶发红＝BUG-005，2026-10-10 已修
+——定性后修测试面断言，双变体 84/84×2 全绿收口，其后用例续补至 95）。
+遗留：会话本地持久化（现内存实现，SQLite 随需要补）。
 
 ## 口径
 
@@ -33,7 +34,7 @@ apps/android/
               #   NoticeGrade 三级通知分级、InitStore 配置持久化
       ui/     # InitActivity / LoginActivity / MainActivity（launcher+守卫）/
               #   ChatActivity / NotificationHelper / MemexNotifyReceiver
-    src/test/ # JVM 单测（57 用例：假服务端探测/登录/收发/群归会话/ACK/去重/KICK/三级通知）
+    src/test/ # JVM 单测（95 用例：假服务端探测/登录/收发/群归会话/ACK/去重/KICK/三级通知）
 ```
 
 协议单一事实源＝仓库根 `common/proto/memex.proto`（构建时跨目录引入，protoc

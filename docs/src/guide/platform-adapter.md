@@ -6,10 +6,10 @@
 
 | 项 | 环境 | 方法 | 结果 |
 | --- | --- | --- | --- |
-| 消息收发 | Ubuntu 24.04 + Xvfb（X11/xcb） | `ctest -R "direct_chat|collab_chat"` | 全绿 |
+| 消息收发 | Ubuntu 24.04 + offscreen（CI 口径，`QT_QPA_PLATFORM=offscreen`） | `ctest -R "direct_chat|collab_chat"` | 全绿 |
 | 文件传输 | 同上 | `ctest -R direct_file` | 全绿 |
-| 界面启动与显示 | 同上 | `xvfb-run ./build/client/memex_client` 常驻 15s 无崩溃、直连引擎线起监听 | 通过 |
-| 截图取屏环节 | Ubuntu 24.04 + Xvfb | T4.4 截图与标注已落地（`client/tests/test_screenshot.cpp` 离屏验证）；A17 要求的多显示器＋高 DPI 实测与不支持环境降级提示仍需目标环境核查 | 部分（Xvfb 通过；实机待补） |
+| 界面启动与显示 | Ubuntu 24.04 + Xvfb（本机走查，CI 无 Xvfb） | `xvfb-run ./build/client/memex_client` 常驻 15s 无崩溃、直连引擎线起监听 | 通过 |
+| 截图取屏环节 | Ubuntu 24.04 + offscreen | T4.4 截图与标注已落地（`client/tests/test_screenshot.cpp` 离屏验证）；A17 要求的多显示器＋高 DPI 实测与不支持环境降级提示仍需目标环境核查 | 部分（offscreen 通过；实机待补） |
 | Windows/UOS/麒麟 媒体底座（WebRTC） | — | 二期事项，现不在第一期范围 | 未开始 |
 
 ## X11／Wayland 降级策略（代码口径）

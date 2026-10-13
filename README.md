@@ -9,12 +9,12 @@
 <p align="center">
   <a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov coverage" /></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-e16531" alt="Platform support" />
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iOS%20%7C%20HarmonyOS-e16531" alt="Platform support" />
   <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
 </p>
 
-An office instant messaging system for physically isolated intranet environments, modeled on the functional scope of WeCom (Enterprise WeChat) and covering communication, office collaboration, organization, and archive search. The business layer is written entirely in-house, while the foundation uses open-source components: Qt 6, asio, protobuf, SQLite, OpenSSL, and the AWS SDK (S3 interface, paired with RustFS); the inventory and licenses are listed in [third_party/](third_party/README.md). The system is not built on top of any open-source IM project, and it integrates no components under strong-copyleft licenses such as AGPL or SSPL. Desktop clients are C++17 + Qt; mobile clients are Android (Kotlin, shipped) and iOS (Swift, code-only with CI verification); the server is C++17, a single process on a single database.
+An office instant messaging system for physically isolated intranet environments, modeled on the functional scope of WeCom (Enterprise WeChat) and covering communication, office collaboration, organization, and archive search. The business layer is written entirely in-house, while the foundation uses open-source components: Qt 6, asio, protobuf, SQLite, OpenSSL, and the AWS SDK (S3 interface, paired with RustFS); the inventory and licenses are listed in [third_party/](third_party/README.md). The system is not built on top of any open-source IM project, and it integrates no components under strong-copyleft licenses such as AGPL or SSPL. Desktop clients are C++17 + Qt (Linux CI-verified; Windows/macOS artifacts come from the nightly build matrix); mobile clients are Android (Kotlin, shipped), iOS (Swift, code-only with CI verification), and HarmonyOS NEXT (ArkTS, code-only with CI logic verification); the server is C++17, a single process on a single database.
 
 ## Documentation
 
@@ -31,7 +31,7 @@ A single installation package contains two communication engines:
 
 | Mode | How to enter | Link | Archiving |
 | --- | --- | --- | --- |
-| Direct mode (default) | Works right after installation, zero configuration | UDP broadcast discovers terminals on the same subnet; TCP peer-to-peer connections (UDP 2425–2436 / TCP 2426–2437) | Stored on the local machine only |
+| Direct mode (default) | Works right after installation, zero configuration | UDP broadcast discovers terminals on the same subnet; TCP peer-to-peer connections (UDP uses 2425 only, 2426–2436 reserved / TCP 2426–2437) | Stored on the local machine only |
 | Collaboration mode (after sign-in) | Enter the server address and sign in | Persistent connection to the collaboration server | Fully persisted on the server, searchable |
 
 The direct engine keeps running after sign-in (cross-mode interoperability requires it); when the server is unreachable, the client falls back to direct mode automatically. **The only purpose of connecting to the server is record retention**: no secret chats, no burn-after-reading, no deletion of archives upon message recall, no unilateral deletion of archives from the client, and no user-facing switch to turn record retention off.
@@ -49,6 +49,8 @@ memex/
 │   ├── engine/direct/    # Direct engine: UDP discovery, peer-to-peer messages and files
 │   ├── engine/collab/    # Collaboration engine: persistent connections, message sync,
 │   │                     #   offline messages and catch-up delivery
+│   ├── engine/task/      # External task providers (dingtalk / feishu / github) over a
+│   │                     #   capability SPI (L1 jump / L2 read / L3 write; R27-2)
 │   ├── core/             # Shared core: local store (SQLite), conversations, file transfer
 │   └── tests/            # Desktop unit tests
 ├── server/               # C++17 collaboration server (single-host centralized deployment)
@@ -59,41 +61,44 @@ memex/
 │                         #   store.cpp authz.cpp cred.cpp (accounts / org / policy / archive)
 │                         #   files_server.cpp storage.cpp (R23 file plane and S3 storage)
 │                         #   webhook.cpp (T4.10 notification integration)
+│                         #   main.cpp (entry point and CLI), model_gateway.cpp
+│                         #   (model gateway, platform phase 3), ldap.cpp (enterprise identity),
+│                         #   group_assistant.cpp (in-group assistant), task_pull.cpp
+│                         #   (external task pull), agent_main.cpp (R26-1 agent:
+│                         #   host-load heartbeat)
 ├── common/               # Shared by client and server: protocol definitions
 │                         #   (common/proto/memex.proto), serialization, common utilities
 ├── apps/                 # Mobile clients
 │   ├── android/          # Android (Kotlin, shipped in T6.3: R17/R18 + conversation list
-│   │                     #   send/receive + three-level push banner and vibration)
+│   │                     #   send/receive + three-level push banner and vibration;
+│   │                     #   39/39 unit tests + on-device walkthrough, no CI leg)
 │   ├── ios/              # iOS (Swift/SwiftUI, T6.4 code-only with CI verification)
 │   ├── harmony/          # HarmonyOS NEXT (ArkTS, T6.6 code-only with CI logic verification,
 │   │                     #   compile leg pending the OHOS toolchain)
-├── admin/                # Admin console (planned; see the server CLI/HTTP meanwhile,
-│                         #   this entry is a placeholder)
+├── admin/                # Admin web console (Drogon process, port 8089; started with
+│                         #   compose — see the Admin web console section)
 ├── docs/                 # Documentation site (VitePress), review report, product docs,
 │                         #   prototypes
+├── scripts/              # Ops/drill scripts (WAN drill, backup/restore drill, nightly,
+│                         #   deploy helpers, tray walkthrough)
+├── packaging/            # Packaging support (Windows Inno script, OHOS HAP notes, LDAP
+│                         #   env example)
+├── examples/             # Example integrations (echo bot)
+├── install.sh            # One-command install from nightly artifacts (OS/arch detection,
+│                         #   idempotent re-run; curl-able from the main branch)
+├── install.ps1           # Windows counterpart of install.sh
+├── BUGS.md               # Bug ledger (register-first policy, fix/acceptance records)
 └── third_party/          # Third-party component inventory and license review (A22;
                           #   dependencies managed via the vcpkg manifest)
 ```
 
-Module boundaries correspond to Chapter 4 of the review report: the two engines are each self-contained and share no communication state; they meet only in the shared core (local message store, conversation list, contact views, file transfer module). The six server modules are consolidated into a single process (review decision no. 7: single-process, single-database implementation with logical splitting reserved); the data model is in Chapter 5 of the report.
+Module boundaries correspond to Chapter 5 of the review report: the two engines are each self-contained and share no communication state; they meet only in the shared core (local message store, conversation list, contact views, file transfer module). The six server modules are consolidated into a single process (review decision no. 7: single-process, single-database implementation with logical splitting reserved); the data model is in the same chapter.
 
 ## Build
 
-Dependencies (asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / Qt6) are managed uniformly through the vcpkg manifest (`vcpkg.json`, versions pinned by `builtin-baseline`); CMake builds with a single command via `CMakePresets.json`:
+Dependencies (asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / drogon (admin console) / crashpad (client crash collection) / Qt6) are managed uniformly through the vcpkg manifest (`vcpkg.json`, versions pinned by `builtin-baseline`); CMake builds with a single command via `CMakePresets.json`:
 
 ```bash
-
-## 本地测试口径
-
-CI 与本地开发按改动面三路分流——改一行文档不该全量编译。
-
-1. **文档改动**（`*.md`、`docs/**`、图片）：不编译。主 CI workflow 的
-   `paths-ignore` 已跳过这些路径。
-2. **代码改动**：只跑改动子集，不全量。
-   - `ctest --preset ci -R '<改动测试>'`
-3. **全量**（`ctest --preset ci`）：仅以下情形触发——CMakeLists.txt、
-   `.github/**`、Docker/Compose 配置、发布前。
-
 # 1. Set up vcpkg (once; adding VCPKG_ROOT to your shell profile is recommended)
 git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
 ~/vcpkg/bootstrap-vcpkg.sh
@@ -106,13 +111,24 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-Presets: `dev` (development build), `ci` (Debug + coverage, the CI gate), and `server-release` / `client-release` (the daily-build artifact configuration). By default only server dependencies are installed; Qt desktop builds enable the manifest's `client` feature. The first configure compiles qtbase and takes a while; the vcpkg binary cache (default `~/.cache/vcpkg/archives`) reuses build artifacts on later configures, which then finish in seconds. CI and daily builds use GitHub Actions caching (the `x-gha` binary cache plus the full install tree) for speed.
+Presets: `dev` (development build), `ci` (Debug + coverage, the CI gate), `server-release` / `client-release` (the daily-build artifact configuration), and the platform variants `client-release-win` / `client-release-mac` / `client-release-ohos` / `server-release-mac` (a hidden `base` preset supplies the shared vcpkg settings). By default only the shared client/server dependencies (protobuf, nlohmann-json, openssl) are installed; server builds enable the manifest's `server` feature (asio, sqlite3, aws-sdk-cpp), and Qt desktop builds enable `client`. The first configure compiles qtbase and takes a while; the vcpkg binary cache (default `~/.cache/vcpkg/archives`) reuses build artifacts on later configures, which then finish in seconds. CI and daily builds use GitHub Actions caching (the `x-gha` binary cache plus the full install tree) for speed.
+
+## 本地测试口径
+
+CI 与本地开发按改动面三路分流——改一行文档不该全量编译。
+
+1. **文档改动**（`*.md`、`docs/**`、图片）：不编译。主 CI workflow 的
+   `paths-ignore` 已跳过这些路径。
+2. **代码改动**：只跑改动子集，不全量。
+   - `ctest --preset ci -R '<改动测试>'`
+3. **全量**（`ctest --preset ci`）：仅以下情形触发——CMakeLists.txt、
+   `.github/**`、Docker/Compose 配置、发布前。
 
 ## Deployment
 
 ### Docker (recommended)
 
-Multi-stage build (`server/Dockerfile`): the dependency layer compiles statically per the vcpkg manifest (invalidated only when `vcpkg.json` changes), the build layer produces a single binary, and the runtime layer is `ubuntu:24.04` running as non-root (uid 10001). Dependency breakdown: asio and nlohmann-json are header-only; protobuf, openssl (libcrypto), sqlite3, and aws-sdk-cpp (s3) are statically linked into the binary, so the runtime layer contains zero `.so` files. The container build and the host development tree (`x64-linux-dynamic`, shared with the Qt client) are fully independent.
+Multi-stage build (`server/Dockerfile`): the dependency layer compiles statically per the vcpkg manifest (invalidated only when `vcpkg.json` changes), the build layer produces a single binary, and the runtime layer is `ubuntu:24.04` running as non-root (uid 10001). Dependency breakdown: asio and nlohmann-json are header-only; protobuf, openssl (libcrypto), sqlite3, and aws-sdk-cpp (s3) are statically linked into the binary, so the runtime layer carries no dependency-side `.so` files beyond the base image's own system libraries. The container build and the host development tree (`x64-linux-dynamic`, shared with the Qt client) are fully independent.
 
 The vcpkg source is not cloned over the network: a snapshot is injected through a buildx named context (it must contain the commit matching the `builtin-baseline` in `vcpkg.json`; a clean clone with that commit checked out is enough, and if the snapshot carries the `downloads/` cache, the dependency layer installs fully offline). CI fetches the snapshot automatically in the workflow; local builds from source must specify it:
 
@@ -132,6 +148,8 @@ docker compose ps        # ready once all three services are healthy
 # Client connections: <host>:8088 (collaboration plane, external port aligned with the
 # tunnel origin tcp://192.168.5.5:8088) or <host>:24360 (LAN default-port compat),
 # <host>:24561 (file plane)
+# Model gateway: http://<host>:24362 (platform phase 3; off by default — pass
+# --model-port N to bind it; idle unless an upstream endpoint is registered)
 # Admin console: http://<host>:8089 (see below)
 ```
 
@@ -313,4 +331,4 @@ For the RustFS object store, use `./build-server/server/memex_server storage com
 
 ## Engineering Discipline
 
-All tests must be green before commit/push; before pushing, run `git fetch origin && git rebase origin/main`. One commit per acceptable increment; no tags, no releases, no force pushes. On licensing: no AGPL/SSPL components, and permissively licensed components are registered in the `third_party/` inventory. Naming follows Section 6 of Chapter 5 of the report: the codename is Memex, the service name is MemexServer, and databases and logs use the `memex` prefix.
+All tests must be green before commit/push; before pushing, run `git fetch origin && git rebase origin/main`. One commit per acceptable increment; no git tags, no formal releases (the nightly rolling binaries are the daily-build channel — a rolling `nightly` Release plus `sha-` / latest image tags), no force pushes. On licensing: no AGPL/SSPL components, and permissively licensed components are registered in the `third_party/` inventory. Naming follows Section 6 of Chapter 5 of the report: the codename is Memex, the service name is MemexServer, and databases and logs use the `memex` prefix.

@@ -106,4 +106,4 @@ auto_bind/auto_provision 默认关、组未映射零授权、会话级真登录�
 `test_files_api.cpp`（文件面全链 401/403/404）、`test_uplink.cpp`（令牌作用域双闸）、
 `test_webhook.cpp` / `test_bot.cpp`（接入面）、`test_authz_audit.cpp`（本轮补漏）、
 `test_ldap.cpp`（企业目录认证 16 腿）、
-`admin/tests/test_admin_api.cpp`（后台面 19 腿）。
+`admin/tests/test_admin_api.cpp`（后台面 27 腿）。
