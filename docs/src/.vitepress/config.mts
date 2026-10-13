@@ -40,6 +40,7 @@ export default defineConfig({
           { text: '客户端设置', link: '/guide/settings' },
           { text: '崩溃采集（Crashpad）', link: '/guide/crash-reporting' },
           { text: '国产系统适配验证', link: '/guide/platform-adapter' },
+          { text: '交付验收矩阵', link: '/guide/delivery-matrix' },
           { text: '音视频与协同文档底座', link: '/guide/av-collab' }
         ]
       },
