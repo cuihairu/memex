@@ -167,7 +167,8 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_search_fuzzy tests/test_search_fuzzy.cpp)
   target_link_libraries(test_search_fuzzy PRIVATE memex_server_core)
   add_test(NAME search_fuzzy COMMAND test_search_fuzzy)
-  set_tests_properties(search_fuzzy PROPERTIES TIMEOUT 240)
+  # 预算按覆盖率构建实测×2 定（实测约 167s，门禁共享机超载可超 2 倍，取 480 留余量）
+  set_tests_properties(search_fuzzy PROPERTIES TIMEOUT 480)
 
   # T4.6 通讯录可见性验收（A20）：库级过滤／脱敏／上级引用抹除／落盘重开＋
   # CLI 配置面（org hide|fields|allow|visibility list）＋协议级 ORG_QUERY
