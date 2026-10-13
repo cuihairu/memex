@@ -17,6 +17,7 @@
 #include <QLineEdit>
 #include <QMenu>
 #include <QSettings>
+#include <QTemporaryDir>
 #include <QPushButton>
 #include <QTemporaryDir>
 #include <QTextBlock>
@@ -75,6 +76,19 @@ QLineEdit* find_input(MainWindow& window) {
 
 int main(int argc, char** argv) {
   QApplication app(argc, argv);
+
+  // 配置隔离：MainWindow 会读写窗口几何等 QSettings 键——测试专用组织/应用名
+  // ＋INI 重定向临时目录，不碰真机 ~/.config/memex（默认格式须先设 INI 才能被
+  // setPath 接管，否则 QSettings(org, app) 走 NativeFormat 直写真配置）
+  QTemporaryDir settings_dir;
+  CHECK(settings_dir.isValid());
+  qputenv("XDG_DATA_HOME",
+          settings_dir.filePath(QStringLiteral("data")).toUtf8());
+  QCoreApplication::setOrganizationName(QStringLiteral("memex-test"));
+  QCoreApplication::setApplicationName(QStringLiteral("chat-actions-test"));
+  QSettings::setDefaultFormat(QSettings::IniFormat);
+  QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                     settings_dir.filePath(QStringLiteral("settings")).toUtf8());
 
   // 与 test_theme 同口径：测试驱动生产 ThemeManager 单例
   memex::client::ThemeManager& manager = memex::client::ThemeManager::instance();

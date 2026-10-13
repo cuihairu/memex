@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QPixmap>
 #include <QProcess>
+#include <QSettings>
 #include <QTcpServer>
 #include <QTemporaryDir>
 #include <QTextStream>
@@ -67,6 +68,15 @@ int main(int argc, char** argv) {
   QApplication app(argc, argv);
   QTemporaryDir tmp;
   CHECK(tmp.isValid());
+  // 配置隔离：主窗写窗口几何、品牌设置页写偏好——测试专用组织/应用名＋INI
+  // 重定向临时目录，不碰真机 ~/.config/memex（默认格式须先设 INI 才能被
+  // setPath 接管，否则 QSettings(org, app) 走 NativeFormat 直写真配置）
+  QCoreApplication::setOrganizationName(QStringLiteral("memex-test"));
+  QCoreApplication::setApplicationName(QStringLiteral("brand-settings-test"));
+  QSettings::setDefaultFormat(QSettings::IniFormat);
+  QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                     tmp.filePath(QStringLiteral("settings")).toUtf8());
+  qputenv("XDG_DATA_HOME", tmp.filePath(QStringLiteral("data")).toUtf8());
   const QString db = tmp.filePath(QStringLiteral("srv.db"));
   const QString server_bin = QStringLiteral(MEMEX_SERVER_BIN);
   // BrandKit 缓存隔离（单例＝设置页保存后本机换牌的真面目；env 须在

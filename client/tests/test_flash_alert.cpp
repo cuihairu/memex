@@ -6,6 +6,8 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QSettings>
+#include <QTemporaryDir>
 #include <QThread>
 #include <QWidget>
 
@@ -47,7 +49,20 @@ bool wait_until(const std::function<bool()>& cond, int timeout_ms) {
 int main(int argc, char** argv) {
   QApplication app(argc, argv);
 
-  // 开关态收口为本测试独有（空 org 的 QSettings，与真机设置互不串扰）
+  // 配置隔离：主窗写窗口几何、开关态走 QSettings——测试专用组织/应用名＋INI
+  // 重定向临时目录，不碰真机 ~/.config/memex（默认格式须先设 INI 才能被
+  // setPath 接管，否则 QSettings(org, app) 走 NativeFormat 直写真配置）
+  QTemporaryDir settings_dir;
+  CHECK(settings_dir.isValid());
+  qputenv("XDG_DATA_HOME",
+          settings_dir.filePath(QStringLiteral("data")).toUtf8());
+  QCoreApplication::setOrganizationName(QStringLiteral("memex-test"));
+  QCoreApplication::setApplicationName(QStringLiteral("flash-alert-test"));
+  QSettings::setDefaultFormat(QSettings::IniFormat);
+  QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+                     settings_dir.filePath(QStringLiteral("settings")).toUtf8());
+
+  // 开关态收口为本测试独有（隔离 QSettings，与真机设置互不串扰）
   NotifyPrefs prefs = NotifyPrefs::load();
   prefs.flash_alert = true;
   prefs.save();

@@ -302,10 +302,20 @@ QString format_online_s(qint64 seconds) {
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   setWindowTitle(QStringLiteral("Memex"));
-  resize(960, 640);
+  setMinimumSize(320, 420); // 下限＝列表态最小可读（rail 60＋会话列 260）
+  resize(1280, 800); // 先占位；build_ui 后再落一次（布局 sizeHint 会改写）
 
   build_ui();
-  close_chat(); // 布局令：启动无会话＝列表态长方形面板（点好友再展开对话）
+  // 启动无会话＝列表态：隐藏对话面板，但保持默认横窗 1280×800（设计稿
+  // prototypes.css .window＝1280×800；同类 IM 默认即横窗）。不钳宽——
+  // 钳宽只在用户主动关会话时生效（close_chat(true)，2026-10-11 死空间修复）
+  close_chat(false);
+  // 默认几何＝1280×800（1.6:1）：与设计稿 prototypes.css .window 一致，落在同类
+  // 重合区间（微信≈1.44／Telegram 4:3／Slack 3:2 1200×800／Discord 16:9），
+  // 会话面板可容纳两列消息。DPI：Qt 的 resize／restoreGeometry 均以逻辑像素
+  // （1/@devicePixelRatio）为单位，高刷屏上按设备像素比自动放大，无需手算。
+  // 须在 build_ui 之后：布局激活会按 sizeHint 改写窗尺寸（无 show 时）。
+  resize(1280, 800);
 
   wire_engines();
   direct_engine_.start();
@@ -347,6 +357,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   connect(&BrandKit::instance(), &BrandKit::brand_applied, this,
           &MainWindow::apply_brand);
   apply_brand();
+
+  // 恢复上次窗口几何（首次启动无存档＝跳过，保持默认 1280×800）。须在
+  // close_chat() 之后：启动列表态把宽度钳到 320，restoreGeometry 再把窗口
+  // 还到上次尺寸。恢复前先释放列表态宽度上限，否则 restoreGeometry 会被
+  // 钳住而静默失效（QWidget 几何受 maximumWidth 约束）
+  setMaximumWidth(QWIDGETSIZE_MAX);
+  restore_window_geometry();
 }
 
 void MainWindow::apply_brand() {
@@ -829,7 +846,11 @@ void MainWindow::build_ui() {
   layout->addWidget(rail_);
   side->setFixedWidth(260);
   layout->addWidget(side);
-  layout->addWidget(chat, 1);
+  // chat 高 stretch（100）：会话态吸收几乎全部余量；尾部 addStretch(1)：
+  // 列表态（chat 隐藏）吸收余量→内容左对齐（否则余量均分到间隙、列表被推
+  // 到窗中部——2026-10-13 默认尺寸令后启动横窗暴露的布局问题）
+  layout->addWidget(chat, 100);
+  layout->addStretch(1);
   setCentralWidget(central);
 
   // 主题：控件样式统一在这里刷（构造时先按当前令牌落一次，之后跟随
@@ -3267,6 +3288,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     event->ignore();
     return;
   }
+  save_window_geometry(); // 真退出：存窗口几何，下次启动恢复（首次启动用默认）
   QMainWindow::closeEvent(event);
 }
 
@@ -3844,12 +3866,13 @@ void MainWindow::open_peer(const QString& device_id) {
 // 直连与协作消息同库合并，按 source 字段标注来源（T2.4 合并展示）。
 // 关会话回列表态（布局令）：清当前会话（历史在库里，重开即重渲），
 // 面板收起、窗口缩回「左菜单+好友列表」长方形
-void MainWindow::close_chat() {
+void MainWindow::close_chat(bool clamp_width) {
   current_kind_.clear();
   current_peer_.clear();
   chat_rows_.clear();
   chat_view_->clear();
   chat_panel_->hide();
+  if (!clamp_width) return; // 启动列表态：不钳宽（保持默认 1280×800 横窗，见构造）
   if (!isMaximized() && width() > 400) resize(320, height());
   // 列表态收紧窗口右缘上限＝左侧列内容宽（rail 60＋会话列 260）：拖窗口右缘
   // 不再把列表与右框之间撑出死空间（2026-10-11 用户报——列表态拉宽窗口，
@@ -3858,12 +3881,37 @@ void MainWindow::close_chat() {
   if (!isMaximized()) setMaximumWidth(rail_->minimumWidth() + side_->minimumWidth());
 }
 
+// —— 窗口几何持久化（同类 IM 通行做法：Telegram savePosition／Slack
+// mainWindowSettings.bounds／Discord WINDOW_BOUNDS 均记住上次尺寸与位置）——
+// 默认几何（1280×800）只在首次启动用；之后启动恢复上次尺寸与位置。
+// QSettings 与本文件其他键同口径（组织/应用名）。
+void MainWindow::save_window_geometry() {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  if (isMaximized()) return; // 最大化态不存（恢复时按普通态处理）
+  if (width() < 480 || height() < 320) return; // 列表态钳到 320 时不存窄条
+  settings.setValue(QStringLiteral("window_geometry"), saveGeometry());
+}
+
+void MainWindow::restore_window_geometry() {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  const QByteArray geom =
+      settings.value(QStringLiteral("window_geometry")).toByteArray();
+  if (geom.isEmpty()) return; // 首次启动＝无存档，保持默认几何
+  if (!restoreGeometry(geom)) return; // 失败＝静默保持默认
+  if (width() < 480) {
+    // 存档是列表态窄条（<480 宽，恢复前宽度上限已释放）——丢弃，用默认
+    resize(1280, 800);
+  }
+}
+
 void MainWindow::open_chat(const QString& kind, const QString& id) {
   // 布局令：对话面板只在打开会话后展开（列表态点好友／菜单／通知点入）；
-  // 从列表态展开时若窗口还停在窄长方形，恢复会话态宽度
+  // 从列表态展开时若窗口还停在窄长方形，恢复会话态宽度（＝默认宽度 1280）
   setMaximumWidth(QWIDGETSIZE_MAX); // 释放列表态的右缘上限（见 close_chat）
   if (chat_panel_->isHidden() && !isMaximized() && width() < 520)
-    resize(960, height());
+    resize(1280, height());
   chat_panel_->show();
   current_kind_ = kind;
   current_peer_ = id;

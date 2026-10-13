@@ -207,6 +207,11 @@ public:
   // lastWindowClosed，进程滞留＝无窗运行还得拉起来再退。退出即显式
   // quit，不依赖窗口可见性）。公开给退出语义回归测试走同一路径。
   void quit_app();
+  // 窗口几何持久化：默认几何只首次启动用；之后恢复上次尺寸与位置（同类
+  // IM 通行：Telegram savePosition／Slack bounds／Discord WINDOW_BOUNDS）。
+  // 公开给几何持久化回归测试走同一路径
+  void save_window_geometry();
+  void restore_window_geometry();
 
 private:
   // 离开锁屏（用户令 2026-10-08 ④）：全局输入喂计时器＋超时上锁
@@ -227,7 +232,9 @@ private:
   void open_chat(const QString& kind, const QString& id);
   // 关会话回列表态（布局令：无对话＝「左菜单+好友列表」长方形面板，
   // 对话面板只在 open_chat 后展开；再点当前好友／点标题栏 ✕ 同此路）
-  void close_chat();
+  // clamp_width=false＝启动列表态（保持默认横窗）；true＝用户关会话（钳到
+  // 320 防死空间，2026-10-11 修复）
+  void close_chat(bool clamp_width = true);
   void append_message(const QString& from_id, const QString& text,
                       qint64 ts_ms, bool outgoing, const QString& source,
                       const QString& msg_id = QString(),
