@@ -233,7 +233,8 @@ private:
   // 关会话回列表态（布局令：无对话＝「左菜单+好友列表」长方形面板，
   // 对话面板只在 open_chat 后展开；再点当前好友／点标题栏 ✕ 同此路）
   // clamp_width=false＝启动列表态（保持默认横窗）；true＝用户关会话（钳到
-  // 320 防死空间，2026-10-11 修复）
+  // 320 防死空间，2026-10-11 修复）。两态下列表列均 Expanding 占满 rail
+  // 之外的宽度，右缘不留空白（2026-10-14 用户报启动右侧空白）
   void close_chat(bool clamp_width = true);
   void append_message(const QString& from_id, const QString& text,
                       qint64 ts_ms, bool outgoing, const QString& source,

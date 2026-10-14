@@ -597,6 +597,7 @@ void MainWindow::build_ui() {
   // —— 左侧：局域网设备列表（直连态以设备替代联系人）——
   auto* side = new QWidget(this);
   side_ = side;
+  side->setObjectName(QStringLiteral("side_column"));
   auto* side_layout = new QVBoxLayout(side);
   side_layout->setContentsMargins(10, 10, 6, 10);
   side_layout->setSpacing(6);
@@ -846,11 +847,11 @@ void MainWindow::build_ui() {
   layout->addWidget(rail_);
   side->setFixedWidth(260);
   layout->addWidget(side);
-  // chat 高 stretch（100）：会话态吸收几乎全部余量；尾部 addStretch(1)：
-  // 列表态（chat 隐藏）吸收余量→内容左对齐（否则余量均分到间隙、列表被推
-  // 到窗中部——2026-10-13 默认尺寸令后启动横窗暴露的布局问题）
+  // chat 高 stretch（100）：会话态吸收几乎全部余量。列表态（chat 隐藏）不再
+  // 用尾部 addStretch 吸收余量——那会在右缘留整片空白（2026-10-14 用户报
+  // 启动横窗右侧空白）；改为列表列本身 Expanding 占满 rail 之外的宽度
+  //（close_chat 放开上限，open_chat 收回 260 固定宽）。
   layout->addWidget(chat, 100);
-  layout->addStretch(1);
   setCentralWidget(central);
 
   // 主题：控件样式统一在这里刷（构造时先按当前令牌落一次，之后跟随
@@ -3872,6 +3873,10 @@ void MainWindow::close_chat(bool clamp_width) {
   chat_rows_.clear();
   chat_view_->clear();
   chat_panel_->hide();
+  // 列表态：列表列占满 rail 之外的全部窗宽（微信/QQ 启动即列表；无论
+  // 启动还是关会话，右缘都不再留空白——2026-10-14 用户报）
+  side_->setMaximumWidth(QWIDGETSIZE_MAX);
+  side_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   if (!clamp_width) return; // 启动列表态：不钳宽（保持默认 1280×800 横窗，见构造）
   if (!isMaximized() && width() > 400) resize(320, height());
   // 列表态收紧窗口右缘上限＝左侧列内容宽（rail 60＋会话列 260）：拖窗口右缘
@@ -3912,6 +3917,8 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
   setMaximumWidth(QWIDGETSIZE_MAX); // 释放列表态的右缘上限（见 close_chat）
   if (chat_panel_->isHidden() && !isMaximized() && width() < 520)
     resize(1280, height());
+  // 会话态：列表列收回固定宽，余量交给 chat 面板（stretch 100）
+  side_->setFixedWidth(260);
   chat_panel_->show();
   current_kind_ = kind;
   current_peer_ = id;

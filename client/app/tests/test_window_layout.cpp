@@ -100,6 +100,34 @@ int main(int argc, char** argv) {
     CHECK(w3.height() == 800);
   }
 
+  // ⑦ 列表态右缘无空白（2026-10-14 用户报：启动 1280 横窗但对话面板隐藏，
+  //    旧尾部 addStretch 吸收余量→右侧整片空白、视觉像方块）：列表列
+  //    Expanding 占满 rail 之外的全部宽度；开会话后收回 260、chat 面吸收。
+  //    须 show 激活布局才测得真实宽度（离屏测试屏 800×800 会钳宽，断言用
+  //    相对占满而非绝对 1280，故用独立实例不动前腿）
+  {
+    QSettings(QCoreApplication::organizationName(),
+              QCoreApplication::applicationName())
+        .remove(QStringLiteral("window_geometry"));
+    memex::client::MainWindow w4;
+    w4.show();
+    app.processEvents();
+    auto* side_col = w4.findChild<QWidget*>(QStringLiteral("side_column"));
+    auto* rail = w4.findChild<QWidget*>(QStringLiteral("rail_nav"));
+    CHECK(side_col);
+    CHECK(rail);
+    CHECK(side_col->width() == w4.width() - rail->width()); // 列表占满，无空白
+    auto* list4 = w4.findChild<QListWidget*>(QStringLiteral("device_list"));
+    CHECK(list4);
+    auto* row4 = new QListWidgetItem(QStringLiteral("测试设备"), list4);
+    row4->setData(Qt::UserRole, QStringLiteral("dev-lf"));
+    row4->setData(Qt::UserRole + 1, QStringLiteral("direct"));
+    emit list4->itemClicked(row4);
+    app.processEvents();
+    CHECK(side_col->width() == 260); // 会话态：列表列收回固定宽
+    w4.hide();
+  }
+
   // ⑥ 托盘退出语义（2026-10-11 用户实录：最小化到托盘的隐藏态点退出，
   //    进程不退——close() 不可见窗口不触发 lastWindowClosed，进程滞留
   //    无窗运行态）。quit_app＝显式 quit：隐藏态（show→hide 模拟托盘
