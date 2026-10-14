@@ -9,6 +9,8 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QHostAddress>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QSettings>
 #include <QTcpServer>
 #include <QTemporaryDir>
@@ -187,6 +189,41 @@ int main(int argc, char** argv) {
   da.stop();
   db.stop();
   da2.stop();
+
+  // —— ④ 发送序号播种（重启续跑）：计数器纯内存，重启归零会重发 seq=1
+  // 撞 UNIQUE(from_id, seq)、双端静默丢行（走查实录）。同库同身份重开，
+  // 下一条 seq 必须接着历史最大序号，且对端真落库＝双端不丢。
+  DirectEngine da3("ng-A", tmp.filePath(QStringLiteral("a.db")));
+  DirectEngine db3("ng-B", tmp.filePath(QStringLiteral("b.db")));
+  CHECK(da3.start());
+  CHECK(db3.start());
+  CHECK(wait_until([&] { return da3.has_peer("ng-B") && db3.has_peer("ng-A"); },
+                   8000));
+  delivered = true;
+  QObject::connect(&da3, &DirectEngine::text_delivered, &da3,
+                   [&](quint64, bool ok) { delivered = ok; });
+  const quint64 seq3 = da3.send_text("ng-B", "netguard-restart-seq");
+  CHECK(seq3 == 3); // 历史已用 1、2；未播种则回 1（丢行实录腿）
+  CHECK(wait_until([&] { return delivered; }, 6000));
+  {
+    QSqlDatabase bdb = QSqlDatabase::addDatabase(
+        QStringLiteral("QSQLITE"), QStringLiteral("seq-seed-b"));
+    bdb.setDatabaseName(tmp.filePath(QStringLiteral("b.db")));
+    CHECK(bdb.open());
+    // 送达回执先于接收方落库回调＝以行出现为真同步点
+    const auto row3_stored = [&bdb] {
+      QSqlQuery q(bdb);
+      if (!q.exec(QStringLiteral("SELECT count(*) FROM messages "
+                                 "WHERE from_id='ng-A' AND seq=3")))
+        return false;
+      return q.next() && q.value(0).toInt() == 1;
+    };
+    CHECK(wait_until(row3_stored, 6000));
+    bdb.close();
+  }
+  QSqlDatabase::removeDatabase(QStringLiteral("seq-seed-b"));
+  da3.stop();
+  db3.stop();
 
   if (g_failures == 0) {
     qInfo("net guard tests: all passed");

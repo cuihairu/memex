@@ -56,6 +56,13 @@ bool DirectEngine::start() {
     return false;
   }
 
+  // 发送序号播种：计数器是内存态，重启归零会让重启后首条消息重发 seq=1，
+  // 双端 UNIQUE(from_id, seq) 撞历史行、落库静默失败＝消息双端丢失（走查
+  // 实录）。从本机库取该身份已用最大序号续跑（next_local_seq 回 MAX+1，
+  // 减一还原成「下一个 ++」语义；空库回 1→种子 0，首条仍 seq=1）。
+  seq_counter_.store(static_cast<std::uint64_t>(
+      std::max<qint64>(store_->next_local_seq(device_id_) - 1, 0)));
+
   // 平台-8：设备身份（Ed25519，缺失即生成落库）。身份未就绪即拒绝启动
   // （fail-closed——没有身份就无法通过握手，不退回明文直连）。
   identity_ = DeviceIdentity::load(store_.get());
