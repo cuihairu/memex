@@ -376,7 +376,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  // —— 需求批⑦ 消息回执：气泡旁状态可见（✓ 送达/✓✓ 已读、只升不降）
+  // —— 需求批⑦ 消息回执：气泡旁状态可见（送达单勾 ✓/已读双勾 ✓✓、只升不降）
   //     ＋已读回执开关（全局缺省＋会话级覆盖）与设置菜单接线 ——
   {
     // QSettings 持久化残留清场（重跑幂等——上次运行留下的开关值会使
@@ -414,25 +414,52 @@ int main(int argc, char** argv) {
       gact->setChecked(before); // 还原
     }
 
-    // 气泡旁回执标注：delivered=✓ 已送达 → read=✓✓ 已读（升）；
-    // 乱序后到的 delivered 不倒退已读终态
+    // 气泡旁回执灰勾（已读灰勾单 2026-10-14）：delivered＝单勾 ✓ →
+    // read＝双勾 ✓✓，靠勾数区分两态、不挂散文标签；乱序后到的
+    // delivered 不倒退已读终态
     window.open_direct_peer(QStringLiteral("dev-C7"));
     CHECK(window.chat_panel_visible());
     window.inject_message(QStringLiteral("dev-C7"),
                           QStringLiteral("回执标注验收"), true,
                           QStringLiteral("msg-rc1"));
-    CHECK(!window.chat_html().contains(QStringLiteral("已送达")));
+    // 无回执态＝不出现任何勾（未发送/已发送不冒充已送达）
+    CHECK(!window.chat_html().contains(QStringLiteral("✓")));
     window.apply_message_receipt(QStringLiteral("msg-rc1"),
                                  QStringLiteral("delivered"));
-    CHECK(window.chat_html().contains(QStringLiteral("✓ 已送达")));
+    // 送达＝单勾，且旧散文标签已下线
+    CHECK(window.chat_html().contains(QStringLiteral("✓")));
+    CHECK(!window.chat_html().contains(QStringLiteral("✓✓")));
+    CHECK(!window.chat_html().contains(QStringLiteral("已送达")));
     window.apply_message_receipt(QStringLiteral("msg-rc1"),
                                  QStringLiteral("read"));
-    CHECK(window.chat_html().contains(QStringLiteral("✓✓ 已读")));
-    CHECK(!window.chat_html().contains(QStringLiteral("✓ 已送达")));
+    // 已读＝双勾（灰勾），旧散文标签同样不出现
+    CHECK(window.chat_html().contains(QStringLiteral("✓✓")));
+    CHECK(!window.chat_html().contains(QStringLiteral("✓✓ 已读")));
     // 乱序回退：后到的 delivered 通知不倒退 read
     window.apply_message_receipt(QStringLiteral("msg-rc1"),
                                  QStringLiteral("delivered"));
-    CHECK(window.chat_html().contains(QStringLiteral("✓✓ 已读")));
+    CHECK(window.chat_html().contains(QStringLiteral("✓✓")));
+    CHECK(!window.chat_html().contains(QStringLiteral("✓✓ 已读")));
+
+    // 直连域灰勾（需求批⑦·已读灰勾单 2026-10-14）：直连行无 msg_id，
+    // 回执按我发出行的发送序号命中（apply_direct_receipt）；换新会话
+    // 清行，勾态从零推进——送达单勾→已读双勾→乱序 delivered 不倒退
+    window.open_direct_peer(QStringLiteral("dev-C8"));
+    window.inject_message(QStringLiteral("dev-C8"),
+                          QStringLiteral("直连灰勾验收"), true, QString(),
+                          QString(), 0, 777);
+    // 已发送（receipt 空）＝无勾
+    CHECK(!window.chat_html().contains(QStringLiteral("✓")));
+    window.apply_direct_receipt(777, QStringLiteral("delivered"));
+    CHECK(window.chat_html().contains(QStringLiteral("✓")));
+    CHECK(!window.chat_html().contains(QStringLiteral("✓✓")));
+    window.apply_direct_receipt(777, QStringLiteral("read"));
+    CHECK(window.chat_html().contains(QStringLiteral("✓✓")));
+    // 乱序回退：后到的 delivered 不倒退已读；无关序号不命中他行
+    window.apply_direct_receipt(777, QStringLiteral("delivered"));
+    window.apply_direct_receipt(778, QStringLiteral("read"));
+    CHECK(window.chat_html().contains(QStringLiteral("✓✓")));
+    CHECK(!window.chat_html().contains(QStringLiteral("✓ 已送达")));
 
     // 还原缺省态（不留开关残留——QSettings 落盘，残留会污染重跑）
     s.remove(QStringLiteral("receipts/send_read"));

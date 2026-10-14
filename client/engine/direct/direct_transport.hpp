@@ -62,6 +62,14 @@ public:
   void send_nudge(const QHostAddress& target, quint16 target_port,
                   const std::string& to_id, std::uint64_t seq);
 
+  // 已读上报（需求批⑦·已读灰勾单 2026-10-14）：接收方→发送方点对点直发
+  // （直连域无服务端）。与文本同机制（握手→发信→等 ACK）；载荷＝被报已读
+  // 消息的发送方序号（Read.seq），帧自身序号取 frame_seq 键控 ACK，两序号
+  // 不得共用同值。回执由本类发出（同 text/nudge）。
+  void send_read(const QHostAddress& target, quint16 target_port,
+                 const std::string& to_id, std::uint64_t frame_seq,
+                 std::uint64_t msg_seq);
+
 signals:
   // 收到对端文本（尚未回执前先缓存，回执由本类发出）
   void text_received(const QString& from_id, const QString& to_id,
@@ -71,6 +79,9 @@ signals:
   void nudge_received(const QString& from_id, const QString& to_id,
                       quint64 seq, qint64 ts_ms);
   void delivered(quint64 seq, bool ok);
+  // 收到对端已读上报（需求批⑦·已读灰勾单）：msg_seq＝被报已读消息的发送方
+  // 序号，reader＝已读方设备号（应用层身份与已认证信道一致，已防冒名）
+  void read_received(quint64 msg_seq, const QString& reader);
   // 文件连接移交（T1.3）：kFileMeta 已解出，socket 所有权随之移交
   // （父对象置空、本类槽位断开），此后字节流由文件服务按块处理。
   // ch＝该连接的安全信道（已握手建立），数据面续用其密钥解封。

@@ -150,6 +150,15 @@ void DirectTransport::handle_payload(QTcpSocket* socket,
     write_ack(socket, ch, msg.seq(), msg.from());
     break;
   }
+  case MsgType::READ: {
+    // 已读上报（需求批⑦·已读灰勾单）：接收方→发送方点对点直发；载荷
+    // Read.seq＝被报已读消息的发送方序号，发送方按 (收件人, 序号) 命中
+    // 自己发出的行落已读终态。回执同文本（送达确认贯穿）。
+    emit read_received(static_cast<quint64>(msg.read().seq()),
+                       QString::fromStdString(msg.from()));
+    write_ack(socket, ch, msg.seq(), msg.from());
+    break;
+  }
   case MsgType::ACK:
     // 入站连接不承载发送确认（确认走各自出站连接）
     break;
@@ -182,6 +191,18 @@ void DirectTransport::send_nudge(const QHostAddress& target,
   frame.set_type(MsgType::NUDGE);
   frame.mutable_nudge(); // 空 message 进 oneof 须显式置位（需求批⑥）
   send_frame_with_ack(target, target_port, to_id, seq, frame);
+}
+
+// 已读上报（需求批⑦·已读灰勾单 2026-10-14）：与文本/振屏同路（握手→
+// 发信→等 ACK）；载荷＝被报已读消息的发送方序号，帧序号（ACK 键）另取。
+void DirectTransport::send_read(const QHostAddress& target,
+                                quint16 target_port, const std::string& to_id,
+                                std::uint64_t frame_seq,
+                                std::uint64_t msg_seq) {
+  Message frame;
+  frame.set_type(MsgType::READ);
+  frame.mutable_read()->set_seq(msg_seq);
+  send_frame_with_ack(target, target_port, to_id, frame_seq, frame);
 }
 
 // 发信共用机制（文本/振屏同路）：先握手后发信，握手失败即

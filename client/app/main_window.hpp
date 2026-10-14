@@ -159,11 +159,12 @@ public:
   // —— 需求批①（验收面）——
   // 注入一条消息走气泡渲染（测试缝：生产路径＝引擎信号驱动 append_message，
   // 纯 UI 测试无对端时经此面断言 colorize 渲染；msg_id/receipt＝需求批⑦
-  // 回执标注验收用）
+  // 回执标注验收用；seq＝直连域发送序号（需求批⑦·已读灰勾单））
   void inject_message(const QString& from_id, const QString& text,
                       bool outgoing, const QString& msg_id = QString(),
                       const QString& receipt = QString(),
-                      qint64 ts_ms = 0); // 0=现在（分日分隔线腿注昨日时戳）
+                      qint64 ts_ms = 0,
+                      quint64 seq = 0); // ts_ms=0 为现在（分日分隔线腿注昨日）
   // 注入一条图片消息走气泡渲染（需求批②验收缝：右键「收藏到表情包」
   // 需图片气泡在场；生产路径＝引擎文件回执驱动 append_image_message）
   void inject_image(const QString& from_id, const QString& image_path,
@@ -177,6 +178,10 @@ public:
   // 回执态落行重渲（测试缝：生产路径＝引擎 message_delivered/
   // message_read/receipts_received 信号驱动同款；state=delivered/read）
   void apply_message_receipt(const QString& msg_id, const QString& state);
+  // 直连域同口径（需求批⑦·已读灰勾单 2026-10-14）：直连行无 msg_id，
+  // 回执按我发出行的发送序号命中；state=delivered/read，只升不降同款
+  //（测试缝：生产路径＝text_delivered/message_read 信号驱动同款）
+  void apply_direct_receipt(quint64 seq, const QString& state);
   // —— 需求批⑧ 聊天记录按日期（验收面与「按日期」对话框同一路径）——
   // 范围筛选（毫秒含端点）：本地索引重建当前会话行；协作/群登录态同时向
   // 服务端补拉该窗（回包落本地索引后自动重渲）。
@@ -239,7 +244,8 @@ private:
   void append_message(const QString& from_id, const QString& text,
                       qint64 ts_ms, bool outgoing, const QString& source,
                       const QString& msg_id = QString(),
-                      const QString& receipt = QString());
+                      const QString& receipt = QString(),
+                      quint64 seq = 0);
   // 图片消息气泡（需求批④）：气泡内直接渲染图片（<img>，非文件系统行）
   void append_image_message(const QString& from_id, const QString& image_path,
                             qint64 ts_ms, bool outgoing, const QString& source);
@@ -287,6 +293,8 @@ private:
     bool at_mode{false}; // 群聊：@账号 高亮
     QString image;      // 非空＝图片消息（需求批④：text 存文件路径，气泡渲染 <img>）
     QString msg_id;     // 协作态消息标识（回执通知按它命中本行；直连恒空）
+    quint64 seq{0};     // 直连域发送序号（我发出的行；直连回执按它命中本行，
+                        // 需求批⑦·已读灰勾单；协作态恒 0——回执走 msg_id）
     QString receipt;    // 我发出消息的回执态（''/delivered/read，需求批⑦）
   };
   // 分日分隔线判定（需求批⑧余量收口）：ts_ms 行前是否需先插日头——

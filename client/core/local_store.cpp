@@ -492,6 +492,26 @@ bool LocalStore::set_receipt(const std::string& msg_id,
   return q.numRowsAffected() > 0;
 }
 
+bool LocalStore::set_receipt_for_seq(const std::string& to_id,
+                                     std::uint64_t seq,
+                                     const std::string& state) {
+  // 与 set_receipt 同口径的只升不降；(to_id, seq) 直连唯一键，
+  // source='direct' 限定防协作域行被序号巧合串扰
+  if (!open_ || to_id.empty() || seq == 0) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "UPDATE messages SET receipt = ? WHERE to_id = ? AND seq = ? AND"
+      " source = 'direct' AND receipt != 'read'"));
+  q.addBindValue(QString::fromStdString(state));
+  q.addBindValue(QString::fromStdString(to_id));
+  q.addBindValue(static_cast<qlonglong>(seq));
+  if (!q.exec()) {
+    qWarning() << "[本地库] 直连回执态写入失败：" << q.lastError().text();
+    return false;
+  }
+  return q.numRowsAffected() > 0;
+}
+
 QList<StoredMessage> LocalStore::pending_sync(
     const std::string& from_id) const {
   QList<StoredMessage> out;

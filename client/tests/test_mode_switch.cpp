@@ -145,7 +145,7 @@ int main(int argc, char** argv) {
   int db_received = 0;
   bool da_delivered = false;
   QObject::connect(&db, &DirectEngine::message_received, &db,
-                   [&](const QString&, const QString&, qint64) { ++db_received; });
+                   [&](const QString&, const QString&, qint64, quint64) { ++db_received; });
   QObject::connect(&da, &DirectEngine::text_delivered, &da,
                    [&](quint64, bool ok) { da_delivered = ok; });
   // 需求批⑤：db 接收目录隔离到临时目录（须 start 前设置）——文件夹腿

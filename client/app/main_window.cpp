@@ -188,8 +188,11 @@ QString colorize(const QString& content) {
 
 // 气泡行：外出＝品牌橙靠右，来访＝浅灰靠左（QTextBrowser 富文本子集，不用圆角）。
 // at_mode=true（群聊）：@账号 标记整体包品牌橙加粗。
-// receipt 非空＝我发出消息的回执态标注（需求批⑦）：delivered=✓ 已送达、
-// read=✓✓ 已读——挂在 meta 行尾，历史重载与实时更新同构。
+// receipt 非空＝我发出消息的回执勾（需求批⑦；已读灰勾单 2026-10-14）：
+// delivered＝单勾 ✓、read＝双勾 ✓✓，两态同为灰色（继承 meta 的 text_muted
+// 令牌，浅深双主题各自可读）——「送达 vs 已读」靠勾数区分，不另造图标语言、
+// 不挂散文标签（沿用微信／QQ／Telegram 同一套勾）。挂在 meta 行尾，历史
+// 重载与实时更新同构。
 QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
                     bool outgoing, bool at_mode = false,
                     const QString& image = {},
@@ -197,9 +200,9 @@ QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
   const ThemeTokens& t = tk();
   QString receipt_tag;
   if (outgoing && receipt == QStringLiteral("delivered")) {
-    receipt_tag = QStringLiteral(" ✓ 已送达");
+    receipt_tag = QStringLiteral(" ✓");   // 已送达＝单勾
   } else if (outgoing && receipt == QStringLiteral("read")) {
-    receipt_tag = QStringLiteral(" ✓✓ 已读");
+    receipt_tag = QStringLiteral(" ✓✓");  // 已读＝双勾（灰勾）
   }
   const QString meta = QStringLiteral(
                            "<span style=\"color:%1; font-size:small;\">%2 %3%4</span>")
@@ -961,12 +964,17 @@ void MainWindow::wire_engines() {
     show_status(status_hint_); // 在线数变化，刷新引擎态前缀
   });
   connect(&direct_engine_, &DirectEngine::message_received, this,
-          [this](const QString& from, const QString& text, qint64 ts_ms) {
+          [this](const QString& from, const QString& text, qint64 ts_ms,
+                 quint64 seq) {
             cross_touch(from); // T4.2：首条收发即上报会话建立
             if (from == current_peer_ &&
                 current_kind_ == QStringLiteral("direct")) {
               append_message(from, text, ts_ms, false,
                              QStringLiteral("direct"));
+              // 已读上报（需求批⑦·已读灰勾单）：会话开着即视为已览，
+              // 是否上报受会话/全局已读回执开关裁决（与协作态同款）
+              if (seq != 0 && read_receipts_enabled(from))
+                direct_engine_.mark_read(from.toStdString(), seq);
             } else {
               // 未读角标（原型行 n-count）：非当前会话到达即计数并重渲行
               ++unread_counts_[from];
@@ -977,7 +985,7 @@ void MainWindow::wire_engines() {
   // T4.7 系统通知独立接入（与渲染分支解耦：窗口未激活时任何直连新消息
   // 都通知，不随分支改写而丢失）
   connect(&direct_engine_, &DirectEngine::message_received, this,
-          [this](const QString& from, const QString& text, qint64) {
+          [this](const QString& from, const QString& text, qint64, quint64) {
             if (!isActiveWindow()) {
               event_notify(NotifyPrefs::load().popup_message,
                            SoundEvent::Message, QStringLiteral("新消息"),
@@ -990,6 +998,16 @@ void MainWindow::wire_engines() {
             set_delivery_state(
                 ok ? QStringLiteral("已送达（seq %1）").arg(seq)
                    : QStringLiteral("送达失败（seq %1）").arg(seq));
+            // 直连送达回执落气泡（需求批⑦·已读灰勾单）：store 侧由引擎
+            // 落 delivered，界面按发送序号命中行改灰单勾（失败不冒充送达）
+            if (ok) apply_direct_receipt(seq, QStringLiteral("delivered"));
+          });
+  // 直连已读上报回执（需求批⑦·已读灰勾单）：store 侧由引擎落 read
+  //（只升不降），界面把灰单勾升为灰双勾；状态行同协作态口径提示
+  connect(&direct_engine_, &DirectEngine::message_read, this,
+          [this](quint64 seq, const QString& reader) {
+            apply_direct_receipt(seq, QStringLiteral("read"));
+            set_delivery_state(QStringLiteral("对方已读 ✓✓（%1）").arg(reader));
           });
   connect(&direct_engine_, &DirectEngine::file_progress, this,
           [this](const QString& /*id*/, quint64 done, quint64 total) {
@@ -1560,7 +1578,10 @@ bool MainWindow::send_in_current_chat(const QString& text) {
   }
   if (!direct_send_allowed()) return false; // T3.4 策略闸门
   const std::string peer = current_peer_.toStdString();
-  if (direct_engine_.send_text(peer, text.toStdString()) == 0) {
+  // seq 一次受理：0＝对端不可达（不落行不冒充已发送）；>0＝已受理落库
+  //（送达失败仍保留本机记录），seq 随行——直连回执按它命中本行
+  const quint64 sent_seq = direct_engine_.send_text(peer, text.toStdString());
+  if (sent_seq == 0) {
     show_status(QStringLiteral("发送失败：对端不可达"));
     return false;
   }
@@ -1571,7 +1592,7 @@ bool MainWindow::send_in_current_chat(const QString& text) {
   }
   append_message(QString::fromStdString(direct_engine_.device_id()), text,
                  QDateTime::currentMSecsSinceEpoch(), true,
-                 QStringLiteral("direct"));
+                 QStringLiteral("direct"), QString(), QString(), sent_seq);
   set_delivery_state(QStringLiteral("发送中…（直连点对点）"));
   return true;
 }
@@ -1722,10 +1743,11 @@ void MainWindow::show_emoji_panel() {
 // —— 需求批① 文字颜色 ——
 void MainWindow::inject_message(const QString& from_id, const QString& text,
                                 bool outgoing, const QString& msg_id,
-                                const QString& receipt, qint64 ts_ms) {
+                                const QString& receipt, qint64 ts_ms,
+                                quint64 seq) {
   append_message(from_id, text,
                 ts_ms > 0 ? ts_ms : QDateTime::currentMSecsSinceEpoch(),
-                outgoing, QStringLiteral("direct"), msg_id, receipt);
+                outgoing, QStringLiteral("direct"), msg_id, receipt, seq);
 }
 
 void MainWindow::inject_image(const QString& from_id, const QString& image_path,
@@ -3066,6 +3088,24 @@ void MainWindow::apply_message_receipt(const QString& msg_id,
   if (changed) rerender_chat();
 }
 
+void MainWindow::apply_direct_receipt(quint64 seq, const QString& state) {
+  // 直连域回执落行（需求批⑦·已读灰勾单）：直连行无 msg_id，按我发出行
+  // 的发送序号命中；只升不降与 apply_message_receipt 同口径
+  if (seq == 0 || state.isEmpty()) return;
+  bool changed = false;
+  for (ChatRow& row : chat_rows_) {
+    if (!row.system && row.outgoing && row.seq == seq &&
+        row.receipt != state) {
+      if (row.receipt == QStringLiteral("read") &&
+          state == QStringLiteral("delivered"))
+        continue;
+      row.receipt = state;
+      changed = true;
+    }
+  }
+  if (changed) rerender_chat();
+}
+
 // —— T4.7 系统集成 ——
 
 QString MainWindow::last_notify() const { return last_notify_; }
@@ -4050,7 +4090,7 @@ void MainWindow::render_open_history() {
                    m.from == my_id.toStdString(),
                    QString::fromStdString(m.source),
                    QString::fromStdString(m.msg_id),
-                   QString::fromStdString(m.receipt));
+                   QString::fromStdString(m.receipt), m.seq);
   }
   // T4.3：打开协作单聊=已读历史——对最近一条收到的协作消息上报已读
   //（打开前到达的消息此前未上报；逐条全报是噪音，只报最新一条）。
@@ -4061,6 +4101,16 @@ void MainWindow::render_open_history() {
         collab_engine_.mark_read(QString::fromStdString(it->msg_id));
         break;
       }
+    }
+  }
+  // 直连已读上报（需求批⑦·已读灰勾单 2026-10-14）：打开直连会话＝本轮
+  // 消息已览，对来自对端的消息逐条上报已读（引擎按序号去重——重开聊天
+  // 不重发，重启后重报一次幂等）。与协作态「只报最新一条」不同：直连无
+  // 服务端台账，漏报无补拉机会，逐条才闭环；开关裁决同款。
+  if (kind == QStringLiteral("direct") && read_receipts_enabled(id)) {
+    for (const StoredMessage& m : hist) {
+      if (m.from == id.toStdString() && m.seq != 0)
+        direct_engine_.mark_read(id.toStdString(), m.seq);
     }
   }
   // 需求批⑦ 归档扩：打开会话即补查自己消息的回执态——离线期错过的
@@ -4100,7 +4150,7 @@ void MainWindow::render_filtered_history() {
                    m.from == my_id.toStdString(),
                    QString::fromStdString(m.source),
                    QString::fromStdString(m.msg_id),
-                   QString::fromStdString(m.receipt));
+                   QString::fromStdString(m.receipt), m.seq);
   }
   if ((collab || group) && collab_engine_.is_logged_in()) {
     QStringList mine;
@@ -4110,6 +4160,14 @@ void MainWindow::render_filtered_history() {
         mine.push_back(QString::fromStdString(it->msg_id));
     }
     collab_engine_.query_receipts(mine);
+  }
+  // 直连已读上报（需求批⑦·已读灰勾单）：筛选窗同开窗口径——窗内对端
+  // 消息视为已览，逐条上报（引擎按序号去重）
+  if (!collab && !group && read_receipts_enabled(current_peer_)) {
+    for (const StoredMessage& m : hist) {
+      if (m.from == current_peer_.toStdString() && m.seq != 0)
+        direct_engine_.mark_read(current_peer_.toStdString(), m.seq);
+    }
   }
 }
 
@@ -4230,7 +4288,7 @@ void MainWindow::show_date_dialog() {
 void MainWindow::append_message(const QString& from_id, const QString& text,
                                 qint64 ts_ms, bool outgoing,
                                 const QString& source, const QString& msg_id,
-                                const QString& receipt) {
+                                const QString& receipt, quint64 seq) {
   QString name = from_id;
   if (!outgoing) {
     if (current_kind_ == QStringLiteral("collab") ||
@@ -4268,6 +4326,7 @@ void MainWindow::append_message(const QString& from_id, const QString& text,
   row.outgoing = outgoing;
   row.at_mode = at_mode;
   row.msg_id = msg_id;
+  row.seq = seq;
   row.receipt = receipt;
   if (needs_day_divider(chat_rows_, row.ts_ms))
     append_system_line(day_divider_html(

@@ -360,7 +360,7 @@ int main(int argc, char** argv) {
     bool msg_seen = false;
     QString msg_text;
     QObject::connect(&engine, &DirectEngine::message_received, &engine,
-                     [&](const QString& from, const QString& text, qint64) {
+                     [&](const QString& from, const QString& text, qint64, quint64) {
                        if (from == QString::fromStdString(feiq_id)) {
                          msg_seen = true;
                          msg_text = text;

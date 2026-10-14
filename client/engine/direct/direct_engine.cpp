@@ -127,7 +127,8 @@ bool DirectEngine::start() {
             m.source = "direct";
             m.sync_state = "LOCAL"; // 直连域不进服务端同步（平台-9）
             store_->append(m);
-            emit message_received(QString::fromStdString(from_id), text, ts_ms);
+            emit message_received(QString::fromStdString(from_id), text, ts_ms,
+                                  static_cast<quint64>(m.seq));
           });
   connect(discovery_.get(), &DiscoveryService::ipmsg_acked, this,
           [this](quint32 packet_no) {
@@ -148,11 +149,37 @@ bool DirectEngine::start() {
             m.source = "direct";
             m.sync_state = "LOCAL"; // 直连域不进服务端同步（平台-9）
             store_->append(m);
-            emit message_received(from_id, text, ts_ms);
+            emit message_received(from_id, text, ts_ms, seq);
           });
 
   connect(transport_.get(), &DirectTransport::delivered, this,
-          [this](quint64 seq, bool ok) { emit text_delivered(seq, ok); });
+          [this](quint64 seq, bool ok) {
+            // 已读上报帧的 ACK（需求批⑦）＝传输可靠性收条，非送达语义，
+            // 不进 text_delivered 也不落库
+            if (read_frame_seqs_.erase(seq) > 0) return;
+            // 送达确认回执落库（需求批⑦·已读灰勾单）：按 (收件人, 序号) 命中
+            // 我发出的行落 delivered；只升不降由 store 的 receipt != 'read'
+            // 守。摘簿记防无序增长。
+            const auto it = sent_peer_.find(seq);
+            if (it != sent_peer_.end() && ok) {
+              store_->set_receipt_for_seq(it->second, seq,
+                                          QStringLiteral("delivered")
+                                              .toStdString());
+            }
+            sent_peer_.erase(seq);
+            emit text_delivered(seq, ok);
+          });
+
+  // 对端已读上报（需求批⑦·已读灰勾单）：按 (收件人=对端, 被报序号) 命中
+  // 我发出的行落已读终态（store 只升不降守终态），再把勾态变更上抛界面
+  connect(transport_.get(), &DirectTransport::read_received, this,
+          [this](quint64 msg_seq, const QString& reader) {
+            const std::string reader_id = reader.toStdString();
+            if (store_->set_receipt_for_seq(reader_id, msg_seq,
+                                           QStringLiteral("read").toStdString())) {
+              emit message_read(msg_seq, reader);
+            }
+          });
 
   // 振屏（需求批⑥）：本地落标记行后上抛（界面抖窗＋提示音）
   connect(transport_.get(), &DirectTransport::nudge_received, this,
@@ -282,6 +309,7 @@ quint64 DirectEngine::send_text(const std::string& peer_device_id,
   m.source = "direct";
   m.sync_state = "LOCAL"; // 直连域不进服务端同步（平台-9）
   store_->append(m);
+  sent_peer_[seq] = peer_device_id; // 送达确认按对端回执落库（需求批⑦）
 
   // 飞秋对端（"ipmsg:" 前缀、无 TCP 直连口）：走 UDP IPMSG 通道，
   // GBK/UTF-8 双向；送达以对端 RECVMSG 回执为准（ipmsg_acked 按同号
@@ -300,6 +328,27 @@ quint64 DirectEngine::send_text(const std::string& peer_device_id,
 
   transport_->send_text(target.address, target.tcp_port, peer_device_id, seq, text);
   return static_cast<quint64>(seq);
+}
+
+// 已读上报（需求批⑦·已读灰勾单 2026-10-14）：接收方→发送方点对点直发
+// READ 帧（Read.seq＝被报已读消息的发送方序号）。会话内同序号去重
+//（重开聊天不重发）；重启后簿记清空、重报一次——发送方落库只升不降，
+// 重报幂等。飞秋对端（无 TCP 口）与未启动态返回 false。
+bool DirectEngine::mark_read(const std::string& peer_device_id,
+                             std::uint64_t msg_seq) {
+  if (!running_ || msg_seq == 0) return false;
+  const auto key = peer_device_id + ":" + std::to_string(msg_seq);
+  if (!reported_reads_.insert(key).second) return false; // 已上报过
+  const Peer target = peer(peer_device_id);
+  if (target.device_id.empty() || target.tcp_port == 0) {
+    reported_reads_.erase(key); // 不可达不算已报，下次再试
+    return false;
+  }
+  const std::uint64_t frame_seq = ++seq_counter_;
+  read_frame_seqs_.insert(frame_seq);
+  transport_->send_read(target.address, target.tcp_port, peer_device_id,
+                        frame_seq, msg_seq);
+  return true;
 }
 
 // 振屏（需求批⑥）：空体 NUDGE 走文本同一机制；本地落 "[振屏]" 标记行

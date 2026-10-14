@@ -35,8 +35,10 @@ struct StoredMessage {
   // RECEIPT_DATA 触发面自 SERVER_ACKED 推进）/ FAILED（终态失败，不再
   // 补传）。空串＝历史行（状态机启用前的旧数据），不参与恢复补传。
   std::string sync_state;
-  // 回执态（需求批⑦，仅我发出的协作消息有意义）：''=无 / delivered=
-  // 已送达对方客户端 / read=已读。接收方向与直连域恒空。
+  // 回执态（需求批⑦）：''=已发送（落库在途，未获对端确认）/ delivered=
+  // 已送达对方客户端 / read=已读（终态）。仅我发出的消息有意义：协作域
+  // 按 msg_id 命中（set_receipt），直连域按 (收件人, 发送序号) 命中
+  // （set_receipt_for_seq，2026-10-14 已读灰勾单）。接收方向恒空。
   std::string receipt;
   // 模糊检索相关度（仅关键词查询时非 0；无关键词=0，不参与排序）：
   // Σ(命中次数×1000 + 首命中位置提前量封顶 999)。见 search_messages。
@@ -107,6 +109,11 @@ public:
   // 我发出消息的回执态（receipt 列）：state=delivered/read，只升不降
   //（已读终态不被乱序送达通知倒退）。非我发出或未知 msg_id 返回 false。
   bool set_receipt(const std::string& msg_id, const std::string& state);
+  // 直连域同口径（需求批⑦·已读灰勾单 2026-10-14）：直连消息无服务端
+  // msg_id，我发出的行以 (收件人 to_id, 发送序号 seq) 唯一——对端已读
+  // 上报按此键命中。仅 source='direct' 行参与，防与协作域序号串扰。
+  bool set_receipt_for_seq(const std::string& to_id, std::uint64_t seq,
+                           const std::string& state);
 
   // 某对端的本地历史：取最近 limit 条，按时间正序返回。
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;

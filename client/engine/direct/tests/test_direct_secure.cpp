@@ -187,7 +187,7 @@ int main(int argc, char** argv) {
   QString last_from;
   QString last_text;
   QObject::connect(&b, &DirectEngine::message_received, &b,
-                   [&](const QString& from, const QString& text, qint64) {
+                   [&](const QString& from, const QString& text, qint64, quint64) {
                      ++b_received;
                      last_from = from;
                      last_text = text;

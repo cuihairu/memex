@@ -10,6 +10,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -58,6 +59,12 @@ public:
   // 振屏（需求批⑥）：发送窗口抖动提醒（空体 NUDGE，无内容载荷）；本地
   // 落 "[振屏]" 标记行，送达结果同文本走 text_delivered(seq, ok)。失败 0。
   quint64 send_nudge(const std::string& peer_device_id);
+
+  // 已读上报（需求批⑦·已读灰勾单 2026-10-14）：告知对端「你发的
+  // msg_seq 那条我已读」。仅对 TCP 直连对端有效（飞秋/IPMSG 协议无已读
+  // 概念，返回 false）；对端不可达或本会话已上报过同一序号（去重，
+  // 重开聊天不重发）也返回 false——上报幂等，去重只为省帧。
+  bool mark_read(const std::string& peer_device_id, std::uint64_t msg_seq);
 
   // 异步发送文件；返回传输 ID（失败为空）。进度与终态经 file_progress /
   // file_finished 回报。须在 start() 前设置接收目录（set_download_dir）。
@@ -114,8 +121,15 @@ public:
   void file_authz_resolved(quint64 req, bool allowed, const QString& reason);
 
 signals:
-  void message_received(const QString& from_id, const QString& text, qint64 ts_ms);
+  // seq＝对端发送序号（本地落库去重键，亦＝已读上报的被报序号，
+  // 需求批⑦·已读灰勾单）
+  void message_received(const QString& from_id, const QString& text, qint64 ts_ms,
+                        quint64 seq);
   void text_delivered(quint64 seq, bool ok);
+  // 对端上报某条我发的消息已读（需求批⑦·已读灰勾单）：seq＝我发出的那条
+  // 消息的发送序号，reader＝已读方设备号。本地库已落已读终态，本信号
+  // 仅供界面层把气泡勾态改为灰双勾。
+  void message_read(quint64 seq, const QString& reader);
   // 收到对端振屏（需求批⑥）：界面层抖窗＋提示音；本地已落 "[振屏]" 标记行
   void nudge_received(const QString& from_id, quint64 seq, qint64 ts_ms);
   void peers_changed();
@@ -178,6 +192,14 @@ private:
   std::atomic<std::uint64_t> seq_counter_{0};
   std::uint64_t authz_seq_{0};
   bool running_{false};
+  // 回执簿记（需求批⑦·已读灰勾单）：sent_peer_ 记我发出的文本序号→对端
+  //（送达确认回执落库用，关单即摘）；reported_reads_ 记本会话已上报的
+  // 已读序号（"peer:seq" 键去重，重启后重报一次＝幂等补齐）；
+  // read_frame_seqs_ 记在途已读上报帧的 ACK 键序号（关单即摘，其 ACK
+  // 不进 text_delivered——传输收条非送达语义）
+  std::map<std::uint64_t, std::string> sent_peer_;
+  std::set<std::string> reported_reads_;
+  std::set<std::uint64_t> read_frame_seqs_;
 };
 
 } // namespace memex::client

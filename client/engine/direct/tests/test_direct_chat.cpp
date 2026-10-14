@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
   QString last_from;
   QString last_text;
   QObject::connect(&b, &DirectEngine::message_received, &b,
-                   [&](const QString& from, const QString& text, qint64) {
+                   [&](const QString& from, const QString& text, qint64, quint64) {
                      ++b_received;
                      last_from = from;
                      last_text = text;
@@ -110,18 +110,66 @@ int main(int argc, char** argv) {
   // A → B 文本
   const quint64 seq = a.send_text("dev-B", "对账单已发你，归档里能查");
   CHECK(seq != 0);
+  // 四态推进·已发送（需求批⑦·已读灰勾单）：受理落库即在途，receipt 空
+  {
+    bool sent_state = false;
+    for (const StoredMessage& m : a.history(QStringLiteral("dev-B"))) {
+      if (m.seq == seq) sent_state = m.receipt.empty();
+    }
+    CHECK(sent_state);
+  }
   CHECK(wait_until([&] { return b_received >= 1 && delivered_fired; }, 6000));
   CHECK(last_from == QStringLiteral("dev-A"));
   CHECK(last_text == QStringLiteral("对账单已发你，归档里能查"));
   CHECK(delivered_ok);
   CHECK(delivered_seq == seq);
+  // 四态推进·已送达：引擎在 text_delivered 信号前按 (收件人, 序号) 落库
+  {
+    bool delivered_stored = false;
+    for (const StoredMessage& m : a.history(QStringLiteral("dev-B"))) {
+      if (m.seq == seq) delivered_stored = m.receipt == "delivered";
+    }
+    CHECK(delivered_stored);
+  }
+
+  // —— 已读回执（需求批⑦·已读灰勾单 2026-10-14）：B 读后上报 READ，
+  // A 按 (收件人, 序号) 命中自己发出的行落已读终态；重报去重；乱序
+  // delivered 不倒退终态（只升不降，store 直写腿） ——
+  bool a_read_fired = false;
+  quint64 a_read_seq = 0;
+  QString a_reader;
+  QObject::connect(&a, &DirectEngine::message_read, &a,
+                   [&](quint64 s, const QString& reader) {
+                     a_read_fired = true;
+                     a_read_seq = s;
+                     a_reader = reader;
+                   });
+  CHECK(b.mark_read("dev-A", seq));
+  CHECK(wait_until([&] { return a_read_fired; }, 6000));
+  CHECK(a_read_seq == seq);
+  CHECK(a_reader == QStringLiteral("dev-B"));
+  // 去重：同序号重报拒绝（不重发帧；重启后簿记清空重报一次＝幂等补齐）
+  CHECK(!b.mark_read("dev-A", seq));
+  // 四态推进·已读：A 本地库该行 receipt=read（送达态被已读覆盖）
+  {
+    bool read_stored = false;
+    for (const StoredMessage& m : a.history(QStringLiteral("dev-B"))) {
+      if (m.seq == seq) read_stored = m.receipt == "read";
+    }
+    CHECK(read_stored);
+  }
+  // 只升不降：乱序后到的 delivered 不倒退已读终态
+  CHECK(!a.store()->set_receipt_for_seq("dev-B", seq, "delivered"));
+  // 键防串扰：收件人不符／序号不符均不命中
+  CHECK(!a.store()->set_receipt_for_seq("dev-C", seq, "delivered"));
+  CHECK(!a.store()->set_receipt_for_seq("dev-B", seq + 999, "delivered"));
 
   // B → A 回复
   const quint64 seq2 = b.send_text("dev-A", "收到，稍后检索确认");
   CHECK(seq2 != 0);
   int a_received = 0;
   QObject::connect(&a, &DirectEngine::message_received, &a,
-                   [&](const QString&, const QString&, qint64) { ++a_received; });
+                   [&](const QString&, const QString&, qint64, quint64) { ++a_received; });
   CHECK(wait_until([&] { return a_received >= 1; }, 6000));
 
   // 本地落库：来源＝直连
