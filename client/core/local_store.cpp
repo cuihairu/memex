@@ -133,6 +133,16 @@ bool LocalStore::ensure_schema() {
       " seed_hex TEXT NOT NULL,"
       " pub_hex TEXT NOT NULL,"
       " created_ms INTEGER NOT NULL DEFAULT 0)");
+  // 「盯」提醒（todo「盯」单·实现单修订 2026-10-14）：本端盯住订阅，
+  // 键唯一（d:<收件人>:<序号>／c:<msg_id>），仅存本机
+  q.exec(
+      "CREATE TABLE IF NOT EXISTS watched_messages ("
+      " key TEXT PRIMARY KEY,"
+      " peer TEXT NOT NULL,"
+      " source TEXT NOT NULL,"
+      " text TEXT NOT NULL,"
+      " created_ms INTEGER NOT NULL,"
+      " reminded INTEGER NOT NULL DEFAULT 0)");
   return q.exec(
       "CREATE TABLE IF NOT EXISTS direct_peer_keys ("
       " device_id TEXT PRIMARY KEY,"
@@ -510,6 +520,102 @@ bool LocalStore::set_receipt_for_seq(const std::string& to_id,
     return false;
   }
   return q.numRowsAffected() > 0;
+}
+
+// —— 「盯」提醒（todo「盯」单·实现单修订 2026-10-14）——
+
+std::string LocalStore::receipt_of_seq(const std::string& to_id,
+                                       std::uint64_t seq) const {
+  if (!open_ || to_id.empty() || seq == 0) return {};
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "SELECT receipt FROM messages WHERE to_id = ? AND seq = ? AND"
+      " source = 'direct'"));
+  q.addBindValue(QString::fromStdString(to_id));
+  q.addBindValue(static_cast<qlonglong>(seq));
+  if (!q.exec() || !q.next()) return {};
+  return q.value(0).toString().toStdString();
+}
+
+std::string LocalStore::receipt_of_msg_id(const std::string& msg_id) const {
+  if (!open_ || msg_id.empty()) return {};
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral("SELECT receipt FROM messages WHERE msg_id = ?"));
+  q.addBindValue(QString::fromStdString(msg_id));
+  if (!q.exec() || !q.next()) return {};
+  return q.value(0).toString().toStdString();
+}
+
+bool LocalStore::add_watch(const WatchedRow& w) {
+  // UPSERT：重盯同键＝整行覆盖（刷新创建时刻与预览），键唯一防重
+  if (!open_ || w.key.empty()) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "INSERT OR REPLACE INTO watched_messages"
+      " (key, peer, source, text, created_ms, reminded)"
+      " VALUES (?, ?, ?, ?, ?, ?)"));
+  q.addBindValue(QString::fromStdString(w.key));
+  q.addBindValue(QString::fromStdString(w.peer));
+  q.addBindValue(QString::fromStdString(w.source));
+  q.addBindValue(QString::fromStdString(w.text));
+  q.addBindValue(w.created_ms);
+  q.addBindValue(w.reminded ? 1 : 0);
+  if (!q.exec()) {
+    qWarning() << "[本地库] 盯住写入失败：" << q.lastError().text();
+    return false;
+  }
+  return true;
+}
+
+bool LocalStore::remove_watch(const std::string& key) {
+  // 三通道解除共口（已读触发／手动取消／超时过期）；无行=false
+  if (!open_ || key.empty()) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral("DELETE FROM watched_messages WHERE key = ?"));
+  q.addBindValue(QString::fromStdString(key));
+  if (!q.exec()) {
+    qWarning() << "[本地库] 盯住解除失败：" << q.lastError().text();
+    return false;
+  }
+  return q.numRowsAffected() > 0;
+}
+
+bool LocalStore::mark_watch_reminded(const std::string& key) {
+  // 未读超阈值提醒打点（只一次，防巡检循环轰炸）
+  if (!open_ || key.empty()) return false;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  q.prepare(QStringLiteral(
+      "UPDATE watched_messages SET reminded = 1 WHERE key = ? AND"
+      " reminded = 0"));
+  q.addBindValue(QString::fromStdString(key));
+  if (!q.exec()) {
+    qWarning() << "[本地库] 盯住提醒打点失败：" << q.lastError().text();
+    return false;
+  }
+  return q.numRowsAffected() > 0;
+}
+
+QList<WatchedRow> LocalStore::watched_all() const {
+  QList<WatchedRow> out;
+  if (!open_) return out;
+  QSqlQuery q(QSqlDatabase::database(connection_name_));
+  if (!q.exec(QStringLiteral(
+          "SELECT key, peer, source, text, created_ms, reminded"
+          " FROM watched_messages ORDER BY created_ms ASC"))) {
+    qWarning() << "[本地库] 盯住查询失败：" << q.lastError().text();
+    return out;
+  }
+  while (q.next()) {
+    WatchedRow w;
+    w.key = q.value(0).toString().toStdString();
+    w.peer = q.value(1).toString().toStdString();
+    w.source = q.value(2).toString().toStdString();
+    w.text = q.value(3).toString().toStdString();
+    w.created_ms = q.value(4).toLongLong();
+    w.reminded = q.value(5).toInt() != 0;
+    out.push_back(std::move(w));
+  }
+  return out;
 }
 
 QList<StoredMessage> LocalStore::pending_sync(

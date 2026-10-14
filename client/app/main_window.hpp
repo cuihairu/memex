@@ -5,6 +5,7 @@
 #pragma once
 
 #include <QDate>
+#include <QDialog>
 #include <QHash>
 #include <QLabel>
 #include <QPointer>
@@ -182,6 +183,32 @@ public:
   // 回执按我发出行的发送序号命中；state=delivered/read，只升不降同款
   //（测试缝：生产路径＝text_delivered/message_read 信号驱动同款）
   void apply_direct_receipt(quint64 seq, const QString& state);
+  // —— 「盯」提醒（todo「盯」单·实现单修订 2026-10-14；验收面）——
+  // 盯住/取消盯（右键菜单与测试同一路径）：已读消息拒绝创建（入口置灰
+  // 同口径）；已读＝静默自动解除（不提醒——已读通知不是盯），提醒只走
+  // 未读超时一路。watch_read_fired 为 message_read/receipts_received
+  // 信号驱动的公共缝。
+  bool watch_current_row(const QString& key);
+  void unwatch_key(const QString& key);
+  void watch_read_fired(const QString& key, const QString& reader = QString());
+  bool is_watched(const QString& key) const { return watched_.contains(key); }
+  int watched_count() const { return watched_.size(); }
+  // 超时巡检（生产 30s 定时驱动；测试直调）：未读超阈值提醒一次（阈值
+  // QSettings watch/remind_minutes，默认 10 分钟），超时静默过期（默认
+  // 24h，解除不通知）。
+  void sweep_watches();
+  int watch_released_count() const { return watch_released_; }
+  int watch_timeout_count() const { return watch_timeout_; }
+  int watch_expired_count() const { return watch_expired_; }
+  QString last_watch_notify() const { return last_watch_notify_; }
+  QStringList watch_reminded_peers() const {
+    return watch_reminded_peers_.values();
+  }
+  // 盯列表（任务菜单「盯列表…」）：快照＝我在盯哪些（按创建时刻序），
+  // cancel 按快照下标取消（与对话框「取消盯」按钮同一路径）
+  QStringList watch_list_snapshot() const;
+  bool cancel_watch_by_index(int index);
+  void open_watch_list();
   // —— 需求批⑧ 聊天记录按日期（验收面与「按日期」对话框同一路径）——
   // 范围筛选（毫秒含端点）：本地索引重建当前会话行；协作/群登录态同时向
   // 服务端补拉该窗（回包落本地索引后自动重渲）。
@@ -296,6 +323,8 @@ private:
     quint64 seq{0};     // 直连域发送序号（我发出的行；直连回执按它命中本行，
                         // 需求批⑦·已读灰勾单；协作态恒 0——回执走 msg_id）
     QString receipt;    // 我发出消息的回执态（''/delivered/read，需求批⑦）
+    QString watch_key;  // 「盯」行键（我发出的行：直连 d:<对端>:<序号>／
+                        // 协作 c:<msg_id>；空＝不可盯——图片/群/收向行）
   };
   // 分日分隔线判定（需求批⑧余量收口）：ts_ms 行前是否需先插日头——
   // chat_rows_ 倒扫最近一条消息行（系统行不参与日序），日不同（或尚无
@@ -445,6 +474,20 @@ private:
   QString kick_text_;                 // 最近一次互踢提示（测试断言面）
   QSet<QString> online_accounts_;      // 在线账号表（服务端推送，含自己）
   void set_delivery_state(const QString& text); // 同步状态面＋状态栏提示
+
+  // —— 「盯」提醒（todo「盯」单·实现单修订 2026-10-14）——
+  QHash<QString, WatchedRow> watched_; // 键 → 盯住行（启动从库装载）
+  QTimer* watch_timer_{nullptr};       // 30s 巡检（未读提醒＋过期）
+  QSet<QString> watch_reminded_peers_; // 提醒触发过的会话（列表高亮，打开即清）
+  QString last_watch_notify_;          // 最近一次盯提醒文案（断言面）
+  int watch_released_{0};              // 已读静默解除次数（断言面）
+  int watch_timeout_{0};               // 未读超时提醒次数（断言面）
+  int watch_expired_{0};               // 超时静默过期次数（断言面）
+  void load_watches();                 // 启动装载（重启后盯仍有效）
+  QString watch_row_label(const WatchedRow& w) const; // 列表行文案
+  void refresh_watch_list();           // 盯列表对话框重灌（空态含引导行）
+  QDialog* watch_list_dialog_{nullptr};
+  QListWidget* watch_list_widget_{nullptr};
 
   // —— T4.7 系统集成 ——
   // 托盘：关闭进托盘（可用时）、托盘菜单（显示／开机启动／退出）；

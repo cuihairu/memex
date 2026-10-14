@@ -56,6 +56,19 @@ struct ScanWhitelist {
 // 扫描结论枚举（与 scan_results.result 列一一对应，勿改已落库值）。
 enum class ScanResult { Unknown = 0, Clean, Quarantined, Error };
 
+// —— 「盯」提醒（todo「盯」单·实现单修订 2026-10-14）——
+// 本端对一条我发出消息的已读订阅：键与回执同口径（直连 d:<收件人>:<序号>
+// ／协作 c:<msg_id>），落库持久（重启仍有效）。三通道解除：已读触发即解
+// ／手动取消／超时（默认 24h）静默过期。只存本机，不对端发任何被盯信号。
+struct WatchedRow {
+  std::string key;    // d:<收件人>:<发送序号> ／ c:<协作 msg_id>
+  std::string peer;   // 会话对端（提醒文案与列表高亮用）
+  std::string source; // "direct" / "collab"
+  std::string text;   // 盯时消息文本（提醒预览）
+  qint64 created_ms{0};
+  bool reminded{false}; // 未读超阈值提醒已发过（只一次，不循环）
+};
+
 class LocalStore {
 public:
   LocalStore() = default;
@@ -114,6 +127,19 @@ public:
   // 上报按此键命中。仅 source='direct' 行参与，防与协作域序号串扰。
   bool set_receipt_for_seq(const std::string& to_id, std::uint64_t seq,
                            const std::string& state);
+  // 回执态查询（「盯」巡检用）：按两域键读某条我发出消息的 receipt；
+  // 无该行返回空串（与"已发送在途"不可区分——盯的解除只认非空 read）。
+  std::string receipt_of_seq(const std::string& to_id,
+                             std::uint64_t seq) const;
+  std::string receipt_of_msg_id(const std::string& msg_id) const;
+
+  // —— 「盯」提醒（todo「盯」单·实现单修订 2026-10-14）——
+  // 盯住表 CRUD：add 幂等（重盯同键＝整行覆盖刷新）；remove 三通道解除
+  // 共口；reminded 打点保未读提醒只一次；watched_all 启动装载与巡检用。
+  bool add_watch(const WatchedRow& w);
+  bool remove_watch(const std::string& key);
+  bool mark_watch_reminded(const std::string& key);
+  QList<WatchedRow> watched_all() const;
 
   // 某对端的本地历史：取最近 limit 条，按时间正序返回。
   QList<StoredMessage> history(const QString& peer, int limit = 200) const;

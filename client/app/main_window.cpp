@@ -193,10 +193,54 @@ QString colorize(const QString& content) {
 // 令牌，浅深双主题各自可读）——「送达 vs 已读」靠勾数区分，不另造图标语言、
 // 不挂散文标签（沿用微信／QQ／Telegram 同一套勾）。挂在 meta 行尾，历史
 // 重载与实时更新同构。
+// watch_key 非空＝可盯行（我发出的文本消息，「盯」单 2026-10-14）：meta
+// 行与正文包进行锚（右键据此定位行键；openLinks 已关＝左键无导航副作用），
+// watched=true 再在 meta 尾追加灰 ◉（与 ✓/✓✓ 同行同色的小眼睛语义）。
+// 「盯」行键 ↔ 气泡锚链接：键百分号编码进自定义 scheme（openLinks 已关，
+// 左键无导航）；右键经 anchorAt 反解回行键。两域键：
+//   直连 d:<收件人>:<发送序号>（无 msg_id，与回执同口径）
+//   协作 c:<msg_id>
+constexpr const char* kWatchScheme = "memexwatch:";
+// 「盯」节奏（实现单修订 2026-10-14：未读超阈值才提醒，已读只静默解除
+// ——已读通知不是盯）：阈值默认 10 分钟、超时解默认 24h，均 QSettings
+// 可配（watch/remind_minutes、watch/expire_hours），每次 sweep 现读＝
+// 改配置即时生效不需重启。巡检 30s 一轮（分钟级语义，秒级精度即可）。
+qint64 watch_remind_ms() {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  const int minutes =
+      settings.value(QStringLiteral("watch/remind_minutes"), 10).toInt();
+  return qint64(minutes > 0 ? minutes : 10) * 60 * 1000;
+}
+qint64 watch_expire_ms() {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  const int hours =
+      settings.value(QStringLiteral("watch/expire_hours"), 24).toInt();
+  return qint64(hours > 0 ? hours : 24) * 60 * 60 * 1000;
+}
+QString watch_href(const QString& key) {
+  return QLatin1String(kWatchScheme) +
+         QString::fromUtf8(QUrl::toPercentEncoding(key));
+}
+QString watch_key_from_href(const QString& href) {
+  const int prefix = int(QLatin1String(kWatchScheme).size());
+  if (!href.startsWith(QLatin1String(kWatchScheme))) return QString();
+  return QUrl::fromPercentEncoding(href.mid(prefix).toUtf8());
+}
+QString direct_watch_key(const QString& peer, quint64 seq) {
+  return QStringLiteral("d:%1:%2").arg(peer, QString::number(seq));
+}
+QString collab_watch_key(const QString& msg_id) {
+  return QStringLiteral("c:%1").arg(msg_id);
+}
+
 QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
                     bool outgoing, bool at_mode = false,
                     const QString& image = {},
-                    const QString& receipt = {}) {
+                    const QString& receipt = {},
+                    const QString& watch_key = {},
+                    bool watched = false) {
   const ThemeTokens& t = tk();
   QString receipt_tag;
   if (outgoing && receipt == QStringLiteral("delivered")) {
@@ -204,10 +248,21 @@ QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
   } else if (outgoing && receipt == QStringLiteral("read")) {
     receipt_tag = QStringLiteral(" ✓✓");  // 已读＝双勾（灰勾）
   }
-  const QString meta = QStringLiteral(
-                           "<span style=\"color:%1; font-size:small;\">%2 %3%4</span>")
-                           .arg(t.text_muted.name(), esc(name), hhmm(ts_ms),
-                                esc(receipt_tag));
+  if (watched) {
+    receipt_tag += QStringLiteral(" ◉"); // 盯住＝小眼睛（text_muted 灰）
+  }
+  const QString meta_text =
+      QStringLiteral("%1 %2%3").arg(esc(name), hhmm(ts_ms), esc(receipt_tag));
+  const QString meta =
+      watch_key.isEmpty()
+          ? QStringLiteral(
+                "<span style=\"color:%1; font-size:small;\">%2</span>")
+                .arg(t.text_muted.name(), meta_text)
+          : QStringLiteral(
+                "<a href=\"%1\"><span style=\"color:%2; text-decoration:none; "
+                "font-size:small;\">%3</span></a>")
+                .arg(esc(watch_href(watch_key)), t.text_muted.name(),
+                     meta_text);
   // 图片消息（需求批④）：气泡内容＝内嵌图片（本机保留路径，file:// 直载）；
   // 普通消息照旧转义文本。
   QString content =
@@ -233,6 +288,17 @@ QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
     }
     highlighted += content.mid(pos);
     content = std::move(highlighted);
+  }
+  // 可盯行正文同锚（右键气泡主体同样命中行键）。span 必须在锚内：链接字色
+  // 取 QPalette::Link＝品牌橙，盖掉锚外的气泡字色 span——橙底橙字不可见
+  // （Xvfb 实录）；text-decoration:none 保住元信息语言（不整段下划线）。
+  if (!watch_key.isEmpty()) {
+    content =
+        QStringLiteral("<a href=\"%1\"><span style=\"color:%2; "
+                       "text-decoration:none;\">%3</span></a>")
+            .arg(esc(watch_href(watch_key)),
+                 outgoing ? t.bubble_out_text.name() : t.bubble_in_text.name(),
+                 content);
   }
   const QString body = QStringLiteral(
                            "<table cellspacing=\"0\" cellpadding=\"6\"><tr><td "
@@ -324,6 +390,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   direct_engine_.start();
   // 双态共用同一份本地库：协作消息与直连消息同库，界面按 source 合并展示
   collab_engine_.attach_store(direct_engine_.store());
+  // 「盯」提醒：启动装载（重启后盯仍有效）＋巡检定时（未读超阈值提醒
+  // 一次、超时静默过期、离线期已读补触发）
+  load_watches();
+  watch_timer_ = new QTimer(this);
+  watch_timer_->setInterval(30 * 1000);
+  connect(watch_timer_, &QTimer::timeout, this, &MainWindow::sweep_watches);
+  watch_timer_->start();
+  sweep_watches();
   wire_collab();
   // T4.4 截图与标注：确认后发送（取消／失败仅提示）
   connect(&screenshot_tool_, &ScreenshotTool::confirmed, this,
@@ -472,6 +546,10 @@ void MainWindow::build_ui() {
     group_tools_dialog_->raise();
     group_tools_dialog_->activateWindow();
   });
+  // 「盯」列表（实现单修订 2026-10-14）：入口看到「我在盯哪些」，逐条可取消
+  auto* act_watch_list = task_menu->addAction(QStringLiteral("盯列表…"));
+  connect(act_watch_list, &QAction::triggered, this,
+          [this] { open_watch_list(); });
   // 二期·会话审计：归档在线检索＋查阅日志（auditor 持证；被拒服务端留痕）
   auto* act_audit = collab_menu->addAction(QStringLiteral("会话审计…"));
   connect(act_audit, &QAction::triggered, this, [this] {
@@ -747,26 +825,65 @@ void MainWindow::build_ui() {
 
   chat_view_ = new QTextBrowser(chat);
   chat_view_->setFrameShape(QFrame::NoFrame);
-  // 需求批② 表情包：图片气泡右键「收藏到表情包」——命中原样保留的
-  // 本机图片路径（bubble_html 的 file:// 直载），导入本地表情目录。
+  // 「盯」单：气泡内锚仅用于右键定位行键——关掉左键跟随链接（无导航
+  // 副作用；文档内其他链接本就不存在，命名日锚不受影响）
+  chat_view_->setOpenLinks(false);
+  // 需求批② 表情包＋「盯」单：右键气泡菜单——图片气泡「收藏到表情包」；
+  // 可盯文本气泡「盯住本消息／取消盯」（已读行入口置灰——已读无需盯）。
   chat_view_->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(chat_view_, &QTextBrowser::customContextMenuRequested, this,
           [this](const QPoint& pos) {
     QTextCursor cur = chat_view_->cursorForPosition(pos);
     const QTextImageFormat img = cur.charFormat().toImageFormat();
     const QString src = img.name(); // file:///…
-    if (!img.isValid() || !src.startsWith(QStringLiteral("file://"))) {
-      return; // 非图片气泡：不弹菜单（QTextBrowser 默认行为不拦）
+    if (img.isValid() && src.startsWith(QStringLiteral("file://"))) {
+      const QString path = QUrl(src).toLocalFile();
+      auto* menu = new QMenu(this);
+      QAction* act = menu->addAction(QStringLiteral("收藏到表情包"));
+      connect(act, &QAction::triggered, this, [this, path] {
+        if (import_emoji(path)) {
+          show_status(QStringLiteral("已收藏到表情包：%1（表情面板可见）")
+                          .arg(QFileInfo(path).fileName()));
+        }
+      });
+      menu->setAttribute(Qt::WA_DeleteOnClose);
+      menu->popup(chat_view_->mapToGlobal(pos));
+      return;
     }
-    const QString path = QUrl(src).toLocalFile();
+    // 可盯行：锚携带行键（meta 行与正文同锚）。取锚不走 anchorAt——Qt 对
+    // 表内（气泡是嵌套表）锚的命中区会空间错位（探针实录：字形区全空、
+    // 命中区漂到表外，右键气泡主体永远取不到键）；cursorForPosition 的
+    // 字符格式锚在顶层与嵌套表上都按字形区可靠解析。
+    const QString key = watch_key_from_href(
+        chat_view_->cursorForPosition(pos).charFormat().anchorHref());
+    if (key.isEmpty()) {
+      return; // 非可盯区域：不弹菜单（维持既有行为）
+    }
     auto* menu = new QMenu(this);
-    QAction* act = menu->addAction(QStringLiteral("收藏到表情包"));
-    connect(act, &QAction::triggered, this, [this, path] {
-      if (import_emoji(path)) {
-        show_status(QStringLiteral("已收藏到表情包：%1（表情面板可见）")
-                        .arg(QFileInfo(path).fileName()));
+    if (watched_.contains(key)) {
+      QAction* act = menu->addAction(QStringLiteral("取消盯"));
+      connect(act, &QAction::triggered, this, [this, key] {
+        unwatch_key(key);
+      });
+    } else {
+      const bool already_read = [&] {
+        for (const ChatRow& r : chat_rows_) {
+          if (!r.system && r.watch_key == key &&
+              r.receipt == QStringLiteral("read")) {
+            return true;
+          }
+        }
+        return false;
+      }();
+      QAction* act = menu->addAction(QStringLiteral("盯住本消息"));
+      act->setEnabled(!already_read); // 已读＝置灰（盯与已读同生命周期已尽）
+      if (already_read) {
+        act->setStatusTip(QStringLiteral("该消息已被读"));
       }
-    });
+      connect(act, &QAction::triggered, this, [this, key] {
+        watch_current_row(key);
+      });
+    }
     menu->setAttribute(Qt::WA_DeleteOnClose);
     menu->popup(chat_view_->mapToGlobal(pos));
   });
@@ -1008,6 +1125,8 @@ void MainWindow::wire_engines() {
           [this](quint64 seq, const QString& reader) {
             apply_direct_receipt(seq, QStringLiteral("read"));
             set_delivery_state(QStringLiteral("对方已读 ✓✓（%1）").arg(reader));
+            // 「盯」：READ 落终态即查盯住集合并触发（无盯则静默穿过）
+            watch_read_fired(direct_watch_key(reader, seq), reader);
           });
   connect(&direct_engine_, &DirectEngine::file_progress, this,
           [this](const QString& /*id*/, quint64 done, quint64 total) {
@@ -1423,6 +1542,8 @@ void MainWindow::wire_collab() {
             // 需求批⑦：消息旁状态可见——落行重渲（引擎已落本地库，
             // 历史重载同构）
             apply_message_receipt(msg_id, QStringLiteral("read"));
+            // 「盯」：协作域同口径（c:<msg_id> 键触发）
+            watch_read_fired(collab_watch_key(msg_id), reader);
           });
   // —— 需求批⑦ 送达级回执：状态行＋消息旁 ✓ ——
   connect(&collab_engine_, &CollabEngine::message_delivered, this,
@@ -1450,6 +1571,8 @@ void MainWindow::wire_collab() {
               apply_message_receipt(
                   mid, read ? QStringLiteral("read")
                             : QStringLiteral("delivered"));
+              // 「盯」：补拉对齐出的已读同样触发（离线期 READ 的兜底面）
+              if (read) watch_read_fired(collab_watch_key(mid));
             }
           });
   connect(&collab_engine_, &CollabEngine::presence_changed, this,
@@ -3106,6 +3229,238 @@ void MainWindow::apply_direct_receipt(quint64 seq, const QString& state) {
   if (changed) rerender_chat();
 }
 
+// —— 「盯」提醒（todo「盯」单·实现单修订 2026-10-14）——
+
+bool MainWindow::watch_current_row(const QString& key) {
+  // 右键菜单与测试同一路径。已读拒绝创建（盯与已读同生命周期）；重复
+  // 盯同键＝刷新（UPSERT）而非报错
+  if (key.isEmpty()) return false;
+  const ChatRow* row = nullptr;
+  for (const ChatRow& r : chat_rows_) {
+    if (!r.system && r.watch_key == key) {
+      row = &r;
+      break;
+    }
+  }
+  if (row == nullptr) {
+    show_status(QStringLiteral("盯失败：消息不在当前会话"));
+    return false;
+  }
+  if (row->receipt == QStringLiteral("read")) {
+    show_status(QStringLiteral("该消息已被读，无需盯"));
+    return false;
+  }
+  LocalStore* store = direct_engine_.store();
+  if (store == nullptr) {
+    show_status(QStringLiteral("盯失败：本地库未就绪"));
+    return false;
+  }
+  WatchedRow w;
+  w.key = key.toStdString();
+  w.peer = current_peer_.toStdString();
+  w.source = current_kind_.toStdString();
+  w.text = row->text.left(24).toStdString(); // 提醒预览（超长截断）
+  w.created_ms = QDateTime::currentMSecsSinceEpoch();
+  if (!store->add_watch(w)) {
+    show_status(QStringLiteral("盯失败：本地库写入失败"));
+    return false;
+  }
+  watched_.insert(key, w);
+  rerender_chat(); // 气泡 meta 行长出灰 ◉
+  show_status(QStringLiteral(
+                  "已盯住本消息：对方已读或未读超 %1 分钟时提醒")
+                  .arg(watch_remind_ms() / 60000));
+  return true;
+}
+
+void MainWindow::unwatch_key(const QString& key) {
+  // 手动解除（菜单「取消盯」同路径）；未盯的键静默幂等
+  if (watched_.remove(key) == 0) return;
+  if (LocalStore* store = direct_engine_.store()) store->remove_watch(key.toStdString());
+  rerender_chat(); // 摘 ◉
+  show_status(QStringLiteral("已取消盯住"));
+}
+
+void MainWindow::watch_read_fired(const QString& key, const QString& reader) {
+  // 已读＝静默自动解除（实现单修订 2026-10-14：对方一打开就提醒是「已读
+  // 通知」不是「盯」——提醒只走未读超时一路）。生产路径＝message_read／
+  // receipts_received 信号驱动；盯住集合无此键＝普通已读，静默穿过
+  Q_UNUSED(reader);
+  const auto it = watched_.constFind(key);
+  if (it == watched_.constEnd()) return;
+  const WatchedRow w = it.value();
+  watched_.erase(it);
+  if (LocalStore* store = direct_engine_.store()) {
+    store->remove_watch(w.key);
+  }
+  ++watch_released_;
+  rerender_chat(); // 摘 ◉（无任何用户可见输出）
+}
+
+void MainWindow::sweep_watches() {
+  LocalStore* store = direct_engine_.store();
+  if (store == nullptr) return;
+  // 以库为源巡检（内存 watched_ 只是界面侧快速集）：双窗口同库、外部
+  // 改写 created_ms（测试回拨）、重启后遗留行都按库面现值裁决
+  const QList<WatchedRow> rows = store->watched_all();
+  if (rows.isEmpty()) return;
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  QStringList read_fire;      // 离线期间已变已读的（补解除）
+  QStringList remind_unread;  // 未读超阈值提醒（只一次；阈值可配，默认 10 分钟）
+  QStringList expired;        // 超时静默过期（默认 24h，可配）
+  for (const WatchedRow& w : rows) {
+    // 已读对账：READ 到达前盯行已存在（离线期/补拉场景）——receipt 落库
+    // 而 watch 未解除即在此补触发（与信号路径同一出口）
+    std::string receipt;
+    if (w.source == "collab") {
+      receipt = store->receipt_of_msg_id(w.key.substr(2));
+    } else {
+      // 直连键 d:<收件人>:<序号>（对端不含冒号，取最后一段）
+      const QString qkey = QString::fromStdString(w.key);
+      const qsizetype cut = qkey.lastIndexOf(QLatin1Char(':'));
+      const QString peer = cut > 1 ? qkey.mid(2, cut - 2) : QString();
+      const quint64 seq = cut > 1 ? qkey.mid(cut + 1).toULongLong() : 0;
+      receipt = (!peer.isEmpty() && seq != 0)
+                    ? store->receipt_of_seq(peer.toStdString(), seq)
+                    : std::string();
+    }
+    const QString key = QString::fromStdString(w.key);
+    if (receipt == "read") {
+      read_fire.append(key);
+    } else if (!w.reminded && now - w.created_ms >= watch_remind_ms()) {
+      remind_unread.append(key);
+    } else if (now - w.created_ms >= watch_expire_ms()) {
+      expired.append(key);
+    }
+  }
+  for (const QString& key : read_fire) {
+    watch_read_fired(key); // 离线补解除不标读者名（静默）
+  }
+  for (const QString& key : remind_unread) {
+    WatchedRow w;
+    for (const WatchedRow& r : rows) {
+      if (r.key == key.toStdString()) {
+        w = r;
+        break;
+      }
+    }
+    store->mark_watch_reminded(w.key); // 只一次打点（先打点防重入轰炸）
+    ++watch_timeout_;
+    last_watch_notify_ =
+        QStringLiteral("盯住的消息仍未读：%1")
+            .arg(QString::fromStdString(w.text));
+    tray_notify(QStringLiteral("盯住的消息未读提醒"), last_watch_notify_);
+    show_status(last_watch_notify_);
+    watch_reminded_peers_.insert(QString::fromStdString(w.peer));
+    refresh_devices(); // 列表高亮（◉ 前缀，复用未读角标位；打开该会话即清）
+  }
+  for (const QString& key : expired) {
+    watched_.remove(key);
+    store->remove_watch(key.toStdString());
+    ++watch_expired_; // 超时解除不通知（防僵尸盯）
+  }
+  if (!expired.isEmpty()) rerender_chat();
+}
+
+void MainWindow::load_watches() {
+  watched_.clear();
+  if (LocalStore* store = direct_engine_.store()) {
+    for (const WatchedRow& w : store->watched_all()) {
+      watched_.insert(QString::fromStdString(w.key), w);
+    }
+  }
+}
+
+namespace {
+
+// 盯行按创建时刻排序（快照与列表展示的稳定序）
+QList<WatchedRow> watched_ordered(const QHash<QString, WatchedRow>& watched) {
+  QList<WatchedRow> rows = watched.values();
+  std::sort(rows.begin(), rows.end(),
+            [](const WatchedRow& a, const WatchedRow& b) {
+              return a.created_ms < b.created_ms;
+            });
+  return rows;
+}
+
+} // namespace
+
+QString MainWindow::watch_row_label(const WatchedRow& w) const {
+  // 「我在盯哪些」一行：域 · 对端名（解析不出用短 id）· 预览 · 已盯时长
+  const QString key = QString::fromStdString(w.key);
+  const QString domain = w.source == "collab" ? QStringLiteral("协作")
+                                              : QStringLiteral("直连");
+  QString peer_name = QString::fromStdString(w.peer);
+  if (w.source != "collab") {
+    const Peer p = direct_engine_.peer(w.peer);
+    if (!p.name.empty()) peer_name = QString::fromStdString(p.name);
+  } else {
+    peer_name = key.mid(2); // 协作键 c:<会话 id> 即对端账号
+  }
+  const qint64 held_min = (QDateTime::currentMSecsSinceEpoch() - w.created_ms +
+                           60000 - 1) / 60000;
+  return QStringLiteral("%1 · %2 · %3 · 已盯 %4 分钟")
+      .arg(domain, peer_name, QString::fromStdString(w.text),
+           QString::number(held_min));
+}
+
+QStringList MainWindow::watch_list_snapshot() const {
+  QStringList out;
+  for (const WatchedRow& w : watched_ordered(watched_)) {
+    out.append(watch_row_label(w));
+  }
+  return out;
+}
+
+bool MainWindow::cancel_watch_by_index(int index) {
+  const QList<WatchedRow> rows = watched_ordered(watched_);
+  if (index < 0 || index >= rows.size()) return false;
+  unwatch_key(QString::fromStdString(rows[index].key));
+  return true;
+}
+
+void MainWindow::open_watch_list() {
+  // 盯列表（实现单修订 2026-10-14：要有入口看到「我在盯哪些」）：非模态
+  // 对话框，逐条可取消；空态给一行说明
+  if (watch_list_dialog_ == nullptr) {
+    watch_list_dialog_ = new QDialog(this);
+    watch_list_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+    watch_list_dialog_->setWindowTitle(QStringLiteral("盯列表"));
+    auto* lay = new QVBoxLayout(watch_list_dialog_);
+    watch_list_widget_ = new QListWidget(watch_list_dialog_);
+    watch_list_widget_->setMinimumSize(420, 220);
+    lay->addWidget(watch_list_widget_);
+    auto* row = new QHBoxLayout();
+    auto* cancel_btn = new QPushButton(QStringLiteral("取消盯"), watch_list_dialog_);
+    auto* close_btn = new QPushButton(QStringLiteral("关闭"), watch_list_dialog_);
+    row->addStretch();
+    row->addWidget(cancel_btn);
+    row->addWidget(close_btn);
+    lay->addLayout(row);
+    connect(cancel_btn, &QPushButton::clicked, this, [this] {
+      const int cur = watch_list_widget_->currentRow();
+      if (cancel_watch_by_index(cur)) refresh_watch_list();
+    });
+    connect(close_btn, &QPushButton::clicked, watch_list_dialog_, &QDialog::close);
+  }
+  refresh_watch_list();
+  watch_list_dialog_->show();
+  watch_list_dialog_->raise();
+  watch_list_dialog_->activateWindow();
+}
+
+void MainWindow::refresh_watch_list() {
+  if (watch_list_widget_ == nullptr) return;
+  watch_list_widget_->clear();
+  const QStringList entries = watch_list_snapshot();
+  if (entries.isEmpty()) {
+    watch_list_widget_->addItem(QStringLiteral(
+        "暂无盯住的消息——在气泡上右键「盯住本消息」可跟进一条"));
+    return;
+  }
+  watch_list_widget_->addItems(entries);
+}
+
 // —— T4.7 系统集成 ——
 
 QString MainWindow::last_notify() const { return last_notify_; }
@@ -3735,7 +4090,12 @@ void MainWindow::refresh_devices() {
                                    .arg(QString::fromStdString(p.account));
     // 未读角标（原型行 n-count 的文本位；行级富文本委托另批）
     const int unread = unread_counts_.value(id);
+    // 「盯」已读提醒触发的会话高亮（todo「盯」单）：◉ 前缀复用未读
+    // 角标位（同一行渲染路径；打开该会话即清）
+    const QString watch_hi =
+        watch_reminded_peers_.contains(id) ? QStringLiteral("◉ ") : QString();
     item->setText(
+        watch_hi +
         (unread > 0 ? QStringLiteral("(%1) ").arg(unread) : QString()) +
         QStringLiteral("%1\n%2%3").arg(name, meta, acct));
     item->setData(Qt::UserRole, id);
@@ -3783,9 +4143,13 @@ void MainWindow::refresh_devices() {
       const int unread = unread_counts_.value(account);
       const QString badge =
           unread > 0 ? QStringLiteral("(%1) ").arg(unread) : QString();
+      // 「盯」已读提醒高亮（与直连同一位：◉ 前缀；打开该会话即清）
+      const QString watch_hi = watch_reminded_peers_.contains(account)
+                                   ? QStringLiteral("◉ ")
+                                   : QString();
       const QString when = fmt_last_contact(fav_last_ms_(account));
-      item->setText(QStringLiteral("%1%2%3\n协作态 · 已归档 · %4%5")
-                        .arg(star, badge, account, presence,
+      item->setText(QStringLiteral("%1%2%3%4\n协作态 · 已归档 · %5%6")
+                        .arg(watch_hi, star, badge, account, presence,
                              when.isEmpty()
                                  ? QString()
                                  : QStringLiteral(" · ") + when));
@@ -3964,6 +4328,8 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
   current_peer_ = id;
   // 打开即读：清该会话未读角标并重渲行（原型行 n-count 只在列表态显）
   if (unread_counts_.remove(id) > 0) refresh_devices();
+  // 「盯」已读提醒高亮同口径：打开该会话即清（已到场，不再占角标位）
+  if (watch_reminded_peers_.remove(id) > 0) refresh_devices();
   chat_showing_guidance_ = false;
   chat_view_->clear();
   chat_rows_.clear(); // 换会话即清空重渲记录（否则旧行会在切换主题时冒出来）
@@ -4328,13 +4694,25 @@ void MainWindow::append_message(const QString& from_id, const QString& text,
   row.msg_id = msg_id;
   row.seq = seq;
   row.receipt = receipt;
+  // 「盯」行键（「盯」单·实现单修订）：仅我发出的 1:1 文本行可盯——
+  // 直连按 (对端, 序号)、协作按 msg_id（回执同口径键）；群/临时群/图片/
+  // 收向行恒空＝右键不弹盯菜单
+  if (outgoing) {
+    if (current_kind_ == QStringLiteral("collab") && !msg_id.isEmpty()) {
+      row.watch_key = collab_watch_key(msg_id);
+    } else if (current_kind_ == QStringLiteral("direct") && seq != 0) {
+      row.watch_key = direct_watch_key(current_peer_, seq);
+    }
+  }
   if (needs_day_divider(chat_rows_, row.ts_ms))
     append_system_line(day_divider_html(
         QDateTime::fromMSecsSinceEpoch(row.ts_ms).date()));
   chat_rows_.append(row);
   chat_view_->append(day_anchor(row.ts_ms) +
                      bubble_html(row.name, row.text, row.ts_ms, row.outgoing,
-                                 row.at_mode, QString(), row.receipt));
+                                 row.at_mode, QString(), row.receipt,
+                                 row.watch_key,
+                                 watched_.contains(row.watch_key)));
   auto* bar = chat_view_->verticalScrollBar();
   bar->setValue(bar->maximum());
 }
@@ -4531,7 +4909,8 @@ void MainWindow::rerender_chat() {
       chat_view_->append(day_anchor(row.ts_ms) +
                          bubble_html(row.name, row.text, row.ts_ms,
                                      row.outgoing, row.at_mode, row.image,
-                                     row.receipt));
+                                     row.receipt, row.watch_key,
+                                     watched_.contains(row.watch_key)));
     }
   }
   if (at_bottom) {

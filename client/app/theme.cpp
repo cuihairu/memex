@@ -774,6 +774,7 @@ QString ThemeManager::stylesheet_for(const ThemeTokens& tokens) {
       "QMenu { background: %surface_raised%; color: %text%; "
       "border: 1px solid %border%; }\n"
       "QMenu::item:selected { background: %selection%; color: %text%; }\n"
+      "QMenu::item:disabled { color: %text_muted%; }\n"
       "QGroupBox { border: 1px solid %border%; border-radius: %radius%px; "
       "margin-top: 12px; }\n"
       "QGroupBox::title { subcontrol-origin: margin; left: 10px; "

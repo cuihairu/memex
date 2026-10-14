@@ -1284,6 +1284,66 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 60)
 
+  # 「盯」提醒验收（todo「盯」单·实现单修订 2026-10-14）：盯创建／已读
+  # 拒绝／三通道解除（已读静默解·手动解·超时静默过期）／未读超阈值提醒
+  # 只一次（QSettings 可配）／盯列表／重启持久。链接面同 test_chat_actions
+  #（MainWindow 全量）。
+  add_executable(test_watch_reminder
+    tests/test_watch_reminder.cpp
+    app/main_window.cpp
+    app/message_search_dialog.cpp
+    app/rail_nav.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
+    app/emoji_pack_dialog.cpp
+    app/brand_kit.cpp
+    app/brand_kit.hpp
+    app/brand_settings_page.cpp
+    app/shortcut_settings.cpp
+    app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
+    app/away_settings.cpp
+    app/file_assistant.cpp
+    app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
+    app/task_template_settings.cpp
+    app/approval_dialog.cpp
+    app/report_dialog.cpp
+    app/group_tools_dialog.cpp
+    app/audit_dialog.cpp
+    app/office_map_dialog.cpp
+    app/assist_dialog.cpp
+    engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
+    engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
+    app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
+    app/group_ci_dialog.cpp
+    app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
+    app/theme.cpp
+    app/theme_pack.cpp
+    app/theme_settings_page.cpp)
+  target_include_directories(test_watch_reminder PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_watch_reminder PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
+  add_test(NAME watch_reminder COMMAND test_watch_reminder)
+  set_tests_properties(watch_reminder PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
+
   # 聊天记录模糊检索验收：本机库核心口径腿（多词 AND／大小写不敏感／
   # 中文按字符／半词命中／相关度排序／分词）＋搜索窗离屏冒烟（绑定本机库→
   # 检索→命中列表→选中回传对端键）。本机库直查不触网，不起服务端进程
