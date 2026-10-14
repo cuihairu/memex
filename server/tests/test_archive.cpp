@@ -498,9 +498,12 @@ int main() {
     CHECK(chain.archive_chain_verify().ok);
 
     // 篡改腿②：改账本行 chain_hash → 与重放链头对不上
+    // 首字符有 1/16 概率本就是 'a',恒等改写会让校验仍判完好(间歇假绿),
+    // 故按现值挑一个必不同的首字符
     CHECK(raw_exec(chain_db,
-                   "UPDATE archive_chain SET chain_hash = 'a' ||"
-                   " substr(chain_hash, 2) WHERE id = 1;"));
+                   "UPDATE archive_chain SET chain_hash ="
+                   " CASE WHEN substr(chain_hash,1,1)='a' THEN 'b' ELSE 'a'"
+                   " END || substr(chain_hash, 2) WHERE id = 1;"));
     CHECK(!chain.archive_chain_verify().ok);
     CHECK(raw_exec(chain_db,
                    "UPDATE archive_chain SET chain_hash = substr(chain_hash, 2)"
