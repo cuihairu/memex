@@ -10,6 +10,13 @@ name: docker
 
 on:
   push:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - "*.svg"
+      - ".editorconfig"
     branches: [main]
     tags: ['v*']
   workflow_dispatch:
