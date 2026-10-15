@@ -557,6 +557,11 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
   - 红线：这是第三次反馈。**先真实启动看当前实际渲染**，再动手；改完必须自己截图确认右侧不再空白，**不要只改代码就宣称完成**
   - 证据：根因＝构造 `close_chat(false)` 隐藏会话面板后，中央布局尾部 `addStretch(1)` 吸收全部余量（main_window.cpp:853 旧码）→ 右侧整片空白。修复 `2e56c92`：选「列表占满」口径——移除尾部 stretch，列表列在无选中态 Expanding 占满 rail 之外全宽（微信/QQ 启动即列表；顺带修好最大化列表态死空间），关会话钳 320（2026-10-11 令）不动。Xvfb 真机启动前后截图：/tmp/defect3/shots/before_root.png → after_fresh_root.png（右侧空白→列表占满）；window_layout 新腿⑦＋全量 ctest 83/83 绿
 
+- [x] 缺陷（反复未修·续前条）：启动无会话时窗口仍是宽横窗，未坍缩成列表态窄长方形（来源：用户 2026-10-15，多次反馈「说了无数次」）
+  - 根因（2026-10-15 实测定位，两条通道）：`66100a7` 反转布局序（默认 1280×800）后——①构造 `close_chat(false)` 显式跳过启动坍缩；②单键 `window_geometry` 存档恢复把上次会话态宽窗直接盖回无会话启动态（Xvfb 复现：探针落 960×640 可复存档 → 启动即 960×640）。前条 `8a84f85` 只登记 todo 未实测，启动路径没修＝假关闭
+  - 修复（重派照抄 Telegram Desktop 机制，不自造）：①最小尺寸随布局态 `apply_state_minimum`——列表态 320×420（rail 60＋列表列 260），会话态 60＋260＋380（＝TG columnMinimalWidthLeft 260／columnMinimalWidthMain 380 之和口径，不用布局 minimumSizeHint：聊天输入行按钮串把自然下限顶到 892，过宽且反锁用户既有窄会话窗）；②几何存档按态分键 `window_geometry_list`／`window_geometry_chat`（TGWindowArchiver 按态归档同构），启动只取列表档，会话档只归 `open_chat` 经 `restore_chat_geometry` 恢复（chat 档→旧单键档→默认 1280 兜底）；③构造即 `close_chat()` 坍缩 320；④旧单键存档迁移归会话态（旧版只存过 ≥480 宽窗，宽档必属会话态）。布局态判据用显式 `chat_open_` 旗（离屏未 show 窗里子件 isVisible 恒 false，按 isVisible 分键会把会话档写进列表键）
+  - 证据：Xvfb :99 真机启动前后实测（/tmp/geo_shots/）——修复前：首次启动 1280×800、有 960×640 存档启动直接 960×640；修复后：①首次启动（空配置）320×800，列表占满右缘无空白（1_fresh_startup_root.png）②同平台探针落双档（list 320×600＋chat 960×640）后重启仍 320×600 列表态窄窗、chat 档不盖回（4_archive_startup_root.png）③点开好友会话恢复 960×640 会话档（5_archive_open_chat_root.png；空配置点开默认 1280×800 见 2_open_chat_root.png）④关会话回列表态 320×640（6_archive_close_root.png）。test_window_layout 重写九腿（构造坍缩／开关往返／按态存档往返／会话档隔离回归／旧单键迁移归会话态／列表占满／托盘隐藏态退出）＋QSettings 双格式路径重定向隔离（只重定向 IniFormat 管不住主窗内部 NativeFormat 构造，存档漏 ~/.config 跨跑串味实录）；ctest 84/84 全绿
+
 - [x] 消息已读状态：灰色勾（来源：用户 2026-10-14）
   - 要求：消息被对方读过之后显示**灰色的勾**，即**已读状态**
   - 要定清楚（别只改 UI）：

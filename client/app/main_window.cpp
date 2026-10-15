@@ -371,20 +371,16 @@ QString format_online_s(qint64 seconds) {
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   setWindowTitle(QStringLiteral("Memex"));
-  setMinimumSize(320, 420); // 下限＝列表态最小可读（rail 60＋会话列 260）
+  setMinimumSize(320, 420); // 下限＝列表态最小可读（rail 60＋列表列 260）
   resize(1280, 800); // 先占位；build_ui 后再落一次（布局 sizeHint 会改写）
 
   build_ui();
-  // 启动无会话＝列表态：隐藏对话面板，但保持默认横窗 1280×800（设计稿
-  // prototypes.css .window＝1280×800；同类 IM 默认即横窗）。不钳宽——
-  // 钳宽只在用户主动关会话时生效（close_chat(true)，2026-10-11 死空间修复）
-  close_chat(false);
-  // 默认几何＝1280×800（1.6:1）：与设计稿 prototypes.css .window 一致，落在同类
-  // 重合区间（微信≈1.44／Telegram 4:3／Slack 3:2 1200×800／Discord 16:9），
-  // 会话面板可容纳两列消息。DPI：Qt 的 resize／restoreGeometry 均以逻辑像素
-  // （1/@devicePixelRatio）为单位，高刷屏上按设备像素比自动放大，无需手算。
-  // 须在 build_ui 之后：布局激活会按 sizeHint 改写窗尺寸（无 show 时）。
+  // build_ui 之后须再落一次（布局激活会按 sizeHint 改写窗尺寸，无 show 时）
   resize(1280, 800);
+  // 布局令＋Telegram 机制（尺寸随布局态绑定）：启动无会话必然坍缩到列表态
+  // 尺寸（宽 320）；点好友经 open_chat 展开到会话态宽。列表态存档由
+  // restore_window_geometry 按态恢复——会话态宽窗不盖回无会话态
+  close_chat();
 
   wire_engines();
   direct_engine_.start();
@@ -435,11 +431,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
           &MainWindow::apply_brand);
   apply_brand();
 
-  // 恢复上次窗口几何（首次启动无存档＝跳过，保持默认 1280×800）。须在
-  // close_chat() 之后：启动列表态把宽度钳到 320，restoreGeometry 再把窗口
-  // 还到上次尺寸。恢复前先释放列表态宽度上限，否则 restoreGeometry 会被
-  // 钳住而静默失效（QWidget 几何受 maximumWidth 约束）
-  setMaximumWidth(QWIDGETSIZE_MAX);
+  // 恢复上次窗口几何：按当前布局态恢复（启动＝列表态，只取列表态存档；
+  // 会话态存档留给 open_chat，不盖回无会话态——2026-10-15 缺陷修复）。
+  // 列表态存档宽不超 320（列表态右缘上限＝320），restore 不被 maximumWidth
+  // 钳掉；上限复归在 restore 出口统一做，不在此先放开（放开＝新装环境
+  // 上限恒失守）
   restore_window_geometry();
 }
 
@@ -4270,18 +4266,20 @@ void MainWindow::open_peer(const QString& device_id) {
 // 打开会话（kind=direct 设备 / collab 账号）：历史取自共享本地库——
 // 直连与协作消息同库合并，按 source 字段标注来源（T2.4 合并展示）。
 // 关会话回列表态（布局令）：清当前会话（历史在库里，重开即重渲），
-// 面板收起、窗口缩回「左菜单+好友列表」长方形
-void MainWindow::close_chat(bool clamp_width) {
+// 面板收起、窗口缩回「左菜单+好友列表」长方形。启动也走此路＝无会话
+// 必然坍缩到列表态尺寸（2026-10-15 缺陷修复：此前启动保持 1280 横窗）
+void MainWindow::close_chat() {
   current_kind_.clear();
   current_peer_.clear();
   chat_rows_.clear();
   chat_view_->clear();
   chat_panel_->hide();
+  chat_open_ = false; // 布局态收回列表态（存档键/最小尺寸判据）
   // 列表态：列表列占满 rail 之外的全部窗宽（微信/QQ 启动即列表；无论
   // 启动还是关会话，右缘都不再留空白——2026-10-14 用户报）
   side_->setMaximumWidth(QWIDGETSIZE_MAX);
   side_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
-  if (!clamp_width) return; // 启动列表态：不钳宽（保持默认 1280×800 横窗，见构造）
+  apply_state_minimum();
   if (!isMaximized() && width() > 400) resize(320, height());
   // 列表态收紧窗口右缘上限＝左侧列内容宽（rail 60＋会话列 260）：拖窗口右缘
   // 不再把列表与右框之间撑出死空间（2026-10-11 用户报——列表态拉宽窗口，
@@ -4290,40 +4288,88 @@ void MainWindow::close_chat(bool clamp_width) {
   if (!isMaximized()) setMaximumWidth(rail_->minimumWidth() + side_->minimumWidth());
 }
 
+// 最小尺寸随布局态（Telegram TGSplitView 每态各有一档最小宽度）：列表态
+// 下限＝左侧两列内容宽（rail 60＋列表列 260）；会话态＝三列列宽之和
+//（Telegram columnMinimalWidthLeft/Main 口径），与内容 sizeHint 解耦。
+void MainWindow::apply_state_minimum() {
+  if (chat_open_) {
+    // 会话态＝rail＋列表列＋会话列三列全显：60＋260＋380（Telegram
+    // columnMinimalWidthLeft/Main 口径＝列最小宽之和，与内容 sizeHint
+    // 解耦）。不能用布局 minimumSizeHint：聊天输入行一串文字按钮把自然
+    // 下限顶到 892——那是内容的下限不是窗口的下限，钳住反而把用户此前
+    // 可自由缩窄的会话窗锁死；380 只保证会话列最小可读，工具条挤窄是
+    // 既有表现（修复前窗口可缩到 320，内容同样挤压）
+    setMinimumSize(rail_->minimumWidth() + side_->minimumWidth() + 380, 420);
+  } else {
+    setMinimumSize(320, 420);
+  }
+}
+
 // —— 窗口几何持久化（同类 IM 通行做法：Telegram savePosition／Slack
 // mainWindowSettings.bounds／Discord WINDOW_BOUNDS 均记住上次尺寸与位置）——
-// 默认几何（1280×800）只在首次启动用；之后启动恢复上次尺寸与位置。
-// QSettings 与本文件其他键同口径（组织/应用名）。
+// 存档按布局态分键（Telegram TGWindowArchiver 按视图态归档同构）：列表态
+// 与会话态各自存档，恢复时只取「当前态」的存档——会话态的宽窗不盖回无会话
+// 态（2026-10-15 缺陷：启动无会话却按上次会话宽显示）。默认几何只在无存档
+// 用。QSettings 与本文件其他键同口径（组织/应用名）。
 void MainWindow::save_window_geometry() {
   QSettings settings(QCoreApplication::organizationName(),
                      QCoreApplication::applicationName());
   if (isMaximized()) return; // 最大化态不存（恢复时按普通态处理）
-  if (width() < 480 || height() < 320) return; // 列表态钳到 320 时不存窄条
-  settings.setValue(QStringLiteral("window_geometry"), saveGeometry());
+  settings.setValue(chat_open_
+                        ? QStringLiteral("window_geometry_chat")
+                        : QStringLiteral("window_geometry_list"),
+                    saveGeometry());
 }
 
+// 启动恢复：启动必然是列表态（布局令＝构造即 close_chat），只取列表态存档；
+// 无存档＝保持默认列表态尺寸（close_chat 已钳 320 宽）。
 void MainWindow::restore_window_geometry() {
   QSettings settings(QCoreApplication::organizationName(),
                      QCoreApplication::applicationName());
   const QByteArray geom =
-      settings.value(QStringLiteral("window_geometry")).toByteArray();
-  if (geom.isEmpty()) return; // 首次启动＝无存档，保持默认几何
-  if (!restoreGeometry(geom)) return; // 失败＝静默保持默认
-  if (width() < 480) {
-    // 存档是列表态窄条（<480 宽，恢复前宽度上限已释放）——丢弃，用默认
-    resize(1280, 800);
-  }
+      settings.value(QStringLiteral("window_geometry_list")).toByteArray();
+  // 首次启动＝无存档：保持默认几何（close_chat 已钳 320 宽）
+  if (!geom.isEmpty() && restoreGeometry(geom) && !isMaximized() &&
+      width() > 400)
+    // 列表态必为 320 宽：旧版（单键时代）留下的宽窗存档兜底
+    resize(320, height());
+  // 列表态右缘上限无条件复归：空档新装（close_chat 已设）与有存档路径同
+  // 一出口——只在 restoreGeometry 成功分支里设上限＝新装环境上限恒放开
+  // （布局腿实录假红）
+  if (!isMaximized())
+    setMaximumWidth(rail_->minimumWidth() + side_->minimumWidth());
+}
+
+// 会话态恢复（open_chat 展开用）：优先会话态存档，无则退旧单键存档（旧版
+// 只存过 ≥480 宽的窗——列表窄条从不存档，宽窗必然属会话态），再失败返回
+// false 由调用方落会话态默认尺寸。返回值＝是否已恢复。
+bool MainWindow::restore_chat_geometry() {
+  QSettings settings(QCoreApplication::organizationName(),
+                     QCoreApplication::applicationName());
+  QByteArray geom =
+      settings.value(QStringLiteral("window_geometry_chat")).toByteArray();
+  if (geom.isEmpty())
+    geom = settings.value(QStringLiteral("window_geometry")).toByteArray();
+  if (geom.isEmpty()) return false;
+  if (!restoreGeometry(geom)) return false;
+  if (isMaximized()) return true;
+  if (width() < 520) resize(1280, height()); // 窄/损坏存档兜底：会话态默认宽
+  return true;
 }
 
 void MainWindow::open_chat(const QString& kind, const QString& id) {
   // 布局令：对话面板只在打开会话后展开（列表态点好友／菜单／通知点入）；
-  // 从列表态展开时若窗口还停在窄长方形，恢复会话态宽度（＝默认宽度 1280）
+  // 从列表态展开时若窗口还停在窄长方形，恢复会话态几何（Telegram 按态归档
+  // 优先，无存档＝默认宽 1280×当前高）
   setMaximumWidth(QWIDGETSIZE_MAX); // 释放列表态的右缘上限（见 close_chat）
-  if (chat_panel_->isHidden() && !isMaximized() && width() < 520)
-    resize(1280, height());
+  if (!chat_open_ && !isMaximized() && width() < 520) {
+    if (!restore_chat_geometry()) resize(1280, height());
+  }
   // 会话态：列表列收回固定宽，余量交给 chat 面板（stretch 100）
   side_->setFixedWidth(260);
   chat_panel_->show();
+  chat_open_ = true; // 布局态切到会话态（存档键/最小尺寸判据）
+  apply_state_minimum();
   current_kind_ = kind;
   current_peer_ = id;
   // 打开即读：清该会话未读角标并重渲行（原型行 n-count 只在列表态显）

@@ -241,7 +241,9 @@ public:
   void quit_app();
   // 窗口几何持久化：默认几何只首次启动用；之后恢复上次尺寸与位置（同类
   // IM 通行：Telegram savePosition／Slack bounds／Discord WINDOW_BOUNDS）。
-  // 公开给几何持久化回归测试走同一路径
+  // 存档按布局态分键（Telegram TGWindowArchiver 同构）——启动列表态只恢复
+  // 列表态存档，会话态的宽窗不盖回无会话态。公开给几何持久化回归测试
+  // 走同一路径
   void save_window_geometry();
   void restore_window_geometry();
 
@@ -263,11 +265,19 @@ private:
   void open_peer(const QString& device_id);
   void open_chat(const QString& kind, const QString& id);
   // 关会话回列表态（布局令：无对话＝「左菜单+好友列表」长方形面板，
-  // 对话面板只在 open_chat 后展开；再点当前好友／点标题栏 ✕ 同此路）
-  // clamp_width=false＝启动列表态（保持默认横窗）；true＝用户关会话（钳到
-  // 320 防死空间，2026-10-11 修复）。两态下列表列均 Expanding 占满 rail
-  // 之外的宽度，右缘不留空白（2026-10-14 用户报启动右侧空白）
-  void close_chat(bool clamp_width = true);
+  // 对话面板只在 open_chat 后展开；再点当前好友／点标题栏 ✕ 同此路）。
+  // 启动也走此路＝必然坍缩到列表态尺寸（宽 320），不再保持默认横窗
+  // （2026-10-15 缺陷修复：无会话保持 1280 宽窗，用户多次反馈）。
+  // 两态下列表列均 Expanding 占满 rail 之外的宽度，右缘不留空白
+  // （2026-10-14 用户报启动右侧空白）
+  void close_chat();
+  // 最小尺寸随布局态（Telegram TGSplitView 每态各一档最小宽度）：列表态
+  // 下限＝左侧两列内容宽（320）；会话态＝三列列宽之和（Telegram
+  // columnMinimalWidthLeft/Main 口径），与内容 sizeHint 解耦
+  void apply_state_minimum();
+  // 会话态几何恢复（open_chat 展开用）：按态取存档，无存档回旧单键存档，
+  // 再失败返回 false 由调用方落默认尺寸
+  bool restore_chat_geometry();
   void append_message(const QString& from_id, const QString& text,
                       qint64 ts_ms, bool outgoing, const QString& source,
                       const QString& msg_id = QString(),
@@ -407,6 +417,9 @@ private:
 
   QString current_peer_;      // 当前会话对端（设备标识或协作账号或群键）
   QString current_kind_{QStringLiteral("direct")}; // 会话形态：direct／collab／group／dgroup
+  bool chat_open_{false}; // 布局态：会话面板是否展开（显隐意图，与窗口可见性
+                          // 解耦——离屏未 show 的窗里 isVisible 恒 false，
+                          // 按态最小尺寸/按态几何存档都以本旗为准）
   QSet<QString> collab_peers_; // 协作会话列表（登录后与本地库历史并集）
   bool collab_was_logged_in_{false}; // 上一轮登录态（降级提示去抖）
   // 平台-7 DEGRADED：本应归档但服务端不可达（断线／掉线后登录失败）。
