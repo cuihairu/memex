@@ -64,6 +64,7 @@
 - 多平台（分级如实）——R8（一期，验收口径见 R 表）
 - Docker＋CI＋tunnel 部署（服务器部署批 2026-10-11；README 部署章）
 - webhook 入口（T4.10；服务端 24361 口）
+- 远程协助——已实现（R16；2026-10-15 代码实读核实，非关键词打勾：入口「远程协助…」main_window.cpp:577-585，UI assist_dialog.cpp:63，链路 /files/assist/* 服务端 HTTP 中介 files_client.cpp:1000-1124；consent/audit 全留痕符合 R16 口径；注：实读核实=代码在，未做真机走查）
 
 ### 二、在做或刚立项
 
@@ -81,16 +82,39 @@
 - 群组知识共享 R24（设计=docs/design/群组知识共享.md；公告/备忘录/密码箱已闭，余量未做）
 - 群工具框架 R25（设计=docs/design/群工具框架.md）
 - 群服务器工具 R26（设计=docs/design/群服务器工具.md）
-- 远程协助 R16（二期）
 - 办公室位置图 R15（二期）
 - 群内智能助手与模型网关 R11（三期）
 
 ### 四、完全没有
 
-- 音视频通话与会议
+- 视频会议——未实现（2026-10-15 实读：proto 无任何 VIDEO 帧类型 memex.proto:9-53 止于 MESSAGE_PAGE=58；采集/传输零符号）
+- 语音通话——未实现（2026-10-15 实读：全仓零命中，proto 无 VOICE/AUDIO）
+- 屏幕共享——部分实现（仅远程协助子功能，无独立入口：抓屏→JPEG base64 轮询 assist_dialog.cpp:400-412 经 /files/assist/frame，非实时流）
+- 远程控制——仅设置壳（net_remote_settings.cpp:71,137-148 落盘开关＋配对密码 net_guard.hpp:38-44；引擎/协议零实现——与「远程协助」是两个功能）
 - 消息编辑（全仓 0 处）
 - LDAP/AD 落地
 - 多端同时在线（R4 现为单端在线，与企业微信口径不同）
+
+### 五、六项功能实现状态核实（2026-10-15 用户扫描＋代码实读复核）
+
+> 用户令：逐项核实真实实现状态（找入口、传输链路、UI），不许看到中文字符串
+> 就打勾；已实现给 file:line，未实现写清「未实现」。核实=代码实读，非真机走查。
+
+| 功能 | 状态 | 入口 | 传输链路 |
+| --- | --- | --- | --- |
+| 截图 | ✅ 已实现 | main_window.cpp:904-914（按钮+Ctrl+Alt+A，可改键 shortcut_settings.cpp:23-57） | direct_engine.cpp:399 → file_transfer（FILE_META/RESUME/DONE memex.proto:17-19）；实现 screenshot_tool.cpp |
+| 文件传输 | ✅ 已实现 | main_window.cpp:895-902（发文件/发文件夹）、file_assistant.cpp:162 | file_transfer.cpp:154-232,370-376；授权门 FILE_AUTHZ memex.proto:39-40 |
+| 远程协助 | ✅ 已实现（HTTP 中介） | main_window.cpp:577-585 → assist_dialog.cpp:63 | files_client.cpp:1000-1124（/files/assist/*，帧=JPEG base64 POST/GET） |
+| 视频会议 | ❌ 未实现 | — | proto 无 VIDEO（memex.proto:9-53）；采集/传输零符号 |
+| 屏幕共享 | ⚠️ 部分实现（远程协助子功能） | assist_dialog.cpp:341,381-387 | assist_dialog.cpp:400-412 抓屏→JPEG→b64→files_client.cpp:1074-1087；轮询非实时流 |
+| 语音通话 | ❌ 未实现 | — | 全仓零命中；proto 无 VOICE/AUDIO |
+
+对用户扫描的三处修正：①「远程协助无实现符号」不成立——assist_dialog＋
+files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直连 proto；
+②「远程控制」（net_remote_settings/net_guard）与「远程协助」（assist_dialog）
+是两个功能，前者仅设置壳；③屏幕共享不是独立功能，是远程协助内的 JPEG
+轮询抓屏。音视频是重功能（采集/编码/传输），自研 vs 复用见「待用户拍板」②，
+本轮不实现。
 
 ### 待用户拍板
 
