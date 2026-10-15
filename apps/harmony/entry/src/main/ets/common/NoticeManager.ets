@@ -9,16 +9,36 @@
  *   对齐桌面「重要通知桌面提醒（强提醒，不看窗口激活态）」；
  * - NOTICE 紧急（URGENT）：前台→应用内置顶确认弹窗（未确认的继续排队
  *   弹出）；后台→常驻横幅（isOngoing 不可滑除）＋震动；确认收悉后横幅
- *   才消失。后台动作按钮经 wantAgent 拉起的路径待 OHOS runner 后补。
+ *   才消失。后台横幅的拉起路径经 wantAgent（代码-only·待真机验证）：
+ *   点横幅本体＝拉起应用（前台确认弹窗队列随主界面注册再弹）；「确认
+ *   收悉」动作按钮＝wantAgent 带 action=confirm_urgent 启 EntryAbility，
+ *   onCreate/onNewWant 解参数直接 confirmUrgent（撤横幅＋弹队列下一条）。
  *
  * 通知授权：requestEnableNotification 由主界面引导（用户拒绝→静默降级
  * 为站内，不阻塞主流程）。
  */
 import notificationManager from '@ohos.notificationManager';
 import vibrator from '@ohos.vibrator';
+import wantAgent from '@ohos.wantAgent';
+import Want from '@ohos.app.ability.Want';
 import { BusinessError } from '@ohos.base';
 import common from '@ohos.app.ability.common';
 import { ChatStore, NoticeGrade, StoredMessage } from '@memex/core';
+
+/** want 参数键（横幅 wantAgent ↔ EntryAbility 解参共用，防字符串漂移）。 */
+export const WANT_KEY_ACTION = 'memex_action';
+export const WANT_KEY_MSG_ID = 'memex_urgent_msg_id';
+/** 「确认收悉」动作按钮的 action 值（EntryAbility 据此走 confirmUrgent）。 */
+export const WANT_ACTION_CONFIRM = 'confirm_urgent';
+/** wantAgent 目标（AppScope/app.json5 bundleName＋entry module.json5 ability）。 */
+const BUNDLE_NAME = 'com.memex.im.harmony';
+const ABILITY_NAME = 'EntryAbility';
+
+/** 紧急横幅的两个 wantAgent（本体拉起＋确认按钮）。 */
+interface UrgentWantAgents {
+  tap: wantAgent.WantAgent;
+  confirm: wantAgent.WantAgent;
+}
 
 /** 紧急通知待确认条目（应用内弹窗与后台常驻横幅共用）。 */
 export interface UrgentNotice {
@@ -78,7 +98,7 @@ export class NoticeManager {
     if (last.msgId.length === 0) {
       return; // 自己刚发的受理暂存不推
     }
-    this.publishBasic(this.notifId(last.msgId), peerDisplayName(peer), last.text, false);
+    this.publishBasic(this.notifId(last.msgId), peerDisplayName(peer), last.text);
   }
 
   /** NOTICE 三级裁决（grade 已由 core 按 proto urgency 映射）。 */
@@ -95,7 +115,7 @@ export class NoticeManager {
       return; // 普通＝仅站内会话消息，不弹（桌面默认偏好同）
     }
     if (grade === NoticeGrade.IMPORTANT) {
-      this.publishBasic(this.notifId(msgId), title, content, false);
+      this.publishBasic(this.notifId(msgId), title, content);
       this.vibrate();
       return;
     }
@@ -106,7 +126,7 @@ export class NoticeManager {
       this.pumpUrgent();
     } else {
       this.urgentQueue.push(info);
-      this.publishBasic(this.notifId(msgId), title, content, true);
+      this.publishUrgent(this.notifId(msgId), title, content, msgId);
       this.vibrate();
     }
   }
@@ -143,8 +163,8 @@ export class NoticeManager {
     }
   }
 
-  /** 基础文本横幅。urgent=true 时 isOngoing（确认前不可滑除）。 */
-  private publishBasic(id: number, title: string, text: string, urgent: boolean): void {
+  /** 基础文本横幅（TEXT/IMPORTANT 用）。 */
+  private publishBasic(id: number, title: string, text: string): void {
     const normal: notificationManager.NotificationContent = {
       notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
       normal: {
@@ -153,23 +173,93 @@ export class NoticeManager {
         additionalText: ''
       }
     };
-    if (urgent) {
-      const request: notificationManager.NotificationRequest = {
-        id: id,
-        isOngoing: true,
-        content: normal
-      };
-      notificationManager.publish(request, (err: BusinessError) => {
-        // 未授权/失败：静默降级为站内（消息已落库）
-      });
-      return;
-    }
     const request: notificationManager.NotificationRequest = {
       id: id,
       content: normal
     };
     notificationManager.publish(request, (err: BusinessError) => {
-      // 同上
+      // 未授权/失败：静默降级为站内（消息已落库）
+    });
+  }
+
+  /**
+   * 紧急常驻横幅（isOngoing 不可滑除）＋wantAgent 拉起路径（代码-only·
+   * 待真机验证）：点横幅本体＝拉起应用（前台确认弹窗队列随主界面注册再
+   * 弹）；「确认收悉」动作按钮＝带 confirm_urgent 参数启动 EntryAbility，
+   * 由其 onCreate/onNewWant 调 confirmUrgent（撤本横幅＋弹队列下一条）。
+   * wantAgent 构建是异步 API：失败时回退无按钮常驻横幅（不丢提醒本体）。
+   */
+  private publishUrgent(id: number, title: string, text: string, msgId: string): void {
+    const normal: notificationManager.NotificationContent = {
+      notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+      normal: {
+        title: title,
+        text: text,
+        additionalText: ''
+      }
+    };
+    const fallback: notificationManager.NotificationRequest = {
+      id: id,
+      isOngoing: true,
+      content: normal
+    };
+    this.buildUrgentWantAgents(id, msgId)
+      .then((agents: UrgentWantAgents) => {
+        const request: notificationManager.NotificationRequest = {
+          id: id,
+          isOngoing: true,
+          content: normal,
+          wantAgent: agents.tap,
+          actionButtons: [
+            {
+              title: '确认收悉',
+              wantAgent: agents.confirm,
+              type: notificationManager.NotificationActionButtonButtonType.BUTTON_WITHOUT_ICON
+            }
+          ]
+        };
+        notificationManager.publish(request, (err: BusinessError) => {
+          // 未授权/失败：静默降级为站内（消息已落库）
+        });
+      })
+      .catch((_e: BusinessError) => {
+        // wantAgent 构建失败：回退无按钮常驻横幅（确认仍可经应用内弹窗）
+        notificationManager.publish(fallback, (err: BusinessError) => {});
+      });
+  }
+
+  /** 横幅本体拉起 want 与「确认收悉」按钮 want。 */
+  private buildUrgentWantAgents(id: number, msgId: string): Promise<UrgentWantAgents> {
+    // 点横幅本体：不带 action——仅拉起应用，确认弹窗队列由主界面注册后弹出
+    const tapWant: Want = {
+      bundleName: BUNDLE_NAME,
+      abilityName: ABILITY_NAME
+    };
+    // 「确认收悉」按钮：action=confirm_urgent＋msg_id，EntryAbility 直走确认
+    const confirmParams: Record<string, Object> = {};
+    confirmParams[WANT_KEY_ACTION] = WANT_ACTION_CONFIRM;
+    confirmParams[WANT_KEY_MSG_ID] = msgId;
+    const confirmWant: Want = {
+      bundleName: BUNDLE_NAME,
+      abilityName: ABILITY_NAME,
+      parameters: confirmParams
+    };
+    const tapInfo: wantAgent.WantAgentInfo = {
+      wants: [tapWant],
+      operationType: wantAgent.OperationType.START_ABILITY,
+      requestCode: id
+    };
+    const confirmInfo: wantAgent.WantAgentInfo = {
+      wants: [confirmWant],
+      operationType: wantAgent.OperationType.START_ABILITY,
+      requestCode: id
+    };
+    return Promise.all([
+      wantAgent.getWantAgent(tapInfo),
+      wantAgent.getWantAgent(confirmInfo),
+    ]).then((both: Array<wantAgent.WantAgent>) => {
+      const agents: UrgentWantAgents = { tap: both[0], confirm: both[1] };
+      return agents;
     });
   }
 

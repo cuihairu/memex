@@ -42,7 +42,9 @@ apps/harmony/
 - **三级通知**（对齐桌面 T4.10 与 Android T6.3）：
   普通＝仅站内会话消息不弹；重要＝横幅＋震动强提醒（不看前后台）；
   紧急＝前台应用内确认弹窗（未确认的排队弹出）/后台常驻横幅（isOngoing
-  不可滑除）＋震动，确认收悉后才消失。
+  不可滑除）＋震动，确认收悉后才消失——后台横幅经 wantAgent 拉起：点本体
+  启应用（弹窗队列随主界面注册再弹），「确认收悉」动作按钮带 confirm_urgent
+  ＋msg_id 参数直走确认（代码-only·待真机验证）。
 - **移动端适配**：气泡左右分侧、进入自动滚底、进入即清未读、长按复制。
 
 ## 验证口径（如实声明）
@@ -52,9 +54,10 @@ apps/harmony/
 
 | 层 | 验证方式 | 状态 |
 |---|---|---|
-| core 纯逻辑（wire/frame/地址/存储/路由/会话全链路） | `npm test`：73 用例，ubuntu CI（`.github/workflows/harmony.yml`） | ✅ 全绿 |
+| core 纯逻辑（wire/frame/地址/存储/路由/会话全链路） | `npm test`：89 用例，ubuntu CI（`.github/workflows/harmony.yml`） | ✅ 全绿 |
 | 线格式字节级一致 | wire 与 protobufjs（加载 `common/proto/memex.proto` 单一事实源）**双向字节交叉**；帧前缀镜像 `client/core frame.cpp` | ✅ 全绿 |
 | ArkTS 壳编译（hvigor → HAP） | 待 OHOS runner 与 SDK 可用后补编译腿 | ⛔ 未验证 |
+| ArkTS 壳运行时（横幅/震动/互踢/wantAgent 拉起与确认收悉实景） | 真机走查（待 OHOS 设备；代码已就位） | ⛔ 未验证·待真机 |
 
 不造假绿：CI 只跑 Node 逻辑层，ArkTS 编译腿在 CI 注释与本表中如实标注
 「待 OHOS runner」，工程级/模块级 hvigor 配置与 ohpm 本地依赖（entry →

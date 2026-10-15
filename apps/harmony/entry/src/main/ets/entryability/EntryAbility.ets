@@ -9,12 +9,40 @@ import Want from '@ohos.app.ability.Want';
 import window from '@ohos.window';
 import { BusinessError } from '@ohos.base';
 import { appState } from '../common/AppState';
+import { WANT_KEY_ACTION, WANT_KEY_MSG_ID, WANT_ACTION_CONFIRM } from '../common/NoticeManager';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     appState.bindContext(this.context);
     appState.foreground = false;
     appState.openPeer = '';
+    this.dispatchWant(want);
+  }
+
+  /**
+   * 横幅 wantAgent 热启动解参（代码-only·待真机验证）：紧急通知「确认收悉」
+   * 动作按钮经 wantAgent 启本 ability，已活着时走 onNewWant——直接确认收悉
+   * （撤常驻横幅＋弹队列下一条，与冷启动 onCreate 同一出口）。
+   */
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    this.dispatchWant(want);
+  }
+
+  /** 紧急横幅 want 参数裁决：confirm_urgent＝确认收悉；其余（本体拉起）不处理。 */
+  private dispatchWant(want: Want): void {
+    const params = want.parameters;
+    if (params === undefined) {
+      return;
+    }
+    const action = params[WANT_KEY_ACTION];
+    if (typeof action !== 'string' || action !== WANT_ACTION_CONFIRM) {
+      return;
+    }
+    const msgId = params[WANT_KEY_MSG_ID];
+    if (typeof msgId !== 'string' || msgId.length === 0) {
+      return;
+    }
+    appState.notice.confirmUrgent(msgId);
   }
 
   onDestroy(): void {
