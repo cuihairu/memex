@@ -22,7 +22,7 @@ An office instant messaging system for physically isolated intranet environments
 - Product positioning: <https://cuihairu.github.io/memex/guide/product> · source [docs/src/guide/product.md](docs/src/guide/product.md)
 - Review panel decision list (fifteen items + one optional): <https://cuihairu.github.io/memex/guide/decisions> · source [docs/src/guide/decisions.md](docs/src/guide/decisions.md)
 - UI previews (live screenshots; 8 desktop screens + 4 mobile screens): <https://cuihairu.github.io/memex/guide/prototypes> · prototype sources [docs/design/prototypes/](docs/design/prototypes/)
-- Product definition and phase basis: [docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
+- Product definition and phase basis: [product plan review report](docs/建设方案评审报告-V10.0.md)
 - Requirements and task list (R1–R19 mainline, R23–R27 additional batches, four-phase breakdown, acceptance criteria): [todo.md](todo.md)
 
 ## Product Form
@@ -113,16 +113,17 @@ ctest --preset dev
 
 Presets: `dev` (development build), `ci` (Debug + coverage, the CI gate), `server-release` / `client-release` (the daily-build artifact configuration), and the platform variants `client-release-win` / `client-release-mac` / `client-release-ohos` / `server-release-mac` (a hidden `base` preset supplies the shared vcpkg settings). By default only the shared client/server dependencies (protobuf, nlohmann-json, openssl) are installed; server builds enable the manifest's `server` feature (asio, sqlite3, aws-sdk-cpp), and Qt desktop builds enable `client`. The first configure compiles qtbase and takes a while; the vcpkg binary cache (default `~/.cache/vcpkg/archives`) reuses build artifacts on later configures, which then finish in seconds. CI and daily builds use GitHub Actions caching (the `x-gha` binary cache plus the full install tree) for speed.
 
-## 本地测试口径
+## Local testing conventions
 
-CI 与本地开发按改动面三路分流——改一行文档不该全量编译。
+CI and local development split into three lanes by change surface — a one-line
+doc change should not trigger a full build.
 
-1. **文档改动**（`*.md`、`docs/**`、图片）：不编译。主 CI workflow 的
-   `paths-ignore` 已跳过这些路径。
-2. **代码改动**：只跑改动子集，不全量。
-   - `ctest --preset ci -R '<改动测试>'`
-3. **全量**（`ctest --preset ci`）：仅以下情形触发——CMakeLists.txt、
-   `.github/**`、Docker/Compose 配置、发布前。
+1. **Doc changes** (`*.md`, `docs/**`, images): no compilation. The main CI
+   workflow's `paths-ignore` already skips these paths.
+2. **Code changes**: run only the affected subset, never the full suite.
+   - `ctest --preset ci -R '<affected tests>'`
+3. **Full suite** (`ctest --preset ci`): only for CMakeLists.txt, `.github/**`,
+   Docker/Compose config changes, or pre-release.
 
 ## Deployment
 
@@ -194,8 +195,9 @@ public internet the domain resolves through normal DNS into the tunnel. Inside t
 LAN you can pin `server.memex.cuihairu.site` to the real server IP so traffic never
 leaves the segment; pick one of:
 
-- **Client setting (built-in)**: Memex menu 设置 → 连接设置…, fill 域名解析覆盖 as
-  `域名=IP` (`server.memex.cuihairu.site=192.168.5.5`; several entries separated by
+- **Client setting (built-in)**: Memex menu Settings → Connection Settings…, fill
+  "domain resolution override" as `domain=IP`
+  (`server.memex.cuihairu.site=192.168.5.5`; several entries separated by
   `;`). The override applies to this machine's connections only and takes precedence
   over system DNS; clearing the field restores normal resolution.
 - **hosts file**: point the domain at the server IP on each LAN machine —
@@ -220,7 +222,8 @@ contract each name maps to.
 - **Where configured**: user-side Cloudflare tunnel (`… → tcp://<origin-host>:8088`).
   The repo-side contract is just: publish the collaboration plane on host 8088 and
   point the origin at the machine actually running `docker compose up`.
-- **Override** (LAN direct connect): client setting 设置 → 连接设置… (`域名=IP`),
+- **Override** (LAN direct connect): client setting Settings → Connection
+  Settings… (`domain=IP`),
   hosts file, or split-horizon DNS — see "LAN direct connect" above.
 - **Optional**: without it, LAN clients use `<host>:8088` directly; the name only
   buys public reachability. The deep-dive is the tunnel section above.
@@ -251,7 +254,7 @@ contract each name maps to.
 - **Purpose**: `GET/POST /files/*` — files, avatars, branding, group-tool
   attachments; every client file byte flows through this plane.
 - **Where configured**: nowhere today; clients set the port in the login dialog
-  (文件口) and talk to `<host>:24561`.
+  (file port) and talk to `<host>:24561`.
 - **Override**: hosts / split DNS if a name is ever wanted; default is LAN direct.
 - **Optional**: required for file features, but as a *port*, not a name. If a
   public entry is ever needed, this plane — not RustFS — is the right candidate.

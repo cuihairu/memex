@@ -587,3 +587,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
   - **修订（实现单·用户 2026-10-14 定稿，按此实现）**：②触发＝**未读超阈值（默认 10 分钟，QSettings `watch/remind_minutes` 可配、sweep 现读即时生效）才提醒**——对方一打开就提醒是"已读通知"不是"盯"，已读改为**静默自动解除**（摘 ◉、无提醒文案、无高亮）；④解除三通道口径不变（已读静默解复用已读水位/逐条 READ 判定，不新造状态源）＋手动解＋超时解（`watch/expire_hours` 可配）；⑥存储仍走 `watched_messages` 独立小表（盯行有独立生命周期字段 created_ms/reminded 与三通道解除删除，不塞 messages 台账；键与回执同口径）；⑦入口＝气泡右键（长按后续）＋已盯 ◉ 视觉＋**任务菜单「盯列表…」**看到"我在盯哪些"并逐条取消
   - 证据：修复＋功能 `2c1cd18`（另 `a8c1471` 顺带修重启后直连 seq 归零重发、双端 UNIQUE 撞行静默丢消息）。①盯创建/已读拒绝：Xvfb 双实例双库实测 /tmp/wt_shots/69_item_zoom.png（已读行菜单「盯住本消息」置灰、点击无效盯表仍 0）＋ 84_menu6.png/85_status（未读行右键点「盯住本消息」→ 盯行落库＋meta 行长 ◉）——右键取键改走 cursorForPosition.charFormat（Qt anchorAt 对嵌套表气泡锚命中区空间错位，探针实录字形区全空）。②已读静默解：87_watch.png（B 打开会话即读 → ✓✓ 出现、◉ 消失、盯表清零，状态条仅既有"对方已读 ✓✓"回执文案、无盯提醒）。③未读超阈值提醒：A 配 remind_minutes=1 实测 93_status.png（"盯住的消息仍未读：盯未读提醒腿"）＋ reminded=1 只一次（后续 sweep 不复燃）；96_watchlist.png（任务→盯列表…：条目"直连 · coding · 盯未读提醒腿 · 已盯 N 分钟"带提醒高亮底色＋取消盯按钮）。④重启持久：98_A_reopen.png（重启后历史重载 ◉ 重挂、reminded 不重置、sweep 不误报）。⑤全量 ctest 84/84 绿（test_watch_reminder 12 腿：创建/UPSERT/列表快照取消/已读拒绝/静默解幂等/协作 c: 键/手动解/阈值边界 9↔11 分钟/阈值可配/24h 过期只清目标行/重启装载不误报）
 
+## 待办
+
+- [ ] 文档双语收口（README 已完成 2026-10-16）：`docs/` 中文单语文档缺英文版、文首无语言切换器——顶部 `docs/建设方案评审报告-V10.0.md`、`docs/审计-文档一致性.md`；`docs/design/` 23 篇设计稿（审批与日报周报／群工具三件／模型网关／OIDC 身份认证接入等）；VitePress 站点源 `docs/src/**` 约 22 页（guide/product、decisions、prototypes、settings、authorization 等）；本轮不补全，README 双语先行（README.zh.md 已有对应中文正文，README.md 中文正文已移英文口径）
+
