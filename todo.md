@@ -589,8 +589,8 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ## 待办
 
-- [ ] 文档英文化缺口（2026-10-16 登记，本轮只登记不补写）：README.md／README.zh.md 已完成双语对齐；下列文档全仓只存在中文版、无英文版、无语言切换器——
-  - 独立文档：`docs/建设方案评审报告-V10.0.md`（135 KB，产品定义与分期依据，README「Documentation」节引用）、`docs/审计-文档一致性.md`（30 KB，文档与源码一致性审计报告）
+- [x] docs 根目录双语配对（2026-10-16 完成）：`docs/审计-文档一致性.md` 已补英文对应件 `docs/audit-doc-consistency.md`（183 行逐条真译，表格/代码引用/专有名词原样保留），双方首行切换器互链；`docs/建设方案评审报告-V10.0.md`（1204 行 >1000 阈值）按红线只做首行切换器＋「暂无译版」说明，不硬造劣质翻译。
+- [ ] 文档英文化缺口（2026-10-16 登记，本轮只登记不补写；docs 根目录已收口，下一轮做子目录）：下列文档全仓只存在中文版、无英文版、无语言切换器——
   - 设计稿 `docs/design/` 23 篇：`IP与办公位置显示.md`、`OIDC身份认证接入设计.md`、`一级菜单管理.md`、`个人任务清单与外部工具接入.md`、`信箱.md`、`办公室位置图.md`、`品牌物料.md`、`基础平台化改造计划（身份-组织-授权-归档）.md`、`审批与日报周报.md`、`建群主题与群记录导出.md`、`文件存储与外网单向传输.md`、`机器人平台.md`、`权限模型.md`、`模型网关.md`、`消息标识与归档去重.md`、`群内智能助手.md`、`群工具三件.md`、`群工具框架.md`、`群服务器工具.md`、`群组知识共享.md`、`远程协助.md`、`group-remote-access.md`（英文文件名但正文为中文）、`settings-consolidation.md`（英文文件名但正文为中文）
   - 文档站 `docs/src/`：首页 `index.md` ＋ 指南 19 篇（`product`／`prototypes`／`requirements`／`roadmap`／`decisions`／`report`／`compliance`／`authorization`／`feiq-compat`／`file-storage`／`backup-restore`／`wan-drill`／`notify`／`settings`／`crash-reporting`／`platform-adapter`／`delivery-matrix`／`av-collab`／`development`）；`.vitepress/config.mts` 仅 `lang: 'zh-CN'`，无 `locales` 配置
 
