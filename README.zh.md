@@ -1,7 +1,7 @@
 [English](README.md) | [中文](README.zh.md)
 
 <p align="center">
-  <img src="docs/src/public/logo.svg" alt="Memex" width="96" height="96" />
+  <img src="docs/src/public/logo.svg" alt="Memex" width="64" height="64" />
 </p>
 
 <h1 align="center">Memex · 内网办公即时通讯系统</h1>
