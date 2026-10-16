@@ -1,4 +1,4 @@
-> **English** | [中文](crash-reporting.md)
+> **English** | [中文](/guide/crash-reporting)
 
 # Crash Reporting (Crashpad)
 
@@ -110,4 +110,4 @@
   4. full ctest 61/61 green (the new crash leg about 3.3s).
      Note: 61/61 was the baseline as of 2026-10-08; the baseline has since grown to 83
      registered tests (ctest names deduplicated, see the
-     [Delivery Acceptance Matrix](/guide/delivery-matrix)).
+     [Delivery Acceptance Matrix](/en/guide/delivery-matrix)).

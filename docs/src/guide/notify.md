@@ -1,4 +1,4 @@
-> [English](notify.en.md) | **中文**
+> [English](/en/guide/notify) | **中文**
 
 # 通知子系统与 webhook 接入（T4.10）
 

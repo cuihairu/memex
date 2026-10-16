@@ -1,4 +1,4 @@
-> [English](settings.en.md) | **中文**
+> [English](/en/guide/settings) | **中文**
 
 # 客户端设置
 

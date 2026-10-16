@@ -1,4 +1,4 @@
-> [English](wan-drill.en.md) | **中文**
+> [English](/en/guide/wan-drill) | **中文**
 
 # 跨地域接入与断线补传验证（T5.4）
 

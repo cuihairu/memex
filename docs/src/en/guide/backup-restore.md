@@ -1,4 +1,4 @@
-> **English** | [中文](backup-restore.md)
+> **English** | [中文](/guide/backup-restore)
 
 # Backup and Restore (T5.2)
 

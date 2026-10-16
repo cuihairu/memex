@@ -1,4 +1,4 @@
-> **English** | [中文](requirements.md)
+> **English** | [中文](/guide/requirements)
 
 # Requirements and Acceptance
 
@@ -26,7 +26,7 @@ Derived rules: archiving is judged in units of **messages** (not in units of ses
 | R5 | Both states integrated into one client | Required | A single installer; not logged in = direct mode, switching to collaboration mode after login; switching requires no restart and loses no local history | 1 |
 | R6 | LAN file sharing | Required | Directory-level sharing with permission differentiation; file bytes do not pass over the public network | 1 |
 | R7 | Archive scope identifiable | Required | Cross-state sessions are clearly labeled「未归档」in the UI and the label cannot be dismissed; the archive start point is traceable | 1 |
-| R8 | Domestic operating systems | Important | At least cover UnionTech UOS and Kylin Linux, with messaging / files / UI display all working normally (currently only verified in an Ubuntu 24.04 sandbox; real-device testing on UOS / Kylin still to be added — the on-site list is in [平台适配](/guide/platform-adapter)) | 1 |
+| R8 | Domestic operating systems | Important | At least cover UnionTech UOS and Kylin Linux, with messaging / files / UI display all working normally (currently only verified in an Ubuntu 24.04 sandbox; real-device testing on UOS / Kylin still to be added — the on-site list is in [平台适配](/en/guide/platform-adapter)) | 1 |
 | R9 | Cross-segment and multi-region, large files | Important | Cross-segment and cross-region communication is carried by the collaboration mode; direct mode is limited to this segment; whole-directory sending and resumable transfer supported | 1 |
 | R10 | Functional scope references 企业微信 | Important | Accepted item by item against the phase-two list; no requirement to achieve it all at once | 2+ |
 | R11 | Intranet AI capabilities | Planned | In-group assistant, meeting minutes, requirement organization; model deployed on the intranet; archived data is only sent to local models | 3 |
@@ -54,7 +54,7 @@ Derived rules: archiving is judged in units of **messages** (not in units of ses
 | A9 | Policy switches take effect | After turning off「允许与未登录设备通信」, cross-state sessions cannot be established; after turning off「允许免登录使用」, a not-logged-in client cannot enter the main interface |
 | A10 | File transfer and sharing | File and folder transfer completes, resumable transfer works; shared directories are accessed per permissions and over-privileged access is denied |
 | A11 | Server degradation behavior | When the server is unavailable, the client shows a clear notice and falls back to direct mode; same-segment messaging and file transfer remain usable |
-| A12 | Domestic system coverage | On UnionTech UOS and Kylin terminals, messaging, file transfer, and UI display all work normally (real-device testing still to be added — currently only verified in an Ubuntu 24.04 sandbox; the on-site list is in [平台适配](/guide/platform-adapter)) |
+| A12 | Domestic system coverage | On UnionTech UOS and Kylin terminals, messaging, file transfer, and UI display all work normally (real-device testing still to be added — currently only verified in an Ubuntu 24.04 sandbox; the on-site list is in [平台适配](/en/guide/platform-adapter)) |
 | A13 | Cross-segment communication | Collaboration-mode messages between terminals on different VLANs send and receive normally; direct mode is limited to this segment with no cross-segment requirement |
 | A14 | Server recovery | A database recovery drill completed per the plan, verifying that the process is executable and the data is complete |
 | A15 | Multi-region access | Remote regions access the same server over dedicated lines, with login, messaging, organizational structure, and history retrieval all working normally |
@@ -64,7 +64,7 @@ Derived rules: archiving is judged in units of **messages** (not in units of ses
 | A19 | Reporting relations | The direct superior is viewable in member profiles; the superior chain can be traversed level by level upward; bulk import takes effect and can validate error entries |
 | A20 | Directory visibility | Hidden departments and members do not appear in the directory and cannot be searched; restricted departments can only see their own department's directory |
 | A21 | Media foundation availability | Screen capture for the screenshot feature works on target terminals (Windows, UOS, Kylin), with a clear degradation notice for unsupported environments; verification that a WebRTC connection can be established is **deferred** (the WebRTC media foundation is not introduced; current remote-assistance media goes over the server-side HTTP relay, see R16) |
-| A22 | Component license list | A complete third-party component list is provided at delivery and verified to contain no strongly infectious license components such as AGPL / SSPL; exceptions remain deployed as separate processes with verification records kept (2026-10-13 re-verification: nine components in the vcpkg manifest — asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / qtbase / drogon / crashpad, of which drogon is still to be registered in `third_party/组件清单.md`; verification records are in [合规与命名一致性](/guide/compliance)) |
+| A22 | Component license list | A complete third-party component list is provided at delivery and verified to contain no strongly infectious license components such as AGPL / SSPL; exceptions remain deployed as separate processes with verification records kept (2026-10-13 re-verification: nine components in the vcpkg manifest — asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / qtbase / drogon / crashpad, of which drogon is still to be registered in `third_party/组件清单.md`; verification records are in [合规与命名一致性](/en/guide/compliance)) |
 | A23 | System identifier consistency | The installer name, Windows service name, database and log prefixes, and intranet domain all use the Memex identity |
 
 The item-by-item mapping of tasks to acceptance is in the「验收」line of every task in [todo.md](https://github.com/cuihairu/memex/blob/main/todo.md).

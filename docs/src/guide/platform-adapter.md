@@ -1,4 +1,4 @@
-> [English](platform-adapter.en.md) | **中文**
+> [English](/en/guide/platform-adapter) | **中文**
 
 # 国产系统适配验证（T5.1）
 

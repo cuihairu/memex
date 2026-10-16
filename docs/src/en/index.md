@@ -34,9 +34,8 @@ features:
     details: Desktop client in C++17 + Qt, covering Windows, macOS, and Chinese Linux (UnionTech UOS, Kylin); mobile on Android (Kotlin, shipped), iOS (Swift, code-only + CI), and HarmonyOS NEXT (ArkTS, code-only + CI); the server is C++ deployed centrally on a single host; file byte streams take a peer-to-peer side channel and never pass through the server.
 ---
 
-> **English** | [中文](index.md)
+> **English** | [中文](/)
 
-> **English** | [中文](index.md)
 
 <script setup>
 const desktopSlides = [
@@ -59,7 +58,7 @@ const mobileSlides = [
 
 ## UI Preview
 
-The UI preview covers eight desktop screens and four mobile screens, in the brand orange (#e16531), with both light and dark variants available. Desktop and mobile are split into two carousels; the button in the top-right corner switches the screenshot theme, and auto-advance, left/right arrows, keyboard arrow keys, and touch swipes are supported. (Progress on swapping in live shots: all eight desktop and all four mobile screens have been replaced with live client screenshots, one light and one dark each, and all twelve carousel slots are live; live screenshots are not promised for the HarmonyOS client. See [UI Prototypes and Preview](/guide/prototypes).)
+The UI preview covers eight desktop screens and four mobile screens, in the brand orange (#e16531), with both light and dark variants available. Desktop and mobile are split into two carousels; the button in the top-right corner switches the screenshot theme, and auto-advance, left/right arrows, keyboard arrow keys, and touch swipes are supported. (Progress on swapping in live shots: all eight desktop and all four mobile screens have been replaced with live client screenshots, one light and one dark each, and all twelve carousel slots are live; live screenshots are not promised for the HarmonyOS client. See [UI Prototypes and Preview](/en/guide/prototypes).)
 
 ### Desktop (Windows / UOS / Kylin / macOS)
 
@@ -69,7 +68,7 @@ The UI preview covers eight desktop screens and four mobile screens, in the bran
 
 <ShowcaseCarousel :slides="mobileSlides" label="Mobile UI preview" />
 
-Full-size single-screen images and prototype source files are in [UI Prototypes and Preview](/guide/prototypes).
+Full-size single-screen images and prototype source files are in [UI Prototypes and Preview](/en/guide/prototypes).
 
 ## Quick Preview
 
@@ -117,4 +116,4 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-More: [Product Positioning](/guide/product) · [Requirements and Acceptance](/guide/requirements) · [Four-Phase Roadmap](/guide/roadmap) · [Decision List](/guide/decisions) · [Review Report Summary](/guide/report) · [Clone and Build](/guide/development)
+More: [Product Positioning](/en/guide/product) · [Requirements and Acceptance](/en/guide/requirements) · [Four-Phase Roadmap](/en/guide/roadmap) · [Decision List](/en/guide/decisions) · [Review Report Summary](/en/guide/report) · [Clone and Build](/en/guide/development)

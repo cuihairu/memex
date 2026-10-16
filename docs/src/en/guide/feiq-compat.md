@@ -1,4 +1,4 @@
-> **English** | [中文](feiq-compat.md)
+> **English** | [中文](/guide/feiq-compat)
 
 # FeiQ / IPMSG Compatibility
 

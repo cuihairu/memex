@@ -1,4 +1,4 @@
-> [English](prototypes.en.md) | **中文**
+> [English](/en/guide/prototypes) | **中文**
 
 # 界面原型与预览
 

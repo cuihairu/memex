@@ -1,4 +1,4 @@
-> **English** | [中文](roadmap.md)
+> **English** | [中文](/guide/roadmap)
 
 # The Four-Phase Plan
 

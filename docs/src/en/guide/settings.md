@@ -1,4 +1,4 @@
-> **English** | [中文](settings.md)
+> **English** | [中文](/guide/settings)
 
 # Client Settings
 
@@ -23,7 +23,7 @@
 
 ## Notifications and Sounds
 
-See [Notifications and Webhook Integration](/guide/notify), sections 「个人通知偏好」 and
+See [Notifications and Webhook Integration](/en/guide/notify), sections 「个人通知偏好」 and
 「事件通知开关组与提示音」; after the grouping roll-up the entry point remains Settings →
 「通知偏好」.
 

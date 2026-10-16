@@ -1,4 +1,4 @@
-> [English](file-storage.en.md) | **中文**
+> [English](/en/guide/file-storage) | **中文**
 
 # 文件存储与生命周期
 

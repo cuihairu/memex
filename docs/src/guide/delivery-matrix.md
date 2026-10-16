@@ -1,4 +1,4 @@
-> [English](delivery-matrix.en.md) | **中文**
+> [English](/en/guide/delivery-matrix) | **中文**
 
 # 交付验收矩阵（评审八-5）
 

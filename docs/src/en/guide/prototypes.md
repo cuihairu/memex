@@ -1,4 +1,4 @@
-> **English** | [中文](prototypes.md)
+> **English** | [中文](/guide/prototypes)
 
 # UI Prototypes and Preview
 

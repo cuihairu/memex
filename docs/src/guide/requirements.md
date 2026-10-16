@@ -1,4 +1,4 @@
-> [English](requirements.en.md) | **中文**
+> [English](/en/guide/requirements) | **中文**
 
 # 需求与验收
 

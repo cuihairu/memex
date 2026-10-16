@@ -1,4 +1,4 @@
-> **English** | [中文](wan-drill.md)
+> **English** | [中文](/guide/wan-drill)
 
 # Cross-Region Access and Disconnection Re-delivery Verification (T5.4)
 

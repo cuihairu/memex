@@ -1,4 +1,4 @@
-> [English](decisions.en.md) | **中文**
+> [English](/en/guide/decisions) | **中文**
 
 # 评审组决策清单
 

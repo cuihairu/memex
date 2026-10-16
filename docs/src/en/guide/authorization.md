@@ -1,4 +1,4 @@
-> **English** | [中文](authorization.md)
+> **English** | [中文](/guide/authorization)
 
 # Server-Side Authorization Inventory (Platform-1)
 

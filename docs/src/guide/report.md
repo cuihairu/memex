@@ -1,4 +1,4 @@
-> [English](report.en.md) | **中文**
+> [English](/en/guide/report) | **中文**
 
 # 评审报告摘要
 

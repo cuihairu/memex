@@ -1,4 +1,4 @@
-> [English](av-collab.en.md) | **中文**
+> [English](/en/guide/av-collab) | **中文**
 
 # 音视频会议与协同文档底座
 

@@ -1,4 +1,4 @@
-> [English](authorization.en.md) | **中文**
+> [English](/en/guide/authorization) | **中文**
 
 # 服务端授权盘点（平台-1）
 

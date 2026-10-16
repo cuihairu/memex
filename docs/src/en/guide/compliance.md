@@ -1,4 +1,4 @@
-> **English** | [中文](compliance.md)
+> **English** | [中文](/guide/compliance)
 
 # Compliance and Naming Consistency (T5.3)
 

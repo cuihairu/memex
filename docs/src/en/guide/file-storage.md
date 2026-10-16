@@ -1,9 +1,9 @@
-> **English** | [中文](file-storage.md)
+> **English** | [中文](/guide/file-storage)
 
 # File Storage and Lifecycle
 
 > Convention page for the two lifecycles of the R23 file plane (group files / personal files / file assistant / external uplink) and chat files (2026-10-13, landing review five's "file lifecycle convention alignment").
-> Decision background: see [决策清单 #7](/guide/decisions) (centralized deployment · storage volume split implementation — this page is the sub-convention of #7's storage volume split as it lands on the file plane; the decision list has no dedicated file-storage entry); the full design text is in the repo at `docs/design/文件存储与外网单向传输.md`.
+> Decision background: see [决策清单 #7](/en/guide/decisions) (centralized deployment · storage volume split implementation — this page is the sub-convention of #7's storage volume split as it lands on the file plane; the decision list has no dedicated file-storage entry); the full design text is in the repo at `docs/design/文件存储与外网单向传输.md`.
 
 ## Two Kinds of Files
 
@@ -28,7 +28,7 @@ Upload acceptance order: **authorization → dedup-by-hash → scan (uplink plan
 - **Upload interrupted** (connection drop / timeout): no bytes are persisted. Object storage writes happen only after the request body is fully received; an interruption = no bytes and no row, and the client can simply retransmit — no half-written objects.
 - **Byte persistence failure** (storage unavailable): 502 「对象存储写入失败」 + quota rollback; no metadata row is written.
 - **Metadata persistence failure**: the server deletes the already-persisted bytes (rollback); no orphans are left.
-- **The only orphan window**: the process crashes after bytes are persisted but before metadata is committed — leaving an unreferenced object. `files verify` reports an "orphan object" warning as-is (not judged an error); whether to clean up is an operations decision — the tool does not delete on your behalf (see [备份恢复 · 一致性核对](/guide/backup-restore)).
+- **The only orphan window**: the process crashes after bytes are persisted but before metadata is committed — leaving an unreferenced object. `files verify` reports an "orphan object" warning as-is (not judged an error); whether to clean up is an operations decision — the tool does not delete on your behalf (see [备份恢复 · 一致性核对](/en/guide/backup-restore)).
 
 ## Degradation Conventions
 

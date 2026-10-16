@@ -1,4 +1,4 @@
-> **English** | [中文](notify.md)
+> **English** | [中文](/guide/notify)
 
 # Notification Subsystem and Webhook Access (T4.10)
 

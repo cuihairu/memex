@@ -1,4 +1,4 @@
-> [English](crash-reporting.en.md) | **中文**
+> [English](/en/guide/crash-reporting) | **中文**
 
 # 崩溃采集（Crashpad）
 

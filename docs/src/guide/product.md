@@ -1,4 +1,4 @@
-> [English](product.en.md) | **中文**
+> [English](/en/guide/product) | **中文**
 
 # 产品定位
 

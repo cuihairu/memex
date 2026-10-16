@@ -1,4 +1,4 @@
-> **English** | [中文](platform-adapter.md)
+> **English** | [中文](/guide/platform-adapter)
 
 # Domestic-OS Adaptation Verification (T5.1)
 

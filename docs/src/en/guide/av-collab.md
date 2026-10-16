@@ -1,4 +1,4 @@
-> **English** | [中文](av-collab.md)
+> **English** | [中文](/guide/av-collab)
 
 # Audio/Video Conferencing and Collaborative Document Base
 

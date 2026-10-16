@@ -1,4 +1,4 @@
-> **English** | [中文](report.md)
+> **English** | [中文](/guide/report)
 
 # Review Report Summary
 
@@ -21,4 +21,4 @@ The full text of the《内网办公即时通讯系统建设方案评审报告 V1
 
 ## Items awaiting review panel decisions
 
-Chapter 11 lists fifteen items for the review panel to decide (plus one optional confirmation on FeiQ compatibility). These have been organized into the[决策清单](/guide/decisions) and are being advanced per the "report recommendation" column.
+Chapter 11 lists fifteen items for the review panel to decide (plus one optional confirmation on FeiQ compatibility). These have been organized into the[决策清单](/en/guide/decisions) and are being advanced per the "report recommendation" column.

@@ -1,4 +1,4 @@
-> [English](development.en.md) | **中文**
+> [English](/en/guide/development) | **中文**
 
 # 克隆与构建
 

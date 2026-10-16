@@ -1,4 +1,4 @@
-> **English** | [中文](development.md)
+> **English** | [中文](/guide/development)
 
 # Clone and Build
 
