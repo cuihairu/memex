@@ -1,3 +1,5 @@
+> [English](oidc-identity-integration.md) | **中文**
+
 # OIDC 身份认证接入设计（设计稿，未实施）
 
 > 状态：本文档只做设计，未改任何代码；等用户看过拍板后再排实施。
