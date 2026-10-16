@@ -589,8 +589,9 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ## 待办
 
-- [x] docs 根目录双语配对（2026-10-16 完成）：`docs/审计-文档一致性.md` 已补英文对应件 `docs/audit-doc-consistency.md`（183 行逐条真译，表格/代码引用/专有名词原样保留），双方首行切换器互链；`docs/建设方案评审报告-V10.0.md`（1204 行 >1000 阈值）按红线只做首行切换器＋「暂无译版」说明，不硬造劣质翻译。
-- [ ] 文档英文化缺口（2026-10-16 登记，本轮只登记不补写；docs 根目录已收口，下一轮做子目录）：下列文档全仓只存在中文版、无英文版、无语言切换器——
+- [x] docs 根目录双语配对（2026-10-16 完成）：`docs/审计-文档一致性.md` 已补英文对应件 `docs/audit-doc-consistency.md`（183 行逐条真译，表格/代码引用/专有名词原样保留），双方首行切换器互链；`docs/建设方案评审报告-V10.0.md`（1204 行 >1000 阈值）按红线只做摘要级英文版 `docs/plan-review-report-v10.0.md`（保留全部标题层级/R1–R16 需求编号/26 张表/决策项等事实，段落压缩不逐段硬译，顶部如实标注摘要级＋中文原文为准），双方首行切换器互链。
+- [x] 文档英文化缺口（2026-10-16 登记，同日完成）：下列中文文档全部补上英文版＋双向语言切换器——
   - 设计稿 `docs/design/` 23 篇：`IP与办公位置显示.md`、`OIDC身份认证接入设计.md`、`一级菜单管理.md`、`个人任务清单与外部工具接入.md`、`信箱.md`、`办公室位置图.md`、`品牌物料.md`、`基础平台化改造计划（身份-组织-授权-归档）.md`、`审批与日报周报.md`、`建群主题与群记录导出.md`、`文件存储与外网单向传输.md`、`机器人平台.md`、`权限模型.md`、`模型网关.md`、`消息标识与归档去重.md`、`群内智能助手.md`、`群工具三件.md`、`群工具框架.md`、`群服务器工具.md`、`群组知识共享.md`、`远程协助.md`、`group-remote-access.md`（英文文件名但正文为中文）、`settings-consolidation.md`（英文文件名但正文为中文）
   - 文档站 `docs/src/`：首页 `index.md` ＋ 指南 19 篇（`product`／`prototypes`／`requirements`／`roadmap`／`decisions`／`report`／`compliance`／`authorization`／`feiq-compat`／`file-storage`／`backup-restore`／`wan-drill`／`notify`／`settings`／`crash-reporting`／`platform-adapter`／`delivery-matrix`／`av-collab`／`development`）；`.vitepress/config.mts` 仅 `lang: 'zh-CN'`，无 `locales` 配置
+  - 完成说明：设计稿 23 篇各补英文对应件（21 个新英文文件名；`group-remote-access.en.md`／`settings-consolidation.en.md` 按 `.en.md` 约定），指南 19 篇各补 `.en.md`，首页补 `index.en.md`；43 对文件首行切换器互链（脚本校验零断链）；`pnpm docs:build`（pnpm 10，CI 钉版）通过。剩余缺口：`.vitepress/config.mts` 的 `locales` 双语路由配置未做（需平行 `src/en/` 树＋双套侧边栏＋链接改写，本轮不做，登记下轮）；英文版内部链接仍指向中文原文件。
 
