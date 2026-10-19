@@ -89,18 +89,24 @@ memex/
 依赖（asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / drogon（管理后台）/ crashpad（客户端崩溃采集）/ Qt6）经 vcpkg manifest 统一管理（`vcpkg.json`，版本由 `builtin-baseline` 钉住），CMake 经 `CMakePresets.json` 一条命令构建：
 
 ```bash
-# 1. 准备 vcpkg（一次性；建议把 VCPKG_ROOT 写入 shell profile）
-git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
-~/vcpkg/bootstrap-vcpkg.sh
-export VCPKG_ROOT="$HOME/vcpkg"
+# 1. 指向与 vcpkg.json builtin-baseline 匹配的 vcpkg checkout
+export VCPKG_ROOT=/path/to/vcpkg
+# 可选：明确使用本地文件二进制缓存；Linux 默认缓存通常已是 ~/.cache/vcpkg/archives
+export VCPKG_BINARY_SOURCES="clear;files,$HOME/.cache/vcpkg/archives,readwrite"
 
-# 2. 开发构建（Release · 服务端+客户端+测试；首次配置自动按 manifest 装包）
+# 2. 配置并构建（Release · 服务端+客户端+测试）
 cmake --preset dev
 cmake --build --preset dev
-ctest --preset dev
+
+# 3. 运行与 CI 相同的测试门禁（Debug + coverage）
+cmake --preset ci
+cmake --build --preset ci
+ctest --preset ci
 ```
 
-Preset 一览：`dev`（开发构建）、`ci`（Debug+覆盖率，CI 门禁）、`server-release` / `client-release`（每日构建产物口径）、平台变体 `client-release-win` / `client-release-mac` / `client-release-ohos` / `server-release-mac`（另有 hidden `base` preset 提供共享 vcpkg 配置）。默认只装双端共享依赖（protobuf／nlohmann-json／openssl），服务端构建启用 manifest 的 `server` feature（asio／sqlite3／aws-sdk-cpp），带 Qt 桌面的构建启用 `client` feature。首次配置会编译 qtbase，耗时较长；vcpkg 二进制缓存（默认 `~/.cache/vcpkg/archives`）在后续配置中复用编译产物，秒级完成。CI 与每日构建使用 GitHub Actions 缓存（`x-gha` 二进制缓存 + 安装树整取）加速。
+Preset 一览：`dev`（开发构建）、`ci`（Debug+覆盖率，CI 门禁）、`server-release` / `client-release`（每日构建产物口径）、平台变体 `client-release-win` / `client-release-mac` / `client-release-ohos` / `server-release-mac`（另有 hidden `base` preset 提供共享 vcpkg 配置）。默认只装双端共享依赖（protobuf／nlohmann-json／openssl），服务端构建启用 manifest 的 `server` feature（asio／sqlite3／aws-sdk-cpp），带 Qt 桌面的构建启用 `client` feature。vcpkg 默认二进制缓存位于 Linux 的 `~/.cache/vcpkg/archives`；已有缓存命中时复用编译包，缺失项仍会编译或下载。离线构建要求 manifest 所需源码归档或二进制包已预热到本地缓存，首次配置前请确认缓存完整；CI 使用 GitHub Actions `x-gha` 二进制缓存和安装树缓存加速。
+
+CI 命令对应 `.github/workflows/ci.yml` 的 Configure、Build、Test 步骤：`cmake --preset ci`、`cmake --build --preset ci`、`ctest --preset ci`。本地干净重建可在确认 `build/` 是生成目录后删除，再执行 `cmake --preset dev` 和 `cmake --build --preset dev`；测试门禁使用 CI preset，而不是旧的 `dev` 测试树。
 
 ## 本地测试口径
 
