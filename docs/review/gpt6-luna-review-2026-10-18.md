@@ -94,7 +94,6 @@ d2bd7cf docs: add deep source audit queue
 >
 > 本节项涉及的文件若与上述两单冲突，**停下回报，不许强行合并**。
 
-- [ ] 核对「WebRTC 架构承诺领先于实现」：docs/plan-review-report-v10.0.md:59 vs client/app/assist_dialog.cpp:3,410
-      核实后二选一：把文档改成与实际一致（JPEG 抓屏轮询），或标注 WebRTC 为未交付规划
-- [ ] 核对「OIDC 是设计稿」：确认当前交付边界，README/文档不得把未交付能力写成已有
-- [ ] 文档口径统一：凡写「已支持」的能力逐条与代码比对，对不上的改文档或补实现
+- [x] 核对「WebRTC 架构承诺领先于实现」：当前实现为 500ms JPEG 抓屏轮询＋服务端 HTTP 帧中继，无 WebRTC 媒体底座；计划书描述的是目标架构。证据：`client/app/assist_dialog.cpp:3,395-420`、`client/engine/collab/files_client.cpp:1074-1097`、`server/src/files_server.cpp:1015-1019,3170-3197`；已在计划书 `:42,59,440-443` 标明目标/未交付并修正文档站中英文评审摘要/路线图，另在 `todo.md` 登记 WebRTC 待实现。
+- [x] 核对「OIDC 是设计稿」：OIDC 未交付；设计稿标题与状态明确“设计稿，未实施”，仓库服务端/客户端/apps/common 源码检索无 OIDC/PKCE/JWKS/id_token 实现，登录路由仍走密码及已配置 LDAP 判定（`server/src/files_server.cpp:1214-1262`）。README 中英文均未宣称 OIDC 已支持；todo 已列为未完成（`todo.md:72`），文档维持设计/待定口径，无需改写成已支持。
+- [x] 文档口径统一：核对 README 中英文与 docs/src 中含“已支持/implemented/supported”的产品能力声明；未发现 README 宣称 OIDC 或 WebRTC 已交付。修正文档站评审摘要与路线图对 WebRTC 的现在时表述；既有远程协助、屏幕共享及各平台分级口径已在 `todo.md:67,92-109` 标明 HTTP 中继、JPEG 轮询和部分实现。未发现需补实现但未登记的超前声明；WebRTC 缺口已以上条登记。

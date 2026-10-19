@@ -65,6 +65,7 @@
 - Docker＋CI＋tunnel 部署（服务器部署批 2026-10-11；README 部署章）
 - webhook 入口（T4.10；服务端 24361 口）
 - 远程协助——已实现（R16；2026-10-15 代码实读核实，非关键词打勾：入口「远程协助…」main_window.cpp:577-585，UI assist_dialog.cpp:63，链路 /files/assist/* 服务端 HTTP 中介 files_client.cpp:1000-1124；consent/audit 全留痕符合 R16 口径；注：实读核实=代码在，未做真机走查）
+- WebRTC 媒体底座待实现：当前远程协助用 500ms JPEG 抓屏轮询＋服务端 HTTP 中继（client/app/assist_dialog.cpp:3,395-420；client/engine/collab/files_client.cpp:1074-1097；server/src/files_server.cpp:1015-1019,3170-3197）；媒体库/连接与 WebRTC 路由未接入。来源：docs/review/gpt6-luna-review-2026-10-18.md「WebRTC 架构承诺领先于实现」核对项；docs/plan-review-report-v10.0.md:42,59,440 的媒体底座属于目标架构，不代表已交付。
 
 ### 二、在做或刚立项
 
