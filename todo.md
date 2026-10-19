@@ -598,3 +598,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] 文档站双语路由 `locales`（2026-10-16 登记下轮，同日完成）：`docs/src/.vitepress/config.mts` 加 `locales`（root=简体中文 `zh-CN` ／ en=English `link:'/en/'`），英文页由 `*.en.md` 平移进平行 `src/en/` 树（首页＋指南 19 篇，`git mv` 保留改名追踪）；中英各一套 nav/sidebar/主题文案（`outline`/`docFooter`/`lastUpdatedText`/明暗切换/footer 中英分列，侧边栏标签取各页 H1 原文）；40 页首行切换器由相对 `X.en.md` 改写为绝对 `/en/...`↔`/guide/...`（顺带修掉首页切换器重复两行的旧 bug），英文正文内链一律指向英文对应页（`/guide/x`→`/en/guide/x`，`/screenshots/*` 属公共资源不加前缀）。
   - 证据：`vitepress build src`（vitepress 1.6.4，`docs/package.json` 钉版，等价 CI `pnpm docs:build`；本机无 pnpm 故直接调 `docs/node_modules/.bin/vitepress`）build complete in 15.73s，产出英文页 20 张于 `/memex/en/**` ＋中文页 20 张＋`404.html`，旧 `*.en.html` 残留 0；**零死链**（`ignoreDeadLinks` 默认开启，断链即 build 失败）＝内链改写全量校验通过；`<html lang>` 分别为 `zh-CN`／`en`，translations 切换菜单已渲染；20 对双语互链脚本校验 20/20 一致且目标文件全部命中。
 
+## 2026-10-19 深度源码审核第一批（A0）
+
+- 记录：[docs/review/audit-batch-a0-2026-10-19.md](docs/review/audit-batch-a0-2026-10-19.md)。已同步 `origin/main`；清点 `git ls-files` 共 654 个 tracked 文件并建立模块审计矩阵。A0.4–A0.8 的执行规则已按本批证据收口；A0.1–A0.3 保持进行中，因尚未逐文件阅读、逐条核对 45 个未勾选框及完成所有业务链路的失败/重试/重启检查。
+- 当前源码证据仍支持队列中的 P0-1/2/3/4 与 P1-1/4/6 风险，分别涉及协作态 TLS、落库后 ACK、归档/离线队列失败语义、文件覆盖、TOFU 首信任、帧累计缓冲和 Admin CSRF/session；需按原条目实施及测试，不重复登记、不在本批宣称修复。未在本批验证 Windows/macOS/UOS/麒麟/OHOS 或真实公网部署。
