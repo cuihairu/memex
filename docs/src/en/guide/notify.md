@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/notify)
-
 # Notification Subsystem and Webhook Access (T4.10)
 
 > The desktop client has landed; mobile push has landed with the Android client (T6.3: normal = in-app only, important = banner + sound + vibration, urgent = persistent until 「确认收悉」, aligning with the desktop's three-tier semantics) — the iOS client implements the same three-tier semantics via APNs / local notifications (T6.4, code-only + CI; real-device APNs verification awaits a real device); the HarmonyOS mobile client is code-only + CI (T6.6; the compile leg awaits the OHOS toolchain).

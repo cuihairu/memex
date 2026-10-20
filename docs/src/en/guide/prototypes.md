@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/prototypes)
-
 # UI Prototypes and Preview
 
 The prototype mockups are a deliverable, covering eight desktop screens and four mobile screens. The style matches the product's temperament: brand orange `#e16531` (taken from the logo) as the primary color, warm neutral backgrounds, and both light and dark themes. The source files (HTML + the shared design system `prototypes.css`) are in the repository under `docs/design/prototypes/`, and the screenshots are in `docs/src/public/screenshots/`.

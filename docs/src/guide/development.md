@@ -1,5 +1,3 @@
-> [English](/en/guide/development) | **中文**
-
 # 克隆与构建
 
 ## 环境要求

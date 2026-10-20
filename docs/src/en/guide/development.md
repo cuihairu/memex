@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/development)
-
 # Clone and Build
 
 ## Environment requirements

@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/wan-drill)
-
 # Cross-Region Access and Disconnection Re-delivery Verification (T5.4)
 
 > Corresponds to acceptance items A13 (cross-subnet communication), A15 (multi-region access), and A16 (disconnection archiving rules). Verification date: 2026-10-03.

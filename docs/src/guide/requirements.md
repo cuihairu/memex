@@ -1,5 +1,3 @@
-> [English](/en/guide/requirements) | **中文**
-
 # 需求与验收
 
 > R 条目＝需求与验收口径，A 条目＝第一期验收标准。任务级拆解（T0–T6，可验收粒度）见仓库根目录 [todo.md](https://github.com/cuihairu/memex/blob/main/todo.md)（主线外另有 R23–R27 追加批次）。

@@ -1,5 +1,3 @@
-> [English](/en/guide/delivery-matrix) | **中文**
-
 # 交付验收矩阵（评审八-5）
 
 > 口径铁律：**CI 绿 ≠ 全平台可交付**。CI 只在 ubuntu-latest 跑，其余平台的证据

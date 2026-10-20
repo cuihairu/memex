@@ -1,5 +1,3 @@
-> [English](/en/guide/roadmap) | **中文**
-
 # 四期规划
 
 | 期次 | 目标 | 交付标志 |

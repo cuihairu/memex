@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/requirements)
-
 # Requirements and Acceptance
 
 > R entries = requirements and acceptance criteria; A entries = phase-one acceptance standards. The task-level breakdown (T0–T6, at acceptable grain) is in the repository root's [todo.md](https://github.com/cuihairu/memex/blob/main/todo.md) (outside the main line there is also the R23–R27 appended batch).

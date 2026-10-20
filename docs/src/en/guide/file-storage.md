@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/file-storage)
-
 # File Storage and Lifecycle
 
 > Convention page for the two lifecycles of the R23 file plane (group files / personal files / file assistant / external uplink) and chat files (2026-10-13, landing review five's "file lifecycle convention alignment").

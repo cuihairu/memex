@@ -1,5 +1,3 @@
-> [English](/en/guide/compliance) | **中文**
-
 # 合规与命名一致性（T5.3）
 
 > 对应验收项 A22（组件许可清单）与 A23（系统标识一致性）。核验日期：2026-10-03；2026-10-04 增补（R23 存储抽象层引入 aws-sdk-cpp:s3，manifest 服务端依赖 sqlite3／openssl 一并登记，见 `third_party/组件清单.md`）；2026-10-10 vite 三公告闭环复核＋引入日期补注（见下表与考证行）；2026-10-13 A22 清单复核补登 crashpad／drogon（drogon 待登记进 `third_party/组件清单.md`）。

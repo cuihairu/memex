@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/feiq-compat)
-
 # FeiQ / IPMSG Compatibility
 
 > Requirement (2026-10-11 user directive): when a FeiQ client exists on the same LAN segment, memex appears in its online list and the two can exchange direct messages.

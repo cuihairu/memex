@@ -1,5 +1,3 @@
-> [English](/en/guide/prototypes) | **中文**
-
 # 界面原型与预览
 
 原型设计稿是交付物，覆盖桌面端八屏与手机端四屏。风格与产品气质一致：品牌橙 `#e16531`（取自 logo）主色、暖中性底色、亮暗双主题。源文件（HTML＋共享设计系统 `prototypes.css`）在仓库 `docs/design/prototypes/`，截图在 `docs/src/public/screenshots/`。

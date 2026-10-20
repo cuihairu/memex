@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/av-collab)
-
 # Audio/Video Conferencing and Collaborative Document Base
 
 Audio/video (LiveKit) and collaborative documents (OnlyOffice) are deployed as **separate

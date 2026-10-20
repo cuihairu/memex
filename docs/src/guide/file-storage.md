@@ -1,5 +1,3 @@
-> [English](/en/guide/file-storage) | **中文**
-
 # 文件存储与生命周期
 
 > R23 文件面（群文件／个人文件／文件助手／外网 uplink）与聊天文件两条

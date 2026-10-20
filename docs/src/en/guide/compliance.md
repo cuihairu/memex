@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/compliance)
-
 # Compliance and Naming Consistency (T5.3)
 
 > Corresponds to acceptance item A22 (component license inventory) and A23 (system identity consistency). Verification date: 2026-10-03; supplemented 2026-10-04 (the R23 storage abstraction layer introduced aws-sdk-cpp:s3; the manifest's server-side dependencies sqlite3/openssl were registered together, see `third_party/组件清单.md`); 2026-10-10 closed-loop re-verification of the three vite advisories plus introduction-date annotations (see the table and research note below); 2026-10-13 A22 inventory re-verification added crashpad/drogon (drogon pending registration in `third_party/组件清单.md`).

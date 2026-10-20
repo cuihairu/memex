@@ -1,5 +1,3 @@
-> [English](/en/guide/report) | **中文**
-
 # 评审报告摘要
 
 《内网办公即时通讯系统建设方案评审报告 V10.0》全文见仓库 [`docs/建设方案评审报告-V10.0.md`](https://github.com/cuihairu/memex/blob/main/docs/建设方案评审报告-V10.0.md)（约 1200 行）。本页摘录工程直接依据的结论。

@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/platform-adapter)
-
 # Domestic-OS Adaptation Verification (T5.1)
 
 > Corresponds to acceptance items A12 (domestic-OS coverage) and A21 (media base).

@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/authorization)
-
 # Server-Side Authorization Inventory (Platform-1)
 
 > Corresponds to the todo "server-side authorization dedicated review": for each sensitive operation, inventory the trio of "server-side authorization decision + explicit denial path + regression test". The outputs are the inventory table and the gap-filling tests; no engine refactoring.

@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/crash-reporting)
-
 # Crash Reporting (Crashpad)
 
 > Crash-reporting batch (2026-10-08 user order): the choice is pinned to **Google Crashpad**

@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/product)
-
 # Product Positioning
 
 > Intranet office instant messaging system (Memex) · converged per the《建设方案评审报告 V10.0》, a one-page statement.

@@ -34,7 +34,6 @@ features:
     details: 桌面客户端 C++17 + Qt，覆盖 Windows、macOS 与国产 Linux（统信 UOS、麒麟）；手机端 Android（Kotlin，已落地）、iOS（Swift，代码-only＋CI）与鸿蒙 NEXT（ArkTS，代码-only＋CI）；服务端 C++ 单台集中部署；文件字节流点对点旁路，不经服务端。
 ---
 
-> [English](/en/) | **中文**
 
 
 <script setup>

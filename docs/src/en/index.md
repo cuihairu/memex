@@ -34,7 +34,6 @@ features:
     details: Desktop client in C++17 + Qt, covering Windows, macOS, and Chinese Linux (UnionTech UOS, Kylin); mobile on Android (Kotlin, shipped), iOS (Swift, code-only + CI), and HarmonyOS NEXT (ArkTS, code-only + CI); the server is C++ deployed centrally on a single host; file byte streams take a peer-to-peer side channel and never pass through the server.
 ---
 
-> **English** | [中文](/)
 
 
 <script setup>

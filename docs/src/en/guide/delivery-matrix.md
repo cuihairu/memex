@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/delivery-matrix)
-
 # Delivery Acceptance Matrix (review eight-5)
 
 > Iron rule of scope: **CI green ≠ deliverable on every platform**. CI runs only on

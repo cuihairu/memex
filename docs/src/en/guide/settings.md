@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/settings)
-
 # Client Settings
 
 > Client settings batch (2026-10-08 user order, six items: notification toggle group /

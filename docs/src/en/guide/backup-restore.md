@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/backup-restore)
-
 # Backup and Restore (T5.2)
 
 > Corresponds to acceptance item A14: run one database recovery drill per the plan, verifying the procedure is executable and the data is intact.

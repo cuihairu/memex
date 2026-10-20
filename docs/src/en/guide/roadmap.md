@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/roadmap)
-
 # The Four-Phase Plan
 
 | Phase | Objective | Delivery milestone |

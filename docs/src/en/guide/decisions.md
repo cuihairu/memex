@@ -1,5 +1,3 @@
-> **English** | [中文](/guide/decisions)
-
 # Review Panel Decision List
 
 > Source: Chapter 11 of the《建设方案评审报告 V10.0》— fifteen items plus one optional confirmation.

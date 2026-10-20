@@ -1,5 +1,3 @@
-> [English](/en/guide/crash-reporting) | **中文**
-
 # 崩溃采集（Crashpad）
 
 > 崩溃采集批（2026-10-08 用户令）：选型已钉 **Google Crashpad**（C++ 直集成；
