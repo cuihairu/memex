@@ -38,7 +38,7 @@ Settings → 「离开与锁屏…」; three things: away password, idle timeout
   page, default 5 minutes) the screen locks automatically. If no password is set, saving
   with the switch on is refused (without a password a lock holds nobody, so no lock is
   installed).
-- **Lock screen face** ([acceptance screenshot](/screenshots/lock-screen.png)): a frameless,
+- **Lock screen face** (acceptance screenshot): a frameless,
   always-on-top, full-screen dark mask — **it shows only the unread message count, never the
   content**; while locked, newly arriving messages/files only increment the counter, and
   popups and sounds are fully silenced (the notification face records no content); an

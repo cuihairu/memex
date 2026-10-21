@@ -51,7 +51,7 @@ curl -X POST http://服务器:24361/hook/whk_xxxxxxxx \
 | 重要 | 桌面通知强提醒（托盘气泡，不看窗口激活态） | 开 |
 | 紧急 | 置顶弹窗，须点「确认收悉」才关；多条排队逐个确认 | 开 |
 
-![紧急通知置顶弹窗（需确认收悉）](/screenshots/notify-urgent-dialog.png)
+
 
 ## 个人通知偏好
 

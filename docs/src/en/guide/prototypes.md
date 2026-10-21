@@ -21,64 +21,64 @@ Each screen can be viewed in its dark variant by appending `?theme=dark`; the bu
 
 Live screenshots: two instances on the same machine discovering each other (UDP 2425; retaken after the rail panel from the 2026-10-10 prototype walkthrough landed, light/dark paired). **Layout decree (2026-10-08)**: no conversation = a rectangular list state of "left menu + friend list", **no chat panel placed** — this is the state at startup / after closing a session; clicking a friend expands the conversation on the right (clicking the friend again or the title-bar ✕ returns to list state). Live shots of the expanded state are the third and fourth images below (real client windows, captured programmatically by the `test_mode_switch` layout leg; the dark variant was added in the 2026-10-09 supplementary pass).
 
-![Desktop not-logged-in direct mode · list state (light · live)](/screenshots/live-direct-light.png)
-![Desktop not-logged-in direct mode · list state (dark · live)](/screenshots/live-direct-dark.png)
-![Desktop direct conversation expanded · after clicking a friend (light · live)](/screenshots/layout-chat.png)
-![Desktop direct conversation expanded · after clicking a friend (dark · live)](/screenshots/layout-chat-dark.png)
+
+
+
+
 
 ### Friend list
 
 Live screenshots (collaboration-mode list state; supplementary capture on 2026-10-09, light retaken plus dark added on 2026-10-10, then re-shot with the batch after the same day's rail-panel walkthrough): logged-in collaboration mode with no open session = a rectangular list state of "left icon bar + message list" (no chat panel placed) — a LAN devices group (with online counts) + a「最近联系」group (unread/online badges, starred entries pinned with frequent contacts) + a「群聊 · 服务端归档」group; the search bar filters by nickname / account / IP / group name; clicking a friend expands the conversation, and clicking the current friend again or ✕ closes back to list state (real client windows, captured programmatically by the `test_mode_switch` layout leg). **Correction for the record**: the "light" shot first committed on 2026-10-09 was in fact a dark capture — a restore defect in the test dark-switching leg (the system-mode dark fallback re-read a palette already tainted dark, so the restore landed back on dark), and the light image went into the library dark; this round fixed the capture mechanism (restore now explicitly returns to light), after which light was retaken and dark added alongside.
 
-![Desktop friend list (light · live)](/screenshots/layout-friends-light.png)
-![Desktop friend list (dark · live)](/screenshots/layout-friends-dark.png)
+
+
 
 Mockups: one light and one dark (collaboration-mode friend-list design drafts, kept for reference).
 
-![Desktop friend list (light · mockup)](/screenshots/desktop-friends-light.png)
-![Desktop friend list (dark · mockup)](/screenshots/desktop-friends-dark.png)
+
+
 
 ### Logged-in collaboration mode
 
 Live screenshots: two collaboration-mode clients exchanging text in a 1:1 chat — the「最近联系」group carries online badges and last-message times, row headers read「协作 · 已归档」, and the delivery receipt「已送达对方 ✓」lands in the status bar (retaken after the 2026-10-10 rail-panel walkthrough, light/dark paired).
 
-![Desktop logged-in collaboration mode (light · live)](/screenshots/live-collab-light.png)
-![Desktop logged-in collaboration mode (dark · live)](/screenshots/live-collab-dark.png)
+
+
 
 ### 1:1 chat
 
 Live screenshots: two direct-mode clients exchanging text in a 1:1 chat — outgoing bubbles in brand orange on the right, incoming bubbles on the left, row headers read「直连·仅本机」, and a persistent「消息不进归档」banner sits at the top (retaken after the 2026-10-10 rail-panel walkthrough, light/dark paired).
 
-![Desktop 1:1 chat (light · live)](/screenshots/live-chat-light.png)
-![Desktop 1:1 chat (dark · live)](/screenshots/live-chat-dark.png)
+
+
 
 ### Group chat
 
 Live screenshots: a server-side group session (bob, granted the `group_creator` privilege, creates the group and pulls in alice) — group messages fan out through the server and are fully archived, and the sidebar's「群聊 · 服务端归档」group carries member counts and archive badges (retaken after the 2026-10-10 rail-panel walkthrough, light/dark paired).
 
-![Desktop group chat (light · live)](/screenshots/live-group-light.png)
-![Desktop group chat (dark · live)](/screenshots/live-group-dark.png)
+
+
 
 ### Organizational structure
 
 Live screenshots: the organizational-structure dialog captured on its own (department/member tree); the frame contains no window chrome, was not affected by the 2026-10-10 rail-panel redesign, and was retained after verification.
 
-![Desktop organizational structure (light · live)](/screenshots/live-org-light.png)
-![Desktop organizational structure (dark · live)](/screenshots/live-org-dark.png)
+
+
 
 ### File transfer
 
 Live screenshots: real send and receive over the direct file channel — the main window sends a whole directory (system rows「[文件夹] 开始发送／发送完成」) plus a file from the peer (system row「[文件] 已接收」with the on-disk path); the cross-state direct session is labeled per its own archiving rule (retaken after the 2026-10-10 rail-panel walkthrough, light/dark paired).
 
-![Desktop file transfer (light · live)](/screenshots/live-files-light.png)
-![Desktop file transfer (dark · live)](/screenshots/live-files-dark.png)
+
+
 
 ### Archive search
 
 Live screenshots: server CLI terminal output (the archive table hit by the search); no window chrome in frame, unaffected by the 2026-10-10 rail-panel redesign, retained after verification.
 
-![Desktop archive search (light · live)](/screenshots/live-search-light.png)
-![Desktop archive search (dark · live)](/screenshots/live-search-dark.png)
+
+
 
 ### Feature dialogs (outside the eight-screen preview set)
 
@@ -88,15 +88,15 @@ The following feature UIs are dialog-level and are not part of the desktop eight
 
   Live screenshots: six entries in the task ledger (self-created / reminder rows, `[x]` completed state, 🌐 deep links and external entries from template keys) + the calendar view expanded (due dates marked in brand orange, click a day to filter that day's due items) + the external-task registration and pull surfaces (captured programmatically by the `test_task_dialog` smoke leg).
 
-  ![Task-list dialog (light · live)](/screenshots/live-task-dialog-light.png)
-  ![Task-list dialog (dark · live)](/screenshots/live-task-dialog-dark.png)
+
+
 
 - **Group tools dialog**: group tasks create / claim / complete; added on 2026-10-10: **due reminders** (due_ms, 30s polling fires an IMPORTANT hard reminder through the notification center when due).
 
   Live screenshots: three votes in the poll page's ledger (in progress · anonymous multi-choice, auto-close at deadline, a named ledger of overwriting re-votes) + the creation area (topic / options, deadline / anonymous / multi-choice checkboxes, vote and change vote, close the poll); the chain and group-task pages switch by tabs within the same window (captured programmatically by the `test_group_tools_dialog` smoke leg).
 
-  ![Group tools dialog (light · live)](/screenshots/live-group-tools-light.png)
-  ![Group tools dialog (dark · live)](/screenshots/live-group-tools-dark.png)
+
+
 
 ## Mobile
 
@@ -111,54 +111,54 @@ The following feature UIs are dialog-level and are not part of the desktop eight
 
 Live screenshots (Android, T6.3): first launch forces entry to the server address setup page; only after filling in the domain / IP (port optional, default 24360) and passing the connectivity check (PING→PONG) is login allowed — before initialization is complete, no chat-capable interface appears (R17). Dark variant added in the 2026-10-10 dark-theme walkthrough (same source as `walkthrough-18`).
 
-![Mobile initialization wizard (Android live · light)](/screenshots/mobile-live-init-light.png)
-![Mobile initialization wizard (Android live · dark)](/screenshots/mobile-live-init-dark.png)
+
+
 
 Mockups: one light and one dark.
 
-![Mobile initialization wizard (light · mockup)](/screenshots/mobile-init-light.png)
-![Mobile initialization wizard (dark · mockup)](/screenshots/mobile-init-dark.png)
+
+
 
 ### Session list
 
 Live screenshots (Android, T6.3): the main interface after successful login — the sole collaboration-mode entry, with no login-free form of any kind (R18). Dark variant added in the 2026-10-10 dark-theme walkthrough (same source as `walkthrough-19`).
 
-![Mobile main interface after login (Android live · light)](/screenshots/mobile-live-main.png)
-![Mobile main interface after login (Android live · dark)](/screenshots/mobile-live-main-dark.png)
+
+
 
 Session-list screen live shots (Android, supplementary walkthrough capture on 2026-10-09): the session list carries unread badges, a start-conversation input (peer account), and file-assistant / logout entries; deliveries from a real server (webhook notification mirror) land as sessions and count unread — one light (top) / one dark (bottom) (same source as `walkthrough-08/11`).
 
-![Mobile session list (Android live · light)](/screenshots/mobile-live-sessions-light.png)
-![Mobile session list (Android live · dark)](/screenshots/mobile-live-sessions-dark.png)
+
+
 
 Mockups: one light and one dark (kept for reference).
 
-![Mobile session list (light · mockup)](/screenshots/mobile-sessions-light.png)
-![Mobile session list (dark · mockup)](/screenshots/mobile-sessions-dark.png)
+
+
 
 ### Chat
 
 Chat page live shots (Android, second supplementary round on 2026-10-09): **real person-to-person exchange** — zhangsan sends to lisi while offline, lisi logs in, receives the offline message, then replies online; two-way bubbles (peer rows +「我」rows, each with a time) record the full chain: offline delivery → delivery on login (unread badge) → online reply (accepted and archived by the server, verified against the SQLite `messages` table); one light (top) / one dark (bottom) (same source as `walkthrough-14/16`). The send path (after the BUG-006 fix) is verified not to crash and renders on acceptance. Rich interaction on record: a long press on a message brings up the system selection toolbar plus a「已复制」toast (archived as `walkthrough-15`). **Stated for the record**: reply / emoji / scroll-to-load entries are not yet implemented on Android (outside T6.3 scope), so there is nothing to capture; also, the server-side archiving of the peer's messages in the screenshots happened to trigger the newly filed BUG-007 (a msg_id collision silently swallowed an archive entry; delivery was unaffected) — see BUGS.md.
 
-![Mobile chat (Android live · light)](/screenshots/mobile-live-chat-light.png)
-![Mobile chat (Android live · dark)](/screenshots/mobile-live-chat-dark.png)
+
+
 
 Mockups: one light and one dark (kept for reference).
 
-![Mobile chat (light · mockup)](/screenshots/mobile-chat-light.png)
-![Mobile chat (dark · mockup)](/screenshots/mobile-chat-dark.png)
+
+
 
 ### Me
 
 Android live shots (2026-10-11 walkthrough, same source as `walkthrough-20/21`): the account card shows organizational profile (ORG_QUERY pulls real name/department/title), local device fingerprint, local cache cleanup, notification entry, About, switch server / logout; the server-side device ledger / login records / retention policy query surfaces have no protocol yet, so the screen honestly labels them「未接入」, leaving no fake data. One light (top) / one dark (bottom).
 
-![Mobile Me (Android live · light)](/screenshots/mobile-live-me-light.png)
-![Mobile Me (Android live · dark)](/screenshots/mobile-live-me-dark.png)
+
+
 
 Mockups: one light and one dark (kept for reference).
 
-![Mobile Me (light · mockup)](/screenshots/mobile-me-light.png)
-![Mobile Me (dark · mockup)](/screenshots/mobile-me-dark.png)
+
+
 
 ## Prototype source files
 

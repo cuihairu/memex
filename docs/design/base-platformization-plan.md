@@ -4,7 +4,7 @@
 
 > Source: the "Memex Complete Improvement Plan" submitted by the user on 2026-10-04 (original text archived; wording unchanged).
 > Positioning: **keep the "dual-engine + trail + intranet + self-developed" core, and raise Identity / Organization / Authorization / Archive into a true foundational platform**. This document is the sole blueprint for the subsequent transformation (P0 first); execution is broken into todo items and coded one by one.
-> Related: [建设方案评审报告-V10.0](../../src/guide/decisions.md 同为本文依据)，[decisions.md](../../src/guide/decisions.md)。
+> Related: [建设方案评审报告-V10.0](../../src/guide/decisions.md 同为本文依据)，decisions.md。
 
 ---
 ## 一、Final Product Positioning

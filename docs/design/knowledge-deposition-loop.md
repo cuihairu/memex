@@ -1,4 +1,4 @@
-> [English](knowledge-deposition-loop.en.md) | **中文**
+> English | **中文**
 
 # 群内知识沉淀闭环设计（客服问答知识库机器人）
 

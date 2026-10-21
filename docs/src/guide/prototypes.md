@@ -26,10 +26,10 @@
 第三、四张（真实客户端窗口，`test_mode_switch` 布局腿程序化抓取，深色随
 2026-10-09 补摄）。
 
-![桌面端未登录直连态·列表态（浅色·实况）](/screenshots/live-direct-light.png)
-![桌面端未登录直连态·列表态（深色·实况）](/screenshots/live-direct-dark.png)
-![桌面端直连会话展开态·点好友后（浅色·实况）](/screenshots/layout-chat.png)
-![桌面端直连会话展开态·点好友后（深色·实况）](/screenshots/layout-chat-dark.png)
+
+
+
+
 
 ### 好友列表
 
@@ -43,13 +43,13 @@
 档判暗兜底回读已被染暗的调色板，还原又落回深色），浅图带暗入库；本轮修
 抓取机制（还原改显式回亮色）后浅色重摄、深色一并补齐。
 
-![桌面端好友列表（浅色·实况）](/screenshots/layout-friends-light.png)
-![桌面端好友列表（深色·实况）](/screenshots/layout-friends-dark.png)
+
+
 
 原型稿：浅色与深色各一（协作态好友列表设计稿，保留备查）。
 
-![桌面端好友列表（浅色·原型稿）](/screenshots/desktop-friends-light.png)
-![桌面端好友列表（深色·原型稿）](/screenshots/desktop-friends-dark.png)
+
+
 
 ### 登录协作态
 
@@ -57,15 +57,15 @@
 标注「协作 · 已归档」，送达回执「已送达对方 ✓」入状态栏（2026-10-10
 rail 面走查后重摄，浅／深配平）。
 
-![桌面端登录协作态（浅色·实况）](/screenshots/live-collab-light.png)
-![桌面端登录协作态（深色·实况）](/screenshots/live-collab-dark.png)
+
+
 
 ### 单聊
 
 实况截图：直连单聊互发文本——外出气泡品牌橙靠右、来访气泡靠左，行首标注「直连·仅本机」，顶部常驻「消息不进归档」横幅（2026-10-10 rail 面走查后重摄，浅／深配平）。
 
-![桌面端单聊（浅色·实况）](/screenshots/live-chat-light.png)
-![桌面端单聊（深色·实况）](/screenshots/live-chat-dark.png)
+
+
 
 ### 群聊
 
@@ -73,16 +73,16 @@ rail 面走查后重摄，浅／深配平）。
 消息经服务端扇出并全量归档，侧栏「群聊 · 服务端归档」分组带群人数与归档
 标识（2026-10-10 rail 面走查后重摄，浅／深配平）。
 
-![桌面端群聊（浅色·实况）](/screenshots/live-group-light.png)
-![桌面端群聊（深色·实况）](/screenshots/live-group-dark.png)
+
+
 
 ### 组织架构
 
 实况截图：组织架构对话框独抓（部门／成员树），画面不含窗口 chrome，不随
 2026-10-10 rail 面改版，核对后沿用。
 
-![桌面端组织架构（浅色·实况）](/screenshots/live-org-light.png)
-![桌面端组织架构（深色·实况）](/screenshots/live-org-dark.png)
+
+
 
 ### 文件传输
 
@@ -90,16 +90,16 @@ rail 面走查后重摄，浅／深配平）。
 完成」系统行）＋对端发文件（「[文件] 已接收」系统行含落盘路径），跨态直连
 会话按归档自行口径标注（2026-10-10 rail 面走查后重摄，浅／深配平）。
 
-![桌面端文件传输（浅色·实况）](/screenshots/live-files-light.png)
-![桌面端文件传输（深色·实况）](/screenshots/live-files-dark.png)
+
+
 
 ### 归档检索
 
 实况截图：服务端 CLI 终端输出（检索命中的归档表），无窗口 chrome，不随
 2026-10-10 rail 面改版，核对后沿用。
 
-![桌面端归档检索（浅色·实况）](/screenshots/live-search-light.png)
-![桌面端归档检索（深色·实况）](/screenshots/live-search-dark.png)
+
+
 
 ### 功能对话框（八屏预览集外）
 
@@ -115,8 +115,8 @@ rail 面走查后重摄，浅／深配平）。
   外部条目）＋日历视图展开态（到期日品牌橙标注、点日筛选该日到期）＋外部
   任务登记与拉取面（`test_task_dialog` 冒烟腿程序化抓取）。
 
-  ![任务清单对话框（浅色·实况）](/screenshots/live-task-dialog-light.png)
-  ![任务清单对话框（深色·实况）](/screenshots/live-task-dialog-dark.png)
+
+
 
 - **群工具对话框**：群任务建／认领／完成；2026-10-10 补**截止提醒**
   （due_ms，30s 轮询到点经通知中心 IMPORTANT 强提醒）。
@@ -126,8 +126,8 @@ rail 面走查后重摄，浅／深配平）。
   接龙与群任务两页同窗内标签切换（`test_group_tools_dialog` 冒烟腿程序化
   抓取）。
 
-  ![群工具对话框（浅色·实况）](/screenshots/live-group-tools-light.png)
-  ![群工具对话框（深色·实况）](/screenshots/live-group-tools-dark.png)
+
+
 
 ## 手机端
 
@@ -142,32 +142,32 @@ rail 面走查后重摄，浅／深配平）。
 
 实况截图（Android，T6.3）：首次启动强制进入服务器地址设置页，填写域名／IP（可带端口，缺省 24360）并连通校验（PING→PONG）通过后才放行登录——未完成初始化不出现任何可聊天界面（R17）。深色补摄（2026-10-10 深色主题走查，`walkthrough-18` 同源）。
 
-![手机端初始化向导（Android 实况·浅色）](/screenshots/mobile-live-init-light.png)
-![手机端初始化向导（Android 实况·深色）](/screenshots/mobile-live-init-dark.png)
+
+
 
 原型稿：浅色与深色各一。
 
-![手机端初始化向导（浅色·原型稿）](/screenshots/mobile-init-light.png)
-![手机端初始化向导（深色·原型稿）](/screenshots/mobile-init-dark.png)
+
+
 
 ### 会话列表
 
 实况截图（Android，T6.3）：登录成功后的主界面——协作态唯一入口，无任何免登录形态（R18）。深色补摄（2026-10-10 深色主题走查，`walkthrough-19` 同源）。
 
-![手机端登录成功主界面（Android 实况·浅色）](/screenshots/mobile-live-main.png)
-![手机端登录成功主界面（Android 实况·深色）](/screenshots/mobile-live-main-dark.png)
+
+
 
 会话列表屏实况（Android，2026-10-09 走查补摄）：会话列表带未读角标、发起会话
 输入框（对端账号）、文件助手／退出登录入口；真实服务端下发（webhook 通知镜像）
 落会话并计未读——浅色（上）／深色（下）各一（`walkthrough-08/11` 同源）。
 
-![手机端会话列表（Android 实况·浅色）](/screenshots/mobile-live-sessions-light.png)
-![手机端会话列表（Android 实况·深色）](/screenshots/mobile-live-sessions-dark.png)
+
+
 
 原型稿：浅色与深色各一（保留备查）。
 
-![手机端会话列表（浅色·原型稿）](/screenshots/mobile-sessions-light.png)
-![手机端会话列表（深色·原型稿）](/screenshots/mobile-sessions-dark.png)
+
+
 
 ### 聊天
 
@@ -181,13 +181,13 @@ rail 面走查后重摄，浅／深配平）。
 服务端归档恰触发新登记的 BUG-007（msg_id 撞车静默吞档，投递不受影响），见
 BUGS.md。
 
-![手机端聊天（Android 实况·浅色）](/screenshots/mobile-live-chat-light.png)
-![手机端聊天（Android 实况·深色）](/screenshots/mobile-live-chat-dark.png)
+
+
 
 原型稿：浅色与深色各一（保留备查）。
 
-![手机端聊天（浅色·原型稿）](/screenshots/mobile-chat-light.png)
-![手机端聊天（深色·原型稿）](/screenshots/mobile-chat-dark.png)
+
+
 
 ### 我
 
@@ -196,13 +196,13 @@ Android 实况（2026-10-11 走查，`walkthrough-20/21` 同源）：账号卡�
 关于、切换服务器/退出登录；服务端设备台账/登录记录/留存策略查询面协议未开，
 屏内如实标「未接入」，不留假数据。浅色（上）／深色（下）各一。
 
-![手机端我（Android 实况·浅色）](/screenshots/mobile-live-me-light.png)
-![手机端我（Android 实况·深色）](/screenshots/mobile-live-me-dark.png)
+
+
 
 原型稿：浅色与深色各一（保留备查）。
 
-![手机端我（浅色·原型稿）](/screenshots/mobile-me-light.png)
-![手机端我（深色·原型稿）](/screenshots/mobile-me-dark.png)
+
+
 
 ## 原型源文件
 

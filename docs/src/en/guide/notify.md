@@ -48,7 +48,7 @@ A group target fans out to all members (including the group owner), at the same 
 | Important | Strong desktop notification (tray bubble, regardless of window activation state) | On |
 | Urgent | Pinned popup that only closes on 「确认收悉」; multiple messages queue and are confirmed one by one | On |
 
-![紧急通知置顶弹窗（需确认收悉）](/screenshots/notify-urgent-dialog.png)
+
 
 ## Personal Notification Preferences
 
