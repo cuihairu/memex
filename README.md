@@ -100,6 +100,8 @@ Dependencies (asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:
 
 ```bash
 # 1. Set up vcpkg (once; adding VCPKG_ROOT to your shell profile is recommended)
+
+[![Status](https://img.shields.io/badge/status-in%20development-orange)](https://github.com/cuihairu/memex/releases)
 git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
 ~/vcpkg/bootstrap-vcpkg.sh
 export VCPKG_ROOT="$HOME/vcpkg"
