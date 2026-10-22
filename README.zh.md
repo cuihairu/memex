@@ -91,7 +91,9 @@ memex/
 ```bash
 # 1. 指向与 vcpkg.json builtin-baseline 匹配的 vcpkg checkout
 
-<p align="center">[![Status](https://img.shields.io/badge/status-in%20development-orange)](https://github.com/cuihairu/memex/releases)</p>
+<p align="center">
+<a href="https://github.com/cuihairu/memex/releases"><img alt="Status" src="https://img.shields.io/badge/status-in%20development-orange"></a>
+</p>
 export VCPKG_ROOT=/path/to/vcpkg
 # 可选：明确使用本地文件二进制缓存；Linux 默认缓存通常已是 ~/.cache/vcpkg/archives
 export VCPKG_BINARY_SOURCES="clear;files,$HOME/.cache/vcpkg/archives,readwrite"
