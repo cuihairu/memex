@@ -40,7 +40,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: 取 compose 定义
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           # workflow_run 触发时对齐被部署的那次 main 提交；dispatch 直接 HEAD
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}

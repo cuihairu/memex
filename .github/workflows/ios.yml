@@ -20,7 +20,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Install protobuf toolchain and xcodegen
         run: brew install protobuf swift-protobuf xcodegen

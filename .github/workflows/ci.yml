@@ -38,7 +38,7 @@ jobs:
     env:
       VCPKG_BINARY_SOURCES: 'clear;x-gha,readwrite'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       # vcpkg 不代管 X11/GL 等系统库；qtbase 构建所需系统包在此安装。
       # autoconf 链为 gperf（qtbase 依赖）源码构建所需，runner 镜像未预装
@@ -63,7 +63,7 @@ jobs:
 
       # 导出 Actions 缓存凭据，vcpkg 才能使用原生 x-gha 二进制缓存
       - name: 导出 Actions 缓存凭据
-        uses: actions/github-script@v9
+        uses: actions/github-script@v9.0.0
         with:
           script: |
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
@@ -72,7 +72,7 @@ jobs:
       # 整取安装树（x-gha 之上再省一层解包安装）；不缓存 vcpkg 源树，
       # 它由 run-vcpkg 按钉住的 commit 管理
       - name: Cache vcpkg 安装树
-        uses: actions/cache@v6
+        uses: actions/cache@v6.1.0
         with:
           path: vcpkg_installed*
           key: vcpkg-installed-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
@@ -80,7 +80,7 @@ jobs:
             vcpkg-installed-${{ runner.os }}-
 
       - name: Setup vcpkg（钉在 manifest builtin-baseline 同一 commit）
-        uses: lukka/run-vcpkg@v11
+        uses: lukka/run-vcpkg@v11.6
         with:
           vcpkgGitCommitId: '10541e317a660f4165ba4ac2851ab54a8d4577b1'
 
@@ -110,7 +110,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7.0.2
         if: success() || failure()
         with:
           name: coverage
@@ -118,7 +118,7 @@ jobs:
           retention-days: 7
 
       # tokenless OIDC 上传（id-token: write 已开；测试挂也传——与上报同口径）
-      - uses: codecov/codecov-action@v7
+      - uses: codecov/codecov-action@v7.1.1
         if: success() || failure()
         with:
           files: coverage.xml

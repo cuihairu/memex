@@ -21,13 +21,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 10
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 24
           cache: pnpm
@@ -41,9 +41,9 @@ jobs:
         working-directory: docs
         run: pnpm docs:build
 
-      - uses: actions/configure-pages@v6
+      - uses: actions/configure-pages@v6.0.0
 
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-pages-artifact@v5.0.0
         with:
           path: docs/src/.vitepress/dist
 
@@ -55,4 +55,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@v5.0.1
