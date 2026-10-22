@@ -1,4 +1,4 @@
-> **English** | [中文](远程协助.md)
+> **English** | [中文](../zh/design/远程协助.md)
 
 # Remote Assistance: Screen Viewing + Controlled-Party Authorized Operations (Protocol Surface + Media Relay)
 

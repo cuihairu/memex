@@ -1,4 +1,4 @@
-> **English** | [中文](群组知识共享.md)
+> **English** | [中文](../zh/design/群组知识共享.md)
 
 # Group Knowledge-Sharing Design: Announcements / Memos / Password Vault (R24 Design Spec)
 

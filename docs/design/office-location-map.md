@@ -1,4 +1,4 @@
-> **English** | [中文](办公室位置图.md)
+> **English** | [中文](../zh/design/办公室位置图.md)
 
 # Office Location Map: Floor Plan + Point Editing + Search & Locate
 

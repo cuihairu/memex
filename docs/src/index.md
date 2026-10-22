@@ -3,84 +3,84 @@ layout: home
 
 hero:
   name: Memex
-  text: 内网办公即时通讯系统
-  tagline: 物理隔离内网下的双引擎 IM——收发不依赖服务端也能用，连上就全量归档，C++17 ＋ Qt 实现
+  text: Intranet Office Instant Messaging System
+  tagline: Dual-engine IM for a physically isolated intranet — messaging works without a server, and everything is fully archived the moment one connects; built in C++17 + Qt
   image:
     src: /logo.svg
     alt: Memex
   actions:
     - theme: brand
-      text: 产品定位
+      text: Product Positioning
       link: /guide/product
     - theme: alt
-      text: 界面原型
+      text: UI Prototypes
       link: /guide/prototypes
     - theme: alt
-      text: 需求与验收
+      text: Requirements and Acceptance
       link: /guide/requirements
 
 features:
   - icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7v10m6-10v10M8.5 3.5h7M12 3.5V7M5 9v6m14-6v6M4 21h16a1 1 0 0 0 1-1v-3H3v3a1 1 0 0 0 1 1Z"/></svg>'
-    title: 双引擎客户端
-    details: 单一安装包两套引擎：未登录零配置直连态（同网段自动发现、点对点收发），登录协作态（服务端中转、全量归档）。切换不重启，服务端不可达自动回落。
+    title: Dual-Engine Client
+    details: "Two engines in a single installer: an unauthenticated direct-connect mode with zero configuration (same-subnet auto-discovery, peer-to-peer send and receive), and a signed-in collaboration mode (server relay, full archival). Switching does not restart the client, and it falls back automatically when the server is unreachable."
   - icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V18c0 1.6 3.6 2.9 8 2.9s8-1.3 8-2.9V5.5M4 12c0 1.6 3.6 2.9 8 2.9s8-1.3 8-2.9"/></svg>'
-    title: 留痕原则
-    details: 连接服务端的唯一目的是留痕。不提供密聊、阅后即焚、撤回抹除归档、终端侧单方删除归档与留痕开关；撤回只作用于显示层，原文留存。
+    title: Traceability Principle
+    details: "Connecting to the server exists for one purpose: leaving a trail. There is no secret chat, no burn-after-reading, no recall that erases the archive, no device-side unilateral archive deletion, and no traceability switch; recall only affects the display layer and the original text is retained."
   - icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V8l7-4v17M13 21V11l7 3v7M4 21h16M7.5 9.5h.01M7.5 13h.01M7.5 16.5h.01M16.5 16.5h.01"/></svg>'
-    title: 组织架构与检索
-    details: 部门树、直属上级、通讯录可见性策略；协作态消息按人员、时间、关键词归档检索，查阅行为自动入审计日志。
+    title: Organization Structure and Search
+    details: Department tree, direct supervisor, and address-book visibility policy; collaboration-mode messages are archived and searchable by person, time, and keyword, and every lookup is recorded in the audit log automatically.
   - icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>'
-    title: 跨平台客户端
-    details: 桌面客户端 C++17 + Qt，覆盖 Windows、macOS 与国产 Linux（统信 UOS、麒麟）；手机端 Android（Kotlin，已落地）、iOS（Swift，代码-only＋CI）与鸿蒙 NEXT（ArkTS，代码-only＋CI）；服务端 C++ 单台集中部署；文件字节流点对点旁路，不经服务端。
+    title: Cross-Platform Clients
+    details: Desktop client in C++17 + Qt, covering Windows, macOS, and Chinese Linux (UnionTech UOS, Kylin); mobile on Android (Kotlin, shipped), iOS (Swift, code-only + CI), and HarmonyOS NEXT (ArkTS, code-only + CI); the server is C++ deployed centrally on a single host; file byte streams take a peer-to-peer side channel and never pass through the server.
 ---
 
 
 
 <script setup>
 const desktopSlides = [
-  { key: 'live-direct', title: '桌面端 · 未登录直连态', desc: '零配置自动发现同网段终端，本机留存，不入归档' },
-  { key: 'layout-friends', title: '桌面端 · 好友列表', desc: '无对话即列表态：不摆聊天面板，点好友才展开会话' },
-  { key: 'live-collab', title: '桌面端 · 登录协作态', desc: '长连接在线、消息全量归档、跨态会话显式标注' },
-  { key: 'live-chat', title: '桌面端 · 单聊', desc: '直连单聊点对点直达：行首标注「直连·仅本机」，横幅明示消息不进归档' },
-  { key: 'live-group', title: '桌面端 · 群聊', desc: '群消息经服务端扇出并全量归档，侧栏群分组带人数与归档标识' },
-  { key: 'live-org', title: '桌面端 · 组织架构', desc: '部门树、成员卡片与汇报链路' },
-  { key: 'live-files', title: '桌面端 · 文件传输', desc: '点对点直传不经服务端、断点续传、元数据入归档' },
-  { key: 'live-search', title: '桌面端 · 归档检索', desc: '按人员、时间、关键词检索归档，撤回原文留存可查' }
+  { key: 'live-direct', title: 'Desktop · Unauthenticated Direct Mode', desc: 'Zero-configuration discovery of endpoints on the same subnet; retained on the local machine, not archived' },
+  { key: 'layout-friends', title: 'Desktop · Friend List', desc: 'List state when no conversation is open: the chat panel stays hidden until a friend is clicked' },
+  { key: 'live-collab', title: 'Desktop · Signed-In Collaboration Mode', desc: 'Persistent connection, messages fully archived, cross-mode conversations explicitly labeled' },
+  { key: 'live-chat', title: 'Desktop · One-to-One Chat', desc: 'Direct one-to-one chat reaches the peer point to point: the line header is marked 「直连·仅本机」, and a banner states that messages are not archived' },
+  { key: 'live-group', title: 'Desktop · Group Chat', desc: 'Group messages fan out through the server and are fully archived; the sidebar group section carries member counts and an archival marker' },
+  { key: 'live-org', title: 'Desktop · Organization Structure', desc: 'Department tree, member cards, and reporting lines' },
+  { key: 'live-files', title: 'Desktop · File Transfer', desc: 'Peer-to-peer direct transfer bypasses the server; resumable; metadata is archived' },
+  { key: 'live-search', title: 'Desktop · Archive Search', desc: 'Search the archive by person, time, and keyword; recalled originals are retained and still retrievable' }
 ]
 const mobileSlides = [
-  { key: 'mobile-live-init', title: '手机端 · 初始化向导', desc: '首次使用必须设置服务器地址，连通校验后才可进入' },
-  { key: 'mobile-live-sessions', title: '手机端 · 会话列表', desc: '移动端全部为协作态，不提供免登录匿名使用' },
-  { key: 'mobile-live-chat', title: '手机端 · 聊天', desc: '真人对人互发（离线投递→登录送达→在线回复），长按消息可复制' },
-  { key: 'mobile-live-me', title: '手机端 · 我', desc: '组织资料账号卡、设备管理、缓存清理与账号操作，未接入项如实标注' }
+  { key: 'mobile-live-init', title: 'Mobile · Setup Wizard', desc: 'First use requires setting a server address, and entry is only allowed after the connectivity check passes' },
+  { key: 'mobile-live-sessions', title: 'Mobile · Session List', desc: 'Mobile is entirely in collaboration mode; no anonymous use without login is provided' },
+  { key: 'mobile-live-chat', title: 'Mobile · Chat', desc: 'Real person-to-person exchange (offline delivery → delivered on login → replied while online); long-press a message to copy it' },
+  { key: 'mobile-live-me', title: 'Mobile · Me', desc: 'Organization profile and account card, device management, cache cleanup, and account actions; unimplemented items are honestly marked as such' }
 ]
 </script>
 
-## 界面预览
+## UI Preview
 
-界面预览覆盖桌面端八屏与手机端四屏，品牌橙（#e16531）主色，浅色与深色两套均可查看。桌面端与手机端分列两组轮播，右上角按钮切换截图主题，支持自动轮播、左右箭头、键盘方向键与触屏滑动。（实况替换进度：桌面端八屏与手机端四屏均已换客户端实况截图，浅／深各一全配平，轮播十二席全实况；鸿蒙端不承诺实况截图。详见[界面原型与预览](/guide/prototypes)。）
+The UI preview covers eight desktop screens and four mobile screens, in the brand orange (#e16531), with both light and dark variants available. Desktop and mobile are split into two carousels; the button in the top-right corner switches the screenshot theme, and auto-advance, left/right arrows, keyboard arrow keys, and touch swipes are supported. (Progress on swapping in live shots: all eight desktop and all four mobile screens have been replaced with live client screenshots, one light and one dark each, and all twelve carousel slots are live; live screenshots are not promised for the HarmonyOS client. See [UI Prototypes and Preview](/guide/prototypes).)
 
-### 桌面端（Windows / UOS / 麒麟 / macOS）
+### Desktop (Windows / UOS / Kylin / macOS)
 
-<ShowcaseCarousel :slides="desktopSlides" label="桌面端界面预览" />
+<ShowcaseCarousel :slides="desktopSlides" label="Desktop UI preview" />
 
-### 手机端（Android / iOS / 鸿蒙）
+### Mobile (Android / iOS / HarmonyOS)
 
-<ShowcaseCarousel :slides="mobileSlides" label="手机端界面预览" />
+<ShowcaseCarousel :slides="mobileSlides" label="Mobile UI preview" />
 
-完整的单屏大图与原型源文件见[界面原型与预览](/guide/prototypes)。
+Full-size single-screen images and prototype source files are in [UI Prototypes and Preview](/guide/prototypes).
 
-## 快速预览
+## Quick Preview
 
-### 产品形态
+### Product Modes
 
-| 形态 | 进入方式 | 链路 | 归档 |
+| Mode | How to enter | Path | Archive |
 | --- | --- | --- | --- |
-| 直连态（默认） | 安装即用，零配置 | UDP 广播发现同网段终端，TCP 点对点直达 | 仅存本机 |
-| 协作态（登录后） | 填服务器地址并登录 | 与协作服务端长连接 | 全量落服务端，可检索 |
+| Direct mode (default) | Install and use immediately, zero configuration | UDP broadcast discovers endpoints on the same subnet, TCP reaches the peer directly | Local machine only |
+| Collaboration mode (after login) | Enter the server address and sign in | Persistent connection to the collaboration server | Fully stored on the server, searchable |
 
-手机端全部为协作态：首次启动必须先完成服务器地址初始化，不提供免登录匿名使用。
+Mobile is entirely in collaboration mode: on first launch the server address must be initialized before anything else, and no anonymous use without login is provided.
 
-### Monorepo 结构
+### Monorepo Structure
 
 ```
 memex/
@@ -99,9 +99,9 @@ memex/
 └── third_party/          # 第三方组件清单与许可核验（依赖经 vcpkg 管理）
 ```
 
-### 构建
+### Build
 
-依赖（asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / Qt6）经 vcpkg manifest 管理，构建入口为 CMake Presets：
+Dependencies (asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / Qt6) are managed through the vcpkg manifest, and the build entry points are CMake presets:
 
 ```bash
 # 准备 vcpkg（一次性）
@@ -115,4 +115,4 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-更多内容：[产品定位](/guide/product) · [需求与验收](/guide/requirements) · [四期规划](/guide/roadmap) · [决策清单](/guide/decisions) · [评审报告摘要](/guide/report) · [克隆与构建](/guide/development)
+More: [Product Positioning](/guide/product) · [Requirements and Acceptance](/guide/requirements) · [Four-Phase Roadmap](/guide/roadmap) · [Decision List](/guide/decisions) · [Review Report Summary](/guide/report) · [Clone and Build](/guide/development)

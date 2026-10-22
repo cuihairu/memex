@@ -1,53 +1,53 @@
-# 产品定位
+# Product Positioning
 
-> 内网办公即时通讯系统（Memex）· 依据《建设方案评审报告 V10.0》收敛，一页纸口径。
+> Intranet office instant messaging system (Memex) · converged per the《建设方案评审报告 V10.0》, a one-page statement.
 
-## 一句话
+## One sentence
 
-在内网物理隔离、终端 Windows 与国产 Linux（UOS／麒麟）混用的办公环境里，提供一套**完全内网运行、业务层自写**的即时通讯系统：沟通与文件共享替代现有局域网工具，登录后具备组织架构、消息归档与检索能力，功能范围参照企业微信按四期推进。
+In an office environment with a physically isolated intranet and a mix of Windows and domestic Linux (UOS / Kylin) terminals, provide an instant messaging system that runs entirely on the intranet with a self-written business layer: communication and file sharing replace existing LAN tools; after login it offers an organizational structure plus message archiving and retrieval; the functional scope follows 企业微信 and is advanced in four phases.
 
-## 双引擎形态（产品的第一特征）
+## Dual-engine form (the product's first feature)
 
-单一安装包，两套引擎各自完整、各走各的链路，只共享本地数据层：
+A single installer, two complete engines, each on its own link, sharing only the local data layer:
 
-- **直连态（未登录，默认）**：零配置：不填地址、不注册账号，UDP 广播自动发现同网段终端，点对点收发消息与文件。消息只存本机，服务端无任何记录。定位是**本网段内的临时、就近使用**（临时来客、临时借机、同区域即刻沟通），不追求跨网段。
-- **协作态（登录后）**：填服务器地址登录，消息经服务端中转并全量归档，获得组织架构、群聊、云端历史、检索等能力。登录后直连引擎不关闭（与未登录同事的跨态互通依赖它），此类会话界面固定标注「未归档」。
-- **降级**：服务端不可达时自动回落直连态，基本沟通不断：服务端是归档与管理能力的单点，不是通信能力的单点。
+- **Direct mode (not logged in, default)**: zero configuration — no address to fill in, no account to register; UDP broadcast automatically discovers terminals on the same segment, with peer-to-peer messaging and file transfer. Messages are stored only on the local machine; the server keeps no records. It is positioned for temporary, nearby use within this segment (visitors passing through, borrowing a machine, instant communication in the same area); it does not pursue cross-segment communication.
+- **Collaboration mode (after login)**: fill in the server address and log in; messages are relayed through the server and fully archived, unlocking the organizational structure, group chat, cloud history, retrieval and other capabilities. After login the direct engine is not shut down (cross-state interoperability with colleagues who are not logged in depends on it); such sessions are permanently labeled「未归档」in the UI.
+- **Degradation**: when the server is unreachable, automatically fall back to direct mode and basic communication continues: the server is the single point for archiving and management capabilities, not the single point for communication capability.
 
-手机端全部为协作态：首次启动必须先完成服务器地址初始化才能进入主界面，不提供免登录匿名使用。
+Mobile clients are entirely collaboration mode: first startup must complete server address initialization before the main interface is entered; no login-free anonymous use is provided.
 
-## 留痕原则（不可表决的前提）
+## The traceability principle (a non-negotiable premise)
 
-**连接服务端的唯一目的即留痕。** 凡「让发送方得以自行消除留痕」的功能一律不建设：
+**The only purpose of connecting to the server is traceability.** Any feature that "lets the sender eliminate the trace on their own" will not be built:
 
-1. 密聊与阅后即焚：不存在任何「发送后自动消失」的会话形态；
-2. 撤回即抹除归档：撤回只作用于客户端显示层，服务端保留原文并额外记录撤回动作本身；
-3. 终端侧单方删除归档：清缓存只影响本机，不影响服务端记录，界面明确区分「本地缓存」与「云端归档」；
-4. 面向使用者的留痕开关：留档策略只由管理侧按部门下发。
+1. Secret chats and burn-after-reading: no conversation form of "automatically disappears after sending" exists;
+2. Recall erases the archive: recall only affects the client display layer; the server keeps the original text and additionally records the recall action itself;
+3. One-sided deletion of the archive on the terminal side: clearing the cache only affects the local machine, not the server records; the UI clearly distinguishes「本地缓存」from「云端归档」;
+4. A traceability switch for users: archiving policy is only issued by the administration side, per department.
 
-直连态的不留痕是该形态的固有属性（不经服务器），不是可按需调用的隐藏模式；协作态的留痕是建设目的本身，不容技术手段豁免。
+The direct mode's non-traceability is an inherent property of that form (it does not pass through the server), not an on-demand hidden mode; the collaboration mode's traceability is the very purpose of the build and is not exempted by any technical means.
 
-## 边界与不做的事
+## Boundaries and things not done
 
-- **会议与协同文档不自写**：音视频会议、协同文档（在线文档／表格／知识库）属独立技术领域，第四期采购或集成。
-- **不二开**：不基于开源即时通讯软件改造；开源组件只以部署调用或宽松许可链接方式引入，交付时提交组件清单。
-- **直连态不跨网段**：广播不出网段是网络固有行为；跨网段与跨地域一律由协作态承接，不为直连态做任何网络侧改造。
-- **表述纪律**：界面与材料统一说「归档与检索」，不用「监控」「追踪」「审查」；撤回提示只说「消息已撤回」，不出现「已删除」「不再保存」。
+- **Meetings and collaborative documents are not self-written**: audio/video meetings and collaborative documents (online documents / spreadsheets / knowledge base) belong to separate technical domains and are procured or integrated in phase four.
+- **No secondary development**: not built by modifying open-source instant messaging software; open-source components are introduced only as deployment-time invocation or permissive-license linking, and a component list is submitted at delivery.
+- **The direct mode does not cross segments**: a broadcast not leaving the segment is inherent network behavior; cross-segment and cross-region communication is always carried by the collaboration mode, and no network-side modification is made for the direct mode.
+- **Wording discipline**: the UI and materials uniformly say「归档与检索」, not「监控」「追踪」「审查」; recall notices only say「消息已撤回」, never「已删除」「不再保存」.
 
-## 技术路线
+## Technical route
 
-- 底座：Qt 6、asio、protobuf、nlohmann-json、SQLite、OpenSSL、AWS SDK（S3 接口）等开源组件，版本与许可证见 `third_party/README.md`；上面的业务层全部自己编写，不含任何开源 IM 的二开代码。
-- 客户端：C++17 + Qt（评审报告定调 C++17 + Qt，实现以 C++17 落地；网络与本地库成熟、国产系统适配成本最低、打包小）。媒体底座（libdatachannel（MPL-2.0）或 WebRTC 参考实现（BSD-3-Clause））**未引入、留后续**——现役媒体（远程协助屏幕帧/输入）走服务端 HTTP 中继（内网可控，见 R16 远程协助）。手机端 Android（Kotlin）／iOS（Swift）／鸿蒙 NEXT（ArkTS）。
-- 服务端：C++17，单台集中部署，评审报告六模块：接入网关、账号与设备、组织架构、消息与归档、策略服务、文件元数据服务——当前以单进程单库形式集聚实现（评审决策第 7 项，预留逻辑拆分）。
-- 文件双通道（两条生命周期，不混写）：**聊天文件**字节点对点直传不经服务端——正文只落收发双方本机、不入归档，发送前经服务端统一判权（可发／可收／跨部门／再转发）；传输元数据（文件名、大小、哈希、收发方、时间）的归档**留后续**（现未落库，服务端无传输元数据表）；**文件面文件**（群文件／个人文件／文件助手／外网 uplink）字节经服务端代理落对象存储，客户端永不直连对象存储。生命周期与降级口径见[文件存储与生命周期](/guide/file-storage)。
-- AI（第三期）：模型网关统一 OpenAI 兼容协议、可插拔；归档数据只允许送本地模型，外部端点默认禁用。
-- 多端模型：账号可换机登录；桌面端同一账号仅一台在线，重复登录踢出前一个并提示；每次登录记录设备指纹（只存哈希）、类型与来源。
+- Foundation: open-source components such as Qt 6, asio, protobuf, nlohmann-json, SQLite, OpenSSL, and AWS SDK (S3 interface); versions and licenses in `third_party/README.md`. The entire business layer above is written in-house and contains no secondary-development code from any open-source IM.
+- Client: C++17 + Qt (the review report set the tone at C++17 + Qt, and the implementation lands in C++17; mature networking and local libraries, lowest adaptation cost on domestic systems, small packages). The media foundation (libdatachannel (MPL-2.0) or the WebRTC reference implementation (BSD-3-Clause)) is **not introduced and deferred** — current media (remote-assistance screen frames/input) goes through the server-side HTTP relay (controllable within the intranet, see R16 remote assistance). Mobile: Android (Kotlin) / iOS (Swift) / HarmonyOS NEXT (ArkTS).
+- Server: C++17, single-machine centralized deployment, six modules per the review report: access gateway, accounts and devices, organizational structure, messages and archiving, policy service, file metadata service — currently implemented converged as a single process and single database (review decision item 7, with logical split reserved).
+- File dual-channel (two lifecycles, not mixed): **chat files** are transferred peer-to-peer at the byte level without passing through the server — the bytes land only on the sending and receiving machines' local storage and do not enter the archive; before sending, a unified permission check goes through the server (can send / can receive / cross-department / re-forward); archiving of transfer metadata (file name, size, hash, sender and receiver, time) is **deferred** (not persisted to the database yet; the server has no transfer-metadata table); **file-surface files** (group files / personal files / file assistant / external-network uplink) have their bytes proxied through the server into object storage, and the client never directly connects to object storage. Lifecycle and degradation details are in [文件存储与生命周期](/guide/file-storage).
+- AI (phase 3): a unified model gateway speaking the OpenAI-compatible protocol, pluggable; archived data is only allowed to be sent to local models, and external endpoints are disabled by default.
+- Multi-terminal model: an account can log in on different machines; on the desktop, the same account has only one instance online, and a repeated login kicks out the previous one with a notice; each login records the device fingerprint (hash only), type, and source.
 
-## 分期
+## Phases
 
-| 期次 | 目标 | 交付标志 |
+| Phase | Objective | Delivery milestone |
 | --- | --- | --- |
-| 第一期 | 沟通与文件共享本体（双引擎、消息、群聊、截图表情、常用联系人、组织架构、文件传输、归档检索、管理后台） | 可替代现有局域网工具，且具备归档与检索能力 |
-| 第二期 | 办公能力（审批、日程待办、公告、群工具、位置图、远程协助） | 具备轻量办公协同能力 |
-| 第三期 | AI 能力（群内助手、会议纪要、需求整理） | 群聊内容可自动结构化 |
-| 第四期 | 音视频会议与协同文档 | 独立立项，采购或集成 |
+| Phase 1 | The communication and file sharing core (dual engine, messaging, group chat, screenshots and emoji, frequent contacts, organizational structure, file transfer, archive retrieval, admin console) | Can replace existing LAN tools, and has archiving and retrieval capabilities |
+| Phase 2 | Office capabilities (approvals, schedule and to-dos, announcements, group tools, location map, remote assistance) | Has lightweight office collaboration capabilities |
+| Phase 3 | AI capabilities (in-group assistant, meeting minutes, requirement organization) | Group chat content can be automatically structured |
+| Phase 4 | Audio/video meetings and collaborative documents | Independently initiated, procured or integrated |

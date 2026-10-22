@@ -1,4 +1,4 @@
-> **English** | [中文](机器人平台.md)
+> **English** | [中文](../zh/design/机器人平台.md)
 
 # Bot Platform (bot) Design Draft
 

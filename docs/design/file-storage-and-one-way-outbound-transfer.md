@@ -1,4 +1,4 @@
-> **English** | [中文](文件存储与外网单向传输.md)
+> **English** | [中文](../zh/design/文件存储与外网单向传输.md)
 
 # File Storage and One-Way External Transfer Design (R23 Design Draft)
 

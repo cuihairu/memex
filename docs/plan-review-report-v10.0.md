@@ -1,4 +1,4 @@
-> **English** | [中文](建设方案评审报告-V10.0.md)
+> **English** | [中文](zh/建设方案评审报告-V10.0.md)
 
 > **Translation note**: This is a summary-level English rendering of a 1204-line Chinese report. It preserves the full heading hierarchy, all numbered requirements, all phase/batch tables with acceptance criteria, the risk and red-line sections, and the module and boundary definitions, but it is not a line-by-line translation. The Chinese original is authoritative.
 

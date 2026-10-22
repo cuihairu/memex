@@ -1,4 +1,4 @@
-> **English** | [中文](审批与日报周报.md)
+> **English** | [中文](../zh/design/审批与日报周报.md)
 
 # Approval (Form + Workflow Engine) and Daily/Weekly Reports: Phase-2 Feature Detail Spec
 

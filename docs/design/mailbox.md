@@ -1,4 +1,4 @@
-> **English** | [中文](信箱.md)
+> **English** | [中文](../zh/design/信箱.md)
 
 # Mailbox: Unified Inbox (Design Draft, Not Implemented)
 

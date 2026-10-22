@@ -1,4 +1,4 @@
-> **English** | [中文](权限模型.md)
+> **English** | [中文](../zh/design/权限模型.md)
 
 # Permission Model: User-Group-Role-Grant (Cross-cutting Design)
 

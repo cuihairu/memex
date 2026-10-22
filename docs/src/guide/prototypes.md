@@ -1,244 +1,170 @@
-# 界面原型与预览
+# UI Prototypes and Preview
 
-原型设计稿是交付物，覆盖桌面端八屏与手机端四屏。风格与产品气质一致：品牌橙 `#e16531`（取自 logo）主色、暖中性底色、亮暗双主题。源文件（HTML＋共享设计系统 `prototypes.css`）在仓库 `docs/design/prototypes/`，截图在 `docs/src/public/screenshots/`。
+The prototype mockups are a deliverable, covering eight desktop screens and four mobile screens. The style matches the product's temperament: brand orange `#e16531` (taken from the logo) as the primary color, warm neutral backgrounds, and both light and dark themes. The source files (HTML + the shared design system `prototypes.css`) are in the repository under `docs/design/prototypes/`, and the screenshots are in `docs/src/public/screenshots/`.
 
-每屏均可加 `?theme=dark` 参数查看深色版；首页轮播的右上角按钮可切换截图主题。
+Each screen can be viewed in its dark variant by appending `?theme=dark`; the button in the top-right corner of the homepage carousel switches the screenshot theme.
 
-## 桌面端
+## Desktop
 
-| 屏幕 | 说明 |
+| Screen | Description |
 | --- | --- |
-| 未登录直连态 | 零配置：UDP 广播自动发现同网段终端；会话标注「仅存本机 · 不入归档」；无对话＝列表态长方形面板（不摆聊天面板），点好友展开对话 |
-| 好友列表 | 协作态下的纯好友列表（布局令列表态）：组织架构通讯录分组、搜索好友／工号、在线数统计；点好友展开对话，再点当前好友或 ✕ 关回列表态 |
-| 登录协作态 | 长连接在线、全量归档；服务端不可达时状态徽标显式回落提示 |
-| 单聊 | 归档起点「归档自 X 时刻」、跨态会话「未归档」不可关闭、撤回仅显示层（原文留存） |
-| 群聊 | 公告、@提醒、成员管理；群消息同样全量归档 |
-| 组织架构 | 部门树、成员卡片、汇报链路、直属上级、可见性策略提示 |
-| 文件传输 | 点对点直传不经服务端、断点续传、元数据入归档 |
-| 归档检索 | 管理台：人员＋时间＋关键词检索、撤回原文留存标记、查阅日志、导出留证 |
+| Not-logged-in direct mode | Zero configuration: UDP broadcast automatically discovers terminals on the same segment; sessions are labeled「仅存本机 · 不入归档」; no conversation = a rectangular panel in list state (no chat panel placed), clicking a friend expands the conversation |
+| Friend list | A pure friend list in collaboration mode (list state per the layout decree): organizational-structure directory groups, search by friend / employee ID, online counts; clicking a friend expands the conversation, clicking the current friend again or ✕ closes back to list state |
+| Logged-in collaboration mode | Long-connection online, full archiving; when the server is unreachable the status badge shows an explicit fallback notice |
+| 1:1 chat | Archive start point「归档自 X 时刻」, the cross-state session label「未归档」cannot be dismissed, recall affects only the display layer (original text retained) |
+| Group chat | Announcements, @mentions, member management; group messages are likewise fully archived |
+| Organizational structure | Department tree, member cards, reporting chains, direct superiors, visibility policy hints |
+| File transfer | Peer-to-peer transfer bypassing the server, resumable transfer, metadata enters the archive |
+| Archive search | Admin console: search by person + time + keyword, recalled-original-retained markers, view logs, export for evidence |
 
-### 未登录直连态
+### Not-logged-in direct mode
 
-实况截图：双实例同机互发现（UDP 2425；2026-10-10 原型走查 rail 面落地后
-重摄，浅／深配平）。**布局令（2026-10-08）**：无对话＝
-「左菜单＋好友列表」长方形列表态，**不摆聊天面板**——启动/关会话即此态；
-点好友后右侧展开对话（点好友或点标题栏 ✕ 回列表态），展开态实况见下方
-第三、四张（真实客户端窗口，`test_mode_switch` 布局腿程序化抓取，深色随
-2026-10-09 补摄）。
+Live screenshots: two instances on the same machine discovering each other (UDP 2425; retaken after the rail panel from the 2026-10-10 prototype walkthrough landed, light/dark paired). **Layout decree (2026-10-08)**: no conversation = a rectangular list state of "left menu + friend list", **no chat panel placed** — this is the state at startup / after closing a session; clicking a friend expands the conversation on the right (clicking the friend again or the title-bar ✕ returns to list state). Live shots of the expanded state are the third and fourth images below (real client windows, captured programmatically by the `test_mode_switch` layout leg; the dark variant was added in the 2026-10-09 supplementary pass).
 
 
 
 
 
 
-### 好友列表
+### Friend list
 
-实况截图（协作态列表态，2026-10-09 补摄、2026-10-10 浅色重摄＋深色补齐，
-同日 rail 面走查后随批重摄）：登录协作态、未开会话＝「左图标栏＋消息列表」
-长方形列表态（不摆聊天面板）——局域网设备分组（在线数统计）＋「最近联系」
-分组（未读／在线标识、星标置顶随常用联系人）＋「群聊 · 服务端归档」分组；
-搜索栏按昵称／账号／IP／群名过滤；点好友展开对话、再点当前好友或 ✕ 关回
-列表态（真实客户端窗口，`test_mode_switch` 布局腿程序化抓取）。**如实更正**：
-2026-10-09 首轮入库的「浅色」实为深色抓图——测试切暗腿的还原缺陷（system
-档判暗兜底回读已被染暗的调色板，还原又落回深色），浅图带暗入库；本轮修
-抓取机制（还原改显式回亮色）后浅色重摄、深色一并补齐。
+Live screenshots (collaboration-mode list state; supplementary capture on 2026-10-09, light retaken plus dark added on 2026-10-10, then re-shot with the batch after the same day's rail-panel walkthrough): logged-in collaboration mode with no open session = a rectangular list state of "left icon bar + message list" (no chat panel placed) — a LAN devices group (with online counts) + a「最近联系」group (unread/online badges, starred entries pinned with frequent contacts) + a「群聊 · 服务端归档」group; the search bar filters by nickname / account / IP / group name; clicking a friend expands the conversation, and clicking the current friend again or ✕ closes back to list state (real client windows, captured programmatically by the `test_mode_switch` layout leg). **Correction for the record**: the "light" shot first committed on 2026-10-09 was in fact a dark capture — a restore defect in the test dark-switching leg (the system-mode dark fallback re-read a palette already tainted dark, so the restore landed back on dark), and the light image went into the library dark; this round fixed the capture mechanism (restore now explicitly returns to light), after which light was retaken and dark added alongside.
 
 
 
 
-原型稿：浅色与深色各一（协作态好友列表设计稿，保留备查）。
+Mockups: one light and one dark (collaboration-mode friend-list design drafts, kept for reference).
 
 
 
 
-### 登录协作态
+### Logged-in collaboration mode
 
-实况截图：协作单聊互发文本——「最近联系」分组带在线标识与末条时间，行首
-标注「协作 · 已归档」，送达回执「已送达对方 ✓」入状态栏（2026-10-10
-rail 面走查后重摄，浅／深配平）。
+Live screenshots: two collaboration-mode clients exchanging text in a 1:1 chat — the「最近联系」group carries online badges and last-message times, row headers read「协作 · 已归档」, and the delivery receipt「已送达对方 ✓」lands in the status bar (retaken after the 2026-10-10 rail-panel walkthrough, light/dark paired).
 
 
 
 
-### 单聊
+### 1:1 chat
 
-实况截图：直连单聊互发文本——外出气泡品牌橙靠右、来访气泡靠左，行首标注「直连·仅本机」，顶部常驻「消息不进归档」横幅（2026-10-10 rail 面走查后重摄，浅／深配平）。
-
-
-
-
-### 群聊
-
-实况截图：服务端群会话（bob 授 `group_creator` 特权后建群拉 alice）——群
-消息经服务端扇出并全量归档，侧栏「群聊 · 服务端归档」分组带群人数与归档
-标识（2026-10-10 rail 面走查后重摄，浅／深配平）。
+Live screenshots: two direct-mode clients exchanging text in a 1:1 chat — outgoing bubbles in brand orange on the right, incoming bubbles on the left, row headers read「直连·仅本机」, and a persistent「消息不进归档」banner sits at the top (retaken after the 2026-10-10 rail-panel walkthrough, light/dark paired).
 
 
 
 
-### 组织架构
+### Group chat
 
-实况截图：组织架构对话框独抓（部门／成员树），画面不含窗口 chrome，不随
-2026-10-10 rail 面改版，核对后沿用。
-
-
-
-
-### 文件传输
-
-实况截图：直连文件通道真实收发——主窗发整目录（「[文件夹] 开始发送／发送
-完成」系统行）＋对端发文件（「[文件] 已接收」系统行含落盘路径），跨态直连
-会话按归档自行口径标注（2026-10-10 rail 面走查后重摄，浅／深配平）。
+Live screenshots: a server-side group session (bob, granted the `group_creator` privilege, creates the group and pulls in alice) — group messages fan out through the server and are fully archived, and the sidebar's「群聊 · 服务端归档」group carries member counts and archive badges (retaken after the 2026-10-10 rail-panel walkthrough, light/dark paired).
 
 
 
 
-### 归档检索
+### Organizational structure
 
-实况截图：服务端 CLI 终端输出（检索命中的归档表），无窗口 chrome，不随
-2026-10-10 rail 面改版，核对后沿用。
-
-
-
-
-### 功能对话框（八屏预览集外）
-
-以下功能界面为对话框级，不在桌面八屏预览集内（需入轮播预览集另立走查单，
-当前仍不占十二席之一）。两者实况由各自对话框冒烟腿程序化抓取（真服务端
-进程＋真实数据面，浅／深各一配平，2026-10-11 补摄）：
-
-- **任务清单对话框**（R27-1）：自建／完成／提醒＋他人分配（同群／同部门互派）；
-  2026-10-10 补**日历视图**（月历标到期日＋点日筛选该日到期，默认收起）
-  与**关窗后台驻留**（关窗＝hide 不销毁，30s 轮询与提醒常驻通知中心）。
-
-  实况截图：清单台账六项（自建／提醒行、`[x]` 完成态、🌐 直通链接与模板键
-  外部条目）＋日历视图展开态（到期日品牌橙标注、点日筛选该日到期）＋外部
-  任务登记与拉取面（`test_task_dialog` 冒烟腿程序化抓取）。
+Live screenshots: the organizational-structure dialog captured on its own (department/member tree); the frame contains no window chrome, was not affected by the 2026-10-10 rail-panel redesign, and was retained after verification.
 
 
 
 
-- **群工具对话框**：群任务建／认领／完成；2026-10-10 补**截止提醒**
-  （due_ms，30s 轮询到点经通知中心 IMPORTANT 强提醒）。
+### File transfer
 
-  实况截图：投票页台账三票（进行中·匿名多选、到点自动关票、改票覆盖的记名
-  台账）＋发起区（主题／选项、截止／匿名／多选勾选、投改票、截止投票）；
-  接龙与群任务两页同窗内标签切换（`test_group_tools_dialog` 冒烟腿程序化
-  抓取）。
+Live screenshots: real send and receive over the direct file channel — the main window sends a whole directory (system rows「[文件夹] 开始发送／发送完成」) plus a file from the peer (system row「[文件] 已接收」with the on-disk path); the cross-state direct session is labeled per its own archiving rule (retaken after the 2026-10-10 rail-panel walkthrough, light/dark paired).
 
 
 
 
-## 手机端
+### Archive search
 
-| 屏幕 | 说明 |
+Live screenshots: server CLI terminal output (the archive table hit by the search); no window chrome in frame, unaffected by the 2026-10-10 rail-panel redesign, retained after verification.
+
+
+
+
+### Feature dialogs (outside the eight-screen preview set)
+
+The following feature UIs are dialog-level and are not part of the desktop eight-screen preview set (admitting them into the carousel preview set would require a separate walkthrough ticket; they still occupy none of the twelve slots). Their live shots were captured programmatically by each dialog's smoke-test leg (real server process + real data surface, one light and one dark paired, captured 2026-10-11):
+
+- **Task-list dialog** (R27-1): self-created / completed / reminders + assignment by others (mutual assignment within a group or department); added on 2026-10-10: a **calendar view** (a month calendar marks due dates + click a day to filter that day's due items, collapsed by default) and **background residency on window close** (closing = hide, not destroy; 30s polling and reminders stay resident in the notification center).
+
+  Live screenshots: six entries in the task ledger (self-created / reminder rows, `[x]` completed state, 🌐 deep links and external entries from template keys) + the calendar view expanded (due dates marked in brand orange, click a day to filter that day's due items) + the external-task registration and pull surfaces (captured programmatically by the `test_task_dialog` smoke leg).
+
+
+
+
+- **Group tools dialog**: group tasks create / claim / complete; added on 2026-10-10: **due reminders** (due_ms, 30s polling fires an IMPORTANT hard reminder through the notification center when due).
+
+  Live screenshots: three votes in the poll page's ledger (in progress · anonymous multi-choice, auto-close at deadline, a named ledger of overwriting re-votes) + the creation area (topic / options, deadline / anonymous / multi-choice checkboxes, vote and change vote, close the poll); the chain and group-task pages switch by tabs within the same window (captured programmatically by the `test_group_tools_dialog` smoke leg).
+
+
+
+
+## Mobile
+
+| Screen | Description |
 | --- | --- |
-| 初始化向导 | 第一步即域名／服务器地址（必填＋连通性校验），未完成不能进入主界面（R17） |
-| 会话列表 | 移动端全部为协作态，不出现任何免登录入口（R18） |
-| 聊天 | 已读回执、文件卡片、归档状态随手可见 |
-| 我 | 设备管理、桌面端单点在线说明、留存策略展示 |
+| Initialization wizard | The very first step is the domain / server address (required + connectivity check); until it is completed the main interface cannot be entered (R17) |
+| Session list | Mobile is entirely collaboration mode; no login-free entry of any kind appears (R18) |
+| Chat | Read receipts, file cards, and archive status visible at hand |
+| Me | Device management, an explanation of desktop single-point online, retention policy display |
 
-### 初始化向导
+### Initialization wizard
 
-实况截图（Android，T6.3）：首次启动强制进入服务器地址设置页，填写域名／IP（可带端口，缺省 24360）并连通校验（PING→PONG）通过后才放行登录——未完成初始化不出现任何可聊天界面（R17）。深色补摄（2026-10-10 深色主题走查，`walkthrough-18` 同源）。
-
-
-
-
-原型稿：浅色与深色各一。
+Live screenshots (Android, T6.3): first launch forces entry to the server address setup page; only after filling in the domain / IP (port optional, default 24360) and passing the connectivity check (PING→PONG) is login allowed — before initialization is complete, no chat-capable interface appears (R17). Dark variant added in the 2026-10-10 dark-theme walkthrough (same source as `walkthrough-18`).
 
 
 
 
-### 会话列表
-
-实况截图（Android，T6.3）：登录成功后的主界面——协作态唯一入口，无任何免登录形态（R18）。深色补摄（2026-10-10 深色主题走查，`walkthrough-19` 同源）。
+Mockups: one light and one dark.
 
 
 
 
-会话列表屏实况（Android，2026-10-09 走查补摄）：会话列表带未读角标、发起会话
-输入框（对端账号）、文件助手／退出登录入口；真实服务端下发（webhook 通知镜像）
-落会话并计未读——浅色（上）／深色（下）各一（`walkthrough-08/11` 同源）。
+### Session list
+
+Live screenshots (Android, T6.3): the main interface after successful login — the sole collaboration-mode entry, with no login-free form of any kind (R18). Dark variant added in the 2026-10-10 dark-theme walkthrough (same source as `walkthrough-19`).
 
 
 
 
-原型稿：浅色与深色各一（保留备查）。
+Session-list screen live shots (Android, supplementary walkthrough capture on 2026-10-09): the session list carries unread badges, a start-conversation input (peer account), and file-assistant / logout entries; deliveries from a real server (webhook notification mirror) land as sessions and count unread — one light (top) / one dark (bottom) (same source as `walkthrough-08/11`).
 
 
 
 
-### 聊天
-
-聊天页实况（Android，2026-10-09 第二轮补摄）：**真实人对人互发**——zhangsan 离线
-发给 lisi、lisi 登录收离线后在线回复，双向气泡（对端行＋「我」行，各带时间）
-全链实录：离线投递→登录送达（未读角标）→在线回复（服务端受理并归档，SQLite
-`messages` 表核实）；浅色（上）／深色（下）各一（`walkthrough-14/16` 同源）。
-发送路径（BUG-006 修复后）实测不崩、受理即渲染。富交互实录：长按消息即出系统
-选择工具栏＋「已复制」toast（`walkthrough-15` 入档）。**如实注明**：回复／表情／
-滚动加载等入口 Android 端尚未实现（T6.3 范围外），无图可摄；另图中对端消息的
-服务端归档恰触发新登记的 BUG-007（msg_id 撞车静默吞档，投递不受影响），见
-BUGS.md。
+Mockups: one light and one dark (kept for reference).
 
 
 
 
-原型稿：浅色与深色各一（保留备查）。
+### Chat
+
+Chat page live shots (Android, second supplementary round on 2026-10-09): **real person-to-person exchange** — zhangsan sends to lisi while offline, lisi logs in, receives the offline message, then replies online; two-way bubbles (peer rows +「我」rows, each with a time) record the full chain: offline delivery → delivery on login (unread badge) → online reply (accepted and archived by the server, verified against the SQLite `messages` table); one light (top) / one dark (bottom) (same source as `walkthrough-14/16`). The send path (after the BUG-006 fix) is verified not to crash and renders on acceptance. Rich interaction on record: a long press on a message brings up the system selection toolbar plus a「已复制」toast (archived as `walkthrough-15`). **Stated for the record**: reply / emoji / scroll-to-load entries are not yet implemented on Android (outside T6.3 scope), so there is nothing to capture; also, the server-side archiving of the peer's messages in the screenshots happened to trigger the newly filed BUG-007 (a msg_id collision silently swallowed an archive entry; delivery was unaffected) — see BUGS.md.
 
 
 
 
-### 我
-
-Android 实况（2026-10-11 走查，`walkthrough-20/21` 同源）：账号卡组织资料
-（ORG_QUERY 拉真实姓名/部门/职务）、本机设备指纹、本地缓存清理、通知入口、
-关于、切换服务器/退出登录；服务端设备台账/登录记录/留存策略查询面协议未开，
-屏内如实标「未接入」，不留假数据。浅色（上）／深色（下）各一。
+Mockups: one light and one dark (kept for reference).
 
 
 
 
-原型稿：浅色与深色各一（保留备查）。
+### Me
+
+Android live shots (2026-10-11 walkthrough, same source as `walkthrough-20/21`): the account card shows organizational profile (ORG_QUERY pulls real name/department/title), local device fingerprint, local cache cleanup, notification entry, About, switch server / logout; the server-side device ledger / login records / retention policy query surfaces have no protocol yet, so the screen honestly labels them「未接入」, leaving no fake data. One light (top) / one dark (bottom).
 
 
 
 
-## 原型源文件
+Mockups: one light and one dark (kept for reference).
 
-原型为纯 HTML＋CSS（无框架依赖），浏览器直接打开即可交互查看：
 
-- 桌面端：[desktop-direct](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct.html)（列表态：无对话不摆聊天面板）· [desktop-direct-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct-chat.html)（点好友后对话展开）· [desktop-friends](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-friends.html)（协作态好友列表·列表态）· [desktop-collab](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-collab.html) · [desktop-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-chat.html) · [desktop-group](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-group.html) · [desktop-org](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-org.html) · [desktop-files](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-files.html) · [desktop-search](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-search.html)
-- 手机端：[mobile-init](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-init.html) · [mobile-sessions](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-sessions.html) · [mobile-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-chat.html) · [mobile-me](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-me.html)
 
-功能实现后，本页截图将逐步替换为客户端实况截图。当前进度（2026-10-10 预览核验轮更新）：BUG-007
-实施批（42c4b46，服务端撞 id 消歧＋移动端 seq 台账）无界面变化；全部既有实况不做重摄、改为像素级
-核验为当前——`test_live_shots`＋`test_mode_switch` 重跑再生的 14 张桌面实况对入库版逐张比对，差异
-均为消息时钟与临时路径文字（0.00%–0.39%，UI 结构零差异），锁屏验收图本轮重跑字节级一致，紧急弹窗
-验收图与 `test_notify` 再生抓图像素级一致，docs 全站截图引用 38 处零缺失；剩余原型稿均如实标注
-（「我」屏未建、备查稿保留）。此前口径（2026-10-10 复核轮更新）：2026-10-10 原型走查 rail 面落地
-rail 面落地（左图标导航栏，b92de8a）后，桌面端五屏实况重摄浅／深配平——直连列表态／单聊／登录协作态／
-群聊／文件传输（`test_live_shots` 程序化驱动真实服务端＋双直连实例＋对端协作引擎抓取，逐张目检）；组织
-架构（对话框独抓）与归档检索（服务端 CLI 终端输出）画面不含窗口 chrome、不随 rail 改版，核对后沿用；
-好友列表屏分组描述随 rail 批改名同步更正（「协作会话 · 服务端归档」→「最近联系」＋「群聊 · 服务端归
-档」）。2026-10-10 功能落地复核轮：rail 后落地的六项提交逐项核对——聊天日界线
-（3f95bdd，聊天历史按日插「── yyyy-MM-dd ──」分日系统行）为桌面聊天渲染，重摄轮
-（0ca8d81）摄于该提交之后、实况已含日界线，手机端未触及（仅改 main_window.cpp）；
-任务提醒常驻（d870898，任务对话框关窗 hide 后台驻留、30s 轮询与提醒常驻通知中心）、
-任务日历视图（1141677，月历标到期日＋点日筛选）、群任务截止提醒（41f31ce，due_ms
-＋30s 轮询到点 IMPORTANT）三者均为对话框级新界面，不在八屏预览集内、不影响既有
-实况，已如实补注（见上「功能对话框（八屏预览集外）」节）；BUG-005 收口（fbfe6ef，
-测试假设修正）与 BUG-007 设计（37b89a0，设计文档）无界面变化。全部既有 live-*／
-layout-*／mobile-live-* 实况核对沿用不重摄。此前的进度口径：桌面端八屏已全部替换为实况截图（浅／深各一，真实客户端在 Xvfb 下拍摄，逐张目检非原型稿）；未登录直连态已随布局令（2026-10-08）重摄为「列表态」实况（浅／深各一，Xvfb 双实例互发现拍摄），「会话展开态」实况浅／深各一补齐（点好友后，`test_mode_switch` 布局腿程序化抓取，深色本轮切暗补摄）；好友列表屏实况浅／深各一（协作态列表态，登录后经生产 ✕ 路径关回列表态抓取——局域网设备＋「协作会话·服务端归档」两分组，`test_mode_switch` 布局腿程序化抓取；浅色 2026-10-10 重摄更正——2026-10-09 首轮入库误为深色抓图，抓取机制还原缺陷已修，深色同轮补齐）；手机端初始化向导与登录成功主界面为 Android 实况（T6.3 模拟器走查，与 `apps/android/docs/walkthrough-0*.png` 同源；深色随 2026-10-10 深色主题走查补齐，`walkthrough-18/19` 同源）；会话列表屏与聊天屏本轮补 Android 实况浅／深各一（2026-10-09 模拟器 android-34＋本机 serve 走查，与 `walkthrough-08/09/10/11` 同源）——聊天屏实况 2026-10-09 第二轮已换真实人对人互发（离线投递→登录送达→在线回复全链，BUG-006 修复后实测不崩；长按复制富交互入档，`walkthrough-14/15/16` 同源，详见上「聊天」小节）；「我」屏 Android 未建、iOS 代码-only——暂仍为原型稿并如实标注。鸿蒙端（T6.2 桌面矩阵项，工具链/证书/真机未备受阻；鸿蒙手机版 T6.6 代码-only＋CI，编译腿待 OHOS 工具链）不为其承诺实况截图。2026-10-10 首页轮播实况化轮：文档站首页（`docs/src/index.md`）界面预览轮播十二席中十一席由原型稿渲染换为客户端实况截图（桌面八屏＋手机初始化向导/会话列表/聊天；「我」屏 Android 端未建仍原型稿），轮播组件（`ShowcaseCarousel.vue`）改定高等比 contain 适配实况件离散宽高比（0.45–1.67），四张无后缀浅色实况件统一命名补 `-light`（`layout-friends`／`mobile-live-init`／`mobile-live-sessions`／`mobile-live-chat`，抓取腿与本文档引用同步）；原型渲染件保留在库备查。2026-10-11 对话框实况轮：
-「功能对话框（八屏预览集外）」两节补齐实况——任务清单对话框与群工具对话框
-各浅深一（`live-task-dialog[-dark]`／`live-group-tools[-dark]`，由
-`test_task_dialog`／`test_group_tools_dialog` 冒烟腿程序化抓取：真服务端＋
-真实数据面，任务台账六项含日历展开态与外部任务拉取面、投票台账三票含匿名
-多选与到点自动关票；抓取腿照 `test_live_shots` grab_pair 式，亮暗各一、抓完
-显式回亮）。八屏预览集与轮播十二席口径不变（十一席实况＋「我」屏原型稿），
-鸿蒙端承诺外维持前令。2026-10-11「我」屏实况轮：Android「我」屏落地（
-5e213ba，`MeActivity`——账号卡接 ORG_QUERY/ORG_DATA 组织资料；设备管理/登录
-记录/留存策略协议无查询面，屏内如实标「未接入」），android-34 模拟器＋本机
-serve 走查实况浅／深各一（`walkthrough-20/21` 同源，入 `apps/android/docs/`），
-首页轮播 mobile-me 席由原型稿渲染换实况（`mobile-live-me[-light|-dark]`）。
-八屏预览集不变，轮播十二席全实况收口；鸿蒙端承诺外维持前令。
+
+## Prototype source files
+
+The prototypes are pure HTML + CSS (no framework dependency); open them directly in a browser to explore interactively:
+
+- Desktop: [desktop-direct](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct.html) (list state: no chat panel without a conversation) · [desktop-direct-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-direct-chat.html) (conversation expands after clicking a friend) · [desktop-friends](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-friends.html) (collaboration-mode friend list · list state) · [desktop-collab](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-collab.html) · [desktop-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-chat.html) · [desktop-group](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-group.html) · [desktop-org](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-org.html) · [desktop-files](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-files.html) · [desktop-search](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/desktop-search.html)
+- Mobile: [mobile-init](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-init.html) · [mobile-sessions](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-sessions.html) · [mobile-chat](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-chat.html) · [mobile-me](https://github.com/cuihairu/memex/blob/main/docs/design/prototypes/mobile-me.html)
+
+As features are implemented, the screenshots on this page will be progressively replaced with live client screenshots. Current progress (updated in the 2026-10-10 preview verification round): the BUG-007 implementation batch (42c4b46, server-side id-collision disambiguation + mobile seq ledger) has no UI change; all existing live shots were not retaken but instead pixel-verified as current — the 14 desktop live shots regenerated by rerunning `test_live_shots` + `test_mode_switch` were compared one by one against the committed versions, with all differences being message clocks and temporary-path text (0.00%–0.39%, zero structural UI difference); the lock-screen acceptance image reran this round byte-identical; the urgent-banner acceptance image is pixel-identical to the `test_notify` regenerated capture; all 38 screenshot references across the docs site resolve with zero missing; the remaining mockups are all honestly labeled (the「我」screen not yet built, reference drafts kept). Prior statement (updated in the 2026-10-10 re-verification round): after the rail panel from the 2026-10-10 prototype walkthrough landed (left icon navigation bar, b92de8a), five desktop screens' live shots were retaken light/dark paired — direct list state / 1:1 chat / logged-in collaboration mode / group chat / file transfer (captured by `test_live_shots` programmatically driving a real server + two direct instances + a peer collaboration engine, each image visually inspected); organizational structure (dialog captured standalone) and archive search (server CLI terminal output) contain no window chrome in frame, did not change with the rail redesign, and were retained after verification; the friend-list screen's group descriptions were corrected in sync with the rail batch rename (「协作会话 · 服务端归档」→「最近联系」+「群聊 · 服务端归档」). The 2026-10-10 feature-landing re-verification round: the six commits that landed after rail were checked item by item — the chat day divider (3f95bdd, chat history inserts a「── yyyy-MM-dd ──」day-separator system row per day) is desktop chat rendering; the retake round (0ca8d81) shot after that commit, so the live shots already contain the day divider, and mobile was untouched (only main_window.cpp changed); task-reminder residency (d870898, task dialog hides and stays resident on window close, 30s polling and reminders resident in the notification center), the task calendar view (1141677, month calendar marks due dates + click a day to filter), and group-task due reminders (41f31ce, due_ms + 30s polling firing IMPORTANT at due time) are all dialog-level new UI, outside the eight-screen preview set and not affecting existing live shots, and have been honestly annotated (see the "Feature dialogs (outside the eight-screen preview set)" section above); the BUG-005 close-out (fbfe6ef, test-assumption fix) and the BUG-007 design (37b89a0, design document) have no UI change. All existing live-* / layout-* / mobile-live-* shots were verified and retained without retakes. The earlier progress statement: all eight desktop screens have been replaced with live screenshots (one light and one dark each, real clients shot under Xvfb, each visually inspected, not mockups); the not-logged-in direct mode was retaken per the layout decree (2026-10-08) as "list state" live shots (one light and one dark, shot with two Xvfb instances discovering each other), and "conversation expanded" live shots were completed one light and one dark (after clicking a friend, captured programmatically by the `test_mode_switch` layout leg, dark added in this round's dark-switching pass); the friend-list screen live shots are one light and one dark (collaboration-mode list state, captured by logging in and closing back to list state via the production ✕ path — the two groups LAN devices +「协作会话·服务端归档」, captured programmatically by the `test_mode_switch` layout leg; the light one retaken as a correction on 2026-10-10 — the 2026-10-09 first commit was mistakenly a dark capture, the capture mechanism's restore defect is fixed, and dark was added in the same round); the mobile initialization wizard and logged-in main interface are Android live shots (T6.3 emulator walkthrough, same source as `apps/android/docs/walkthrough-0*.png`; dark added with the 2026-10-10 dark-theme walkthrough, same source as `walkthrough-18/19`); the session-list and chat screens gained Android live shots this round, one light and one dark each (2026-10-09, android-34 emulator + local serve walkthrough, same source as `walkthrough-08/09/10/11`) — the chat screen live shots were switched in the 2026-10-09 second round to a real person-to-person exchange (the full chain of offline delivery → delivery on login → online reply, verified not to crash after the BUG-006 fix; the long-press-copy rich interaction archived, same source as `walkthrough-14/15/16`, see the "Chat" section above); the「我」screen is not built on Android and iOS is code-only — for now it remains a mockup, honestly labeled. The HarmonyOS end (T6.2 desktop matrix item, blocked with toolchain/certificates/real devices unready; the HarmonyOS phone edition T6.6 is code-only + CI, with the build leg awaiting the OHOS toolchain) is promised no live screenshots. The 2026-10-10 homepage carousel live-ization round: of the twelve slots in the docs site homepage's (`docs/src/index.md`) UI preview carousel, eleven slots were switched from mockup renders to live client screenshots (the eight desktop screens + mobile initialization wizard / session list / chat; the「我」screen, not built on Android, remains a mockup); the carousel component (`ShowcaseCarousel.vue`) was changed to fixed-height, aspect-preserving contain to accommodate the discrete aspect ratios of live assets (0.45–1.67); four unsuffixed light live assets were uniformly renamed with `-light` appended (`layout-friends` / `mobile-live-init` / `mobile-live-sessions` / `mobile-live-chat`, with the capture legs and this document's references synchronized); the mockup render assets remain in the library for reference. The 2026-10-11 dialog live round: the two "Feature dialogs (outside the eight-screen preview set)" sections gained live shots — the task-list dialog and the group tools dialog, one light and one dark each (`live-task-dialog[-dark]` / `live-group-tools[-dark]`, captured programmatically by the `test_task_dialog` / `test_group_tools_dialog` smoke legs: real server + real data surface, the task ledger's six entries including the expanded calendar view and the external-task pull surface, the poll ledger's three votes including anonymous multi-choice and auto-close at deadline; the capture legs follow the `test_live_shots` grab_pair pattern — one light and one dark, explicitly restored to light after capture). The eight-screen preview set and the twelve-carousel-slot statement are unchanged (eleven live slots + the「我」screen mockup); the HarmonyOS end remains outside the promise per the prior decree. The 2026-10-11「我」screen live round: the Android「我」screen landed (5e213ba, `MeActivity` — the account card connects to ORG_QUERY/ORG_DATA for organizational profile; device management / login records / retention policy have no query protocol, and the screen honestly labels them「未接入」), and android-34 emulator + local serve walkthrough live shots were taken one light and one dark (same source as `walkthrough-20/21`, committed under `apps/android/docs/`); the homepage carousel's mobile-me slot was switched from a mockup render to live (`mobile-live-me[-light|-dark]`). The eight-screen preview set is unchanged, the twelve carousel slots are all live and closed out; the HarmonyOS end remains outside the promise per the prior decree.

@@ -1,4 +1,4 @@
-> **English** | [中文](群服务器工具.md)
+> **English** | [中文](../zh/design/群服务器工具.md)
 
 # Group Server Tools: Agent + Load Status + Remote Session (R26 Design Draft)
 

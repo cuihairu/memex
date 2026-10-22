@@ -1,4 +1,4 @@
-> **English** | [中文](IP与办公位置显示.md)
+> **English** | [中文](../zh/design/IP与办公位置显示.md)
 
 # IP and Office Location Display
 

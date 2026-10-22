@@ -1,4 +1,4 @@
-> **English** | [中文](群内智能助手.md)
+> **English** | [中文](../zh/design/群内智能助手.md)
 
 # In-Group AI Assistant Design Spec (Platform Phase 3 · line164)
 

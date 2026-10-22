@@ -1,4 +1,4 @@
-> **English** | [中文](群工具三件.md)
+> **English** | [中文](../zh/design/群工具三件.md)
 
 # Three Group Tools: Polls / Sign-up Chains / Group Tasks (Phase Two Close-out Increment)
 

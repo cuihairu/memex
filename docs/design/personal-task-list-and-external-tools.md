@@ -1,4 +1,4 @@
-> **English** | [中文](个人任务清单与外部工具接入.md)
+> **English** | [中文](../zh/design/个人任务清单与外部工具接入.md)
 
 # Personal Task List and External Tool Integration: Survey Analysis (R27 Design Draft)
 

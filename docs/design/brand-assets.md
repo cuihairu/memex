@@ -1,4 +1,4 @@
-> **English** | [中文](品牌物料.md)
+> **English** | [中文](../zh/design/品牌物料.md)
 
 # Brand Assets: Server-Side Configurable Company Branding; the Client Rebrands Itself On Connect
 

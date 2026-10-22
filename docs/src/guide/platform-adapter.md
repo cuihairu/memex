@@ -1,30 +1,35 @@
-# 国产系统适配验证（T5.1）
+# Domestic-OS Adaptation Verification (T5.1)
 
-> 对应验收项 A12（国产系统覆盖）与 A21（媒体底座）。核验日期：2026-10-03。
+> Corresponds to acceptance items A12 (domestic-OS coverage) and A21 (media base).
+> Verification date: 2026-10-03.
 
-## 现环境可执行的验证（已完成）
+## Verification runnable in the current environment (done)
 
-| 项 | 环境 | 方法 | 结果 |
+| Item | Environment | Method | Result |
 | --- | --- | --- | --- |
-| 消息收发 | Ubuntu 24.04 + offscreen（CI 口径，`QT_QPA_PLATFORM=offscreen`） | `ctest -R "direct_chat|collab_chat"` | 全绿 |
-| 文件传输 | 同上 | `ctest -R direct_file` | 全绿 |
-| 界面启动与显示 | Ubuntu 24.04 + Xvfb（本机走查，CI 无 Xvfb） | `xvfb-run ./build/client/memex_client` 常驻 15s 无崩溃、直连引擎线起监听 | 通过 |
-| 截图取屏环节 | Ubuntu 24.04 + offscreen | T4.4 截图与标注已落地（`client/tests/test_screenshot.cpp` 离屏验证）；A17 要求的多显示器＋高 DPI 实测与不支持环境降级提示仍需目标环境核查 | 部分（offscreen 通过；实机待补） |
-| Windows/UOS/麒麟 媒体底座（WebRTC） | — | 二期事项，现不在第一期范围 | 未开始 |
+| Message send/receive | Ubuntu 24.04 + offscreen (CI scope, `QT_QPA_PLATFORM=offscreen`) | `ctest -R "direct_chat\|collab_chat"` | All green |
+| File transfer | Same as above | `ctest -R direct_file` | All green |
+| UI launch and display | Ubuntu 24.04 + Xvfb (local walkthrough; CI has no Xvfb) | `xvfb-run ./build/client/memex_client` stayed up 15s without a crash, direct engine started listening | Pass |
+| Screenshot capture step | Ubuntu 24.04 + offscreen | T4.4 screenshot and annotation have landed (offscreen verification in `client/tests/test_screenshot.cpp`); the multi-monitor + high-DPI live test required by A17 and the degradation notice on unsupported environments still need checking on the target environment | Partial (offscreen passes; real hardware pending) |
+| Windows/UOS/Kylin media base (WebRTC) | — | Phase-2 item, not in phase-1 scope now | Not started |
 
-## X11／Wayland 降级策略（代码口径）
+## X11 / Wayland degradation strategy (code scope)
 
-- Qt xcb 平台插件为主路径；Wayland 会话下经 `QT_QPA_PLATFORM` 可强制 `xcb`
-  （XWayland），发现平台不可达时 Qt 自动回退，不崩溃——如需收敛提示文案，
-  见 T4.7 系统集成的提示通道。
-- 截图（T4.4）取屏在不支持环境必须显式降级提示，按钮置灰并说明原因，
-  不允许静默失败。
+- The Qt xcb platform plugin is the main path; under a Wayland session `QT_QPA_PLATFORM` can
+  force `xcb` (XWayland), and when the platform is found unreachable Qt falls back
+  automatically instead of crashing — if the notice wording needs to be converged, see the
+  notice channel of T4.7 system integration.
+- Screenshot capture (T4.4) must degrade with an explicit notice in an unsupported
+  environment: the button is greyed out and the reason stated; silent failure is not allowed.
 
-## 现场待补（需统信 UOS／麒麟实机）
+## Pending on-site checks (needs real UnionTech UOS / Kylin machines)
 
-A12 的字面要求是统信 UOS 与麒麟终端实测——本沙箱无此类实机，
-以下清单留现场补测，补测通过后再把本页「待实机」标记清零：
+A12's literal requirement is live testing on UnionTech UOS and Kylin terminals — this sandbox
+has no such machines, so the checklist below is left for on-site testing; after it passes,
+this page's 「待实机」 markers get cleared:
 
-1. UOS / 麒麟桌面端：安装包运行 → 直连发现/收发 → 文件 → 窗口显示缩放（高 DPI）；
-2. 同机 Wayland 会话与 X11 会话各一次；
-3. 不支持项（截屏、托盘、通知）逐项确认降级提示出现且不崩溃。
+1. UOS / Kylin desktop client: run the installer → direct discovery / send-receive →
+   files → window display scaling (high DPI);
+2. one run each of a Wayland session and an X11 session on the same machine;
+3. for the unsupported items (screenshot, tray, notification), confirm item by item that the
+   degradation notice appears and nothing crashes.

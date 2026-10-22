@@ -1,4 +1,4 @@
-> **English** | [中文](一级菜单管理.md)
+> **English** | [中文](../zh/design/一级菜单管理.md)
 
 # Top-Level Menu Management (Interface Settings)
 

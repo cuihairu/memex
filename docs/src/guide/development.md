@@ -1,54 +1,61 @@
-# 克隆与构建
+# Clone and Build
 
-## 环境要求
+## Environment requirements
 
-- CMake 4.x、C++17 编译器（GCC 15 或 MSVC；CI 工具链未钉版——`ci.yml` 以 ubuntu-latest 镜像自带编译器为准）
-- [vcpkg](https://github.com/microsoft/vcpkg)：所有第三方依赖经 manifest 管理
-- Linux 编译 Qt 客户端所需的系统开发包（vcpkg 不代管 X11/GL 等系统库；Ubuntu 参考：
-  `autoconf autoconf-archive automake libtool`（gperf 等 autotools 端口源码构建所需，缺则 qtbase 依赖链在 gperf 处失败）；
-  `libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev libxcb-icccm4-dev libxcb-util-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-glx0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev libfontconfig1-dev libfreetype-dev libdbus-1-dev libicu-dev`；
-  与 CI 工作流的安装清单一致）
-- 文档站：Node 24 + pnpm（CI 口径，`docs-check.yml`／`docs-deploy.yml`）
+- CMake 4.x, a C++17 compiler (GCC 15 or MSVC; the CI toolchain is not version-pinned —
+  `ci.yml` uses whatever compiler the ubuntu-latest image ships with)
+- [vcpkg](https://github.com/microsoft/vcpkg): every third-party dependency is managed via the
+  manifest
+- The system development packages needed to compile the Qt client on Linux (vcpkg does not
+  manage system libraries such as X11/GL; Ubuntu reference:
+  `autoconf autoconf-archive automake libtool` (needed for the source builds of autotools ports
+  such as gperf — without them the qtbase dependency chain fails at gperf);
+  `libx11-dev libx11-xcb-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev libxrandr-dev libxcursor-dev libxinerama-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libxcb-cursor-dev libxcb-icccm4-dev libxcb-util-dev libxcb-image0-dev libxcb-keysyms1-dev libxcb-randr0-dev libxcb-render0-dev libxcb-render-util0-dev libxcb-shape0-dev libxcb-shm0-dev libxcb-sync-dev libxcb-glx0-dev libxcb-xfixes0-dev libxcb-xinerama0-dev libxcb-xkb-dev libxcb-xinput-dev libgl1-mesa-dev libglu1-mesa-dev mesa-common-dev libfontconfig1-dev libfreetype-dev libdbus-1-dev libicu-dev`;
+  identical to the install list in the CI workflows)
+- Documentation site: Node 24 + pnpm (CI scope, `docs-check.yml` / `docs-deploy.yml`)
 
-## 依赖管理（vcpkg manifest）
+## Dependency management (vcpkg manifest)
 
-仓库根 `vcpkg.json` 声明全部第三方依赖（asio、protobuf、nlohmann-json、sqlite3、
-openssl、aws-sdk-cpp:s3、qtbase、drogon、crashpad），
-版本由 `builtin-baseline` 钉在 vcpkg 上游某一次提交；个别需要锁版本的包写进
-`overrides`（当前为空占位）。CI 与每日构建把 vcpkg 钉在同一 commit，
-启用 GitHub Actions 二进制缓存（`x-gha`）+ 安装树缓存，跨 run 复用编译产物。
+The repo-root `vcpkg.json` declares every third-party dependency (asio, protobuf,
+nlohmann-json, sqlite3, openssl, aws-sdk-cpp:s3, qtbase, drogon, crashpad); versions are
+pinned by `builtin-baseline` to a particular vcpkg upstream commit, and any package needing a
+locked version goes into `overrides` (currently an empty placeholder). CI and the daily build
+pin vcpkg to the same commit and enable the GitHub Actions binary cache (`x-gha`) plus an
+installed-tree cache, reusing build artifacts across runs.
 
-依赖清单：
+Dependency list:
 
-| 依赖 | 用途 | 说明 |
+| Dependency | Purpose | Notes |
 | --- | --- | --- |
-| `asio` | 服务端网络 I／O | header-only，`server` feature |
-| `protobuf` | 协议载荷编解码（libprotobuf + protoc 生成） | 默认安装（底座）；Android/iOS/鸿蒙端由各自工具链按同一 `common/proto/memex.proto` 生成 |
-| `nlohmann-json` | 协议 JSON 编解码 | 默认安装（底座，≥3.11.3） |
-| `sqlite3` | 服务端本地库（账号/设备/归档/文件元数据） | `server` feature |
-| `openssl` | 凭据 PBKDF2、设备指纹 SHA-256（仅 libcrypto） | 默认安装（底座，双端共用） |
-| `aws-sdk-cpp` | R23 存储抽象层（S3 兼容对象存储客户端） | `server` feature，启用 `s3` |
-| `qtbase` | 客户端界面框架 | `client` feature，启用 `glib`／`xkb`／`xkbcommon-x11` |
-| `drogon` | 管理后台 HTTP 框架（admin 独立进程监听 8089） | `admin` feature（2026-10-11 拍板引入；`third_party/组件清单.md` 登记待补） |
-| `crashpad` | 客户端崩溃采集（独立 handler 进程落 minidump，dump 只本地落盘） | `crashpad` feature（随 `client` 构建启用） |
-| `gcovr` | CI 覆盖率汇总 | vcpkg 无此 port，由 CI 系统包提供（宿主工具，不随产物分发） |
+| `asio` | Server network I/O | header-only, `server` feature |
+| `protobuf` | Protocol payload encode/decode (libprotobuf + protoc generation) | Installed by default (base); the Android/iOS/HarmonyOS ends each generate from the same `common/proto/memex.proto` via their own toolchains |
+| `nlohmann-json` | Protocol JSON encode/decode | Installed by default (base, ≥3.11.3) |
+| `sqlite3` | Server local store (accounts / devices / archive / file metadata) | `server` feature |
+| `openssl` | Credential PBKDF2, device fingerprint SHA-256 (libcrypto only) | Installed by default (base, shared by both ends) |
+| `aws-sdk-cpp` | R23 storage abstraction layer (S3-compatible object storage client) | `server` feature, with `s3` enabled |
+| `qtbase` | Client UI framework | `client` feature, with `glib` / `xkb` / `xkbcommon-x11` enabled |
+| `drogon` | Admin console HTTP framework (the admin process listens on 8089 as a separate process) | `admin` feature (decision taken 2026-10-11; registration in `third_party/组件清单.md` still pending) |
+| `crashpad` | Client crash reporting (a standalone handler process writes the minidump; dumps stay on local disk only) | `crashpad` feature (enabled with the `client` build) |
+| `gcovr` | CI coverage aggregation | No such port in vcpkg, provided by CI system packages (a host tool, not shipped with artifacts) |
 
-底座（不启用 feature）只装双端共享依赖（protobuf／nlohmann-json／openssl）；
-服务端构建启用 `server` feature（preset 经 `VCPKG_MANIFEST_FEATURES` 声明，
-容器 deps 层直调 `vcpkg install --x-feature=server`），带 Qt 桌面的构建启用
-`client` feature（＋`crashpad`）——所以每日构建的服务端产物不会拖 Qt 编译，
-清单仍是唯一入口。服务端 preset 另用安装树 `vcpkg_installed-server/`，
-与带 Qt 的 `vcpkg_installed/` 并存，两边互不剪枝。鸿蒙交叉构建（T6.2）用
-`client` feature＋官方 `arm64-ohos` triplet，不装服务端三件套。
+The base (no feature enabled) installs only the dependencies shared by both ends
+(protobuf / nlohmann-json / openssl); a server build enables the `server` feature (the preset
+declares it via `VCPKG_MANIFEST_FEATURES`, and the container deps layer calls
+`vcpkg install --x-feature=server` directly), and a build with the Qt desktop enables the
+`client` feature (+`crashpad`) — so the daily build's server artifacts do not drag in Qt
+compilation, and the manifest remains the single entry point. The server preset additionally
+uses the installed tree `vcpkg_installed-server/`, which coexists with the Qt-bearing
+`vcpkg_installed/`, and neither prunes the other. The HarmonyOS cross build (T6.2) uses the
+`client` feature + the official `arm64-ohos` triplet and does not install the server trio.
 
-Qt 的 `glib` feature 不是可选项：Linux 桌面 Qt 的 xcb 平台插件引用 glib
-事件分发器符号，缺该 feature 时桌面端启动即中止。
+Qt's `glib` feature is not optional: the xcb platform plugin of desktop Qt on Linux references
+glib event-dispatcher symbols, and without that feature the desktop client aborts at startup.
 
-Triplet 统一用 `x64-linux-dynamic`（社区 triplet）：Qt 以 LGPL-3.0 **动态链接**
-是既定合规口径，而 vcpkg 默认 triplet（`x64-linux`）对 qtbase 是静态构建，
-不能用于本项目。
+The triplet is uniformly `x64-linux-dynamic` (a community triplet): **dynamically linking** Qt
+under LGPL-3.0 is the established compliance decision, whereas vcpkg's default triplet
+(`x64-linux`) builds qtbase statically and cannot be used in this project.
 
-## vcpkg Bootstrap（一次性，随后直接用 preset）
+## vcpkg Bootstrap (one time, then go straight to the presets)
 
 ```bash
 # 1. 获取 vcpkg（建议放在固定目录，如 ~/vcpkg）
@@ -61,10 +68,10 @@ cd ~/vcpkg
 export VCPKG_ROOT=~/vcpkg
 ```
 
-> **CI/每日构建** 已内置 `lukka/run-vcpkg@v11`（自动 clone、bootstrap、
-> 二进制缓存），无需手动干预。
+> **CI / daily build** already has `lukka/run-vcpkg@v11` built in (automatic clone,
+> bootstrap, binary cache); no manual intervention is needed.
 
-## 构建与测试（Preset 一条命令）
+## Build and test (one preset command)
 
 ```bash
 git clone https://github.com/cuihairu/memex.git
@@ -77,28 +84,32 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
-Preset 一览（`CMakePresets.json`，Ninja 生成器；本机 Linux 构建 vcpkg 安装树统一在 `vcpkg_installed/`，跨平台 preset 各自独立安装树）：
+Preset overview (`CMakePresets.json`, Ninja generator; on a local Linux machine the vcpkg
+installed tree is unified at `vcpkg_installed/`, while cross-platform presets each use their
+own installed tree):
 
-| Preset | 用途 | 构建目录 | 配置 |
+| Preset | Purpose | Build directory | Configuration |
 | --- | --- | --- | --- |
-| `base` | 公共基线（hidden，各 preset 继承） | `build/` | Ninja · vcpkg toolchain · `x64-linux-dynamic` |
-| `dev` | 本地开发 | `build/` | Release · 服务端+客户端+测试（manifest `server;client;crashpad;admin`） |
-| `ci` | CI 门禁 | `build-ci/` | Debug · `--coverage` · 全量（manifest `server;client;crashpad;admin`） |
-| `server-release` | 每日构建 · 服务端 | `build-server/` | Release · 仅服务端（manifest `server;admin`） |
-| `client-release` | 每日构建 · 客户端 | `build-client/` | Release · 仅客户端（manifest `client;crashpad`） |
-| `client-release-win` | 每日构建 · 客户端（Windows x64） | `build-client-win/` | Release · 官方 Qt + vcpkg 非 Qt 依赖（manifest `crashpad`） |
-| `client-release-mac` | 每日构建 · 客户端（macOS arm64） | `build-client-mac/` | Release · 官方 Qt + vcpkg 静态非 Qt 依赖（manifest `crashpad`） |
-| `client-release-ohos` | 每日构建 · 客户端（鸿蒙 arm64 交叉） | `build-client-ohos/` | Release · Qt for OpenHarmony + vcpkg ohos 依赖（manifest `client`） |
-| `server-release-mac` | 每日构建 · 服务端（macOS arm64） | `build-server-mac/` | Release · vcpkg 静态依赖，单二进制分发 |
+| `base` | Shared baseline (hidden, inherited by each preset) | `build/` | Ninja · vcpkg toolchain · `x64-linux-dynamic` |
+| `dev` | Local development | `build/` | Release · server + client + tests (manifest `server;client;crashpad;admin`) |
+| `ci` | CI gate | `build-ci/` | Debug · `--coverage` · full set (manifest `server;client;crashpad;admin`) |
+| `server-release` | Daily build · server | `build-server/` | Release · server only (manifest `server;admin`) |
+| `client-release` | Daily build · client | `build-client/` | Release · client only (manifest `client;crashpad`) |
+| `client-release-win` | Daily build · client (Windows x64) | `build-client-win/` | Release · official Qt + vcpkg non-Qt dependencies (manifest `crashpad`) |
+| `client-release-mac` | Daily build · client (macOS arm64) | `build-client-mac/` | Release · official Qt + vcpkg static non-Qt dependencies (manifest `crashpad`) |
+| `client-release-ohos` | Daily build · client (HarmonyOS arm64 cross) | `build-client-ohos/` | Release · Qt for OpenHarmony + vcpkg ohos dependencies (manifest `client`) |
+| `server-release-mac` | Daily build · server (macOS arm64) | `build-server-mac/` | Release · vcpkg static dependencies, single-binary distribution |
 
-各 preset 独立构建目录，互不污染缓存；vcpkg 安装树由 manifest 统一管理，
-本机 Linux 的带 Qt 构建共用 `vcpkg_installed/`，服务端 preset 用 `vcpkg_installed-server/`，
-win／mac／ohos preset 各用 `vcpkg_installed-{win,mac,ohos}[-server]/`。
+Each preset has its own build directory, so caches never pollute one another; the vcpkg
+installed trees are managed uniformly by the manifest — Qt-bearing builds on a local Linux
+machine share `vcpkg_installed/`, the server preset uses `vcpkg_installed-server/`, and the
+win / mac / ohos presets each use `vcpkg_installed-{win,mac,ohos}[-server]/`.
 
-二进制缓存：本机默认 `~/.cache/vcpkg/archives`（可用 `VCPKG_DEFAULT_BINARY_CACHE`
-换目录）。manifest 未变化时，二次配置从缓存恢复编译产物，秒级完成。
+Binary cache: locally the default is `~/.cache/vcpkg/archives` (redirect it with
+`VCPKG_DEFAULT_BINARY_CACHE`). When the manifest has not changed, a second configure restores
+build artifacts from cache and finishes in seconds.
 
-## 文档站
+## Documentation site
 
 ```bash
 cd docs
@@ -108,13 +119,21 @@ pnpm docs:build    # 构建到 src/.vitepress/dist
 pnpm docs:preview  # 本地预览构建产物
 ```
 
-## 工程纪律
+## Engineering discipline
 
-- 提交门禁：全量测试绿才允许 commit／push；push 前 `git fetch origin && git rebase origin/main`。
-- 每个「可验收增量」一笔提交；不打 tag、不发 release、不 force push。
-- 组件级许可纪律：不引入 AGPL／SSPL 组件；宽松许可组件登记进 `third_party/` 清单。
-- 命名规范：代号 Memex，服务名 MemexServer，数据库与日志前缀 `memex`。
+- Commit gate: a commit / push is allowed only when the full test suite is green; before
+  pushing, `git fetch origin && git rebase origin/main`.
+- One commit per "verifiable increment"; no tags, no releases, no force pushes.
+- Component-level license discipline: no AGPL / SSPL components are introduced; components
+  under permissive licenses are registered in the `third_party/` list.
+- Naming convention: codename Memex, service name MemexServer, database and log prefix `memex`.
 
-## 模块边界
+## Module boundaries
 
-Monorepo 结构与模块边界对应评审报告第四章／第五章：两套引擎各自完整、不共享通信状态，只通过共享内核交汇；服务端六模块（网关、账号与设备、组织架构、消息与归档、策略、文件元数据）以单进程单库形式集聚实现。完整结构见仓库 [README](https://github.com/cuihairu/memex#readme)（含 `apps/` 手机端三端）。
+The Monorepo structure and module boundaries correspond to chapters four / five of the review
+report: the two engines are each self-contained and share no communication state, meeting only
+through the shared core; the server's six modules (gateway, accounts & devices, organization
+structure, messaging & archive, policy, file metadata) are implemented together as a single
+process on a single database. For the complete structure see the repo
+[README](https://github.com/cuihairu/memex#readme) (including the three mobile ends under
+`apps/`).

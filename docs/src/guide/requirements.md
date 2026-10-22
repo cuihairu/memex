@@ -1,68 +1,68 @@
-# 需求与验收
+# Requirements and Acceptance
 
-> R 条目＝需求与验收口径，A 条目＝第一期验收标准。任务级拆解（T0–T6，可验收粒度）见仓库根目录 [todo.md](https://github.com/cuihairu/memex/blob/main/todo.md)（主线外另有 R23–R27 追加批次）。
+> R entries = requirements and acceptance criteria; A entries = phase-one acceptance standards. The task-level breakdown (T0–T6, at acceptable grain) is in the repository root's [todo.md](https://github.com/cuihairu/memex/blob/main/todo.md) (outside the main line there is also the R23–R27 appended batch).
 
-## 留痕原则（铁律）
+## The traceability principle (iron rule)
 
-**连接服务端的唯一目的是留痕。** 以下功能永久排除，不排期、不留接口、不作为可配置项：
+**The only purpose of connecting to the server is traceability.** The following features are permanently excluded — not scheduled, no interface reserved, not offered as a configurable option:
 
-- 密聊／阅后即焚：不存在「发送后自动消失」的会话形态；
-- 撤回抹除归档：撤回仅作用于客户端显示，服务端保留原文并记录撤回事件（谁、何时、撤回哪条）；
-- 终端侧单方删除归档：清本地缓存不影响服务端记录，界面区分「本地缓存」与「云端归档」；
-- 面向使用者的留痕开关：留档策略仅由管理侧按部门下发。
+- Secret chat / burn-after-reading: no conversation form of "automatically disappears after sending" exists;
+- Recall erasing the archive: recall only affects the client display; the server keeps the original text and records the recall event (who, when, which message was recalled);
+- One-sided deletion of the archive on the terminal side: clearing the local cache does not affect the server records; the UI distinguishes「本地缓存」from「云端归档」;
+- A traceability switch for users: archiving policy is only issued by the administration side, per department.
 
-衍生口径：归档以**消息**为单位判定（不以会话为单位）；跨态会话唯一留痕缺口以「未归档」标识显式暴露且不可关闭；媒体内容不落地存储，但「发生过这次通信」的元数据必须归档。
+Derived rules: archiving is judged in units of **messages** (not in units of sessions); the only traceability gap of cross-state sessions is explicitly exposed with the「未归档」label and cannot be dismissed; media content is not stored to disk, but the metadata recording "this communication happened" must be archived.
 
-## 需求清单（R1–R19）
+## Requirements list (R1–R19)
 
-| 编号 | 需求 | 优先级 | 验收口径 | 期次 |
+| ID | Requirement | Priority | Acceptance criteria | Phase |
 | --- | --- | --- | --- | --- |
-| R1 | 不登录即可使用，无需配置 | 必须 | 安装后不填地址、不注册即可自动发现同网段终端并收发消息 | 一 |
-| R2 | 直连态消息不经服务器 | 必须 | 点对点传输，服务端无任何记录，抓包可验证 | 一 |
-| R3 | 登录后聊天记录集中留存 | 必须 | 协作态消息统一落服务端；管理员可按人员／时间／关键词检索；终端删除不影响留存；不提供任何可由发送方消除已归档内容的功能 | 一 |
-| R4 | 换机登录与多端管控 | 必须 | 账号可在不同电脑登录；桌面端同账号仅一台在线，重复登录前一个被踢并收到提示；每次登录记录设备类型与标识 | 一 |
-| R5 | 双态集成于同一客户端 | 必须 | 单一安装包；未登录为直连态，登录后切换协作态，切换不重启、不丢本地历史 | 一 |
-| R6 | 局域网文件共享 | 必须 | 目录级共享与权限区分；文件字节不经公网 | 一 |
-| R7 | 归档范围可标识 | 必须 | 跨态会话界面明确标注「未归档」且不可关闭；归档起点可追溯 | 一 |
-| R8 | 国产操作系统 | 重要 | 至少覆盖统信 UOS 与麒麟 Linux，消息／文件／界面显示正常（现仅 Ubuntu 24.04 沙箱验证；UOS／麒麟实机实测待补，现场清单见[平台适配](/guide/platform-adapter)） | 一 |
-| R9 | 跨网段与多地域、大文件 | 重要 | 跨网段与跨地域由协作态承接；直连态限本网段；支持整目录发送与断点续传 | 一 |
-| R10 | 功能范围参照企业微信 | 重要 | 按二期分期清单逐项验收，不要求一次性达成 | 二起 |
-| R11 | 内网 AI 能力 | 计划 | 群内助手、会议纪要、需求整理；模型内网部署；归档数据只送本地模型 | 三 |
-| R12 | 服务端高可用 | 重要 | 服务端故障时直连态仍可通信；具备备份与恢复预案 | 一 |
-| R13 | 沟通体验 | 重要 | 内置截图与标注后直接发送；自定义表情包导入；常用联系人置顶与快速查找 | 一 |
-| R14 | 组织架构含汇报关系与可见性 | 重要 | 成员资料可查看直属上级；按部门设置通讯录可见范围；敏感字段可隐藏 | 一 |
-| R15 | 办公室位置图 | 计划 | 楼层平面图定位工位；搜索姓名图上高亮；按园区楼层限定可见 | 二 |
-| R16 | 远程协助 | 计划 | 请求远程查看／控制；被控方显式授权、过程持续可见、全程留痕；默认仅 IT 运维（媒体现役走文件面 HTTP 中继；WebRTC 媒体底座未实现、留后续） | 二 |
-| R17 | 手机端首次连接必须初始化服务器地址（追加） | 必须 | 移动端首次启动进入初始化向导，第一步为域名／服务器地址设置，填写并连通校验通过后才能进入主界面；未初始化不出现任何可聊天界面 | 一 |
-| R18 | 手机端不提供匿名聊天（追加） | 必须 | 直连态／免登录能力仅存在于桌面端；移动端全部为协作态；移动端界面不出现「免登录体验」「附近设备直连」类入口 | 一 |
-| R19 | 客户端主题切换（追加） | 重要 | 亮／暗双主题：跟随系统＋设置内手动切换，选择持久化；颜色令牌化并预留多主题扩展位，品牌橙为主色 | 一（主线后） |
+| R1 | Usable without login, no configuration needed | Required | After installation, with no address filled in and no registration, terminals on the same segment are automatically discovered and messages can be sent and received | 1 |
+| R2 | Direct-mode messages do not pass through the server | Required | Peer-to-peer transfer; the server keeps no records at all; verifiable by packet capture | 1 |
+| R3 | Centralized retention of chat records after login | Required | Collaboration-mode messages are uniformly stored on the server; administrators can search by person / time / keyword; terminal deletion does not affect retention; no feature exists that lets the sender eliminate archived content | 1 |
+| R4 | Login on different machines and multi-device control | Required | An account can log in on different computers; on the desktop only one instance of the same account is online — a repeated login kicks out the previous one and it receives a notice; each login records the device type and identifier | 1 |
+| R5 | Both states integrated into one client | Required | A single installer; not logged in = direct mode, switching to collaboration mode after login; switching requires no restart and loses no local history | 1 |
+| R6 | LAN file sharing | Required | Directory-level sharing with permission differentiation; file bytes do not pass over the public network | 1 |
+| R7 | Archive scope identifiable | Required | Cross-state sessions are clearly labeled「未归档」in the UI and the label cannot be dismissed; the archive start point is traceable | 1 |
+| R8 | Domestic operating systems | Important | At least cover UnionTech UOS and Kylin Linux, with messaging / files / UI display all working normally (currently only verified in an Ubuntu 24.04 sandbox; real-device testing on UOS / Kylin still to be added — the on-site list is in [平台适配](/guide/platform-adapter)) | 1 |
+| R9 | Cross-segment and multi-region, large files | Important | Cross-segment and cross-region communication is carried by the collaboration mode; direct mode is limited to this segment; whole-directory sending and resumable transfer supported | 1 |
+| R10 | Functional scope references 企业微信 | Important | Accepted item by item against the phase-two list; no requirement to achieve it all at once | 2+ |
+| R11 | Intranet AI capabilities | Planned | In-group assistant, meeting minutes, requirement organization; model deployed on the intranet; archived data is only sent to local models | 3 |
+| R12 | Server high availability | Important | Direct mode can still communicate when the server fails; a backup and recovery plan exists | 1 |
+| R13 | Communication experience | Important | Built-in screenshot and annotation sent directly; custom emoji pack import; frequent contacts pinned with quick lookup | 1 |
+| R14 | Organizational structure with reporting relations and visibility | Important | Member profiles show the direct superior; directory visibility scope set per department; sensitive fields can be hidden | 1 |
+| R15 | Office location map | Planned | Floor plans locate workstations; searching a name highlights it on the map; visibility limited by campus floor | 2 |
+| R16 | Remote assistance | Planned | Request remote view / control; the controlled party grants explicit authorization, the process stays continuously visible, the whole session is traced; default is IT operations only (current media goes over the file-surface HTTP relay; the WebRTC media foundation is not implemented and deferred) | 2 |
+| R17 | First mobile connection must initialize the server address (appended) | Required | On first mobile launch the initialization wizard is entered; the first step is domain / server address setup, and only after filling it in and passing the connectivity check can the main interface be entered; before initialization no chat-capable interface appears | 1 |
+| R18 | No anonymous chat on mobile (appended) | Required | Direct mode / login-free capability exists only on desktop; mobile is entirely collaboration mode; no「免登录体验」/「附近设备直连」-style entry appears in the mobile UI | 1 |
+| R19 | Client theme switching (appended) | Important | Light / dark dual themes: follow the system + manual switching in settings, the choice is persisted; colors are tokenized with a multi-theme extension slot reserved, brand orange as the primary color | 1 (after main line) |
 
-## 第一期验收标准（A1–A23）
+## Phase-one acceptance standards (A1–A23)
 
-| 编号 | 验收项 | 标准 |
+| ID | Acceptance item | Standard |
 | --- | --- | --- |
-| A1 | 免登录免配置可用 | 新终端安装后不填地址、不输账号即可发现同网段终端并发起会话 |
-| A2 | 直连态不经服务器 | 抓包验证直连态消息无服务端流量；服务端无任何相关记录 |
-| A3 | 模式切换 | 填入服务器地址并登录后正常切换至协作态，无需重启，本地历史正常保留与合并 |
-| A4 | 多端登录管控 | 同一账号在第二台电脑登录后，第一台被下线并收到提示；桌面端与移动端可同时在线 |
-| A5 | 登录记录完整性 | 后台可查到账号的全量登录记录，含设备类型、设备名称、时间与来源 |
-| A6 | 归档完整性 | 协作态会话在终端删除本地记录、或发送方撤回消息后，管理员仍可检索到原始消息内容；撤回动作本身（谁、何时、撤回哪条）亦可查 |
-| A7 | 跨态会话标识 | 与未登录终端的会话显示「未归档」标记，且标记不可关闭 |
-| A8 | 归档起点准确性 | 跨态转为协作态的会话，后台显示的归档起点与实际登录时间一致 |
-| A9 | 策略开关生效 | 关闭「允许与未登录设备通信」后跨态会话无法建立；关闭「允许免登录使用」后未登录客户端无法进入主界面 |
-| A10 | 文件传输与共享 | 文件与文件夹传输完成，断点续传有效；共享目录按权限访问，越权被拒 |
-| A11 | 服务端降级表现 | 服务端不可用时客户端明确提示并回落至直连态，同网段消息与文件传输仍可用 |
-| A12 | 国产系统覆盖 | 在统信 UOS 与麒麟终端上完成消息收发、文件传输与界面显示正常（实机实测待补——现仅 Ubuntu 24.04 沙箱验证，现场清单见[平台适配](/guide/platform-adapter)） |
-| A13 | 跨网段通信 | 不同 VLAN 的终端之间协作态消息正常收发；直连态限本网段，不作跨网段要求 |
-| A14 | 服务端恢复 | 按预案完成一次数据库恢复演练，验证流程可执行、数据完整 |
-| A15 | 多地域接入 | 异地地域经专线接入同一服务端，登录、消息收发、组织架构与历史检索功能正常 |
-| A16 | 断线归档规则 | 服务端不可达期间协作态双方消息本地暂存，恢复连接后按消息标识去重补传，归档无重复、无缺失 |
-| A17 | 截图与标注 | 在多显示器与高 DPI 环境下截图区域正确；涂鸦、箭头、马赛克可用；确认后直接发送至会话 |
-| A18 | 表情与常用联系人 | 自定义表情包可导入并在会话中发送；常用联系人在换机登录后完整保留 |
-| A19 | 汇报关系 | 成员资料中可查看直属上级；按上级链路可逐级上溯；批量导入生效且能校验错误项 |
-| A20 | 通讯录可见性 | 被隐藏的部门与成员不出现在通讯录且不可被搜索；受限部门仅能看到本部门通讯录 |
-| A21 | 媒体底座可用性 | 截图功能的画面采集在目标终端（Windows、UOS、麒麟）可用，不支持的环境有明确降级提示；WebRTC 连接可建立的验证**留后续**（WebRTC 媒体底座未引入，现役远程协助媒体走服务端 HTTP 中继，见 R16） |
-| A22 | 组件许可清单 | 交付时提供完整第三方组件清单，经核查不含 AGPL／SSPL 等强传染性许可组件；例外项保持独立进程部署并留有核验记录（2026-10-13 复核：vcpkg manifest 九个组件——asio／protobuf／nlohmann-json／sqlite3／openssl／aws-sdk-cpp:s3／qtbase／drogon／crashpad，其中 drogon 待登记进 `third_party/组件清单.md`；核验记录见[合规与命名一致性](/guide/compliance)） |
-| A23 | 系统标识一致性 | 安装包名、Windows 服务名、数据库与日志前缀、内网域名统一采用 Memex 标识 |
+| A1 | Usable without login or configuration | On a new terminal, after installation with no address filled in and no account entered, terminals on the same segment can be discovered and a conversation started |
+| A2 | Direct mode does not pass through the server | Packet capture verifies that direct-mode messages generate no server traffic; the server keeps no related records at all |
+| A3 | Mode switching | After entering the server address and logging in, switching to collaboration mode works normally without a restart, and local history is preserved and merged normally |
+| A4 | Multi-device login control | After the same account logs in on a second computer, the first is taken offline and receives a notice; desktop and mobile can be online simultaneously |
+| A5 | Login record completeness | The console can query an account's full login records, including device type, device name, time, and source |
+| A6 | Archive completeness | After a collaboration-mode session's local records are deleted on the terminal, or after the sender recalls a message, the administrator can still search out the original message content; the recall action itself (who, when, which message was recalled) is also queryable |
+| A7 | Cross-state session labeling | Sessions with not-logged-in terminals show the「未归档」marker, and the marker cannot be dismissed |
+| A8 | Archive start accuracy | For a session that turned from cross-state into collaboration mode, the archive start point shown in the console matches the actual login time |
+| A9 | Policy switches take effect | After turning off「允许与未登录设备通信」, cross-state sessions cannot be established; after turning off「允许免登录使用」, a not-logged-in client cannot enter the main interface |
+| A10 | File transfer and sharing | File and folder transfer completes, resumable transfer works; shared directories are accessed per permissions and over-privileged access is denied |
+| A11 | Server degradation behavior | When the server is unavailable, the client shows a clear notice and falls back to direct mode; same-segment messaging and file transfer remain usable |
+| A12 | Domestic system coverage | On UnionTech UOS and Kylin terminals, messaging, file transfer, and UI display all work normally (real-device testing still to be added — currently only verified in an Ubuntu 24.04 sandbox; the on-site list is in [平台适配](/guide/platform-adapter)) |
+| A13 | Cross-segment communication | Collaboration-mode messages between terminals on different VLANs send and receive normally; direct mode is limited to this segment with no cross-segment requirement |
+| A14 | Server recovery | A database recovery drill completed per the plan, verifying that the process is executable and the data is complete |
+| A15 | Multi-region access | Remote regions access the same server over dedicated lines, with login, messaging, organizational structure, and history retrieval all working normally |
+| A16 | Disconnection archiving rule | While the server is unreachable, both parties' collaboration-mode messages are held locally; after the connection is restored they are re-sent with de-duplication by message identifier, leaving the archive with no duplicates and no gaps |
+| A17 | Screenshot and annotation | The screenshot area is correct in multi-monitor and high-DPI environments; doodle, arrow, and mosaic all work; after confirming, sent directly into the conversation |
+| A18 | Emoji and frequent contacts | A custom emoji pack can be imported and sent in a conversation; frequent contacts are fully preserved after logging in on a different machine |
+| A19 | Reporting relations | The direct superior is viewable in member profiles; the superior chain can be traversed level by level upward; bulk import takes effect and can validate error entries |
+| A20 | Directory visibility | Hidden departments and members do not appear in the directory and cannot be searched; restricted departments can only see their own department's directory |
+| A21 | Media foundation availability | Screen capture for the screenshot feature works on target terminals (Windows, UOS, Kylin), with a clear degradation notice for unsupported environments; verification that a WebRTC connection can be established is **deferred** (the WebRTC media foundation is not introduced; current remote-assistance media goes over the server-side HTTP relay, see R16) |
+| A22 | Component license list | A complete third-party component list is provided at delivery and verified to contain no strongly infectious license components such as AGPL / SSPL; exceptions remain deployed as separate processes with verification records kept (2026-10-13 re-verification: nine components in the vcpkg manifest — asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:s3 / qtbase / drogon / crashpad, of which drogon is still to be registered in `third_party/组件清单.md`; verification records are in [合规与命名一致性](/guide/compliance)) |
+| A23 | System identifier consistency | The installer name, Windows service name, database and log prefixes, and intranet domain all use the Memex identity |
 
-任务与验收的逐条映射在 [todo.md](https://github.com/cuihairu/memex/blob/main/todo.md) 每个任务的「验收」行内。
+The item-by-item mapping of tasks to acceptance is in the「验收」line of every task in [todo.md](https://github.com/cuihairu/memex/blob/main/todo.md).

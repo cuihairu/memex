@@ -1,4 +1,4 @@
-> **English** | [中文](消息标识与归档去重.md)
+> **English** | [中文](../zh/design/消息标识与归档去重.md)
 
 # Message Identity and Archive Dedup Design (BUG-007 Whole-System Design Spec)
 

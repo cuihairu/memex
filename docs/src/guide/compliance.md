@@ -1,46 +1,45 @@
-# 合规与命名一致性（T5.3）
+# Compliance and Naming Consistency (T5.3)
 
-> 对应验收项 A22（组件许可清单）与 A23（系统标识一致性）。核验日期：2026-10-03；2026-10-04 增补（R23 存储抽象层引入 aws-sdk-cpp:s3，manifest 服务端依赖 sqlite3／openssl 一并登记，见 `third_party/组件清单.md`）；2026-10-10 vite 三公告闭环复核＋引入日期补注（见下表与考证行）；2026-10-13 A22 清单复核补登 crashpad／drogon（drogon 待登记进 `third_party/组件清单.md`）。
+> Corresponds to acceptance item A22 (component license inventory) and A23 (system identity consistency). Verification date: 2026-10-03; supplemented 2026-10-04 (the R23 storage abstraction layer introduced aws-sdk-cpp:s3; the manifest's server-side dependencies sqlite3/openssl were registered together, see `third_party/组件清单.md`); 2026-10-10 closed-loop re-verification of the three vite advisories plus introduction-date annotations (see the table and research note below); 2026-10-13 A22 inventory re-verification added crashpad/drogon (drogon pending registration in `third_party/组件清单.md`).
 
-## A22 组件许可核验记录
+## A22 Component License Verification Record
 
-第三方组件经 vcpkg manifest（仓库根 `vcpkg.json`）单一事实源声明，
-清单见 `third_party/组件清单.md`。本轮核验结论：
+Third-party components are declared through the vcpkg manifest (the single source of truth at the repo root `vcpkg.json`); the inventory is in `third_party/组件清单.md`. Conclusions of this verification round:
 
-| 核验点 | 结论 |
+| Verification point | Conclusion |
 | --- | --- |
-| 强传染性许可（AGPL／SSPL 等） | 无——清单覆盖 asio（BSL-1.0）、protobuf（BSD-3-Clause）、nlohmann/json（MIT）、sqlite3（Public Domain）、openssl（Apache-2.0）、aws-sdk-cpp:s3（Apache-2.0）、vcpkg（MIT）、Qt（LGPL-3.0）、crashpad（Apache-2.0）、drogon（MIT AND BSD-3-Clause，vcpkg manifest 已声明；`third_party/组件清单.md` 登记待补） |
-| Qt 链接方式 | LGPL-3.0 动态链接（`x64-linux-dynamic` triplet），不静态链接、不修改 Qt 源码 |
-| 源码 vendoring | 仓库不 vendor 第三方源码，全部由 vcpkg 按 baseline 获取 |
-| 依赖升级路径 | 提升 `builtin-baseline` 一并更新清单版本列；`overrides` 当前空（无个别锁版） |
+| Strongly copyleft licenses (AGPL/SSPL etc.) | None — the inventory covers asio (BSL-1.0), protobuf (BSD-3-Clause), nlohmann/json (MIT), sqlite3 (Public Domain), openssl (Apache-2.0), aws-sdk-cpp:s3 (Apache-2.0), vcpkg (MIT), Qt (LGPL-3.0), crashpad (Apache-2.0), drogon (MIT AND BSD-3-Clause, declared in the vcpkg manifest; registration in `third_party/组件清单.md` pending) |
+| Qt linking | LGPL-3.0 dynamic linking (`x64-linux-dynamic` triplet); no static linking, no modification of Qt source |
+| Source vendoring | The repo vendors no third-party source; everything is fetched by vcpkg per the baseline |
+| Dependency upgrade path | Bumping `builtin-baseline` updates the inventory version column together; `overrides` is currently empty (no individual version pins) |
 
-交付时本清单随包一并提供，即为 A22 交付物。
+This inventory ships with the deliverable package and constitutes the A22 deliverable.
 
-## 依赖安全公告处理（dependabot）
+## Dependency Security Advisory Handling (dependabot)
 
-2026-10-03 处置记录（`gh api .../dependabot/alerts`，4 条）：
+2026-10-03 handling record (`gh api .../dependabot/alerts`, 4 items):
 
-| 公告 | 包 | 处置 |
+| Advisory | Package | Handling |
 | --- | --- | --- |
-| GHSA-67mh-4wv8-2f99（esbuild ≤0.24.2） | esbuild 0.21.5 | 已修：`docs/package.json` 加 `pnpm.overrides.esbuild ^0.25.0` → 0.25.12，`docs:build` 绿 |
-| GHSA-4w7w-66w2-5vf9 / GHSA-fx2h-pf6j-xcff / GHSA-v6wh-96g9-6wx3（vite ≤6.4.1/≤6.4.2） | vite 5.4.21（文档站初版内嵌件） | 已修（2026-10-04 `1747f69`）：`pnpm.overrides.vite ^6.4.3` 即统一——vitepress 1.x 内嵌件一并钉版，lockfile 仅剩 6.4.3 一处，`docs:build` 全站 15 页过；dependabot 三条状态=fixed（2026-10-10 复核）。原「升级需 vitepress 2.0 alpha（vite ^8）」评估不成立（override 无需动 vitepress）；「dev server 专属、静态产物不携带」的降级理由仍成立，但已无需降级 |
+| GHSA-67mh-4wv8-2f99 (esbuild ≤0.24.2) | esbuild 0.21.5 | Fixed: added `pnpm.overrides.esbuild ^0.25.0` to `docs/package.json` → 0.25.12, `docs:build` green |
+| GHSA-4w7w-66w2-5vf9 / GHSA-fx2h-pf6j-xcff / GHSA-v6wh-96g9-6wx3 (vite ≤6.4.1/≤6.4.2) | vite 5.4.21 (embedded in the initial docs site) | Fixed (2026-10-04 `1747f69`): `pnpm.overrides.vite ^6.4.3` unifies everything — the vitepress 1.x embedded copy is pinned along with it, the lockfile now contains only 6.4.3, `docs:build` passes on all 15 pages of the site; the three dependabot alerts show status=fixed (re-verified 2026-10-10). The earlier assessment that "upgrading requires vitepress 2.0 alpha (vite ^8)" does not hold (the override needs no vitepress change); the downgrade rationale "dev server only, static artifacts do not carry it" still holds, but downgrading is no longer needed |
 
-复审周期：每季度或 vitepress 正式版发版时重核。
+Review cycle: quarterly, or upon each vitepress stable release.
 
-引入日期考证（2026-10-10 补注，与 `third_party/组件清单.md` 引入日期列同源）：VitePress 2026-10-02 随文档站引入（`9cf6f72`，devDep 仅 vitepress，vite 以内嵌传递件 5.4.21 同日入库）；vite 2026-10-04 起为直连 devDep（`1747f69`，升 6.4.3＋overrides 钉版）。
+Introduction-date research (annotated 2026-10-10, same source as the introduction-date column in `third_party/组件清单.md`): VitePress was introduced with the docs site on 2026-10-02 (`9cf6f72`; devDeps contain only vitepress, with vite entering the same day as an embedded transitive dependency at 5.4.21); vite became a direct devDep on 2026-10-04 (`1747f69`, upgraded to 6.4.3 plus overrides pinning).
 
-## A23 系统标识一致性核查
+## A23 System Identity Consistency Check
 
-对照评审报告 V10.0 第五章第六节「表 14 系统标识与命名清单」逐项核查当前产物：
+Checked the current artifacts item by item against "Table 14 System Identity and Naming Inventory" in section 5.6 of review report V10.0:
 
-| 规范项 | 规范值 | 仓库现状 | 结论 |
+| Spec item | Spec value | Repo status | Conclusion |
 | --- | --- | --- | --- |
-| 英文名与代号 | Memex | README、文档站 title、协议 package `memex.protocol.v1` | ✓ |
-| 代码仓库名 | memex | GitHub `cuihairu/memex`；服务端产物 `memex_server`、客户端 `memex_client` 二进制与 `memex-server`/`memex-client` 包名 | ✓ |
-| 数据库与日志前缀 | memex、[MEMEX] | 服务端默认库 `memex-server.db`、客户端本地库 `memex-local.db`、日志行前缀 `[MEMEX]`（`server/src/server.cpp`） | ✓ |
-| Windows 服务名 | MemexServer | 文档站（development.md、report.md）与服务端入口注释 `MemexServer 入口` 口径一致；服务端运行期日志以 `[MEMEX] MemexServer 监听` 输出 | ✓ |
-| 内网域名／主机名 | memex.corp.local（示例）、memex-srv | 评审报告部署章给出同口径示例 | ✓ |
-| 客户端安装包命名 | `MemexClient-x.y.z-*` | nightly 产物统一：linux `MemexClient-<版本>-linux-x64-<日期>-<短SHA>.tar.gz`、win `MemexClient-<版本>-win-x64.exe`（Inno 安装器）`/.zip`（便携）、macOS `MemexClient-<版本>-macos-arm64.dmg`（版本取根 CMakeLists PROJECT_VERSION；T4.7 落地） | ✓ |
-| 表述口径 | 「归档与检索」，不用「监控」「追踪」「审查」 | 界面归档提示条用「消息不进归档」，README 与文档站同口径 | ✓ |
+| English name and codename | Memex | README, docs site title, protocol package `memex.protocol.v1` | ✓ |
+| Code repository name | memex | GitHub `cuihairu/memex`; server artifact `memex_server`, client `memex_client` binaries and `memex-server`/`memex-client` package names | ✓ |
+| Database and log prefix | memex, [MEMEX] | Server default database `memex-server.db`, client local database `memex-local.db`, log line prefix `[MEMEX]` (`server/src/server.cpp`) | ✓ |
+| Windows service name | MemexServer | The docs site (development.md, report.md) and the server entry comment `MemexServer 入口` use the same wording; the server runtime log outputs `[MEMEX] MemexServer 监听` | ✓ |
+| Intranet domain / hostname | memex.corp.local (example), memex-srv | The review report's deployment chapter gives the same example | ✓ |
+| Client installer naming | `MemexClient-x.y.z-*` | Nightly artifacts are uniform: linux `MemexClient-<version>-linux-x64-<date>-<short-SHA>.tar.gz`, win `MemexClient-<version>-win-x64.exe` (Inno installer) `/.zip` (portable), macOS `MemexClient-<version>-macos-arm64.dmg` (version taken from root CMakeLists PROJECT_VERSION; landed in T4.7) | ✓ |
+| Wording convention | "Archive and retrieval"; do not use "monitor", "track", or "audit" | The in-app archive banner says 「消息不进归档」; README and docs site use the same wording | ✓ |
 
-核查结论：全部标识与命名清单一致，无偏差项（T4.7 安装包命名已落地）。
+Check conclusion: all identities and naming match the inventory, no deviations (T4.7 installer naming has landed).

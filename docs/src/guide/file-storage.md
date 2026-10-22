@@ -1,51 +1,36 @@
-# 文件存储与生命周期
+# File Storage and Lifecycle
 
-> R23 文件面（群文件／个人文件／文件助手／外网 uplink）与聊天文件两条
-> 生命周期的口径页（2026-10-13 评审五「文件生命周期口径对齐」落地）。
-> 决策背景见 [决策清单 #7](/guide/decisions)（集中部署·存储分卷实装——本页是 #7
-> 存储分卷落在文件面上的子口径，决策清单无独立的文件存储专项条目）；设计全文见仓库内
-> `docs/design/文件存储与外网单向传输.md`。
+> Convention page for the two lifecycles of the R23 file plane (group files / personal files / file assistant / external uplink) and chat files (2026-10-13, landing review five's "file lifecycle convention alignment").
+> Decision background: see [决策清单 #7](/guide/decisions) (centralized deployment · storage volume split implementation — this page is the sub-convention of #7's storage volume split as it lands on the file plane; the decision list has no dedicated file-storage entry); the full design text is in the repo at `docs/design/文件存储与外网单向传输.md`.
 
-## 两类文件
+## Two Kinds of Files
 
-产品里的「文件」有**两条独立生命周期**，口径不同，不混写：
+"Files" in the product have **two independent lifecycles** with different conventions; do not mix them:
 
-| | 聊天文件（直连临时） | 文件面文件（服务端持久化） |
+| | Chat files (direct, ephemeral) | File-plane files (server-persisted) |
 | --- | --- | --- |
-| 场景 | 会话里互传文件／图片／目录 | 群文件、个人文件、文件助手（收件箱／备忘录）、外网 uplink |
-| 字节路径 | 点对点直传，**不经服务端** | 经服务端代理落对象存储，**客户端永不直连对象存储** |
-| 元数据 | 判权经服务端（FILE_AUTHZ 只判权回结果）；传输元数据入归档**留后续（现未落库）**；直连态只存本机 | files 表（秒传／引用计数／两级配额／置顶），字节在对象卷 |
-| 开关 | 常开（直连态基本盘） | `--files-port` 显式开启，缺省关闭（uplink 另有 `--uplink-port`） |
-| 判权 | 发送前经服务端统一判权（可发／可收／跨部门／再转发；服务端不可达本地即拒——文件是权限面不可绕权） | FileServer 每请求判权（隔离／过期文件拒读、个人文件仅本人、群文件按角色） |
+| Scenario | Files / images / directories exchanged within a conversation | Group files, personal files, file assistant (inbox / memos), external uplink |
+| Byte path | Peer-to-peer direct transfer, **never through the server** | Proxied through the server into object storage; **the client never connects to object storage directly** |
+| Metadata | Authorization via the server (FILE_AUTHZ only decides and returns the result); transfer metadata into the archive **deferred (not persisted yet)**; direct mode stores only locally | files table (dedup-by-hash / reference counting / two-tier quotas / pinning); bytes live in the object volume |
+| Switch | Always on (the direct-mode baseline) | Explicitly enabled via `--files-port`, off by default (uplink has its own `--uplink-port`) |
+| Authorization | Unified server-side authorization before sending (can-send / can-receive / cross-department / re-forward; if the server is unreachable the local side rejects — files are a permission plane and cannot bypass authorization) | FileServer authorizes per request (quarantined / expired files denied reads, personal files owner-only, group files by role) |
 
-## 聊天文件：正文不入归档，元数据归档留后续
+## Chat Files: Content Not Archived, Metadata Archiving Deferred
 
-设计口径是协作态归档**传输元数据**（文件名、大小、哈希、收发方、时间），
-回答「传过什么」，**不含文件内容**；正文只落收发双方本机。现状：发送前
-判权经服务端（FILE_AUTHZ 只判权回结果，session.cpp:805-833），传输元数据
-暂不落库（归档无对应表）——该步**留后续**。直连态消息与文件都不入服务端
-归档（会话标注「仅存本机 · 不入归档」）。
+The design convention is that collaboration mode archives **transfer metadata** (file name, size, hash, sender/receiver, time) — answering "what was transferred" — and **does not include file content**; content lands only on the sender's and recipient's local machines. Current state: authorization before sending goes through the server (FILE_AUTHZ only decides and returns the result, session.cpp:805-833); transfer metadata is not yet persisted (the archive has no corresponding table) — that step is **deferred**. In direct mode neither messages nor files enter the server archive (conversations are labeled 「仅存本机 · 不入归档」).
 
-## 文件面：受理序与中断语义
+## File Plane: Acceptance Order and Interruption Semantics
 
-上传受理序：**判权 → 秒传 → 扫描（uplink 面）→ 扣配额 → 落字节 → 落
-元数据**——字节与元数据都不在受理完成前对外可见。
+Upload acceptance order: **authorization → dedup-by-hash → scan (uplink plane) → quota deduction → byte persistence → metadata persistence** — neither bytes nor metadata are externally visible before acceptance completes.
 
-- **上传中断**（连接断／超时）：字节不落。对象存储写入只发生在请求体
-  收全之后，中断＝无字节无行，客户端直接重传即可，无半截对象。
-- **落字节失败**（存储不可用）：502「对象存储写入失败」＋配额回滚，
-  不落元数据行。
-- **落元数据失败**：服务端删除已落字节（回滚），不留孤儿。
-- **唯一孤儿窗口**：落字节成功后、元数据落库前进程崩溃——残留无引用
-  对象。`files verify` 如实报「孤儿对象」告警（不判错）；是否清理属
-  运维决策，工具不代删（见 [备份恢复 · 一致性核对](/guide/backup-restore)）。
+- **Upload interrupted** (connection drop / timeout): no bytes are persisted. Object storage writes happen only after the request body is fully received; an interruption = no bytes and no row, and the client can simply retransmit — no half-written objects.
+- **Byte persistence failure** (storage unavailable): 502 「对象存储写入失败」 + quota rollback; no metadata row is written.
+- **Metadata persistence failure**: the server deletes the already-persisted bytes (rollback); no orphans are left.
+- **The only orphan window**: the process crashes after bytes are persisted but before metadata is committed — leaving an unreferenced object. `files verify` reports an "orphan object" warning as-is (not judged an error); whether to clean up is an operations decision — the tool does not delete on your behalf (see [备份恢复 · 一致性核对](/guide/backup-restore)).
 
-## 降级口径
+## Degradation Conventions
 
-消息面与文件面**零共享依赖**：聊天消息不经对象存储，对象存储不可用
-**不影响消息收发与归档**。
+The message plane and the file plane share **zero dependencies**: chat messages do not go through object storage, and object storage being unavailable **does not affect message send/receive or archiving**.
 
-- **存储后端未配置**：文件面上传 503「存储后端未配置」；元数据面
-  （列表／配额／备忘录）照常可用。
-- **存储后端不可达**：上传 502「对象存储写入失败」（配额已回滚）、
-  下载失败；客户端可重试，存储恢复后无需人工干预。
+- **Storage backend not configured**: file-plane uploads return 503 「存储后端未配置」; the metadata plane (lists / quotas / memos) remains fully usable.
+- **Storage backend unreachable**: uploads return 502 「对象存储写入失败」 (quota already rolled back) and downloads fail; the client can retry, and no manual intervention is needed once storage recovers.

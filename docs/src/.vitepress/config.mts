@@ -78,7 +78,7 @@ const buildSidebar = (prefix: string, labels: Record<string, string>, group: str
 
 export default defineConfig({
   title: 'Memex',
-  lang: 'zh-CN',
+  lang: 'en-US',
   base: '/memex/',
   cleanUrls: true,
   lastUpdated: true,
@@ -87,18 +87,19 @@ export default defineConfig({
     ['meta', { name: 'theme-color', content: '#e16531' }]
   ],
   locales: {
-    root: {
+    zh: {
       label: '简体中文',
       lang: 'zh-CN',
+      link: '/zh/',
       description: '内网办公即时通讯系统 · 对标企业微信 · 纯自研 · 物理隔离内网部署',
       themeConfig: {
         nav: [
-          { text: '指南', link: '/guide/product', activeMatch: '/guide/' },
-          { text: '需求与验收', link: '/guide/requirements' },
-          { text: '决策清单', link: '/guide/decisions' },
-          { text: '评审报告', link: '/guide/report' }
+          { text: '指南', link: '/zh/guide/product', activeMatch: '/zh/guide/' },
+          { text: '需求与验收', link: '/zh/guide/requirements' },
+          { text: '决策清单', link: '/zh/guide/decisions' },
+          { text: '评审报告', link: '/zh/guide/report' }
         ],
-        sidebar: buildSidebar('', zhLabels, '指南', '开发'),
+        sidebar: buildSidebar('/zh', zhLabels, '指南', '开发'),
         outline: { label: '本页目录', level: [2, 3] },
         docFooter: { prev: '上一页', next: '下一页' },
         lastUpdatedText: '最后更新于',
@@ -113,19 +114,18 @@ export default defineConfig({
         }
       }
     },
-    en: {
+    root: {
       label: 'English',
       lang: 'en',
-      link: '/en/',
       description: 'Intranet office IM · Enterprise-WeChat-class · Fully in-house · Air-gapped deployment',
       themeConfig: {
         nav: [
-          { text: 'Guide', link: '/en/guide/product', activeMatch: '/en/guide/' },
-          { text: 'Requirements', link: '/en/guide/requirements' },
-          { text: 'Decisions', link: '/en/guide/decisions' },
-          { text: 'Review Report', link: '/en/guide/report' }
+          { text: 'Guide', link: '/guide/product', activeMatch: '/guide/' },
+          { text: 'Requirements', link: '/guide/requirements' },
+          { text: 'Decisions', link: '/guide/decisions' },
+          { text: 'Review Report', link: '/guide/report' }
         ],
-        sidebar: buildSidebar('/en', enLabels, 'Guide', 'Development'),
+        sidebar: buildSidebar('', enLabels, 'Guide', 'Development'),
         outline: { label: 'On this page', level: [2, 3] },
         docFooter: { prev: 'Previous', next: 'Next' },
         lastUpdatedText: 'Last updated',
@@ -139,7 +139,7 @@ export default defineConfig({
           copyright: 'Enterprise-WeChat-class · Fully in-house · Air-gapped deployment'
         }
       }
-    }
+    },
   },
   themeConfig: {
     logo: '/logo.svg',

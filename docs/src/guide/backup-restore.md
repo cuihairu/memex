@@ -1,31 +1,22 @@
-# 备份恢复（T5.2）
+# Backup and Restore (T5.2)
 
-> 对应验收项 A14：按预案完成一次数据库恢复演练，验证流程可执行、数据完整。
-> 评审 P0-3 扩展（2026-10-12）：对象存储字节入预案——双资产叙事＋一致性核对
-> 工具＋干净机器全量恢复演练。
+> Corresponds to acceptance item A14: run one database recovery drill per the plan, verifying the procedure is executable and the data is intact.
+> Review P0-3 extension (2026-10-12): object storage bytes enter the plan — dual-asset narrative + consistency check tool + full recovery drill on a clean machine.
 
-## 资产边界
+## Asset Boundary
 
-服务端持久数据是**双资产**，缺一不可：
+The server's persistent data is a **dual asset**, and neither half is dispensable:
 
-1. **单库**（默认 `memex-server.db`，可用 `--db` 覆盖）：账号、设备台账、登录
-   记录、消息归档、已读回执、撤回事件、离线补投、组织架构与通讯录可见性、
-   群与成员角色、常用联系人、跨态日志、查阅审计、策略开关、webhook 台账、
-   R23 文件**元数据**（files 秒传/引用计数/置顶、群／个人两级配额、外网
-   uplink 预留日志）、表情包与头像 BLOB（落库不占对象卷）。
-2. **对象卷**（RustFS/S3 兼容桶，如 `memex-files`）：R23 文件**正文字节**，
-   内容寻址键 `groups/{gid}/{sha256}`、`users/{uid}/{sha256}`、
-   `inbox/{uid}/…`。客户端永不直连对象存储，字节全过文件面。
+1. **Single database** (default `memex-server.db`, overridable with `--db`): accounts, device registry, login records, message archive, read receipts, recall events, offline redelivery, org structure and address-book visibility, groups and member roles, frequent contacts, cross-mode logs, access audits, policy switches, webhook registry, R23 file **metadata** (files dedup-by-hash / reference counting / pinning, group/personal two-tier quotas, external uplink reservation logs), and sticker/avatar BLOBs (persisted in the database, not occupying the object volume).
+2. **Object volume** (RustFS/S3-compatible bucket, e.g. `memex-files`): R23 file **content bytes**, content-addressed keys `groups/{gid}/{sha256}`, `users/{uid}/{sha256}`, `inbox/{uid}/…`. The client never connects to object storage directly; all bytes go through the file plane.
 
-元数据在库、字节在卷——**单库备份不含文件正文**；只备库＝文件面元数据
-指向一个空桶。客户端直连态另有各机 `memex-local.db`（本机历史，不上报
-服务端），不纳入服务端预案。
+Metadata in the database, bytes in the volume — **a database-only backup contains no file content**; backing up only the database = file-plane metadata pointing at an empty bucket. The client's direct mode additionally has a per-machine `memex-local.db` (local history, never reported to the server), which is outside the server's plan.
 
-## 备份
+## Backup
 
-### 单库
+### Single Database
 
-库文件在服务端**停写**（进程退出或不在线写入窗口）时可直接文件级复制：
+The database file can be copied at the file level while the server is **not writing** (process exited or within an offline write window):
 
 ```bash
 memex_server serve --db /var/lib/memex/memex-server.db   # 正常运行时勿直接 cp
@@ -34,13 +25,11 @@ systemctl stop memex-server   # 或 Ctrl-C
 cp memex-server.db memex-server.db.$(date +%Y%m%d-%H%M%S).bak
 ```
 
-在线热备建议用 SQLite 自带备份（`sqlite3 memex-server.db ".backup backup.db"`），
-避免直接复制产生半写页。
+For online hot backups, SQLite's own backup is recommended (`sqlite3 memex-server.db ".backup backup.db"`), to avoid half-written pages from direct copying.
 
-### 对象卷（须与库**同窗口成对拍**）
+### Object Volume (Must Be Backed Up **Paired in the Same Window** as the Database)
 
-对象卷与库必须**同一维护窗口内成对备份**：元数据行 ↔ 字节对象的一致性
-以「同一时刻」为基准——只备卷不备库（或反之），恢复后就是半套。
+The object volume and the database must be **backed up as a pair within the same maintenance window**: the consistency between metadata rows and byte objects is anchored to "the same moment" — backing up only the volume and not the database (or vice versa) leaves you with half a set after recovery.
 
 ```bash
 # compose 部署（`storage compose` 生成的 rustfs-compose.yml，宿主目录挂载
@@ -51,10 +40,9 @@ tar czf rustfs-$(date +%Y%m%d-%H%M%S).tgz -C /var/lib/memex rustfs
 mc mirror --overwrite local/memex-files /backup/memex-files   # 或 aws s3 sync
 ```
 
-对象卷数据文件属 uid 10001（rustfs 容器运行身份），宿主删除/改属需
-root 或经容器（演练脚本内有现成写法：`docker run --user 0 … chown`）。
+The object volume's data files belong to uid 10001 (the rustfs container's runtime identity); host-side deletion or ownership changes require root or going through a container (the drill script has a ready-made pattern: `docker run --user 0 … chown`).
 
-## 恢复
+## Recovery
 
 ```bash
 systemctl stop memex-server
@@ -68,12 +56,11 @@ systemctl start memex-server
 memex_server account list --db memex-server.db   # 抽查
 ```
 
-恢复后**必做一致性核对**（见下节）；文件面会话令牌只存内存，服务端重启
-后客户端须重登（最小暴露面口径）。
+After recovery a **consistency check is mandatory** (see the next section); file-plane session tokens live only in memory, so clients must re-login after a server restart (minimal exposure surface convention).
 
-## 一致性核对：`files verify`
+## Consistency Check: `files verify`
 
-恢复后核对元数据 ↔ 字节双面（只读工具，不代删不代改）：
+After recovery, check the metadata ↔ bytes dual side (read-only tool; deletes and modifies nothing on your behalf):
 
 ```bash
 memex_server files verify \
@@ -81,28 +68,18 @@ memex_server files verify \
   --s3-access-key AK --s3-secret-key SK        # 或 MEMEX_S3_* 环境变量
 ```
 
-输出与退出码口径：
+Output and exit-code conventions:
 
-- **受检元数据行 / 桶内对象**：计数总览；
-- **缺对象**（元数据在、字节无）与**大小不符**（元数据 file_size ≠ 对象
-  实际大小）：**退出码 1**——恢复面有缺，禁止对外；
-- **孤儿对象**（桶里有、无任何元数据行引用）：只告警——多为「落字节成功
-  →元数据落库前崩溃」窗口残留，是否清理属运维决策；
-- 隔离/过期行同样算引用面（其字节不算孤儿），但只核 normal 行的存在性
-  与大小。
+- **Checked metadata rows / objects in the bucket**: count overview;
+- **Missing objects** (metadata present, bytes absent) and **size mismatch** (metadata file_size ≠ the object's actual size): **exit code 1** — the recovery surface has gaps; do not serve traffic;
+- **Orphan objects** (present in the bucket, referenced by no metadata row): warning only — mostly residue from the "bytes persisted → crash before metadata commit" window; whether to clean up is an operations decision;
+- Quarantined/expired rows also count toward the reference side (their bytes are not orphans), but only normal rows are checked for existence and size.
 
-## 归档完整性账：`archive seal` / `archive verify`（评审四·远期加固）
+## Archive Integrity Ledger: `archive seal` / `archive verify` (Review Four · Long-Term Hardening)
 
-消息归档（`message_events` 事件流）的防篡改账本——**不引入区块链**，分块
-封账＋链式摘要：每 64 条事件在落库同事务自动封一块（`archive_chain` 表，
-不可变封账行；未封开尾不落行），块内链式摘要
-`h = sha256_hex(h + 事件摘要)`（首块 prev=64 个 `0`），单事件摘要用长度
-前缀框架（`<len>:<bytes>`）防 payload 拼接歧义。
+A tamper-evident ledger for the message archive (the `message_events` event stream) — **no blockchain introduced**; block sealing + chained digests: every 64 events are automatically sealed into one block in the same transaction as the commit (`archive_chain` table, immutable seal rows; an unsealed tail writes no rows), with an in-block chained digest `h = sha256_hex(h + event digest)` (the first block's prev = 64 `0`s); single-event digests use a length-prefixed framing (`<len>:<bytes>`) to prevent payload-concatenation ambiguity.
 
-DB 级管理员可改库＝「append-only 表名≠不可篡改」——校验链断裂即可信性
-断言：改／删／插任一已封事件行、或改账本行本身，逐块重放对不上账即如实
-报断（`archive verify` 退出码 1，巡检脚本可挂）；未封开尾如实报告不判错
-（正常态，待 seal 收尾）。
+A DB-level administrator can modify the database = "an append-only table name ≠ tamper-proof" — a broken verification chain is itself the trust assertion: modifying / deleting / inserting any sealed event row, or modifying the ledger rows themselves, makes the per-block replay fail to match, and the break is reported as-is (`archive verify` exit code 1; inspection scripts can hook it); an unsealed tail is reported truthfully and not judged an error (normal state, awaiting seal wrap-up).
 
 ```bash
 memex_server archive status   # 块数／开尾条数／链头摘要
@@ -111,43 +88,35 @@ memex_server archive verify   # 全账校验；完好 exit 0、已断 exit 1；
                               # 每次 verify 落 audit_reads 留痕可查
 ```
 
-恢复场景的对账口径：库恢复后先 `archive verify`——事件流与账本逐位对上
-才算恢复面完好；「校验不修复，只断言」（发现断链须从备份重放，不代修）。
+Reconciliation convention for recovery scenarios: after the database is restored, run `archive verify` first — the event stream and the ledger must match bit for bit for the recovery surface to be intact; "verify does not repair, it only asserts" (a discovered break must be replayed from a backup; the tool does not repair on your behalf).
 
-## 演练（A14 可执行验证）
+## Drills (A14 Executable Verification)
 
-### 单库演练
+### Single-Database Drill
 
-仓库脚本 `scripts/backup_restore_drill.sh <memex_server 路径>`：
+Repo script `scripts/backup_restore_drill.sh <memex_server path>`:
 
-1. 临时目录造数（account add ×2）；
-2. `account list` 记录备份前清单；
-3. 文件级复制备份 → 删除原库 → 从备份恢复；
-4. 恢复后 `account list` 与备份前逐行比对，不一致退出码非零。
+1. Create data in a temp directory (account add ×2);
+2. `account list` records the pre-backup inventory;
+3. File-level copy backup → delete the original database → restore from the backup;
+4. After recovery, `account list` is compared line by line with the pre-backup inventory; any mismatch yields a non-zero exit code.
 
-2026-10-03 执行通过（本机 `build/server/memex_server`，退出码 0）。
+Passed on 2026-10-03 (local `build/server/memex_server`, exit code 0).
 
-### 干净机器全量恢复演练（双资产，评审 P0-3）
+### Clean-Machine Full Recovery Drill (Dual Asset, Review P0-3)
 
-仓库脚本 `scripts/files_backup_drill.sh <memex_server 路径>`（依赖 docker
-与 curl；端口可用 `API_PORT/CONSOLE_PORT/FILES_PORT/COLLAB_PORT` 覆盖）：
+Repo script `scripts/files_backup_drill.sh <memex_server path>` (depends on docker and curl; ports can be overridden with `API_PORT/CONSOLE_PORT/FILES_PORT/COLLAB_PORT`):
 
-1. RustFS 容器起（`storage compose`＋`storage up`，宿主目录挂载；演练
-   容器改名 `memex-rustfs-drill` 隔离——绝不碰宿主在跑的同名部署）；
-2. 服务端起（单库＋文件面），造数：账号×2、个人上传×3；
-3. **成对备份**：库 cp ＋ 对象卷 tar（同窗口拍）；
-4. **清场＝干净机器**：停服务、库删除、桶归零（经 rustfs 镜像以属主身份
-   清——数据文件属 uid 10001，宿主 rm 删不动）；
-5. **成对恢复**：库回＋卷回＋`chown 10001:10001`（部署口径属主修复），
-   RustFS 与服务端再起；
-6. `files verify` 退出码 0（元数据 ↔ 字节一致）；
-7. 权限关系抽查：会话随重启失效须重登；本人下载逐位一致、他人下载个人
-   文件 403；
-8. **核对工具自证**：真删一个对象字节再核——verify 必报不一致（退出码 1），
-   核对器本身也在演练范围内。
+1. Start the RustFS container (`storage compose` + `storage up`, host-directory mount; the drill container is renamed `memex-rustfs-drill` for isolation — never touch the same-named deployment running on the host);
+2. Start the server (single database + file plane); create data: accounts ×2, personal uploads ×3;
+3. **Paired backup**: database cp + object volume tar (same-window pair);
+4. **Clean slate = clean machine**: stop the service, delete the database, zero the bucket (cleared via the rustfs image as the owner identity — the data files belong to uid 10001, which host rm cannot delete);
+5. **Paired restore**: database back + volume back + `chown 10001:10001` (deployment-convention ownership repair), then restart RustFS and the server;
+6. `files verify` exit code 0 (metadata ↔ bytes consistent);
+7. Permission spot checks: sessions are invalidated by the restart and require re-login; the owner's download matches bit for bit, another user downloading a personal file gets 403;
+8. **The check tool proves itself**: actually delete one object's bytes and re-check — verify must report inconsistency (exit code 1); the checker itself is within the drill's scope.
 
-2026-10-12 执行通过（本机 `build-ci/server/memex_server`，退出码 0），
-实跑输出：
+Passed on 2026-10-12 (local `build-ci/server/memex_server`, exit code 0); actual run output:
 
 ```
 [drill] RustFS 就绪 http://127.0.0.1:19290（数据目录 /tmp/tmp.w5uKjgY0Zx/data）
@@ -164,4 +133,4 @@ memex_server archive verify   # 全账校验；完好 exit 0、已断 exit 1；
 [drill] 演练通过：干净机器全量恢复 → 一致性核对 → 权限关系正确
 ```
 
-每次服务端大版本升级后应重复两场演练。
+Both drills should be repeated after every major server upgrade.

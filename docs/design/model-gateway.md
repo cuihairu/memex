@@ -1,4 +1,4 @@
-> **English** | [中文](模型网关.md)
+> **English** | [中文](../zh/design/模型网关.md)
 
 # Model Gateway Design Draft (Platform Phase Three)
 

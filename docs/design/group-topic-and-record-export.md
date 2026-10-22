@@ -1,4 +1,4 @@
-> **English** | [中文](建群主题与群记录导出.md)
+> **English** | [中文](../zh/design/建群主题与群记录导出.md)
 
 # Group Creation Topic/Purpose and Group Record Export (Design Draft, Not Implemented)
 

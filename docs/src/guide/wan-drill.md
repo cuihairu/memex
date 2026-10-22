@@ -1,34 +1,28 @@
-# 跨地域接入与断线补传验证（T5.4）
+# Cross-Region Access and Disconnection Re-delivery Verification (T5.4)
 
-> 对应验收项 A13（跨网段通信）、A15（多地域接入）、A16（断线归档规则）。核验日期：2026-10-03。
+> Corresponds to acceptance items A13 (cross-subnet communication), A15 (multi-region access), and A16 (disconnection archiving rules). Verification date: 2026-10-03.
 
-## A16 断线归档规则——自动化+降级网络演练
+## A16 Disconnection Archiving Rules — Automated + Degraded-Network Drill
 
-- 常规验收：`collab_resend` 测试（进程级，真实服务端）覆盖
-  中断期暂存 → 自动重连 → 按 msg_id 去重补传 → 归档无重复无缺失。
-- 降级网络演练：`scripts/wan_drill.sh <test_collab_resend 路径>` 在回环口
-  叠加 `netem delay 80ms 20ms loss 2%`，重跑上述验收，通过即证明
-  丢包／高时延下补传与去重依然正确。
-- 2026-10-03 执行记录：`build/client/test_collab_resend` 通过
-  （`collab resend tests: all passed`，退出码 0），演练后 qdisc 已恢复。
+- Regular acceptance: the `collab_resend` test (process-level, real server) covers buffering during the outage → automatic reconnect → dedup-by-msg_id re-delivery → archive with no duplicates and no gaps.
+- Degraded-network drill: `scripts/wan_drill.sh <test_collab_resend path>` adds `netem delay 80ms 20ms loss 2%` on the loopback interface and re-runs the acceptance above; passing proves re-delivery and dedup remain correct under packet loss / high latency.
+- 2026-10-03 execution record: `build/client/test_collab_resend` passed (`collab resend tests: all passed`, exit code 0); the qdisc was restored after the drill.
 
-## A13 跨网段通信——环境要求与手工核查清单
+## A13 Cross-Subnet Communication — Environment Requirements and Manual Check List
 
-Mas 环境约束：协作态消息经服务端转发，**不作网段限制**；直连态走 UDP 广播发现，
-限本网段（不同 VLAN 间广播不可达属预期），跨网段必须走协作态——这是设计口径，不是缺陷。
-现场核查清单：
+Mas environment constraints: collaboration-mode messages are relayed by the server with **no subnet restriction**; direct mode uses UDP broadcast discovery, limited to the local subnet (broadcasts not reaching across VLANs is expected), so cross-subnet traffic must go through collaboration mode — this is the design convention, not a defect.
+On-site check list:
 
-1. 两终端置于不同 VLAN，均登录同一服务端：互发 TEXT，服务端 `messages` CLI 双向可检索；
-2. 两终端同 VLAN：直连态免登录收发正常，`peers` 宣告可见；
-3. 同两终端跨 VLAN 直连：发现表为空、直连发送返回对端不可达（符合预期）。
+1. Two terminals on different VLANs, both logged into the same server: exchange TEXT in both directions, retrievable both ways via the server's `messages` CLI;
+2. Two terminals on the same VLAN: direct-mode login-free send/receive works, `peers` announcements visible;
+3. The same two terminals in direct mode across VLANs: the discovery table is empty and direct send returns peer unreachable (as expected).
 
-## A15 多地域接入——部署前提与手工核查清单
+## A15 Multi-Region Access — Deployment Prerequisites and Manual Check List
 
-服务端单台集中部署于总机房，异地地域经专线／加密隧道接入；客户端唯一配置项是
-服务器地址（消息端口缺省 24360，`serve --port` 可改）。手工核查：
+The server is deployed as a single centralized instance in the headquarters machine room; remote regions access it via dedicated lines / encrypted tunnels; the client's only configuration item is the server address (message port defaults to 24360, changeable via `serve --port`). Manual checks:
 
-1. 异地终端登录 → 收发 → 组织架构下发 → `messages` 历史检索（四项全通）；
-2. 专线抖动注入（netem 100ms±50ms/1% 丢包）下登录与消息收发不丢、不重（可复用 wan_drill 思路）；
-3. 服务端不可达 → 客户端常驻「消息不进归档」提示并转直连态 → 恢复后补传归档。
+1. Remote terminal login → send/receive → org structure delivery → `messages` history search (all four pass);
+2. Under dedicated-line jitter injection (netem 100ms±50ms / 1% packet loss), login and message send/receive lose nothing and duplicate nothing (the wan_drill approach can be reused);
+3. Server unreachable → the client keeps showing the 「消息不进归档」 banner and switches to direct mode → after recovery the backlog is re-delivered into the archive.
 
-本沙箱无跨地域物理链路，A13/A15 以清单形式交付现场执行；A16 已在降级网络下自动化通过。
+This sandbox has no cross-region physical links, so A13/A15 are delivered as check lists for on-site execution; A16 has passed automatically under a degraded network.

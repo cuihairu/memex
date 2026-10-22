@@ -1,4 +1,4 @@
-> **English** | [中文](OIDC身份认证接入设计.md)
+> **English** | [中文](../zh/design/OIDC身份认证接入设计.md)
 
 # OIDC Identity Authentication Integration Design (Design Spec, Not Implemented)
 

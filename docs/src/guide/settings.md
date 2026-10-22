@@ -1,68 +1,89 @@
-# 客户端设置
+# Client Settings
 
-> 客户端设置批（2026-10-08 用户令六件：通知开关组／提示音三档／截图快捷键／
-> 离开锁屏／网络与远程／设置页分组）逐件落地，本页随批续写；分组归集见
-> 文末「设置页分组」。
+> Client settings batch (2026-10-08 user order, six items: notification toggle group /
+> three-level notification sound / screenshot shortcut / away lock / network & remote /
+> settings page grouping) landed item by item; this page continues to be written in
+> step with the batch. See "Settings Page Grouping" at the end for the grouping roll-up.
 
-## 快捷键
+## Shortcuts
 
-- **截图快捷键**：默认 `Ctrl+Alt+A`；设置 →「快捷键…」改键
-  （QKeySequenceEdit 输入，保存即生效——主窗快捷键即时重绑，无需重启）。
-- **冲突检测**：保存时比对窗口内其他快捷键（QShortcut 与带键菜单项），
-  冲突红字明示并保持原键；空键序列拒存。
-- **落盘**：QSettings `shortcuts/screenshot`，主窗构造即读；按钮 tooltip
-  同步显示当前键。
-- 口径注明：当前为**窗口内**快捷键；「全局热键」按平台能力另批——
-  Wayland 安全模型不放行全局钩子，X11 全局抓键属桌面集成另批。
+- **Screenshot shortcut**: default `Ctrl+Alt+A`; change the key under Settings →
+  「快捷键…」 (entered via QKeySequenceEdit, effective on save — the main-window shortcut
+  rebinds immediately, no restart needed).
+- **Conflict detection**: on save, the key is compared against the other shortcuts inside
+  the window (QShortcut and menu items that carry keys); a conflict is flagged in red text
+  and the original key is kept; an empty key sequence is refused.
+- **Persistence**: QSettings `shortcuts/screenshot`, read as soon as the main window is
+  constructed; the button tooltip shows the current key in sync.
+- Scope note: this is a **window-scoped** shortcut; 「全局热键」 is a separate batch gated on
+  platform capability — the Wayland security model does not allow global hooks, and global
+  key capture on X11 is a separate desktop-integration batch.
 
-## 通知与提示音
+## Notifications and Sounds
 
-见[通知与 webhook 接入](/guide/notify)「个人通知偏好」「事件通知开关组与
-提示音」两节；分组归集后入口仍为设置 →「通知偏好」。
+See [Notifications and Webhook Integration](/guide/notify), sections 「个人通知偏好」 and
+「事件通知开关组与提示音」; after the grouping roll-up the entry point remains Settings →
+「通知偏好」.
 
-## 离开与锁屏
+## Away and Lock Screen
 
-设置 →「离开与锁屏…」；三件事：离开密码、无操作超时、启用开关。
+Settings → 「离开与锁屏…」; three things: away password, idle timeout, and an enable switch.
 
-- **离开密码**：本机 QSettings 只存盐＋SHA-256（`away/pwd_salt`／
-  `away/pwd_hash`），明文不落盘；每次设密重生成盐（同密码两台机器落盘
-  哈希也不同）。已设密码后留空＝不改。
-- **无操作超时**：鼠标移动／点击、键盘、滚轮任一输入即重计；超时
-  （`away/timeout_sec`，设置页按分钟 1–120 配，默认 5 分钟）自动锁屏。
-  未设密码时开关保存被拒（没密码锁不住人，不装锁）。
-- **锁屏面**（验收截图）：无边框
-  置顶全屏暗色遮罩——**只显示未读消息数量，不显示内容**；锁屏期间新到
-  消息／文件只累计条数，弹窗与提示音全静默（通知面不记内容），上线事件
-  不计未读。解锁后计数清零（会话内容照常在聊天区，解锁即可看）。
-- **唯一出路＝密码**：Esc／关闭钮／Alt+F4 一律不放行；错密码红字不动，
-  对密码即解。解锁后重新计时。
-- 口径注明：锁屏是**本机遮罩**——presence 在线表没有 away／离开状态
-  字段，对端联系人看不到「离开」标记（协议扩列 per-user 状态另批）。
+- **Away password**: the local QSettings store keeps only the salt + SHA-256
+  (`away/pwd_salt` / `away/pwd_hash`); plaintext never lands on disk; the salt is regenerated
+  every time a password is set (the same password yields different hashes on two machines).
+  Once a password is set, leaving the field blank means "no change".
+- **Idle timeout**: any input — mouse move/click, keyboard, scroll wheel — restarts the
+  countdown; on timeout (`away/timeout_sec`, configured in minutes 1–120 on the settings
+  page, default 5 minutes) the screen locks automatically. If no password is set, saving
+  with the switch on is refused (without a password a lock holds nobody, so no lock is
+  installed).
+- **Lock screen face** (acceptance screenshot): a frameless,
+  always-on-top, full-screen dark mask — **it shows only the unread message count, never the
+  content**; while locked, newly arriving messages/files only increment the counter, and
+  popups and sounds are fully silenced (the notification face records no content); an
+  online event is not counted as unread. The counter resets to zero on unlock (conversation
+  content stays where it is in the chat area and is visible once unlocked).
+- **The only way out is the password**: Esc / the close button / Alt+F4 are all refused; a
+  wrong password leaves the red text as it is and the right password unlocks. Timing restarts
+  after unlock.
+- Scope note: the lock screen is a **local mask** — the presence online table has no away /
+  leave state field, so a contact on the other side sees no 「离开」 marker (extending the
+  protocol with per-user state is a separate batch).
 
-## 网络与远程
+## Network and Remote
 
-设置 →「网络与远程…」；两件事：网段黑名单、远程控制配对密码。
+Settings → 「网络与远程…」; two things: subnet blacklist, and the remote-control pairing
+password.
 
-- **网段黑名单**：段格式 `a.b.c.d/掩码位`（掩码位 0–32，如
-  `192.168.10.0/24`）。**默认关闭＝全放行**；启用后段表命中＝
-  直连发现包**不响应**（丢弃不入邻居表）＋新入站连接**当场拒**
-  （TCP 连接建立即断）。段输入过 `validate_cidr` 本地门——坏段
-  （缺斜杠／非点分四节／节越界／掩码位越界）红字不入表不落盘。
-  保存即写 QSettings（`net/blacklist_enabled`、`net/blacklist`）并
-  立即重装过滤器——运行中改开关／段表，下一批包与连接即按新表判；
-  开关关＝不装过滤器（全放行）。
-- **远程控制**：**默认关闭、开启须显式操作**——关着时受控方批准远程
-  协助请求直接走批准流程，不设密码；**开启后批准前须输入配对密码**
-  （密码错＝拒绝不发网、取消＝请求保持待批）；「先设配对密码，才能
-  开启远程控制」为保存门（没密码开远程＝锁不住人）。
-- **配对密码**：本机 QSettings 只存盐＋SHA-256（`remote/pwd_salt`／
-  `remote/pwd_hash`），明文不落盘；每次设密重生成盐；已设则留空＝
-  不改；两次输入不一致拒存。
-- 口径注明：黑名单为**发现与入站两处新连接**的拦截——已建立的连接
-  不追溯断开（受控会话另有结束／撤权路径）；IPv4 段判定，IPv6 邻居
-  不参与段匹配。
+- **Subnet blacklist**: segment format `a.b.c.d/prefix-length` (prefix 0–32, e.g.
+  `192.168.10.0/24`). **Off by default = allow everything**; once enabled, a segment-table hit
+  means a direct-connect discovery packet gets **no reply** (dropped and never entered into
+  the neighbor table) plus a new inbound connection is **rejected on the spot** (the TCP
+  connection is dropped as soon as it is established). Segment input passes the local
+  `validate_cidr` gate — a bad segment (missing slash / not dotted-quad / octet out of range /
+  prefix out of range) is flagged in red and enters neither the table nor the store. Saving
+  writes QSettings (`net/blacklist_enabled`, `net/blacklist`) and reinstalls the filter
+  immediately — flipping the switch or editing the segment table at runtime applies to the next
+  batch of packets and connections under the new table; switch off = no filter installed
+  (allow everything).
+- **Remote control**: **off by default, and enabling it requires an explicit action** — while
+  off, the controlled side approves a remote-assistance request straight through the approval
+  flow with no password; **once enabled, the pairing password must be entered before approval**
+  (wrong password = refused, nothing goes on the wire; cancel = the request stays pending
+  approval); 「先设配对密码，才能开启远程控制」 is the save gate (turning on remote control
+  without a password = a lock that holds nobody).
+- **Pairing password**: the local QSettings store keeps only the salt + SHA-256
+  (`remote/pwd_salt` / `remote/pwd_hash`); plaintext never lands on disk; the salt is
+  regenerated on each set; if already set, leaving it blank means "no change"; two mismatched
+  entries are refused.
+- Scope note: the blacklist blocks **new connections at both the discovery and the inbound
+  entry points** — already established connections are not torn down retroactively (a
+  controlled session has its own end / revoke paths); IPv4 segment matching only, IPv6
+  neighbors do not take part in segment matching.
 
-## 设置页分组
+## Settings Page Grouping
 
-（批次进行中：通知／声音／快捷键／离开与锁屏／网络与远程五组统一归组
-落地后续写。）
+(Batch in progress: the five groups — notifications / sounds / shortcuts / away & lock screen /
+network & remote — will be rolled up into unified grouping, and this page will be continued
+after that lands.)

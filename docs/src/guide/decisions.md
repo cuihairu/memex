@@ -1,59 +1,59 @@
-# 评审组决策清单
+# Review Panel Decision List
 
-> 来源：《建设方案评审报告 V10.0》第十一章，十五项 + 一项可选确认。
-> 执行口径：**不等回音，边做边回报**，工程按「报告建议」列先行；「当前工程口径」是实现时采取的具体做法，评审组改判后按新决策返工对应项。状态列由评审组填写。
+> Source: Chapter 11 of the《建设方案评审报告 V10.0》— fifteen items plus one optional confirmation.
+> Execution rule: **don't wait for a reply, build and report as we go**; engineering proceeds per the "report recommendation" column; the "current engineering position" is the concrete approach taken during implementation, and if the panel revises a decision the corresponding item is reworked per the new decision. The status column is filled in by the review panel.
 
-| 序号 | 决策事项 | 报告建议 | 当前工程口径 | 状态 |
+| No. | Decision item | Report recommendation | Current engineering position | Status |
 | --- | --- | --- | --- | --- |
-| 1 | 是否采用业务层自写、不二开的路线 | 采用 | 已按此执行：不基于开源 IM 二开，不集成 AGPL／SSPL 组件，底座用开源组件（third_party/ 清单） | **已拍板（2026-10-08 追认）** |
-| 2 | 是否认可四期分期方案 | 认可，第一期验收后各期单独立项 | 按四期推进，todo.md 以第一期到可验收粒度 | **已拍板（2026-10-08 认可）** |
-| 3 | 音视频会议与协同文档是否自行开发 | 不自行开发，采购或集成 | 未排期；四期建议单列 | **已拍板（2026-10-08 不自行开发）** |
-| 4 | 登录策略：桌面端单点在线、移动端并存 | 采用 | 服务端按「同类终端唯一在线」设计（T2.1） | **已拍板（2026-10-08 追认）** |
-| 5 | 是否允许登录用户与未登录同事通信 | 允许，高归档要求部门可关 | 跨态互通实现为默认允许 + 策略开关「允许与未登录设备通信」（T3.4） | **已拍板（2026-10-08 认可）** |
-| 6 | 聊天记录留存期限 | 6 个月 | 留存期策略化已实现（retention_policies 按域配置＋retention_purges 清理留痕，CLI policy 面）；**内置默认＝6 个月（180 天）已落码**（`store.cpp` `retention_resolve` fallback，2026-10-10 拍板后落）——配置化留改：`retention set <days\|indefinite>` 覆盖（部门链逐级上溯→全局行），白名单 30/180/365/1095/indefinite | **已拍板（2026-10-10 授权代拍，效果后审）** |
-| 7 | 服务端单台集中部署、无地域边缘节点 | 采用 | 单进程单库实现不变；存储分卷已从预留变实装——R23-1 存储抽象层接 S3 兼容对象存储（`--files-port` 显式开启文件面，缺省关闭；S3Storage 注入 FileServer 与上行面，`storage compose` CLI 带 --data-dir 面），客户端永不直连对象存储（一律经服务端代理）；网关／库仍为单进程内逻辑分层（2026-10-09 对账更新） | **已拍板（2026-10-10 授权代拍，效果后审）** |
-| 8 | 中断期归档规则 | 本地暂存、恢复后按消息标识去重补传 | 按 T2.5 实现暂存队列 + 去重补传（约 0.5–1 人周已计入） | **已拍板（2026-10-10 授权代拍，效果后审）** |
-| 9 | 模型网关是否允许外部 API 端点 | 默认不允许；如允许限非归档数据并留审计 | 已实现（2026-10-08）：网关落地，「归档数据仅本地模型」红线写死在 model_gateway.cpp 不开放配置——memex_archive_scope:true 只路由 is_local 端点、无本地端点 503 请求不出门（测试钉住外部零命中）；调用审计 model_calls 一次上游尝试一行含 archive_scope 留痕；外部端点可登记，归档请求永不路由（红线在代码不在配置） | **已拍板（2026-10-10 授权代拍，效果后审）** |
-| 10 | 是否启动 GPU 采购评估 | 第一期同期启动评估 | 非软件工程项，已列入持续事项提醒 | **已拍板（2026-10-10 授权代拍，效果后审）** |
-| 11 | 网络层准入控制 | 实施 | 外部依赖；客户端侧按端口固定（UDP 2425–2436 / TCP 2426–2437）配合策略编写；设置批四已落客户端侧网段黑名单准入（net_guard QSettings 面＋「网络与远程」设置对话框：开关＋段/掩码列表，命中＝直连发现不响应＋入连接当场拒）与远程控制配对密码面；服务端侧无网段准入（仅 R23-5 文件面扩展名黑名单）（2026-10-09 对账更新） | **已拍板（2026-10-10 授权代拍，效果后审）** |
-| 12 | 远程协助开放范围 | 仅 IT 运维，默认对普通员工关闭 | 已实现（2026-10-08 二期收口）：部门放行开关默认禁沿链上溯（范围可控）、批/拒只属受控方本人（显式确认 consent 红线）、实批⊆申请可缩不可扩、会话台账倒序＋共享中持续可见指示＋随时结束=撤权（过程可见）、audits 迁移链当事方可读（全程留痕）；org-admin 全量审计面 CLI 已有；「仅 IT 运维」的部门粒度配置即放行开关用法，默认关闭与建议一致 | **已拍板（2026-10-10 授权代拍，效果后审）** |
-| 13 | 办公室位置图可见范围 | 默认仅本人楼层，跨楼层按需授权 | 已实现（2026-10-08 二期收口）：可见范围=本人占用工位所在楼层同层互见（不从部门推导不造映射）、无工位空图；跨层仅 org-admin（?floor= 显式指定，编辑权 server 端现裁）——「跨楼层按需授权」现口径=org-admin 角色即授权位，更细粒度授权面留后续如实注明 | **已拍板（2026-10-10 授权代拍，效果后审）** |
-| 14 | 通讯录可见性策略 | 默认全员可见，高管字段按需隐藏 | T4.6 按此实现（隐藏部门／成员、限看本部门、字段隐藏） | **已拍板（2026-10-10 授权代拍，效果后审）** |
-| 15 | 直属上级数据来源 | 先管理后台手工维护 + 批量导入，不对接 HR | T2.6 按此实现（CSV 批量导入 + 错误校验） | **已拍板（2026-10-10 授权代拍，效果后审）** |
-| 附 | 是否兼容存量飞秋客户端（IPMsg 明文协议） | 不兼容（存量小或有退场计划时） | 直连态采用自定义加密协议，不做 IPMsg 兼容。**2026-10-11 用户令改判**：同网段飞秋互通为真实需求，改为旁路兼容——编解码纯函数面（`client/engine/direct/ipmsg.{hpp,cpp}`），同口 UDP 2425 按首字节分流，开关 `net/ipmsg_enabled` 默认关（「网络与远程」设置页「飞秋兼容」显式开启）；不改变 memex 直连／协作两态任何行为，文件传输、加密、广播群发等高级特性不实现（2026-10-12 落地）。口径全文见[飞秋/IPMSG 兼容](/guide/feiq-compat) | **已拍板（2026-10-10 授权代拍，效果后审；2026-10-11 用户令改判为旁路兼容、默认关）** |
+| 1 | Whether to adopt the self-written-business-layer, no-secondary-development route | Adopt | Already executing per this: no secondary development based on open-source IM, no integration of AGPL / SSPL components, the foundation uses open-source components (the third_party/ list) | **Decided (retroactively confirmed 2026-10-08)** |
+| 2 | Whether the four-phase plan is endorsed | Endorsed; each phase is separately initiated after phase-one acceptance | Advancing in four phases, with todo.md carried to phase one at acceptable grain | **Decided (endorsed 2026-10-08)** |
+| 3 | Whether audio/video meetings and collaborative documents are self-developed | Not self-developed; procured or integrated | Not scheduled; phase four recommends a separate item | **Decided (not self-developed 2026-10-08)** |
+| 4 | Login policy: desktop single-point online, mobile coexists | Adopted | The server is designed as "only one online instance of the same terminal type" (T2.1) | **Decided (retroactively confirmed 2026-10-08)** |
+| 5 | Whether logged-in users may communicate with not-logged-in colleagues | Allowed; departments with high archiving requirements can turn it off | Cross-state interoperability is implemented as allowed by default + the policy switch「允许与未登录设备通信」(T3.4) | **Decided (endorsed 2026-10-08)** |
+| 6 | Chat record retention period | 6 months | Retention-period policy-ization is implemented (retention_policies configured per domain + retention_purges clean up traces, the CLI policy surface); **the built-in default = 6 months (180 days) has been coded** (`store.cpp` `retention_resolve` fallback, landed after the 2026-10-10 decision) — configurable override: `retention set <days\|indefinite>` overrides (walking up the department chain level by level → the global row), whitelist 30/180/365/1095/indefinite | **Decided (authorized proxy decision 2026-10-10, effect reviewed afterward)** |
+| 7 | Single-machine centralized server deployment, no regional edge nodes | Adopted | The single-process single-database implementation is unchanged; storage sharding has gone from reserved to actually implemented — the R23-1 storage abstraction layer connects to S3-compatible object storage (`--files-port` explicitly enables the file surface, off by default; S3Storage is injected into the FileServer and the uplink surface, the `storage compose` CLI carries the --data-dir surface), and the client never directly connects to object storage (always proxied through the server); the gateway / database remain logical layering within a single process (2026-10-09 reconciliation update) | **Decided (authorized proxy decision 2026-10-10, effect reviewed afterward)** |
+| 8 | Interruption-period archiving rule | Hold locally; after recovery re-send with de-duplication by message identifier | Implemented per T2.5 as a staging queue + de-duplicated re-send (about 0.5–1 person-week already counted) | **Decided (authorized proxy decision 2026-10-10, effect reviewed afterward)** |
+| 9 | Whether the model gateway allows external API endpoints | Not allowed by default; if allowed, limited to non-archived data with an audit trail | Implemented (2026-10-08): the gateway has landed; the "archived data only to local models" red line is hard-coded in model_gateway.cpp with no configuration exposed — memex_archive_scope:true routes only to is_local endpoints, and with no local endpoint returns 503 without the request ever leaving the box (tests pin zero external hits); call audit in model_calls writes one line per upstream attempt including archive_scope for traceability; external endpoints can be registered, but archived requests are never routed to them (the red line lives in code, not in configuration) | **Decided (authorized proxy decision 2026-10-10, effect reviewed afterward)** |
+| 10 | Whether to start the GPU procurement assessment | Start the assessment alongside phase one | A non-software-engineering item, already listed in the standing-issues reminder | **Decided (authorized proxy decision 2026-10-10, effect reviewed afterward)** |
+| 11 | Network-layer admission control | Implement | External dependency; the client side is written to fixed ports (UDP 2425–2436 / TCP 2426–2437) to cooperate with policy; settings batch four has landed client-side segment blacklist admission (the net_guard QSettings surface + the「网络与远程」settings dialog: switch + segment/mask list, a hit = direct-mode discovery does not respond + incoming connection is refused on the spot) and the remote-control pairing password surface; the server side has no segment admission (only the R23-5 file-surface extension blacklist) (2026-10-09 reconciliation update) | **Decided (authorized proxy decision 2026-10-10, effect reviewed afterward)** |
+| 12 | Remote assistance scope | IT operations only, closed to ordinary staff by default | Implemented (phase-two close-out 2026-10-08): the department release switch defaults to deny and walks up the chain (scope is controllable), approve/deny belongs to the controlled party alone (the explicit-confirm consent red line), actual approvals ⊆ requests and can only shrink not expand, session ledger in reverse order + continuously visible in-sharing indicator + end at any time = revoke permission (process visible), the audits migration chain is readable by the parties involved (full traceability); the org-admin full-audit CLI surface already exists; the department-granularity configuration for "IT operations only" is exactly how the release switch is used, and its default of closed matches the recommendation | **Decided (authorized proxy decision 2026-10-10, effect reviewed afterward)** |
+| 13 | Office location map visibility scope | Only one's own floor by default; cross-floor authorized on demand | Implemented (phase-two close-out 2026-10-08): visibility = same-floor mutual visibility for the floor of one's own occupied workstation (not derived from departments, no mapping fabricated), an empty map with no workstation; cross-floor only for org-admin (?floor= explicitly specified, editing rights cut server-side) — the current position on "cross-floor authorized on demand" = the org-admin role is the authorization position itself; a finer-granularity authorization surface is deferred and honestly noted | **Decided (authorized proxy decision 2026-10-10, effect reviewed afterward)** |
+| 14 | Directory visibility policy | Visible to everyone by default, executive fields hidden on demand | Implemented per T4.6 (hidden departments / members, restrict to own department, field hiding) | **Decided (authorized proxy decision 2026-10-10, effect reviewed afterward)** |
+| 15 | Direct superior data source | Manual maintenance in the admin console first + bulk import, no HR integration | Implemented per T2.6 (CSV bulk import + error validation) | **Decided (authorized proxy decision 2026-10-10, effect reviewed afterward)** |
+| Annex | Whether to be compatible with existing FeiQ clients (IPMsg plaintext protocol) | Not compatible (when the installed base is small or has a retirement plan) | Direct mode uses a custom encrypted protocol, no IPMsg compatibility. **2026-10-11 user-order revision**: FeiQ interoperability on the same segment is a real requirement, so it became bypass compatibility — a pure-function codec surface (`client/engine/direct/ipmsg.{h,cpp}`), the same port UDP 2425 dispatches on the first byte, and the switch `net/ipmsg_enabled` is off by default (the「飞秋兼容」switch is explicitly enabled on the「网络与远程」settings page); it does not change any behavior of Memex's direct / collaboration states, and advanced features such as file transfer, encryption, and broadcast mass-send are not implemented (landed 2026-10-12). The full position is in [飞秋/IPMSG 兼容](/guide/feiq-compat) | **Decided (authorized proxy decision 2026-10-10, effect reviewed afterward; 2026-10-11 user-order revision to bypass compatibility, off by default)** |
 
-## 拍板记录
+## Decision records
 
-> 2026-10-08 用户拍板（授权工程代录，效果后审）：序号 1、2、3 三项定夺，状态列同步改「已拍板」，其余各项仍「待拍板」归评审组。
+> 2026-10-08 user decision (recorded by engineering as authorized, effect reviewed afterward): items 1, 2, 3 were decided, the status column changed to「已拍板」in sync; all other items remain「待拍板」with the review panel.
 
-- **#1 完全自研路线：追认**——不基于开源 IM 二开、不接 AGPL／SSPL 组件；底座开源组件沿用 third_party/ 清单（vcpkg 单一事实源）。
-- **#2 四期分期：认可**——第一期验收后各期单独立项；todo.md 继续以第一期到可验收粒度推进。
-- **#3 音视频会议与协同文档：不自行开发**——采购或集成；四期单列（与 todo 第四期口径一致：不自行开发、独立立项、工程侧只核对集成边界）。
+- **#1 Fully self-developed route: retroactive confirmation** — no secondary development based on open-source IM, no AGPL / SSPL components; the foundation's open-source components follow the third_party/ list (vcpkg as the single source of truth).
+- **#2 Four-phase phasing: endorsed** — after phase-one acceptance each phase is separately initiated; todo.md continues to advance phase one at acceptable grain.
+- **#3 Audio/video meetings and collaborative documents: not self-developed** — procured or integrated; a separate item in phase four (consistent with the phase-four position in todo: not self-developed, separately initiated, with engineering only verifying the integration boundary).
 
-> 2026-10-10 用户拍板（授权工程代录，效果后审）：序号 6–15 与附录项共十一项，**全部采纳报告「建议」列**（即与当前工程口径同口径），状态列同步改「已拍板」；其中 #6 的配置默认值已落码。
+> 2026-10-10 user decision (recorded by engineering as authorized, effect reviewed afterward): items 6–15 plus the annex, eleven items in total, **all adopting the report's "recommendation" column** (i.e., the same position as the current engineering position), with the status column changed to「已拍板」in sync; the configuration default for #6 has been coded.
 
-- **#6 留存期限：6 个月（180 天）**——配置化留改（`retention set` 覆盖，部门链→全局行；白名单 30/180/365/1095/indefinite）；内置默认已落 `store.cpp` `retention_resolve` fallback（测试钉住）。
-- **#7 集中部署：采用**——单台集中、无地域边缘节点；单进程单库不变（存储分卷已由预留变实装，见口径列）。
-- **#8 中断期归档：本地暂存＋去重补传**——T2.5 已实现（暂存队列＋按消息标识去重补传）。
-- **#9 外部端点：默认不允许**——「归档数据仅本地模型」红线维持代码级（`model_gateway.cpp` 写死、不开放配置；外部端点可登记但归档请求永不路由）。
-- **#10 GPU 采购评估：启动**——非软件工程项，已列入持续事项提醒，评估同期启动。
-- **#11 准入控制：实施**——客户端侧已落即口径（`net_guard` 网段黑名单＋「网络与远程」设置面）；服务端不扩（仅 R23-5 文件面扩展名黑名单）。
-- **#12 远程协助：仅 IT 运维、默认对普通员工关闭**——放行开关默认禁沿链上溯；批/拒只属受控方本人（consent 红线）、实批⊆申请可缩不可扩、全程留痕。
-- **#13 位置图：默认仅本人楼层**——本人占用工位所在楼层同层互见；跨楼层按需授权＝org-admin 角色即授权位（更细粒度留后续，如实注明）。
-- **#14 通讯录：默认全员可见＋高管字段隐藏**——T4.6 已实现（隐藏部门／成员、限看本部门、字段隐藏）。
-- **#15 上级来源：先管理后台手工维护＋批量导入，不对接 HR**——T2.6 已实现（CSV 批量导入＋错误校验）。
-- **附 飞秋兼容：不兼容**——直连态采用自定义加密协议，不做 IPMsg（IPMsg 明文协议）兼容。**2026-10-11 用户令改判**：改为旁路兼容（同口 UDP 2425 首字节分流，不改变两态行为），开关 `net/ipmsg_enabled` 默认关、设置页显式开启——已实现并验收（2026-10-12 落地，ctest `ipmsg` 腿），口径全文见[飞秋/IPMSG 兼容](/guide/feiq-compat)。
+- **#6 Retention period: 6 months (180 days)** — configurable override (`retention set` overrides, department chain → global row; whitelist 30/180/365/1095/indefinite); the built-in default has landed in `store.cpp` `retention_resolve` fallback (pinned by tests).
+- **#7 Centralized deployment: adopted** — single machine centralized, no regional edge nodes; single-process single-database unchanged (storage sharding has gone from reserved to actually implemented; see the position column).
+- **#8 Interruption-period archiving: local staging + de-duplicated re-send** — implemented in T2.5 (staging queue + de-duplicated re-send by message identifier).
+- **#9 External endpoints: not allowed by default** — the "archived data only to local models" red line remains at the code level (hard-coded in `model_gateway.cpp`, not exposed in configuration; external endpoints can be registered but archived requests are never routed to them).
+- **#10 GPU procurement assessment: started** — a non-software-engineering item, already listed in the standing-issues reminder, the assessment starting alongside.
+- **#11 Admission control: implemented** — what has landed on the client side is the position (`net_guard` segment blacklist + the「网络与远程」settings surface); the server is not expanded (only the R23-5 file-surface extension blacklist).
+- **#12 Remote assistance: IT operations only, closed to ordinary staff by default** — the release switch defaults to deny and walks up the chain; approve/deny belongs to the controlled party alone (consent red line), actual approvals ⊆ requests and can only shrink not expand, full traceability.
+- **#13 Location map: only one's own floor by default** — same-floor mutual visibility for the floor of one's own occupied workstation; cross-floor authorization on demand = the org-admin role is the authorization position itself (finer granularity deferred, honestly noted).
+- **#14 Directory: visible to everyone by default + executive field hiding** — implemented in T4.6 (hidden departments / members, restrict to own department, field hiding).
+- **#15 Superior source: manual maintenance in the admin console first + bulk import, no HR integration** — implemented in T2.6 (CSV bulk import + error validation).
+- **Annex FeiQ compatibility: not compatible** — direct mode uses a custom encrypted protocol, no IPMsg (IPMsg plaintext protocol) compatibility. **2026-10-11 user-order revision**: changed to bypass compatibility (same port UDP 2425, first-byte dispatch, not changing the behavior of either state), with the switch `net/ipmsg_enabled` off by default and explicitly enabled in settings — implemented and accepted (landed 2026-10-12, ctest `ipmsg` leg); the full position is in [飞秋/IPMSG 兼容](/guide/feiq-compat).
 
-> 副本注明：t44/t45 为搁置中的实验性 worktree（分支 t44-screenshot、t45-emoji-favorites，HEAD 停 2026-10-04 且带在途未提交改动），其 decisions.md 副本不随本次拍板同步，以主仓为准。
+> Copy note: t44 / t45 are shelved experimental worktrees (branches t44-screenshot, t45-emoji-favorites, HEAD frozen at 2026-10-04 and carrying uncommitted in-flight changes); their decisions.md copies are not synced by this decision round — the main repository prevails.
 
-> 2026-10-10 工程对账复核（巡检批）：#1–#15 与附项「当前工程口径」逐项对码复核——单点互踢（`session.cpp` 同类型互踢＋KICK 帧）、跨态互通开关（`allow_cross_state`）、留存 180 天默认（`retention_resolve` fallback）、S3 文件面（`--files-port`＋`storage compose`）、暂存补传（collab 引擎＋`test_collab_resend`）、模型网关红线（`memex_archive_scope`＋无本地端点 503）、客户端网段准入（`net_guard`）＋服务端不扩、远程协助 consent 红线（批/拒只属受控方本人）、位置图同层互见（`office_seats` floor）、通讯录字段隐藏、上级 CSV 导入（`org import`）——全部与实现相符，「当前工程口径」列无陈旧、无改动。
+> 2026-10-10 engineering reconciliation re-verification (inspection round): the "current engineering position" for #1–#15 and the annex was checked against code item by item — single-point mutual kick (`session.cpp` same-type mutual kick + KICK frame), cross-state interoperability switch (`allow_cross_state`), 180-day retention default (`retention_resolve` fallback), S3 file surface (`--files-port` + `storage compose`), staging re-send (collab engine + `test_collab_resend`), model-gateway red line (`memex_archive_scope` + 503 with no local endpoint), client-side segment admission (`net_guard`) + no server expansion, remote-assistance consent red line (approve/deny belongs to the controlled party alone), location map same-floor mutual visibility (`office_seats` floor), directory field hiding, superior CSV import (`org import`) — all consistent with the implementation, with nothing stale and nothing to change in the "current engineering position" column.
 
-## 建设方追加决策（评审报告之后下达，已执行）
+## Client-side additional decisions (issued after the review report, already executed)
 
-| 项 | 内容 | 落点 |
+| Item | Content | Landing spot |
 | --- | --- | --- |
-| 追加 1 | 手机端首次连接必须初始化域名／服务器地址（向导第一步，填完才进主界面） | R17 · todo T4.8 · 原型「移动端初始化」 |
-| 追加 2 | 手机端不提供匿名聊天（直连态／免登录仅桌面端，手机全协作态） | R18 · todo T4.8 · 原型「移动端」全套 |
-| 追加 3 | 原型设计稿为交付物（桌面 7 屏 + 移动 4 屏），进文档站「界面预览」轮播 | docs/design/prototypes · 文档站 |
+| Addition 1 | The first mobile connection must initialize the domain / server address (the wizard's first step; only after filling it in can the main interface be entered) | R17 · todo T4.8 · prototype「移动端初始化」 |
+| Addition 2 | No anonymous chat on mobile (direct mode / login-free exists only on desktop; mobile is entirely collaboration mode) | R18 · todo T4.8 · the full「移动端」prototype set |
+| Addition 3 | The prototype mockups are a deliverable (7 desktop screens + 4 mobile screens) and enter the docs site's "UI preview" carousel | docs/design/prototypes · docs site |
 
-> 现状注记（2026-10-10）：追加 3 拍板时桌面为 7 屏；2026-10-08 布局令批补入「好友列表」屏后，文档站「界面预览」轮播现为桌面 8 屏 + 移动 4 屏（实况替换进度见[界面原型与预览](/guide/prototypes)）。
+> Status note (2026-10-10): when Addition 3 was decided the desktop had 7 screens; after the「好友列表」screen was added by the 2026-10-08 layout-decree batch, the docs site's "UI preview" carousel is now 8 desktop screens + 4 mobile screens (live-replacement progress is in [界面原型与预览](/guide/prototypes)).

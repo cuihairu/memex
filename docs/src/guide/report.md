@@ -1,22 +1,22 @@
-# 评审报告摘要
+# Review Report Summary
 
-《内网办公即时通讯系统建设方案评审报告 V10.0》全文见仓库 [`docs/建设方案评审报告-V10.0.md`](https://github.com/cuihairu/memex/blob/main/docs/建设方案评审报告-V10.0.md)（约 1200 行）。本页摘录工程直接依据的结论。
+The full text of the《内网办公即时通讯系统建设方案评审报告 V10.0》 is in the repository at [`docs/建设方案评审报告-V10.0.md`](https://github.com/cuihairu/memex/blob/main/docs/建设方案评审报告-V10.0.md) (about 1200 lines). This page extracts the conclusions engineering relies on directly.
 
-## 评审结论要点
+## Key review conclusions
 
-- **业务层自写，不二开**：不基于开源即时通讯软件二次开发，不集成 AGPL／SSPL 等强传染性许可组件；底座用 Qt、asio、protobuf、SQLite 等开源组件（清单见 `third_party/README.md`），仅以部署调用或宽松许可链接方式引入，交付时提交组件清单。
-- **客户端选型 C++17 + Qt**：评估维度含媒体能力。主流发行版打包的 WebKitGTK 默认不编译 WebRTC，Tauri 类路线在国产 Linux 终端无法建立媒体连接；Qt 路线国产系统适配成本最低、打包小。WebRTC 是计划采用的媒体管道，当前尚未引入；现役远程协助通过服务端 HTTP 中继传输 JPEG 帧，见[产品定位](product.md)。
-- **双引擎客户端**：未登录零配置直连态＋登录服务端协作态，两套引擎各自完整、不共享通信状态，只通过共享内核（本地消息库、会话列表、联系人视图、文件传输模块）交汇。
-- **服务端六模块**：接入网关、账号与设备、组织架构、消息与归档、策略服务、文件元数据服务；单台集中部署，预留逻辑拆分。聊天文件字节流点对点旁路不经服务端（仅元数据入归档）；R23 文件面（群文件／个人文件／文件助手／外网 uplink）字节经服务端代理落对象存储，客户端永不直连对象存储。
-- **归档与留痕**：归档以消息为单位；撤回只作用于显示层，服务端保留原文并记录撤回事件；跨态会话以「未归档」标识显式暴露；不提供任何由发送方消除留痕的能力。
-- **命名规范**：代号 Memex，服务名 MemexServer，数据库与日志前缀 `memex`，内网域名 memex.corp.local。
+- **Self-written business layer, no secondary development**: no secondary development based on open-source instant messaging software, and no integration of strongly infectious license components such as AGPL / SSPL; the foundation uses open-source components such as Qt, asio, protobuf, and SQLite (list in `third_party/README.md`), introduced only as deployment-time invocation or permissive-license linking, with a component list submitted at delivery.
+- **Client stack: C++17 + Qt**: the evaluation dimensions included media capability. WebKitGTK as packaged by mainstream distributions does not build WebRTC by default, so Tauri-style routes cannot establish media connections on domestic Linux terminals; the Qt route has the lowest adaptation cost on domestic systems and small packages. WebRTC is the planned media pipeline and has not been introduced; current remote assistance relays JPEG frames through the server-side HTTP surface (see [Product Positioning](product.md)).
+- **Dual-engine client**: a zero-configuration direct mode when not logged in plus a server-backed collaboration mode when logged in; the two engines are each complete, do not share communication state, and only converge through a shared core (local message database, session list, contact view, file transfer module).
+- **Six server modules**: access gateway, accounts and devices, organizational structure, messages and archiving, policy service, file metadata service; single-machine centralized deployment with logical split reserved. Chat file byte streams bypass the server peer-to-peer (metadata only enters the archive); R23 file-surface files (group files / personal files / file assistant / external-network uplink) have their bytes proxied through the server into object storage, and the client never directly connects to object storage.
+- **Archiving and traceability**: archiving is in units of messages; recall only affects the display layer, the server keeps the original text and records the recall event; cross-state sessions are explicitly exposed with the「未归档」label; no capability exists that lets the sender eliminate the trace.
+- **Naming conventions**: codename Memex, service name MemexServer, database and log prefix `memex`, intranet domain memex.corp.local.
 
-## 部署与实施建议（第一期）
+## Deployment and implementation recommendations (phase one)
 
-- 周期约 14 周：试点部署（第 1–4 周）→ 直连态功能 → 协作态与归档 → 管理后台 → 分批推广（第 13–14 周全面验收）。
-- 网络准入：UDP 2425（报告固定段 2425–2436 中现役仅用 2425，2426–2436 为保留段）／TCP 2426–2437 端口固定，配合网络侧策略。
-- 第二期办公室位置图与远程协助单独立项验收；远程协助须验证授权确认、过程可见、操作留痕、部门开关四项。
+- About 14 weeks: pilot deployment (weeks 1–4) → direct-mode features → collaboration mode and archiving → admin console → phased rollout (weeks 13–14, full acceptance).
+- Network admission: UDP 2425 (within the report's fixed segment 2425–2436, only 2425 is in active use; 2426–2436 is a reserved segment) / TCP 2426–2437, ports fixed to cooperate with network-side policy.
+- The phase-two office location map and remote assistance are separately initiated for acceptance; remote assistance must verify four items: authorization confirmation, visible process, operation traceability, and the per-department switch.
 
-## 待评审组决策
+## Items awaiting review panel decisions
 
-第十一章列出十五项请评审组决策事项（另有一项飞秋兼容可选确认），已整理为[决策清单](/guide/decisions)并按「报告建议」先行推进。
+Chapter 11 lists fifteen items for the review panel to decide (plus one optional confirmation on FeiQ compatibility). These have been organized into the[决策清单](/guide/decisions) and are being advanced per the "report recommendation" column.

@@ -1,4 +1,4 @@
-> **English** | [中文](群工具框架.md)
+> **English** | [中文](../zh/design/群工具框架.md)
 
 # Group Tools Framework Design: CI/CD / Packaging / Config Export (R25 Design Draft)
 
