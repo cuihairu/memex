@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 移动 · 邮箱（统一收件箱 + 已读态 + 底部抽屉详情）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  body{align-items:flex-start}
+  .stack{display:flex;gap:22px;align-items:flex-start}
+  .cap{font-size:10.5px;color:var(--text-3);text-align:center;margin-top:6px;font-weight:600}
+  .appbar.row{justify-content:flex-start;gap:8px}
+  .appbar .badge-n{margin-left:auto;background:var(--brand);color:#fff;font-size:10px;font-weight:800;border-radius:999px;padding:1.5px 7px}
+  .chips{display:flex;gap:7px;padding:10px 12px 8px;overflow-x:auto}
+  .chip{flex:none;font-size:12px;padding:5px 12px;border-radius:999px;background:var(--panel);border:1px solid var(--line-strong);color:var(--text-2);white-space:nowrap}
+  .chip.on{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:700}
+  .chip .n{opacity:.75;font-size:10.5px;margin-left:4px}
+  .mlist{padding:0 12px;display:flex;flex-direction:column;gap:8px}
+  .mrow{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:11px 13px;position:relative}
+  .mrow.unread{border-color:rgba(225,101,49,.45);background:var(--brand-softer)}
+  .mrow.unread:before{content:"";position:absolute;left:5px;top:16px;width:6px;height:6px;border-radius:50%;background:var(--brand)}
+  .mrow .r-top{display:flex;align-items:center;gap:7px}
+  .mrow .ic{width:26px;height:26px;border-radius:8px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--warn-soft);color:var(--warn)}
+  .mrow .ic.n{background:var(--panel-2);color:var(--text-2);border:1px solid var(--line)}
+  .mrow .ic.a{background:var(--brand-soft);color:var(--brand-deep)}
+  .mrow .t{font-size:13.5px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mrow .tm{font-size:10.5px;color:var(--text-3);flex:none}
+  .mrow .prev{font-size:12px;color:var(--text-2);margin-top:5px;display:flex;gap:6px;align-items:flex-start}
+  .tag-k{flex:none;font-size:9.5px;font-weight:800;padding:1px 7px;border-radius:999px;color:var(--warn);background:var(--warn-soft)}
+  .tag-k.n{color:var(--text-2);background:var(--panel-2);border:1px solid var(--line)}
+  .tag-k.a{color:var(--brand-deep);background:var(--brand-soft)}
+  .tag-s{flex:none;font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:999px;color:var(--ok);background:var(--ok-soft)}
+  .tag-s.warn{color:var(--warn);background:var(--warn-soft)}
+  .mrow .acts{display:flex;gap:6px;margin-top:8px}
+  .mrow .acts button{flex:1;font-size:11.5px;padding:6px 0;border-radius:8px;background:var(--panel-2);border:1px solid var(--line-strong);color:var(--text-2)}
+  .mrow .acts button.p{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:700}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);border-radius:18px 18px 0 0;padding:8px 16px 12px;box-shadow:0 -8px 24px rgba(0,0,0,.12)}
+  .sheet .grab{width:36px;height:4px;border-radius:2px;background:var(--line-strong);margin:0 auto 9px}
+  .dim{background:rgba(0,0,0,.28)}
+  .kv2{display:flex;justify-content:space-between;gap:12px;font-size:12px;padding:5px 0;border-bottom:1px dashed var(--line)}
+  .kv2 .k{color:var(--text-3)}
+  .kv2 .v{font-weight:600;text-align:right}
+  .note2{font-size:10px;color:var(--text-3);line-height:1.7;margin-top:8px;padding:7px 9px;border-radius:8px;background:var(--panel-2);border:1px solid var(--line)}
+  .who{display:flex;gap:5px;align-items:center;font-size:11px;padding:4px 0;border-bottom:1px dashed var(--line)}
+  .who:last-child{border-bottom:none}
+  .who .av{width:20px;height:20px;border-radius:50%;flex:none;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .who .st{margin-left:auto;font-size:10px;font-weight:700}
+  .who .st.y{color:var(--ok)}
+  .who .st.n{color:var(--warn)}
+</style>
+</head>
+<body>
+<div class="stack">
+
+  <div>
+    <div class="phone">
+      <div class="statusbar">
+        <span>10:26</span>
+        <span class="sb-right">
+          <svg width="15" height="11" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".35"/></svg>
+          <svg width="20" height="11" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x="1" y="1" width="20" height="10" rx="3" stroke-width="1.4"/><rect x="3" y="3" width="13" height="6" rx="1.5" fill="currentColor" stroke="none"/><path d="M23 4v4" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </span>
+      </div>
+      <div class="appbar row"><span class="a-title">邮箱</span><span class="badge-n">23</span></div>
+      <div class="phone-body" style="overflow-y:auto;padding-bottom:10px">
+        <div class="chips">
+          <span class="chip on">全部<span class="n">23</span></span>
+          <span class="chip">告警<span class="n">2</span></span>
+          <span class="chip">通知<span class="n">15</span></span>
+          <span class="chip">公告<span class="n">6</span></span>
+          <span class="chip" style="margin-left:auto">只看未读</span>
+        </div>
+        <div class="mlist">
+          <div class="mrow unread">
+            <div class="r-top">
+              <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5"/><circle cx="12" cy="18" r=".8" fill="currentColor"/></svg></span>
+              <span class="t">磁盘使用率超 85%</span>
+              <span class="tm">11:02</span>
+            </div>
+            <div class="prev"><span class="tag-k">告警</span><span style="flex:1;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">db-1 · 92% · 值班人 李文</span></div>
+            <div class="acts"><button>去处理</button><button class="p">确认已读</button></div>
+          </div>
+          <div class="mrow unread">
+            <div class="r-top">
+              <span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5"/><circle cx="12" cy="18" r=".8" fill="currentColor"/></svg></span>
+              <span class="t">备份任务失败</span>
+              <span class="tm">03:14</span>
+            </div>
+            <div class="prev"><span class="tag-k">告警</span><span style="flex:1;color:var(--text-2)">backup-nightly · 连续 2 次失败</span></div>
+            <div class="acts"><button>去处理</button><button class="p">确认已读</button></div>
+          </div>
+          <div class="mrow unread">
+            <div class="r-top">
+              <span class="ic n"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l3.5 2"/></svg></span>
+              <span class="t">王倩 在 Q4预算 中 @ 了你</span>
+              <span class="tm">09:41</span>
+            </div>
+            <div class="prev"><span class="tag-k n">通知</span><span style="flex:1;color:var(--text-2)">「预算表复核完了，@zhangwei 对一下」</span></div>
+          </div>
+          <div class="mrow">
+            <div class="r-top">
+              <span class="ic n"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M9 3v4M15 3v4M4 10h16"/></svg></span>
+              <span class="t">任务「Q3复盘文档」已到期</span>
+              <span class="tm">08:00</span>
+            </div>
+            <div class="prev"><span class="tag-k n">通知</span><span class="tag-s warn">逾期</span><span style="flex:1;color:var(--text-2)">截止 10-23 23:59</span></div>
+          </div>
+          <div class="mrow">
+            <div class="r-top">
+              <span class="ic a"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg></span>
+              <span class="t">年假审批已通过</span>
+              <span class="tm">10-23</span>
+            </div>
+            <div class="prev"><span class="tag-k n">通知</span><span style="flex:1;color:var(--text-2)">直属上级 赵磊 同意</span></div>
+          </div>
+          <div class="mrow">
+            <div class="r-top">
+              <span class="ic a"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 11l18-7-7 18-2.5-7.5L3 11z"/></svg></span>
+              <span class="t">研发部 10-26 停服演练</span>
+              <span class="tm">10-22</span>
+            </div>
+            <div class="prev"><span class="tag-k a">公告</span><span class="tag-s warn">待确认</span><span style="flex:1;color:var(--text-2)">20:00–21:00 请勿发起变更</span></div>
+            <div class="acts"><button>详情</button><button class="p">确认已读</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="tabbar">
+        <button class="tab">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H7l-4 3v-4.5A8.5 8.5 0 1 1 21 11.5z"/></svg>
+          会话
+        </button>
+        <button class="tab active">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 8l9 6 9-6"/></svg>
+          邮箱
+        </button>
+        <button class="tab">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg>
+          任务
+        </button>
+        <button class="tab">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></svg>
+          我
+        </button>
+      </div>
+    </div>
+    <div class="cap">① 收件箱列表（告警·通知·公告 同池 · 分类筛选）</div>
+  </div>
+
+  <div>
+    <div class="phone" style="position:relative;overflow:hidden">
+      <div class="statusbar">
+        <span>10:26</span>
+        <span class="sb-right">
+          <svg width="15" height="11" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="7" width="3" height="5" rx="1"/><rect x="5" y="4.5" width="3" height="7.5" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".35"/></svg>
+          <svg width="20" height="11" viewBox="0 0 25 12" fill="none" stroke="currentColor"><rect x="1" y="1" width="20" height="10" rx="3" stroke-width="1.4"/><rect x="3" y="3" width="13" height="6" rx="1.5" fill="currentColor" stroke="none"/><path d="M23 4v4" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </span>
+      </div>
+      <div class="appbar row"><span class="a-title">邮箱</span><span class="badge-n">22</span></div>
+      <div class="phone-body dim" style="overflow-y:auto;padding-bottom:10px">
+        <div class="chips">
+          <span class="chip">全部<span class="n">23</span></span>
+          <span class="chip">告警<span class="n">2</span></span>
+          <span class="chip">通知<span class="n">15</span></span>
+          <span class="chip">公告<span class="n">6</span></span>
+        </div>
+        <div class="mlist">
+          <div class="mrow unread"><div class="r-top"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3 2 21h20L12 3z"/></svg></span><span class="t">磁盘使用率超 85%</span><span class="tm">11:02</span></div></div>
+          <div class="mrow unread"><div class="r-top"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3 2 21h20L12 3z"/></svg></span><span class="t">备份任务失败</span><span class="tm">03:14</span></div></div>
+        </div>
+      </div>
+
+      <div class="sheet">
+        <div class="grab"></div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="ic" style="width:28px;height:28px;border-radius:8px;flex:none;background:var(--brand-soft);color:var(--brand-deep);display:flex;align-items:center;justify-content:center"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 11l18-7-7 18-2.5-7.5L3 11z"/></svg></span>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:14px;font-weight:800">研发部 10-26 停服演练</div>
+            <div style="font-size:10.5px;color:var(--text-3);margin-top:1px">公告 · 发布 赵磊 · 10-22 09:00 · 到期 10-25 23:59</div>
+          </div>
+          <span class="tag-k a">公告</span>
+        </div>
+        <div style="font-size:12.5px;color:var(--text-2);line-height:1.75;margin-top:9px;padding:9px 11px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line)">
+          10-26 20:00–21:00 全员停服演练，请勿发起变更；值班群「研发一组」由李文主持，演练完成后由管理员确认解除。
+        </div>
+        <div style="font-size:11px;font-weight:700;color:var(--text-3);letter-spacing:.05em;margin-top:10px;padding:0 1px">已读确认台账（5 人 · 3 已确认 / 2 未确认）</div>
+        <div style="margin-top:4px">
+          <div class="who"><span class="av avatar v1">赵</span>赵磊<span class="st y">已确认</span></div>
+          <div class="who"><span class="av avatar v2">李</span>李文<span class="st y">已确认</span></div>
+          <div class="who"><span class="av avatar v3">王</span>王倩<span class="st y">已确认</span></div>
+          <div class="who"><span class="av avatar v4">孙</span>孙宇<span class="st n">未确认</span></div>
+          <div class="who"><span class="av avatar v5">陈</span>陈晨<span class="st n">未确认</span></div>
+        </div>
+        <div class="acts" style="display:flex;gap:7px;margin-top:11px">
+          <button style="flex:1;font-size:12px;padding:9px 0;border-radius:9px;background:var(--panel-2);border:1px solid var(--line-strong);color:var(--text-2)">转发到群</button>
+          <button style="flex:1.4;font-size:12px;padding:9px 0;border-radius:9px;background:var(--brand);border:1px solid var(--brand);color:#fff;font-weight:800">确认已读</button>
+        </div>
+        <div class="note2">确认已读只改邮箱已读态，不动公告归档行；清空/标记已读一概不触碰归档。</div>
+      </div>
+    </div>
+    <div class="cap">② 条目详情（底部抽屉 · 已读确认台账）</div>
+  </div>
+
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>
