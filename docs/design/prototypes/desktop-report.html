@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 日报周报（三段自由文本 + 周报聚合 + 直属上级视图）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  .dialog{width:min(1040px,96vw);height:min(660px,94vh)}
+  .conn-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12px;color:var(--text-2)}
+  .conn-row .f{display:flex;align-items:center;gap:5px}
+  .conn-row .f b{font-weight:600;color:var(--text-1);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px}
+  .conn-row .ok{margin-left:auto;color:var(--ok);display:flex;align-items:center;gap:5px;font-weight:600}
+  .conn-row .ok i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .split{flex:1;display:flex;min-height:0}
+  .write-col{width:420px;flex:none;border-right:1px solid var(--line);background:var(--panel);padding:14px;display:flex;flex-direction:column;gap:11px;overflow-y:auto}
+  .w-h{display:flex;align-items:center;gap:8px}
+  .w-h .t{font-size:13.5px;font-weight:700}
+  .in{background:var(--panel-2);border:1px solid var(--line-strong);border-radius:6px;padding:6px 9px;color:var(--text-1);font-size:12px}
+  .frow{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2)}
+  .frow label{flex:none}
+  .editor{background:var(--panel-2);border:1px solid var(--line-strong);border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.85;color:var(--text-1);height:150px;overflow-y:auto}
+  .editor .ph{color:var(--text-3)}
+  .editor .h{color:var(--brand-deep);font-weight:700}
+  .btnrow{display:flex;gap:8px}
+  .btnrow .btn{flex:1}
+  .btnrow .btn.ghost{flex:none}
+  .divider2{height:1px;background:var(--line);margin:2px 0}
+  .hint{font-size:10.5px;color:var(--text-3);line-height:1.7}
+  .read-col{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg)}
+  .rs-head{flex:none;display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel);font-size:12.5px;font-weight:700}
+  .rs-head .c{margin-left:auto;font-size:10.5px;color:var(--text-3);font-weight:600;background:var(--panel-2);border:1px solid var(--line);border-radius:999px;padding:0 8px}
+  .rs-head .wk{margin-left:auto;font-size:10.5px}
+  .rs-body{flex:1;overflow-y:auto;padding:6px 10px}
+  .rrow{display:flex;align-items:baseline;gap:10px;padding:8px 10px;border-radius:9px;font-size:12.5px;border:1px solid transparent;margin-bottom:4px}
+  .rrow:hover{background:var(--panel-2)}
+  .rrow.sel{background:var(--brand-softer);border-color:rgba(225,101,49,.4)}
+  .rrow .date{flex:none;font-size:11.5px;color:var(--text-3);width:74px}
+  .rrow .who{flex:none;font-size:11.5px;color:var(--brand-deep);font-weight:600}
+  .rrow .first{flex:1;min-width:0;color:var(--text-2)}
+  .rrow.sub .first{color:var(--text-2)}
+  .stat{flex:none;padding:6px 16px;font-size:11.5px;color:var(--text-3);background:var(--panel-2);border-top:1px solid var(--line);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="window dialog">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span style="font-size:12.5px;color:var(--text-2)">日报周报</span>
+    <span class="state-badge collab" style="margin-left:10px"><i class="dot"></i>协作态 · 任务菜单</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="conn-row">
+    <span class="f">服务器地址 <b>memex.corp.local</b></span>
+    <span class="f">文件端口 <b>24362</b></span>
+    <span class="f">账号 <b>zhangwei</b></span>
+    <span class="f">口令 <b>••••••••</b></span>
+    <span class="ok"><i></i>已连接（只读他人日报需 org_reporting_lines 权限）</span>
+  </div>
+
+  <div class="split">
+    <aside class="write-col">
+      <div class="w-h"><span class="t">写日报</span></div>
+      <div class="frow"><label>归属日</label><span class="in">2026-10-24 ⌃</span></div>
+      <div class="editor">
+        <div><span class="h">今日完成：</span></div>
+        <div>补齐原型图 17 张（任务/审批/日报/群工具/群知识/群服务器）</div>
+        <div>建 prototype-conformance.md 台账，36 行</div>
+        <div><br></div>
+        <div><span class="h">明日计划：</span></div>
+        <div>todo.md 追加「原型符合度」验收条目并走第一轮逐屏比对</div>
+        <div><br></div>
+        <div><span class="h">blockers（无则留空）：</span></div>
+        <div>移动端任务看板与桌面同源端点尚未建，先记 TODO</div>
+      </div>
+      <div class="btnrow">
+        <button class="btn primary">保存日报</button>
+        <button class="btn">刷新</button>
+      </div>
+      <div class="hint">当日重复提交＝更新（保留 updated_ms，不留修订历史，与个人备忘录口径一致）。</div>
+
+      <div class="divider2"></div>
+
+      <div class="w-h"><span class="t">周报补写</span><span style="font-size:10.5px;color:var(--text-3);font-weight:600;margin-left:4px">选周内任一天</span></div>
+      <div class="frow"><label>周内日期</label><span class="in">2026-10-19（周一）⌃</span></div>
+      <div class="frow"><label>周报视图</label><span class="in" style="flex:1">只看本周：开</span></div>
+      <div class="btnrow">
+        <button class="btn ghost-brand" style="flex:1">保存周报</button>
+      </div>
+      <div class="hint">周报＝同一 reports 表按周聚合视图，不另设 week 维度。补写以所选周的周一日期落一行；同周重复提交＝更新。</div>
+    </aside>
+
+    <section class="read-col">
+      <div class="rs-head">我的日报<span class="c">12 篇</span><span class="wk" style="color:var(--text-3);font-weight:600">点击条目回灌编辑器</span></div>
+      <div class="rs-body" style="flex:none;max-height:210px">
+        <div class="rrow sel"><span class="date">2026-10-24</span><span class="first">补齐原型图 17 张（任务/审批/日报/群工具/群知识/群服务器）…</span></div>
+        <div class="rrow"><span class="date">2026-10-23</span><span class="first">完成盯提醒三通道解除（已读静默解 / 手动解 / 超时解）…</span></div>
+        <div class="rrow"><span class="date">2026-10-22</span><span class="first">修复重启后直连 seq 归零重发、双端 UNIQUE 撞行静默丢消息…</span></div>
+        <div class="rrow"><span class="date">2026-10-21</span><span class="first">已读回执四态推进（未发送 / 已发送 / 已送达 / 已读）落地…</span></div>
+        <div class="rrow"><span class="date">2026-10-20</span><span class="first">群工具三件套截止自动关闭（惰性求值）＋结果卡回群…</span></div>
+      </div>
+
+      <div class="rs-head">下属日报（直属上级可见）<span class="c">8 篇</span><span class="wk" style="color:var(--text-3);font-weight:600">az verb report:read · 仅直属下级一层</span></div>
+      <div class="rs-body" style="flex:1">
+        <div class="rrow sub"><span class="date">2026-10-24</span><span class="who">liwen</span><span class="first">联调环境修复已完成，明日回归；blocker：压测机磁盘 92%…</span></div>
+        <div class="rrow sub"><span class="date">2026-10-24</span><span class="who">wangqian</span><span class="first">预算表复核通过；组件库升级评估排到 11-05…</span></div>
+        <div class="rrow sub"><span class="date">2026-10-23</span><span class="who">sunyu</span><span class="first">自动化测试矩阵补齐 12 腿，覆盖率 84% → 91%…</span></div>
+        <div class="rrow sub"><span class="date">2026-10-23</span><span class="who">liwen</span><span class="first">评审 PPT 初稿完成，待组长过目…</span></div>
+        <div class="rrow sub"><span class="date">2026-10-22</span><span class="who">chenchen</span><span class="first">需求清单 v3 已发群，等排期会定优先级…</span></div>
+        <div class="rrow sub"><span class="date">2026-10-21</span><span class="who">wangqian</span><span class="first">周报视图切换验证通过；无 blocker…</span></div>
+        <div class="rrow sub"><span class="date">2026-10-20</span><span class="who">sunyu</span><span class="first">用例去重脚本落地，回归耗时 -38%…</span></div>
+        <div class="rrow sub"><span class="date">2026-10-19</span><span class="who">liwen</span><span class="first">周计划：联调环境 + 评审 PPT + 日报补交…</span></div>
+      </div>
+
+      <div class="stat">
+        <span>已刷新（我的 12 篇 · 下属 8 篇）</span>
+        <span>只读他人日报＝直属上级（同 R27 上级视图口径：不跨级、无 org-admin 兜底）</span>
+        <span style="margin-left:auto">部门聚合视图＝后续再做</span>
+      </div>
+    </section>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

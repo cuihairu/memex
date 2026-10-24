@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 邮箱（告警+通知+公告 统一收件箱）</title>
+<link rel="stylesheet" href="prototypes.css">
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span class="state-badge collab"><i class="dot"></i>协作态</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="app-body">
+    <nav class="rail">
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H7l-4 3v-4.5A8.5 8.5 0 1 1 21 11.5z"/></svg><span class="tip">会话</span></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.2 3.4-5 6.5-5s5.7 1.8 6.5 5"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.6c2.7.3 4.7 1.9 5.4 4.4"/></svg><span class="tip">通讯录</span></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="tip">文件</span></button>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="tip">搜索</span></button>
+      <button class="rail-item active" style="position:relative"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7.5 9 6 9-6"/></svg><span class="tip">邮箱</span><span class="n-count" style="position:absolute;right:2px;top:2px;transform:none">23</span></button>
+      <span class="spacer"></span>
+      <button class="rail-item"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.33-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.51 1.7 1.7 0 0 0 1.87-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9v.09a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/></svg><span class="tip">设置</span></button>
+      <div class="avatar" style="width:34px;height:34px;border-radius:10px;font-size:13px">张</div>
+    </nav>
+
+    <section class="console">
+      <div class="console-top">
+        <div style="display:flex;align-items:baseline;gap:10px">
+          <span class="console-title">邮箱</span>
+          <span class="console-sub">告警 · 通知 · 公告 三类条目进同一个收件箱；条目正文留在各自来源，邮箱只管入箱 / 未读 / 已读 / 已处理</span>
+        </div>
+        <div class="filters">
+          <div class="tx-tabs" style="padding:0">
+            <button class="tx-tab active">全部 23</button>
+            <button class="tx-tab">告警 <b style="color:var(--warn)">2</b></button>
+            <button class="tx-tab">通知 15</button>
+            <button class="tx-tab">公告 6</button>
+          </div>
+          <label class="filter" style="min-width:0"><i class="toggle" style="flex:none"></i>只看未读</label>
+          <div class="filter wide"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input placeholder="搜索标题 / 来源" value=""></div>
+          <button class="btn ghost-brand" style="flex:none;padding:7px 14px">全部标记已读</button>
+        </div>
+      </div>
+
+      <div class="result-table">
+        <div class="rt-head"><span class="c-key">条目</span><span class="c-people">来源</span><span class="c-time">时间</span><span class="c-flag">状态</span><span class="c-ops">操作</span></div>
+        <div class="rt-row" style="background:var(--brand-softer)">
+          <span class="c-key"><span style="display:inline-flex;align-items:center;gap:8px"><span class="tag paused" style="flex:none">告警</span><span style="min-width:0"><b style="font-size:12.5px"><span style="color:var(--brand);margin-right:5px">●</span>磁盘使用率超过 85%（srv-db-01 / data 卷）</b><span class="kw-context" style="display:block;font-size:11px">健康检查 · 持续未处理，红点不消失</span></span></span></span>
+          <span class="c-people">admin 事件源</span>
+          <span class="c-time">10-24 09:12</span>
+          <span class="c-flag"><span class="tag paused">未读</span></span>
+          <span class="c-ops"><span>标记已处理</span><span>标记已读</span></span>
+        </div>
+        <div class="rt-row">
+          <span class="c-key"><span style="display:inline-flex;align-items:center;gap:8px"><span class="tag paused" style="flex:none">告警</span><span style="min-width:0"><b style="font-size:12.5px">备份任务失败：backup-nightly（第 2 次）</b><span class="kw-context" style="display:block;font-size:11px">服务器事件 · 修复后由处理人标记已处理并留痕</span></span></span></span>
+          <span class="c-people">admin 事件源</span>
+          <span class="c-time">10-24 02:00</span>
+          <span class="c-flag"><span class="tag doing">已处理</span></span>
+          <span class="c-ops"><span>详情</span></span>
+        </div>
+        <div class="rt-row">
+          <span class="c-key"><span style="display:inline-flex;align-items:center;gap:8px"><span class="tag doing" style="flex:none">通知</span><span style="min-width:0"><b style="font-size:12.5px"><span style="color:var(--brand);margin-right:5px">●</span>王倩 在群「Q4 预算对齐」中 @ 了你</b><span class="kw-context" style="display:block;font-size:11px">@我 · 回执只提醒一次，重复刷新不重复弹</span></span></span></span>
+          <span class="c-people">@我</span>
+          <span class="c-time">10-24 10:26</span>
+          <span class="c-flag"><span class="tag paused">未读</span></span>
+          <span class="c-ops"><span>去会话</span><span>标记已读</span></span>
+        </div>
+        <div class="rt-row">
+          <span class="c-key"><span style="display:inline-flex;align-items:center;gap:8px"><span class="tag doing" style="flex:none">通知</span><span style="min-width:0"><b style="font-size:12.5px">任务「Q3 复盘文档」将于今日 18:00 到期</b><span class="kw-context" style="display:block;font-size:11px">任务到期 · 通知中心三级分层 IMPORTANT 强提醒</span></span></span></span>
+          <span class="c-people">任务到期</span>
+          <span class="c-time">10-24 09:30</span>
+          <span class="c-flag"><span class="tag done">已读</span></span>
+          <span class="c-ops"><span>去任务</span></span>
+        </div>
+        <div class="rt-row">
+          <span class="c-key"><span style="display:inline-flex;align-items:center;gap:8px"><span class="tag doing" style="flex:none">通知</span><span style="min-width:0"><b style="font-size:12.5px">你的「年假」申请已通过（审批人 周航）</b><span class="kw-context" style="display:block;font-size:11px">审批结果 · 落定才提醒申请人，首连静默不轰炸</span></span></span></span>
+          <span class="c-people">审批结果</span>
+          <span class="c-time">10-23 17:42</span>
+          <span class="c-flag"><span class="tag done">已读</span></span>
+          <span class="c-ops"><span>去审批</span></span>
+        </div>
+        <div class="rt-row">
+          <span class="c-key"><span style="display:inline-flex;align-items:center;gap:8px"><span class="tag doing" style="flex:none">通知</span><span style="min-width:0"><b style="font-size:12.5px">群「研发一组」备忘录「测试环境说明」有变更</b><span class="kw-context" style="display:block;font-size:11px">共享变更 · 正文在群知识共享，邮箱只承载状态</span></span></span></span>
+          <span class="c-people">群知识共享</span>
+          <span class="c-time">10-23 15:08</span>
+          <span class="c-flag"><span class="tag done">已读</span></span>
+          <span class="c-ops"><span>去群</span></span>
+        </div>
+        <div class="rt-row">
+          <span class="c-key"><span style="display:inline-flex;align-items:center;gap:8px"><span class="pill-outline" style="flex:none;color:var(--text-2)">公告</span><span style="min-width:0"><b style="font-size:12.5px"><span style="color:var(--brand);margin-right:5px">●</span>全员：国庆值班安排（需确认已读）</b><span class="kw-context" style="display:block;font-size:11px">弱提醒 · 已读确认 3/5，台账可查</span></span></span></span>
+          <span class="c-people">人事行政部</span>
+          <span class="c-time">10-23 09:00</span>
+          <span class="c-flag"><span class="tag paused">待确认</span></span>
+          <span class="c-ops"><span>确认已读</span><span>详情</span></span>
+        </div>
+        <div class="rt-row">
+          <span class="c-key"><span style="display:inline-flex;align-items:center;gap:8px"><span class="pill-outline" style="flex:none;color:var(--text-2)">公告</span><span style="min-width:0"><b style="font-size:12.5px">研发部：10-26 02:00 停服演练窗口</b><span class="kw-context" style="display:block;font-size:11px">部门广播 · R24 公告的部门 / 全员扩展形态</span></span></span></span>
+          <span class="c-people">产品研发部</span>
+          <span class="c-time">10-22 18:30</span>
+          <span class="c-flag"><span class="tag done">已确认</span></span>
+          <span class="c-ops"><span>详情</span></span>
+        </div>
+        <div class="rt-foot">
+          未读 23（告警 2 · 通知 15 · 公告 6）· 服务端为唯一未读来源，桌面 / 手机 / 管理台三面同源同数
+          <span class="audit"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>查阅留痕：audit.message.search</span>
+        </div>
+      </div>
+
+      <div class="audit-log">
+        <span>边界①邮箱=视图+已读状态，不是新通道（复用通知中心 / webhook / admin 事件源 / R24 公告，禁止第三条推送链）</span>
+        <span>边界②清空 / 标记已读只动邮箱状态与留痕，<b style="color:var(--warn)">消息归档行 / 公告行 / 告警台账行一概不动</b></span>
+      </div>
+    </section>
+
+    <aside class="infopanel">
+      <h4>条目详情</h4>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="pill-outline">公告</span>
+        <span class="tag paused">待确认</span>
+      </div>
+      <div style="font-weight:700;font-size:13.5px;line-height:1.5">全员：国庆值班安排（需确认已读）</div>
+      <div class="kv"><span class="k">发布方</span><span class="v">人事行政部</span></div>
+      <div class="kv"><span class="k">发布时间</span><span class="v">10-23 09:00</span></div>
+      <div class="kv"><span class="k">正文位置</span><span class="v brand">R24 公告（群置顶）</span></div>
+      <div class="kv"><span class="k">提醒级别</span><span class="v">弱提醒</span></div>
+      <button class="btn primary" style="width:100%;margin-top:4px">确认已读</button>
+
+      <h4 style="margin-top:6px">已读确认台账</h4>
+      <div class="member-row"><div class="avatar v3 sm">李</div>李文<span class="role" style="margin-left:auto">10-23 09:41 已确认</span></div>
+      <div class="member-row"><div class="avatar v6 sm">王</div>王倩<span class="role" style="margin-left:auto">10-23 10:02 已确认</span></div>
+      <div class="member-row"><div class="avatar v7 sm">赵</div>赵磊<span class="role" style="margin-left:auto">10-23 11:15 已确认</span></div>
+      <div class="member-row" style="color:var(--text-3)"><div class="avatar v8 sm" style="opacity:.55">陈</div>陈静<span class="role" style="margin-left:auto;color:var(--warn);background:var(--warn-soft)">未确认</span></div>
+      <div class="member-row" style="color:var(--text-3)"><div class="avatar v9 sm" style="opacity:.55">孙</div>孙宇<span class="role" style="margin-left:auto;color:var(--warn);background:var(--warn-soft)">未确认</span></div>
+      <div style="font-size:10.5px;color:var(--text-3);line-height:1.7">谁 / 何时确认持久化可查（按人 / 按条目）；是否强制全员确认＝待拍板项（mailbox.md §Ⅵ-1）。</div>
+
+      <h4 style="margin-top:6px">告警处理留痕（示例）</h4>
+      <div class="kv"><span class="k">条目</span><span class="v" style="max-width:120px">备份失败</span></div>
+      <div class="kv"><span class="k">处理人</span><span class="v">刘畅</span></div>
+      <div class="kv"><span class="k">处理时间</span><span class="v">10-24 08:55</span></div>
+      <div class="kv"><span class="k">动作</span><span class="v brand">标记已处理</span></div>
+      <div style="font-size:10.5px;color:var(--text-3);line-height:1.7">处理动作与处理人留痕；红点持续到已处理为止。非管理员默认看不到系统详情（磁盘路径 / 日志摘录脱敏，待拍板项 §Ⅵ-2）。</div>
+    </aside>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>
