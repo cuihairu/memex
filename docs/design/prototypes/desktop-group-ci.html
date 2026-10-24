@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 群 CI/CD 流水线（R25-2 状态视图 + 触发 + 留痕）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  .dialog{width:min(1000px,96vw);height:min(640px,94vh)}
+  .conn-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12px;color:var(--text-2)}
+  .conn-row .f{display:flex;align-items:center;gap:5px}
+  .conn-row .f b{font-weight:600;color:var(--text-1);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px}
+  .conn-row .ok{margin-left:auto;color:var(--ok);display:flex;align-items:center;gap:5px;font-weight:600}
+  .conn-row .ok i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .split{flex:1;display:flex;min-height:0}
+  .col{flex:1;min-width:0;display:flex;flex-direction:column}
+  .col.l{border-right:1px solid var(--line)}
+  .col-r{overflow-y:auto;background:var(--bg);padding:10px 12px;display:flex;flex-direction:column;gap:10px}
+  .sec-h{display:flex;align-items:center;gap:9px;padding:0 0 8px;font-size:12.5px;font-weight:700}
+  .sec-h .s{font-size:10.5px;color:var(--text-3);font-weight:600}
+  .listbox{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+  .pipe{border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--panel);font-size:12.5px;line-height:1.7}
+  .pipe.sel{border-color:rgba(225,101,49,.5);background:var(--brand-softer)}
+  .pipe .p-top{display:flex;align-items:center;gap:8px}
+  .pipe .p-top b{font-weight:700}
+  .pipe .p-top .desc{color:var(--text-2);font-size:11.5px}
+  .pipe .p-top .who{margin-left:auto;font-size:10.5px;color:var(--text-3);white-space:nowrap}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block}
+  .dot.ok{background:#2e8b57}
+  .dot.fail{background:#c43a2d}
+  .dot.idle{background:var(--text-3)}
+  .pipe .p-last{font-size:11.5px;color:var(--text-2);margin-top:3px}
+  .pipe .p-last .fail{color:#c43a2d;font-weight:700}
+  .pipe .p-last .ok{color:var(--ok);font-weight:700}
+  .pipe .p-last .idle{color:var(--text-3)}
+  .pipe.never{opacity:.7}
+  .rowbox{display:flex;align-items:center;gap:8px;padding:8px 0;border-top:1px dashed var(--line);flex-wrap:wrap;font-size:12px;color:var(--text-2)}
+  .in{background:var(--panel);border:1px solid var(--line-strong);border-radius:6px;padding:5px 9px;color:var(--text-1);font-size:12px}
+  .in.grow{flex:1;min-width:140px}
+  .in.wide{width:230px}
+  .btnrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card .ch{padding:8px 12px;font-size:12px;font-weight:700;border-bottom:1px solid var(--line);background:var(--panel-2);display:flex;align-items:center;gap:8px}
+  .card .ch .s{font-size:10.5px;color:var(--text-3);font-weight:600;margin-left:auto}
+  .card .cb{padding:10px 12px}
+  .runrow{display:flex;gap:10px;font-size:12px;padding:5px 0;border-bottom:1px dashed var(--line);align-items:baseline}
+  .runrow:last-child{border-bottom:none}
+  .runrow .rid{color:var(--text-3);width:34px;flex:none}
+  .runrow .st{flex:none;width:52px}
+  .runrow .st.ok{color:var(--ok);font-weight:700}
+  .runrow .st.fail{color:#c43a2d;font-weight:700}
+  .runrow .st.undone{color:var(--text-3)}
+  .runrow .ts{margin-left:auto;color:var(--text-3);font-size:11px;white-space:nowrap}
+  .note{display:flex;gap:7px;padding:7px 10px;border-radius:8px;background:var(--ok-soft);color:var(--ok);font-size:11px;line-height:1.6}
+  .note.warn{background:var(--warn-soft);color:var(--warn)}
+  .note.lock{background:var(--panel);color:var(--text-2);border:1px solid var(--line)}
+  .cred{display:flex;align-items:center;gap:8px}
+  .cred .m{flex:1;letter-spacing:3px;color:var(--text-3);font-weight:700;font-size:12px}
+  .cred .st{font-size:11px;color:var(--text-3)}
+</style>
+</head>
+<body>
+<div class="window dialog">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span style="font-size:12.5px;color:var(--text-2)">群 CI/CD — 研发一组</span>
+    <span class="state-badge collab" style="margin-left:10px"><i class="dot" style="background:var(--brand)"></i>R25-2 · 客户端只见按钮，不见凭据</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="conn-row">
+    <span class="f">服务器地址 <b>memex.corp.local</b></span>
+    <span class="f">文件端口 <b>24362</b></span>
+    <span class="f">账号 <b>zhangwei</b></span>
+    <span class="f">口令 <b>••••••••</b></span>
+    <span class="f">群号 <b>7</b></span>
+    <span class="ok"><i></i>已连接</span>
+  </div>
+
+  <div class="split">
+    <section class="col l">
+      <div class="sec-h" style="padding:12px 14px 8px">流水线（红绿灯）<span class="s">未跑过＝灰 · 最近成功绿 / 失败红</span></div>
+      <div class="listbox" style="padding:0 12px">
+        <div class="pipe sel">
+          <div class="p-top"><span class="dot ok"></span><b>release-ci</b><span class="desc">合并后构建 + 单测</span><span class="who">群主 赵磊</span></div>
+          <div class="p-last">最近：<span class="ok">成功</span> · 触发 zhangwei · 10-24 09:41（#18）</div>
+        </div>
+        <div class="pipe">
+          <div class="p-top"><span class="dot fail"></span><b>docker-publish</b><span class="desc">构建镜像并推送仓库</span><span class="who">群主 赵磊</span></div>
+          <div class="p-last">最近：<span class="fail">失败</span> · 触发 zhangwei · 10-24 09:41（#12）· 结果卡已回群</div>
+        </div>
+        <div class="pipe">
+          <div class="p-top"><span class="dot ok"></span><b>docs-preview</b><span class="desc">文档站预览构建</span><span class="who">群主 赵磊</span></div>
+          <div class="p-last">最近：<span class="ok">成功</span> · 触发 chenchen · 10-23 17:02（#9）</div>
+        </div>
+        <div class="pipe never">
+          <div class="p-top"><span class="dot idle"></span><b>nightly-perf</b><span class="desc">每夜性能回归（白名单未开放）</span><span class="who">群主 赵磊</span></div>
+          <div class="p-last">最近：<span class="idle">未跑过</span></div>
+        </div>
+      </div>
+      <div style="padding:8px 12px 12px">
+        <div class="rowbox" style="border-top:none;padding-top:4px">
+          <span class="in wide">参数 JSON（可选）{"fail":true}</span>
+          <button class="btn primary" style="flex:none">触发构建</button>
+          <span style="font-size:10.5px;color:var(--text-3)">点触发=留痕到群日志，可追溯到人</span>
+        </div>
+        <div class="rowbox">
+          <span style="font-size:11.5px;color:var(--text-3)">流水线名</span>
+          <span class="in wide">nightly-perf</span>
+          <span class="in grow">描述（可选）</span>
+          <button class="btn" style="flex:none">新建 / 更新</button>
+          <button class="btn" style="flex:none;border-color:rgba(196,58,45,.45);color:#c43a2d">删除</button>
+          <button class="btn ghost-brand" style="flex:none">开放成员触发</button>
+          <button class="btn" style="flex:none">刷新</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="col-r">
+      <div class="card">
+        <div class="ch">运行历史（谁触发可追溯）<span class="s">actor · 参数 · 结果 · 留痕</span></div>
+        <div class="cb">
+          <div class="runrow"><span class="rid">#18</span><span class="st ok">成功</span><span>release-ci</span><span class="ts">zhangwei · 10-24 09:41</span></div>
+          <div class="runrow"><span class="rid">#12</span><span class="st fail">失败</span><span>docker-publish　{"fail":true}</span><span class="ts">zhangwei · 10-24 09:41</span></div>
+          <div class="runrow"><span class="rid">#11</span><span class="st ok">成功</span><span>docker-publish</span><span class="ts">zhaolei · 10-23 20:05</span></div>
+          <div class="runrow"><span class="rid">#9</span><span class="st ok">成功</span><span>docs-preview</span><span class="ts">chenchen · 10-23 17:02</span></div>
+          <div class="runrow"><span class="rid">#8</span><span class="st undone">取消</span><span>release-ci（危险动作二次确认）</span><span class="ts">zhangwei · 10-22 14:33</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ch">工具凭据（仅服务端保存）<span class="s">客户端零凭据</span></div>
+        <div class="cb">
+          <div class="cred"><span class="in wide" style="color:var(--text-2)">已配置</span><span class="m">ghp_••••••••••••••••</span><span class="st">ci 凭据：已配置（AES-256-GCM 密文落库）</span></div>
+          <div class="btnrow">
+            <button class="btn ghost-brand">设置凭据</button>
+            <button class="btn">删除凭据</button>
+            <span style="font-size:10.5px;color:var(--text-3);align-self:center;margin-left:4px">外部 token 只存服务端；复用 R24 保险柜加密面</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="note lock">动作语义：点按钮 → 服务端代理外呼 → 结果回群（消息卡 + 本面板状态刷新）。白名单动作制：工具只暴露声明过的动作，参数服务端校验。</div>
+      <div class="note warn">危险动作（取消构建 / 删除产物）可配二次确认；取消已取消的运行不重复留痕。</div>
+    </aside>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

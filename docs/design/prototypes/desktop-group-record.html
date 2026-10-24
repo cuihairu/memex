@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 导出群记录（分页导出 + AI 降级 + truncated 续传标记）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  .dialog{width:min(900px,96vw);height:min(600px,94vh)}
+  .conn-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12px;color:var(--text-2)}
+  .conn-row .f{display:flex;align-items:center;gap:5px}
+  .conn-row .f b{font-weight:600;color:var(--text-1);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px}
+  .conn-row .ok{margin-left:auto;color:var(--ok);display:flex;align-items:center;gap:5px;font-weight:600}
+  .conn-row .ok i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .split{flex:1;display:flex;min-height:0}
+  .form-col{width:390px;flex:none;border-right:1px solid var(--line);background:var(--panel);padding:16px;display:flex;flex-direction:column;gap:12px;overflow-y:auto}
+  .eh{font-size:13px;font-weight:700}
+  .frow{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--text-2)}
+  .frow label{flex:none;width:78px}
+  .in{flex:1;background:var(--panel-2);border:1px solid var(--line-strong);border-radius:6px;padding:6px 9px;color:var(--text-1);font-size:12px}
+  .chk{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-1)}
+  .chk i{width:13px;height:13px;border-radius:3px;background:var(--brand);position:relative;display:inline-block;flex:none}
+  .chk i:after{content:"✓";color:#fff;font-size:9px;position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .chk.off i{background:var(--panel);border:1px solid var(--line-strong)}
+  .chk.off i:after{content:""}
+  .progress{border:1px solid var(--line);border-radius:8px;background:var(--panel-2);padding:9px 11px;font-size:12px;color:var(--text-2);min-height:44px}
+  .progress .bar{height:6px;border-radius:4px;background:var(--panel);border:1px solid var(--line);overflow:hidden;margin-top:6px}
+  .progress .bar i{display:block;height:100%;width:62%;background:var(--brand);border-radius:4px}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap}
+  .btnrow .btn{flex:none;padding:8px 16px}
+  .note{font-size:10.5px;color:var(--text-3);line-height:1.8}
+  .note b{color:var(--warn)}
+  .ref-col{flex:1;min-width:0;overflow-y:auto;background:var(--bg);padding:14px 16px}
+  .ref-h{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-bottom:9px}
+  .ref-h .s{font-size:10.5px;color:var(--text-3);font-weight:600}
+  .doc{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .doc .db{padding:12px 15px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11.5px;line-height:1.85;color:var(--text-2);white-space:pre-wrap}
+  .doc .db .h{color:var(--brand-deep);font-weight:700}
+  .doc .db .t{color:var(--text-3)}
+  .doc .db .cut{color:var(--warn);font-weight:700}
+  .card2{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:11.5px;color:var(--text-2);line-height:1.8;margin-top:10px}
+  .card2 .lbl{font-weight:700;color:var(--text-1);font-size:12px;margin-bottom:3px}
+</style>
+</head>
+<body>
+<div class="window dialog">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span style="font-size:12.5px;color:var(--text-2)">导出群记录（群 7 · 研发一组）</span>
+    <span class="state-badge collab" style="margin-left:10px"><i class="dot"></i>群成员均可导出 · 每次导出留审计</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="conn-row">
+    <span class="f">服务器地址 <b>memex.corp.local</b></span>
+    <span class="f">文件端口 <b>24362</b></span>
+    <span class="f">账号 <b>zhangwei</b></span>
+    <span class="f">口令 <b>••••••••</b></span>
+    <span class="f">群号 <b>7</b></span>
+    <span class="ok"><i></i>已连接</span>
+  </div>
+
+  <div class="split">
+    <aside class="form-col">
+      <div class="eh">导出区间（群右键「导出群记录…」）</div>
+      <div class="frow"><label>起始时间（含）</label><span class="in">2026-10-19 00:00:00 ⌃</span></div>
+      <div class="frow"><label>截止时间（含）</label><span class="in">2026-10-24 23:59:59 ⌃</span></div>
+      <label class="chk"><i></i><span>生成 AI 总结（未接线则自动降级为普通文档）</span></label>
+      <div class="progress">
+        导出中…（第 3 页 / 共 4 页）
+        <div class="bar"><i></i></div>
+        <div style="font-size:10.5px;color:var(--text-3);margin-top:5px">可中断：中断后按 after_id 续传，不重导已导页</div>
+      </div>
+      <div class="btnrow">
+        <button class="btn primary">开始导出</button>
+        <button class="btn ghost-brand">保存为 Markdown…</button>
+        <button class="btn">关闭</button>
+      </div>
+      <div class="card2">
+        <div class="lbl">导出完成态</div>
+        导出完成（4 页 · 963 条）<br>
+        （已达单次上限，尾部 <b style="color:var(--warn)">truncated</b> 标注；续传用 after_id=104872）
+      </div>
+      <div class="note">
+        权限：群成员均可导出，非成员 403。<br>
+        审计：每次导出写一条审计行（谁 / 何时 / 哪个群 / 区间 / 条数 / AI 标记），管理台可查。
+      </div>
+    </aside>
+
+    <section class="ref-col">
+      <div class="ref-h">导出产物结构（Markdown，非本窗口）<span class="s">三段固定 · 撤回带标记 · 不静默截断</span></div>
+      <div class="doc">
+        <div class="db"><span class="h"># 研发一组 群记录导出</span>
+
+<span class="h">## 参与者</span>
+- 赵磊　群主　加入 2026-07-01
+- 李文　成员　加入 2026-07-01
+- 王倩　成员　加入 2026-08-14
+- 孙宇　成员　加入 2026-09-02　（离开时间不含）
+- 陈晨　成员　加入 2026-09-20
+
+<span class="h">## 时间范围</span>
+- 群创建：2026-07-01 10:12:44
+- 本次区间：2026-10-19 00:00:00 ~ 2026-10-24 23:59:59
+- 命中 963 条（撤回 2 条）
+
+<span class="h">## 聊天记录</span>
+<span class="t">[10-19 09:12:04] 李文：大家注意 staging 已切流，别用旧连接串</span>
+<span class="t">[10-19 09:13:22] zhangwei：收到，我把脚本里的地址改了</span>
+<span class="t">[10-19 09:14:40] 李文：（撤回）</span>
+<span class="t">[10-19 10:02:11] 王倩：预算表复核完了，@zhangwei 对一下</span>
+…
+<span class="cut">⚠ truncated：已达单次导出上限 10,000 条</span>
+<span class="cut">续传入口：after_id=104872（从下一条继续）</span>
+<span class="cut">AI 总结：AI 未启用（模型网关不可达，已降级为普通文档）</span></div>
+      </div>
+      <div class="card2">
+        <div class="lbl">与群配置快照的区别</div>
+        群配置快照（「群打包 / 导出」）＝配置面（工具白名单 / 凭据状态 / 成员表，<b>不含消息</b>）；本导出＝消息归档正文（参与者 + 时间范围 + 聊天记录），两者互不覆盖。
+      </div>
+    </section>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

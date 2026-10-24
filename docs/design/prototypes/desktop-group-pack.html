@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 群打包 / 导出（R25-3 一键产物 + 群配置快照）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  .dialog{width:min(920px,96vw);height:min(640px,94vh)}
+  .conn-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12px;color:var(--text-2)}
+  .conn-row .f{display:flex;align-items:center;gap:5px}
+  .conn-row .f b{font-weight:600;color:var(--text-1);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px}
+  .conn-row .ok{margin-left:auto;color:var(--ok);display:flex;align-items:center;gap:5px;font-weight:600}
+  .conn-row .ok i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .split{flex:1;display:flex;min-height:0}
+  .col{flex:1;min-width:0;display:flex;flex-direction:column;padding:12px 14px;gap:9px;overflow-y:auto}
+  .col.l{border-right:1px solid var(--line)}
+  .sec-h{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700}
+  .sec-h .s{font-size:10.5px;color:var(--text-3);font-weight:600}
+  .alist{display:flex;flex-direction:column;gap:7px}
+  .art{border:1px solid var(--line);border-radius:10px;padding:9px 12px;background:var(--panel);display:flex;gap:10px;align-items:center;font-size:12.5px}
+  .art.sel{border-color:rgba(225,101,49,.5);background:var(--brand-softer)}
+  .art .f-icon{width:34px;height:34px;border-radius:9px;flex:none;background:var(--brand-soft);color:var(--brand-deep);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
+  .art .f-icon.bin{background:var(--ok-soft);color:var(--ok)}
+  .art .m{flex:1;min-width:0}
+  .art .m b{font-weight:700}
+  .art .m .sub{font-size:11px;color:var(--text-2);margin-top:1px}
+  .art .ts{font-size:10.5px;color:var(--text-3);white-space:nowrap}
+  .frow{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2);flex-wrap:wrap}
+  .in{background:var(--panel);border:1px solid var(--line-strong);border-radius:6px;padding:6px 9px;color:var(--text-1);font-size:12px}
+  .in.grow{flex:1;min-width:120px}
+  .in.wide{width:150px}
+  .btnrow{display:flex;gap:7px;flex-wrap:wrap}
+  .snapshot{flex:1;min-height:150px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;line-height:1.75;color:var(--text-2);overflow:auto;white-space:pre}
+  .snapshot .k{color:var(--brand-deep)}
+  .note{display:flex;gap:7px;padding:7px 10px;border-radius:8px;background:var(--panel-2);border:1px solid var(--line);color:var(--text-2);font-size:11px;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="window dialog">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span style="font-size:12.5px;color:var(--text-2)">群打包 / 导出 — 研发一组</span>
+    <span class="state-badge collab" style="margin-left:10px"><i class="dot"></i>R25-3 · 打包与配置快照</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="conn-row">
+    <span class="f">服务器地址 <b>memex.corp.local</b></span>
+    <span class="f">文件端口 <b>24362</b></span>
+    <span class="f">账号 <b>zhangwei</b></span>
+    <span class="f">口令 <b>••••••••</b></span>
+    <span class="f">群号 <b>7</b></span>
+    <span class="ok"><i></i>已连接</span>
+  </div>
+
+  <div class="split">
+    <section class="col l">
+      <div class="sec-h">出产物<span class="s">一键打包 · 群文件面归档 · 打包动作留痕</span></div>
+      <div class="alist">
+        <div class="art sel">
+          <div class="f-icon">PKG</div>
+          <div class="m"><b>memex-client</b><div class="sub">v0.9.2-rc2 · Linux x64 全量包（含依赖清单）</div></div>
+          <span class="ts">打包 by zhangwei · 10-24 09:41</span>
+        </div>
+        <div class="art">
+          <div class="f-icon">PKG</div>
+          <div class="m"><b>deploy-bundle</b><div class="sub">v0.9.1 · 服务器部署包 + compose 配置</div></div>
+          <span class="ts">打包 by zhaolei · 10-22 20:05</span>
+        </div>
+        <div class="art">
+          <div class="f-icon bin">CFG</div>
+          <div class="m"><b>群配置快照</b><div class="sub">群 7 · 工具白名单 / 凭据状态（脱敏）/ 成员表</div></div>
+          <span class="ts">导出 by liwen · 10-21 11:30</span>
+        </div>
+      </div>
+      <div class="note">打包须白名单开放（群主可切「开放成员打包」）；产物进群文件面，受群配额与钉选管理。</div>
+      <div class="frow">
+        <span class="in wide">产物名（如 memex-client）</span>
+        <span class="in" style="width:90px">版本（v0.9.3）</span>
+        <span class="in grow">备注（可选）</span>
+        <button class="btn primary" style="flex:none">打包</button>
+      </div>
+      <div class="btnrow">
+        <button class="btn" style="border-color:rgba(196,58,45,.45);color:#c43a2d">删除选中</button>
+        <button class="btn ghost-brand">开放成员打包</button>
+        <button class="btn">刷新</button>
+        <span style="font-size:10.5px;color:var(--text-3);align-self:center">删除产物＝危险动作（可配二次确认）</span>
+      </div>
+    </section>
+
+    <aside class="col">
+      <div class="sec-h">群配置快照导出<span class="s">只读 JSON · 脱敏（凭据只出状态不出值）</span></div>
+      <div class="snapshot"><span class="k">{</span>
+  <span class="k">"group"</span>: { "id": 7, "name": "研发一组", "owner": "zhaolei", "members": 12 },
+  <span class="k">"topic"</span>: "研发一组日常协作",
+  <span class="k">"purpose"</span>: "需求评审 / 构建发布 / 值班协同",
+  <span class="k">"capabilities"</span>: { "notice": true, "memo": true, "vault": true,
+                    "tools": true, "server_tools": true, "files": true,
+                    "uplink": false, "remote": false },
+  <span class="k">"tools"</span>: {
+    "polls":   { "open": 2, "closed": 1 },
+    "chains":  { "open": 1, "closed": 1 },
+    "tasks":   { "open": 2, "done": 1 },
+    "ci":      { "pipelines": 4, "runs_total": 18 },
+    "servers": { "agents": 3, "sessions_total": 27 }
+  },
+  <span class="k">"credentials"</span>: { "ci": "configured", "vault_entries": 5 },
+  <span class="k">"exported_at"</span>: "2026-10-24 11:02:33",
+  <span class="k">"exported_by"</span>: "zhangwei"
+<span class="k">}</span></div>
+      <div class="btnrow">
+        <button class="btn primary">导出群配置快照…</button>
+        <button class="btn">另存为文件…</button>
+      </div>
+      <div class="note">导出动作与 CI/CD 打包同源留痕（谁 / 何时 / 哪个群）；快照仅含配置面，<b>不含消息归档</b>——消息导出走「导出群记录…」。</div>
+    </aside>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

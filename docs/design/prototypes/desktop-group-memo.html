@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 群备忘录（R24-2 共享知识 + 修订历史回滚）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  .dialog{width:min(960px,96vw);height:min(660px,94vh)}
+  .conn-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12px;color:var(--text-2)}
+  .conn-row .f{display:flex;align-items:center;gap:5px}
+  .conn-row .f b{font-weight:600;color:var(--text-1);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px}
+  .conn-row .ok{margin-left:auto;color:var(--ok);display:flex;align-items:center;gap:5px;font-weight:600}
+  .conn-row .ok i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .split{flex:1;display:flex;min-height:0}
+  .list-col{width:430px;flex:none;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+  .bar{flex:none;display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)}
+  .bar .search{flex:1;display:flex;align-items:center;gap:7px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;color:var(--text-3);font-size:12px}
+  .bar .search input{flex:1;border:none;background:none;outline:none;color:var(--text-1);font-size:12px}
+  .melist{flex:1;overflow-y:auto;padding:8px 10px}
+  .memo{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:var(--panel-2);font-size:12.5px;margin-bottom:7px}
+  .memo.sel{border-color:rgba(225,101,49,.5);background:var(--brand-softer)}
+  .memo .m-top{display:flex;align-items:center;gap:8px}
+  .memo .m-top b{font-weight:700}
+  .memo .m-top .meta{margin-left:auto;font-size:11px;color:var(--text-3);white-space:nowrap}
+  .memo .m-body{font-size:12px;color:var(--text-2);margin-top:5px;white-space:pre-wrap;line-height:1.65}
+  .memo .m-body code{background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:0 5px;font-size:11px}
+  .warnhint{display:flex;gap:7px;margin-top:7px;padding:6px 9px;border-radius:8px;background:var(--warn-soft);color:var(--warn);font-size:11px;line-height:1.6}
+  .chk{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;color:var(--text-2);white-space:nowrap}
+  .chk i{width:12px;height:12px;border-radius:3px;background:var(--brand);position:relative;display:inline-block}
+  .chk i:after{content:"✓";color:#fff;font-size:9px;position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .chk.off i{background:var(--panel);border:1px solid var(--line-strong)}
+  .chk.off i:after{content:""}
+  .edit-col{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg);overflow-y:auto;padding:12px 14px;gap:10px}
+  .eh{display:flex;align-items:center;gap:8px}
+  .eh .t{font-size:13px;font-weight:700}
+  .frow{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2)}
+  .frow label{flex:none;width:30px}
+  .in{background:var(--panel);border:1px solid var(--line-strong);border-radius:6px;padding:6px 9px;color:var(--text-1);font-size:12px;min-width:0}
+  .grow{flex:1}
+  .box{background:var(--panel);border:1px solid var(--line-strong);border-radius:8px;padding:9px 11px;font-size:12.5px;line-height:1.85;color:var(--text-1);white-space:pre-wrap;min-height:120px}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap}
+  .btnrow .btn{flex:none;padding:7px 14px}
+  .hist{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+  .hist .hh{padding:8px 12px;font-size:12px;font-weight:700;border-bottom:1px solid var(--line);background:var(--panel-2);display:flex;align-items:center;gap:8px}
+  .hist .hh .s{font-size:11px;color:var(--text-3);font-weight:600}
+  .hist .hr{padding:8px 12px;font-size:12px;border-bottom:1px solid var(--line)}
+  .hist .hr:last-child{border-bottom:none}
+  .hist .hr.sel{background:var(--brand-softer)}
+  .hist .hr .ts{font-size:11px;color:var(--text-3);margin-bottom:2px}
+  .stat{flex:none;padding:6px 16px;font-size:11.5px;color:var(--text-3);background:var(--panel-2);border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="window dialog">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span style="font-size:12.5px;color:var(--text-2)">群备忘录（研发一组）</span>
+    <span class="state-badge collab" style="margin-left:10px"><i class="dot"></i>R24-2 · 明文共享知识</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="conn-row">
+    <span class="f">服务器地址 <b>memex.corp.local</b></span>
+    <span class="f">文件端口 <b>24362</b></span>
+    <span class="f">账号 <b>zhangwei</b></span>
+    <span class="f">口令 <b>••••••••</b></span>
+    <span class="f">群号 <b>7</b></span>
+    <span class="ok"><i></i>已连接</span>
+  </div>
+
+  <div class="split">
+    <aside class="list-col">
+      <div class="bar">
+        <div class="search"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input placeholder="搜标题或正文…（回车搜索，清空＝全部）" value=""></div>
+        <button class="btn" style="flex:none;padding:6px 11px">刷新</button>
+        <label class="chk"><i></i>只看我建的</label>
+      </div>
+      <div class="melist">
+        <div class="memo sel">
+          <div class="m-top"><b>测试环境说明</b><span style="font-size:11px;color:var(--text-3)">· 李文 · 10-22 16:40</span><span class="meta">修订 3 版</span></div>
+          <div class="m-body">staging：10.0.0.41（端口 8080 / 9090）
+账号 staging-readonly 见群密码箱「staging 只读库」
+```
+kubectl -n dev get pods
+```</div>
+        </div>
+        <div class="memo">
+          <div class="m-top"><b>值班表（10 月）</b><span style="font-size:11px;color:var(--text-3)">· 陈晨 · 10-01 09:15</span><span class="meta">修订 1 版</span></div>
+          <div class="m-body">第 4 周：张伟（主）/ 孙宇（备）
+告警先看告警群，再 @当值人</div>
+        </div>
+        <div class="memo">
+          <div class="m-top"><b>本地开发速查</b><span style="font-size:11px;color:var(--text-3)">· zhangwei · 09-28 11:02</span><span class="meta">修订 2 版</span></div>
+          <div class="m-body">pnpm install && cmake -P presets.json
+提交前：全量 ctest 84/84 必须绿</div>
+        </div>
+        <div class="memo">
+          <div class="m-top"><b>WiFi 接入方式</b><span style="font-size:11px;color:var(--text-3)">· 王倩 · 09-20 14:30</span><span class="meta">修订 1 版</span></div>
+          <div class="m-body">连 dev-net（访客走 guest-net，限速）</div>
+          <div class="warnhint"><span>⚠</span><span>该条目正文疑似包含凭据（检测到「密码 / password」等字样）。密码只进<b>群密码箱</b>（端到端密文），备忘录为明文——请迁移。</span></div>
+        </div>
+      </div>
+      <div class="stat">备忘录为明文共享知识：环境信息、WiFi 说明、值班表。密码一律进密码箱，两类数据永不混存。</div>
+    </aside>
+
+    <section class="edit-col">
+      <div class="eh"><span class="t">备忘录条目 · 测试环境说明</span><span style="font-size:10.5px;color:var(--text-3);margin-left:auto">条目 #12 · 开放成员编辑（已开）</span></div>
+      <div class="frow"><label>标题</label><span class="in grow">测试环境说明</span></div>
+      <div class="box">staging：10.0.0.41（端口 8080 / 9090）
+账号 staging-readonly 见群密码箱「staging 只读库」
+
+kubectl -n dev get pods
+
+只读账号，写操作走工单</div>
+      <div class="btnrow">
+        <button class="btn primary">新建条目</button>
+        <button class="btn ghost-brand">编辑</button>
+        <button class="btn">历史与回滚…</button>
+        <button class="btn" style="border-color:rgba(196,58,45,.45);color:#c43a2d">删除</button>
+      </div>
+      <div class="hist">
+        <div class="hh">条目修订历史（#12）<span class="s">开放成员编辑时每笔修改留痕，可回滚</span></div>
+        <div class="hr sel">
+          <div class="ts">2026-10-22 16:40　liwen　《测试环境说明》</div>
+          <div style="color:var(--text-2);font-size:12px;line-height:1.7">staging 端口补上 9090；账号改为指向群密码箱（明文密码已移除）</div>
+        </div>
+        <div class="hr">
+          <div class="ts">2026-10-18 10:05　zhangwei　《测试环境说明》</div>
+          <div style="color:var(--text-2);font-size:12px;line-height:1.7">加入 kubectl 速查与权限说明</div>
+        </div>
+        <div class="hr">
+          <div class="ts">2026-10-10 09:30　liwen　《测试环境说明》（创建）</div>
+          <div style="color:var(--text-2);font-size:12px;line-height:1.7">staging：10.0.0.41，端口 8080</div>
+        </div>
+      </div>
+      <div class="btnrow"><button class="btn primary">回滚到选中这笔</button><button class="btn">关闭</button></div>
+      <div style="font-size:10.5px;color:var(--text-3);line-height:1.7">群公告（R24-1）在本群会话置顶区维护，含 @全员 强提醒与编辑历史（群右键「公告编辑历史…」）；管理员默认维护备忘录，开放成员编辑后每笔修改留痕。</div>
+    </section>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

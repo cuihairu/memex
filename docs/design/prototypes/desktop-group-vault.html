@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 群密码箱（R24-3 端到端密文 + 显式解锁 + 查看留痕）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  .dialog{width:min(1000px,96vw);height:min(660px,94vh)}
+  .conn-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12px;color:var(--text-2)}
+  .conn-row .f{display:flex;align-items:center;gap:5px}
+  .conn-row .f b{font-weight:600;color:var(--text-1);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px}
+  .conn-row .ok{margin-left:auto;color:var(--ok);display:flex;align-items:center;gap:5px;font-weight:600}
+  .conn-row .ok i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .split{flex:1;display:flex;min-height:0}
+  .list-col{width:400px;flex:none;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+  .unlock{flex:none;display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line);background:var(--panel-2)}
+  .unlock .btn{flex:none;padding:6px 12px}
+  .unlock .pw{flex:1;background:var(--panel);border:1px solid var(--line-strong);border-radius:6px;padding:6px 9px;color:var(--text-1);letter-spacing:2px;font-size:12px}
+  .vlist{flex:1;overflow-y:auto;padding:8px 10px}
+  .ventry{border:1px solid var(--line);border-radius:10px;padding:8px 11px;background:var(--panel-2);font-size:12.5px;margin-bottom:6px}
+  .ventry.sel{border-color:rgba(225,101,49,.5);background:var(--brand-softer)}
+  .ventry .v-top{display:flex;align-items:center;gap:8px}
+  .ventry .v-top b{font-weight:700}
+  .ventry .v-top .acc{color:var(--text-2)}
+  .ventry .v-meta{font-size:11px;color:var(--text-3);margin-top:2px;display:flex;gap:10px}
+  .ventry .v-meta .lk{color:var(--ok);font-weight:600}
+  .mask{flex:1;letter-spacing:3px;color:var(--text-3);font-size:12px;font-weight:700}
+  .acts{flex:none;display:flex;gap:6px;padding:9px 12px;border-top:1px solid var(--line);flex-wrap:wrap;align-items:center}
+  .acts .btn{flex:none;padding:5px 12px;font-size:12px}
+  .admin{flex:none;display:flex;gap:6px;padding:8px 12px;border-top:1px dashed var(--line);background:var(--panel-2);flex-wrap:wrap;align-items:center;font-size:11.5px;color:var(--text-3)}
+  .admin .btn{flex:none;padding:4px 11px;font-size:11.5px}
+  .det-col{flex:1;min-width:0;overflow-y:auto;background:var(--bg);padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card .ch{padding:8px 12px;font-size:12px;font-weight:700;border-bottom:1px solid var(--line);background:var(--panel-2);display:flex;align-items:center;gap:8px}
+  .card .ch .s{font-size:11px;color:var(--text-3);font-weight:600;margin-left:auto}
+  .card .cb{padding:11px 12px}
+  .kv{display:flex;justify-content:space-between;gap:14px;font-size:12.5px;padding:6px 0;border-bottom:1px dashed var(--line)}
+  .kv:last-of-type{border-bottom:none}
+  .kv .k{color:var(--text-2);flex:none;width:44px}
+  .kv .v{font-weight:600;min-width:0;word-break:break-all}
+  .kv .v .eye{color:var(--brand-deep);font-size:11px;margin-left:8px}
+  .rowbtns{display:flex;gap:7px;margin-top:8px}
+  .rowbtns .btn{flex:none;padding:5px 12px}
+  .note{display:flex;gap:7px;padding:7px 10px;border-radius:8px;background:var(--ok-soft);color:var(--ok);font-size:11px;line-height:1.6}
+  .note.lock{background:var(--panel-2);color:var(--text-3);border:1px solid var(--line)}
+  .note.warn{background:var(--warn-soft);color:var(--warn)}
+  .frow{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2);margin-bottom:7px}
+  .frow label{flex:none;width:38px}
+  .in{flex:1;background:var(--panel-2);border:1px solid var(--line-strong);border-radius:6px;padding:6px 9px;color:var(--text-1);font-size:12px;min-width:0}
+  .audit{font-size:11.5px;color:var(--text-2);line-height:1.9}
+  .audit .ts{color:var(--text-3);font-size:11px}
+  .tagr{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;color:var(--brand-deep);background:var(--brand-soft);white-space:nowrap}
+  .tagc{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;color:var(--ok);background:var(--ok-soft);white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="window dialog">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span style="font-size:12.5px;color:var(--text-2)">群密码箱（研发一组）</span>
+    <span class="state-badge collab" style="margin-left:10px"><i class="dot"></i>R24-3 · 密文端到端 · 客户端零凭据中转</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="conn-row">
+    <span class="f">服务器地址 <b>memex.corp.local</b></span>
+    <span class="f">文件端口 <b>24362</b></span>
+    <span class="f">账号 <b>zhangwei</b></span>
+    <span class="f">口令 <b>••••••••</b></span>
+    <span class="f">群号 <b>7</b></span>
+    <span class="ok"><i></i>已连接（箱密码仅本地参与解密，服务端不可找回）</span>
+  </div>
+
+  <div class="split">
+    <aside class="list-col">
+      <div class="unlock">
+        <button class="btn" style="flex:none;padding:6px 11px" title="建箱仅群主/管理员；箱密码服务端不可找回">建箱…</button>
+        <span class="pw">••••••••••</span>
+        <button class="btn primary" style="flex:none;padding:6px 14px">解锁</button>
+      </div>
+      <div class="vlist">
+        <div class="ventry sel">
+          <div class="v-top"><b>staging 只读库</b><span class="acc">· staging-readonly</span><span class="mask">••••••••</span></div>
+          <div class="v-meta"><span class="lk">已解锁</span><span>维护人 liwen</span><span>10-22 16:38</span></div>
+        </div>
+        <div class="ventry">
+          <div class="v-top"><b>生产库 WiFi</b><span class="acc">· memex-wifi-ops</span><span class="mask">••••••••••</span></div>
+          <div class="v-meta"><span class="lk">已解锁</span><span>维护人 zhangwei</span><span>10-09 11:20</span></div>
+        </div>
+        <div class="ventry">
+          <div class="v-top"><b>监控平台</b><span class="acc">· ops-admin</span><span class="mask">••••••</span></div>
+          <div class="v-meta"><span class="lk">已解锁</span><span>维护人 赵磊</span><span>09-30 09:42</span></div>
+        </div>
+        <div class="ventry">
+          <div class="v-top"><b>发布机 SSH</b><span class="acc">· deploy@10.0.0.9</span><span class="mask">••••••••</span></div>
+          <div class="v-meta"><span class="lk">已解锁</span><span>维护人 赵磊</span><span>09-18 15:05</span></div>
+        </div>
+        <div class="ventry" style="opacity:.62">
+          <div class="v-top"><b>测试机房门禁</b><span class="acc">· visitor</span><span class="mask">••••••</span></div>
+          <div class="v-meta"><span style="color:var(--text-3)">未解锁（授权名单不含我则不可解锁）</span><span>维护人 admin</span></div>
+        </div>
+      </div>
+      <div class="acts">
+        <button class="btn primary">新建条目</button>
+        <button class="btn">编辑</button>
+        <button class="btn ghost-brand">查看</button>
+        <button class="btn">复制密码</button>
+        <button class="btn" style="border-color:rgba(196,58,45,.45);color:#c43a2d">删除</button>
+        <button class="btn">刷新</button>
+      </div>
+      <div class="admin">
+        群主/管理员：
+        <button class="btn">改箱密码…</button>
+        <button class="btn">重置箱…</button>
+        <button class="btn">授权名单…</button>
+        <button class="btn">查看审计…</button>
+        <span style="margin-left:auto">默认全体成员可解锁；群主可收紧为仅授权名单</span>
+      </div>
+    </aside>
+
+    <section class="det-col">
+      <div class="card">
+        <div class="ch">条目详情 · staging 只读库<span class="s">查看/复制均为显式动作，服务端全留痕</span></div>
+        <div class="cb">
+          <div class="kv"><span class="k">名称</span><span class="v">staging 只读库</span></div>
+          <div class="kv"><span class="k">账号</span><span class="v">staging-readonly</span></div>
+          <div class="kv"><span class="k">密码</span><span class="v">rO0yA7Kc2Q<span class="eye">👁 查看后明文呈现</span></span></div>
+          <div class="kv"><span class="k">URL</span><span class="v">https://staging.db.internal:5432</span></div>
+          <div class="kv"><span class="k">备注</span><span class="v">只读账号；写操作走工单</span></div>
+          <div class="rowbtns">
+            <button class="btn primary">复制密码</button>
+            <button class="btn">查看审计…</button>
+          </div>
+          <div class="note" style="margin-top:9px">✓ 已查看（服务端已留痕）　·　✓ 密码已复制到剪贴板（服务端已留痕）　·　导出默认关闭</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ch">密码箱访问审计<span class="s">ts　account　action　条目#id</span></div>
+        <div class="cb audit">
+          <div><span class="ts">2026-10-24 10:31:07</span>　zhangwei　<span class="tagr">view</span>　条目#3（staging 只读库）</div>
+          <div><span class="ts">2026-10-24 10:31:12</span>　zhangwei　<span class="tagc">copy</span>　条目#3（staging 只读库）</div>
+          <div><span class="ts">2026-10-24 09:14:55</span>　liwen　<span class="tagr">view</span>　条目#7（监控平台）</div>
+          <div><span class="ts">2026-10-23 18:02:41</span>　zhaolei　<span class="tagr">view</span>　条目#3（staging 只读库）</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ch">新建条目（密文只在本地加密后落库）<span class="s">名称/账号/密码必填 · URL/备注选填</span></div>
+        <div class="cb">
+          <div class="frow"><label>名称</label><span class="in">生产库 WiFi</span></div>
+          <div class="frow"><label>账号</label><span class="in">memex-wifi-ops</span></div>
+          <div class="frow"><label>密码</label><span class="in" style="letter-spacing:2px">••••••••••</span></div>
+          <div class="frow"><label>URL</label><span class="in" style="color:var(--text-3)">（选填）</span></div>
+          <div class="frow"><label>备注</label><span class="in" style="color:var(--text-3)">（选填）</span></div>
+          <div class="rowbtns"><button class="btn primary">保存条目</button><button class="btn">取消</button></div>
+        </div>
+      </div>
+
+      <div class="note warn">⚠ 与群备忘录（明文）硬性分离：密码类内容只进本箱；箱密码服务端不可找回，重置＝全箱重加密后旧条目不可恢复。</div>
+    </section>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

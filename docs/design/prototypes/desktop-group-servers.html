@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 群服务器（R26 Agent 红绿灯 + 负载 + 一次性短票远程会话）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  .dialog{width:min(1060px,96vw);height:min(660px,94vh)}
+  .conn-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12px;color:var(--text-2)}
+  .conn-row .f{display:flex;align-items:center;gap:5px}
+  .conn-row .f b{font-weight:600;color:var(--text-1);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px}
+  .conn-row .ok{margin-left:auto;color:var(--ok);display:flex;align-items:center;gap:5px;font-weight:600}
+  .conn-row .ok i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .split{flex:1;display:flex;min-height:0}
+  .col{flex:1;min-width:0;display:flex;flex-direction:column;padding:12px 14px;overflow-y:auto;gap:10px}
+  .col.l{border-right:1px solid var(--line)}
+  .sec-h{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700}
+  .sec-h .s{font-size:10.5px;color:var(--text-3);font-weight:600}
+  .slist{display:flex;flex-direction:column;gap:8px}
+  .srv{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel);font-size:12.5px;line-height:1.7}
+  .srv.sel{border-color:rgba(225,101,49,.5);background:var(--brand-softer)}
+  .srv .s-top{display:flex;align-items:center;gap:8px}
+  .srv .s-top b{font-weight:700}
+  .srv .s-top .host{color:var(--text-2);font-size:11.5px}
+  .srv .s-top .lag{margin-left:auto;font-size:10.5px;color:var(--text-3);white-space:nowrap}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block}
+  .dot.ok{background:#2e8b57}
+  .dot.warn{background:#d9a04a}
+  .dot.bad{background:#c43a2d}
+  .srv .m-row{display:flex;gap:0;margin-top:5px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .m-cell{flex:1;padding:6px 10px;border-right:1px solid var(--line);background:var(--panel-2)}
+  .m-cell:last-child{border-right:none}
+  .m-cell .mv{font-weight:700;font-size:14px}
+  .m-cell .mk{font-size:10px;color:var(--text-3);letter-spacing:.04em}
+  .m-cell.hi .mv{color:#c43a2d}
+  .m-cell.mid .mv{color:var(--warn)}
+  .srv .foot{display:flex;gap:12px;font-size:10.5px;color:var(--text-3);margin-top:5px}
+  .frow{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2);flex-wrap:wrap;border-top:1px dashed var(--line);padding-top:9px}
+  .in{background:var(--panel);border:1px solid var(--line-strong);border-radius:6px;padding:6px 9px;color:var(--text-1);font-size:12px}
+  .in.grow{flex:1;min-width:120px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card .ch{padding:8px 12px;font-size:12px;font-weight:700;border-bottom:1px solid var(--line);background:var(--panel-2);display:flex;align-items:center;gap:8px}
+  .card .ch .s{font-size:10.5px;color:var(--text-3);font-weight:600;margin-left:auto}
+  .card .cb{padding:9px 12px}
+  .sessrow{display:flex;gap:9px;font-size:11.5px;padding:5px 0;border-bottom:1px dashed var(--line);align-items:baseline}
+  .sessrow:last-child{border-bottom:none}
+  .sessrow .sid{color:var(--text-3);width:30px;flex:none}
+  .sessrow .st{flex:none;width:60px}
+  .st.live{color:var(--ok);font-weight:700}
+  .st.tickets{color:var(--brand-deep);font-weight:600}
+  .st.done{color:var(--text-3)}
+  .sessrow .meta{flex:1;min-width:0;color:var(--text-2)}
+  .sessrow .ts{margin-left:auto;color:var(--text-3);font-size:10.5px;white-space:nowrap}
+  .note{display:flex;gap:7px;padding:7px 10px;border-radius:8px;background:var(--brand-softer);color:var(--brand-deep);font-size:11px;line-height:1.7}
+  .note.lock{background:var(--panel);color:var(--text-2);border:1px solid var(--line)}
+  .btnrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="window dialog">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span style="font-size:12.5px;color:var(--text-2)">群服务器 — 研发一组</span>
+    <span class="state-badge collab" style="margin-left:10px"><i class="dot" style="background:var(--brand)"></i>R26 · 入群即视 · 只看 + 连接</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="conn-row">
+    <span class="f">服务器地址 <b>memex.corp.local</b></span>
+    <span class="f">文件端口 <b>24362</b></span>
+    <span class="f">账号 <b>zhangwei</b></span>
+    <span class="f">口令 <b>••••••••</b></span>
+    <span class="f">群号 <b>7</b></span>
+    <span class="ok"><i></i>已连接（agent 心跳 15s · 掉线 60s 判离线）</span>
+  </div>
+
+  <div class="split">
+    <section class="col l">
+      <div class="sec-h">共享服务器（红绿灯 + 负载）<span class="s">入群即视 · 退群即失</span></div>
+      <div class="slist">
+        <div class="srv sel">
+          <div class="s-top"><span class="dot ok"></span><b>web-1</b><span class="host">10.0.0.9</span><span class="lag">心跳 3s 前</span></div>
+          <div class="m-row">
+            <div class="m-cell mid"><div class="mv">41%</div><div class="mk">CPU</div></div>
+            <div class="m-cell"><div class="mv">5.2/16G</div><div class="mk">内存</div></div>
+            <div class="m-cell mid"><div class="mv">78%</div><div class="mk">磁盘</div></div>
+            <div class="m-cell"><div class="mv">1.24</div><div class="mk">负载 1m</div></div>
+          </div>
+          <div class="foot"><span>最近心跳 10-24 11:14:33</span><span>登记人 赵磊</span><span>凭据 有（服务端加密面）</span></div>
+        </div>
+        <div class="srv">
+          <div class="s-top"><span class="dot warn"></span><b>db-1</b><span class="host">10.0.0.12</span><span class="lag">心跳 22s 前 · 磁盘将满</span></div>
+          <div class="m-row">
+            <div class="m-cell"><div class="mv">23%</div><div class="mk">CPU</div></div>
+            <div class="m-cell"><div class="mv">9.8/32G</div><div class="mk">内存</div></div>
+            <div class="m-cell hi"><div class="mv">92%</div><div class="mk">磁盘</div></div>
+            <div class="m-cell"><div class="mv">0.87</div><div class="mk">负载 1m</div></div>
+          </div>
+          <div class="foot"><span>最近心跳 10-24 11:14:14</span><span>登记人 赵磊</span><span>凭据 有</span></div>
+        </div>
+        <div class="srv" style="opacity:.62">
+          <div class="s-top"><span class="dot bad"></span><b>test-runner</b><span class="host">10.0.0.41</span><span class="lag">离线 3 分 12 秒</span></div>
+          <div class="m-row">
+            <div class="m-cell"><div class="mv">—</div><div class="mk">CPU</div></div>
+            <div class="m-cell"><div class="mv">—</div><div class="mk">内存</div></div>
+            <div class="m-cell"><div class="mv">—</div><div class="mk">磁盘</div></div>
+            <div class="m-cell"><div class="mv">—</div><div class="mk">负载 1m</div></div>
+          </div>
+          <div class="foot"><span>最后心跳 10-24 11:11:02</span><span>登记人 李文</span><span>凭据 无</span></div>
+        </div>
+      </div>
+      <div class="frow">
+        <span class="in">服务器名（如 web-1）</span>
+        <span class="in grow">地址（如 10.0.0.9）</span>
+        <button class="btn primary" style="flex:none">登记服务器</button>
+        <button class="btn" style="flex:none">刷新</button>
+      </div>
+      <div class="note lock">memex 面只做「查看 + 连接」；重启服务 / 改配置等高危动作不入本面（走审批流）。每次访问留痕：谁 / 何时 / 哪台机 / 协议 / 时长。</div>
+    </section>
+
+    <aside class="col">
+      <div class="card">
+        <div class="ch">远程会话（一次性短票）<span class="s">#id · 服务器 · 协议 · actor · 状态 · 时长</span></div>
+        <div class="cb">
+          <div class="sessrow"><span class="sid">#27</span><span class="meta">web-1 · 10.0.0.9 · SSH</span><span class="st live">进行中</span><span class="ts">zhangwei · 10-24 11:02 起 · 12 分钟</span></div>
+          <div class="sessrow"><span class="sid">#26</span><span class="meta">db-1 · 10.0.0.12 · SSH</span><span class="st live">进行中</span><span class="ts">liwen · 10-24 10:44 起 · 30 分钟</span></div>
+          <div class="sessrow"><span class="sid">#25</span><span class="meta">web-1 · 10.0.0.9 · SSH</span><span class="st tickets">未用短票</span><span class="ts">zhangwei · 10-24 10:30 签发</span></div>
+          <div class="sessrow"><span class="sid">#24</span><span class="meta">test-runner · 10.0.0.41 · SSH</span><span class="st done">已收尾</span><span class="ts">sunyu · 10-23 16:20 ~ 16:52 · 32 分钟</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ch">发起会话（SSH 先行 · RDP/VNC 后续）<span class="s">短票＝一次性 · 服务端不回显</span></div>
+        <div class="cb">
+          <div class="frow" style="border-top:none;padding-top:0">
+            <span class="in grow" style="letter-spacing:2px;color:var(--text-3)">一次性短票（粘贴后点发起）</span>
+            <button class="btn primary" style="flex:none">发起 SSH 会话</button>
+            <button class="btn" style="flex:none">关闭会话</button>
+          </div>
+          <div class="note" style="margin-top:8px">✓ 短票已签发，正在兑现…（凭据由服务端注入会话参数，客户端零凭据）</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="ch">远程命令（可选）<span class="s">登记期一次性命令 · 只读探测</span></div>
+        <div class="cb">
+          <div class="frow" style="border-top:none;padding-top:0">
+            <span class="in grow" style="color:var(--text-3)">uptime && df -h /</span>
+          </div>
+          <div class="btnrow">
+            <button class="btn ghost-brand">存凭据</button>
+            <button class="btn">删凭据</button>
+            <span style="font-size:10.5px;color:var(--text-3);align-self:center">服务器凭据只存服务端加密面（同 R24 保险柜）</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>
