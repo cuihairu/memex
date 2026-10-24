@@ -7,11 +7,7 @@
 <h1 align="center">Memex · Intranet Office Instant Messaging System</h1>
 
 <p align="center">
-  <a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov coverage" /></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iOS%20%7C%20HarmonyOS-e16531" alt="Platform support" />
-  <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" />
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
+<a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a> <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov coverage" /></a> <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iOS%20%7C%20HarmonyOS-e16531" alt="Platform support" /> <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" /> <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
 </p>
 
 An office instant messaging system for physically isolated intranet environments, modeled on the functional scope of WeCom (Enterprise WeChat) and covering communication, office collaboration, organization, and archive search. The business layer is written entirely in-house, while the foundation uses open-source components: Qt 6, asio, protobuf, SQLite, OpenSSL, and the AWS SDK (S3 interface, paired with RustFS); the inventory and licenses are listed in [third_party/](third_party/README.md). The system is not built on top of any open-source IM project, and it integrates no components under strong-copyleft licenses such as AGPL or SSPL. Desktop clients are C++17 + Qt (Linux CI-verified; Windows/macOS artifacts come from the nightly build matrix); mobile clients are Android (Kotlin, shipped), iOS (Swift, code-only with CI verification), and HarmonyOS NEXT (ArkTS, code-only with CI logic verification); the server is C++17, a single process on a single database.
