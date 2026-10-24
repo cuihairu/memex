@@ -602,3 +602,58 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 - 记录：[docs/review/audit-batch-a0-2026-10-19.md](docs/review/audit-batch-a0-2026-10-19.md)。已同步 `origin/main`；清点 `git ls-files` 共 654 个 tracked 文件并建立模块审计矩阵。A0.4–A0.8 的执行规则已按本批证据收口；A0.1–A0.3 保持进行中，因尚未逐文件阅读、逐条核对 45 个未勾选框及完成所有业务链路的失败/重试/重启检查。
 - 当前源码证据仍支持队列中的 P0-1/2/3/4 与 P1-1/4/6 风险，分别涉及协作态 TLS、落库后 ACK、归档/离线队列失败语义、文件覆盖、TOFU 首信任、帧累计缓冲和 Admin CSRF/session；需按原条目实施及测试，不重复登记、不在本批宣称修复。未在本批验证 Windows/macOS/UOS/麒麟/OHOS 或真实公网部署。
+
+## 原型符合度（来源=用户 2026-10-24 令；验收＝与 prototypes/xxx.html 逐屏比对一致(控件/布局/文案/间距)）
+
+台账：`docs/design/prototype-conformance.md`（36 张原型 → C++/Kotlin 界面，含留痕铁律与未入型清单）。
+
+### 桌面 · 主窗口与列表面
+
+- [ ] 与 prototypes/desktop-chat.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/main_window.cpp` 群聊页）
+- [ ] 与 prototypes/desktop-collab.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/main_window.cpp` 协作态会话列表）
+- [ ] 与 prototypes/desktop-direct.html 逐屏比对一致(控件/布局/文案/间距)（未登录直连列表态）
+- [ ] 与 prototypes/desktop-direct-chat.html 逐屏比对一致(控件/布局/文案/间距)（直连会话展开态）
+- [ ] 与 prototypes/desktop-friends.html 逐屏比对一致(控件/布局/文案/间距)（好友列表）
+- [ ] 与 prototypes/desktop-group.html 逐屏比对一致(控件/布局/文案/间距)（群聊基础面）
+- [ ] 与 prototypes/desktop-files.html 逐屏比对一致(控件/布局/文案/间距)（文件传输面）
+- [ ] 与 prototypes/desktop-org.html 逐屏比对一致(控件/布局/文案/间距)（组织架构与汇报关系）
+- [ ] 与 prototypes/desktop-search.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/message_search_dialog.cpp`）
+- [ ] 与 prototypes/main-empty.html 逐屏比对一致(控件/布局/文案/间距)（联系人空态）
+
+### 桌面 · 对话框（已实现面，按原型收口偏差）
+
+- [ ] 与 prototypes/desktop-tasks.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/task_dialog.cpp`）
+- [ ] 与 prototypes/desktop-approval.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/approval_dialog.cpp`）
+- [ ] 与 prototypes/desktop-report.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/report_dialog.cpp`）
+- [ ] 与 prototypes/desktop-group-tools.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_tools_dialog.cpp`）
+- [ ] 与 prototypes/desktop-group-memo.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_memo_dialog.cpp`）
+- [ ] 与 prototypes/desktop-group-vault.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_vault_dialog.cpp`）
+- [ ] 与 prototypes/desktop-group-ci.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_ci_dialog.cpp`）
+- [ ] 与 prototypes/desktop-group-pack.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_pack_dialog.cpp`）
+- [ ] 与 prototypes/desktop-group-servers.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_server_dialog.cpp`）
+- [ ] 与 prototypes/desktop-group-record.html 逐屏比对一致(控件/布局/文案/间距)（`MainWindow::group_record_export_dialog`）
+- [ ] 与 prototypes/desktop-assist.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/assist_dialog.cpp`）
+- [ ] 与 prototypes/desktop-office-map.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/office_map_dialog.cpp`）
+- [ ] 与 prototypes/desktop-audit.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/audit_dialog.cpp`）
+- [ ] 与 prototypes/desktop-file-assistant.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/file_assistant.cpp`）
+
+### 桌面 · 设置页
+
+- [ ] 与 prototypes/settings-general.html 逐屏比对一致(控件/布局/文案/间距)（主题/主题包/品牌）
+- [ ] 与 prototypes/settings-account.html 逐屏比对一致(控件/布局/文案/间距)（账号与设备）
+- [ ] 与 prototypes/settings-message.html 逐屏比对一致(控件/布局/文案/间距)（表情/截图偏好）
+- [ ] 与 prototypes/settings-privacy.html 逐屏比对一致(控件/布局/文案/间距)（离开/锁屏/通知偏好）
+- [ ] 与 prototypes/settings-advanced.html 逐屏比对一致(控件/布局/文案/间距)（网络与远程/快捷键/连接）
+
+### 邮箱（未实现面，先建后比）
+
+- [ ] 与 prototypes/desktop-mailbox.html 逐屏比对一致(控件/布局/文案/间距)（邮箱＝统一收件箱：告警/通知/公告；桌面侧尚无实现）
+- [ ] 与 prototypes/mobile-mailbox.html 逐屏比对一致(控件/布局/文案/间距)（移动端邮箱；尚无 MailboxActivity）
+
+### 移动端
+
+- [ ] 与 prototypes/mobile-chat.html 逐屏比对一致(控件/布局/文案/间距)（`ChatActivity.kt`）
+- [ ] 与 prototypes/mobile-init.html 逐屏比对一致(控件/布局/文案/间距)（`InitActivity.kt` / `LoginActivity.kt`）
+- [ ] 与 prototypes/mobile-me.html 逐屏比对一致(控件/布局/文案/间距)（`MeActivity.kt`）
+- [ ] 与 prototypes/mobile-sessions.html 逐屏比对一致(控件/布局/文案/间距)（`MainActivity.kt`）
+- [ ] 与 prototypes/mobile-tasks.html 逐屏比对一致(控件/布局/文案/间距)（`TasksActivity.kt`，看板 <600dp 自动降级回列表）
