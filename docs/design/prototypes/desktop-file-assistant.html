@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 文件助手（自收自发自传 · 秒传去重 · 外部仅入箱）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  .dialog{width:min(880px,96vw);height:min(660px,94vh)}
+  .conn-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12px;color:var(--text-2)}
+  .conn-row .f{display:flex;align-items:center;gap:5px}
+  .conn-row .f b{font-weight:600;color:var(--text-1);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px}
+  .conn-row .ok{margin-left:auto;color:var(--ok);display:flex;align-items:center;gap:5px;font-weight:600}
+  .conn-row .ok i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .split{flex:1;display:flex;min-height:0}
+  .list-col{width:400px;flex:none;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+  .list-h{flex:none;padding:9px 13px;font-size:12px;font-weight:700;border-bottom:1px solid var(--line);background:var(--panel-2);display:flex;align-items:center;gap:8px}
+  .list-h .s{font-size:10.5px;color:var(--text-3);font-weight:600;margin-left:auto}
+  .stream{flex:1;overflow-y:auto;padding:9px 11px;display:flex;flex-direction:column;gap:8px}
+  .item{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:var(--panel-2);font-size:12.5px;line-height:1.65}
+  .item.sel{border-color:rgba(225,101,49,.5);background:var(--brand-softer)}
+  .item .head{display:flex;align-items:center;gap:7px;margin-bottom:4px}
+  .item .kind{font-weight:700;color:var(--brand-deep);font-size:11.5px}
+  .item .kind.file{color:var(--ok)}
+  .item .ts{color:var(--text-3);font-size:10.5px}
+  .item .meta{color:var(--text-2);font-size:11px}
+  .item .body{color:var(--text-1);white-space:pre-wrap;word-break:break-word}
+  .acts{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+  .acts .btn{flex:none;padding:4px 11px;font-size:11.5px}
+  .write{flex:none;padding:10px 11px;border-top:1px solid var(--line);background:var(--panel)}
+  .write .box{width:100%;background:var(--panel-2);border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--text-1);min-height:60px;resize:vertical;font-family:inherit}
+  .write .row{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;align-items:center}
+  .det-col{flex:1;min-width:0;overflow-y:auto;background:var(--bg);padding:13px 15px;display:flex;flex-direction:column;gap:10px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card .ch{padding:8px 12px;font-size:12px;font-weight:700;border-bottom:1px solid var(--line);background:var(--panel-2);display:flex;align-items:center;gap:8px}
+  .card .ch .s{font-size:10.5px;color:var(--text-3);font-weight:600;margin-left:auto}
+  .card .cb{padding:10px 12px}
+  .stat{font-size:11.5px;color:var(--text-3);line-height:1.7}
+  .stat b{color:var(--text-2)}
+  .note{display:flex;gap:7px;padding:7px 10px;border-radius:8px;background:var(--ok-soft);color:var(--ok);font-size:11px;line-height:1.7}
+  .note.lock{background:var(--panel);color:var(--text-2);border:1px solid var(--line)}
+  .note.warn{background:var(--warn-soft);color:var(--warn)}
+  .btnrow{display:flex;gap:7px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="window dialog">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span style="font-size:12.5px;color:var(--text-2)">文件助手</span>
+    <span class="state-badge collab" style="margin-left:10px"><i class="dot"></i>收件箱＝自传唯一落点</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="conn-row">
+    <span class="f">服务器 <b>memex.corp.local</b></span>
+    <span class="f">文件面端口 <b>24362</b></span>
+    <span class="f">账号 <b>zhangwei</b></span>
+    <span class="f">口令 <b>••••••••</b></span>
+    <span class="ok"><i></i>已连接：zhangwei@memex.corp.local:24362</span>
+  </div>
+
+  <div class="split">
+    <aside class="list-col">
+      <div class="list-h">收件箱（备忘录 · 文件 · 倒序）<span class="s">同内容秒传，未重复占额</span></div>
+      <div class="stream">
+        <div class="item sel">
+          <div class="head"><span class="kind">备忘录 · 10-24 09:31</span></div>
+          <div class="body">staging 部署窗口：今晚 20:00–21:00
+回归脚本：scripts/regress-v3.sh
+注意：db-1 磁盘 92%，先扩容再发。</div>
+          <div class="acts">
+            <button class="btn ghost-brand">编辑备忘录</button>
+            <button class="btn" style="border-color:rgba(196,58,45,.45);color:#c43a2d">删除</button>
+          </div>
+        </div>
+        <div class="item">
+          <div class="head"><span class="kind file">文件 · runbook-v3.md · 1.8 MB · 10-23 15:47</span></div>
+          <div class="acts">
+            <button class="btn">下载到本地…</button>
+            <button class="btn" style="border-color:rgba(196,58,45,.45);color:#c43a2d">删除</button>
+          </div>
+        </div>
+        <div class="item">
+          <div class="head"><span class="kind">备忘录 · 10-22 21:04</span></div>
+          <div class="body">明天请假（年假）已发起审批，交接：李文。</div>
+          <div class="acts">
+            <button class="btn ghost-brand">编辑备忘录</button>
+            <button class="btn" style="border-color:rgba(196,58,45,.45);color:#c43a2d">删除</button>
+          </div>
+        </div>
+        <div class="item">
+          <div class="head"><span class="kind file">文件 · perf-baseline-1022.txt · 412 KB · 10-22 10:12</span></div>
+          <div class="acts">
+            <button class="btn">下载到本地…</button>
+            <button class="btn" style="border-color:rgba(196,58,45,.45);color:#c43a2d">删除</button>
+          </div>
+        </div>
+        <div class="item">
+          <div class="head"><span class="kind">备忘录 · 10-21 08:55</span></div>
+          <div class="body">季度复盘文档链接：docs/q3-review.md</div>
+          <div class="acts">
+            <button class="btn ghost-brand">编辑备忘录</button>
+            <button class="btn" style="border-color:rgba(196,58,45,.45);color:#c43a2d">删除</button>
+          </div>
+        </div>
+      </div>
+      <div class="write">
+        <textarea class="box">写点什么给自己（备忘录）…</textarea>
+        <div class="row">
+          <button class="btn primary" style="flex:none">存备忘录</button>
+          <button class="btn" style="flex:none">发文件给自己…</button>
+          <button class="btn" style="flex:none">刷新</button>
+        </div>
+      </div>
+    </aside>
+
+    <section class="det-col">
+      <div class="card">
+        <div class="ch">正在编辑备忘录 #41<span class="s">改完回车或点「保存修改」</span></div>
+        <div class="cb">
+          <textarea class="box" style="width:100%;background:var(--panel-2);border:1px solid var(--line-strong);border-radius:8px;padding:8px 10px;font-size:12.5px;color:var(--text-1);min-height:110px;resize:vertical;font-family:inherit">staging 部署窗口：今晚 20:00–21:00
+回归脚本：scripts/regress-v3.sh
+注意：db-1 磁盘 92%，先扩容再发。
+追加：回归结果回群文件面「预发演练」条目。</textarea>
+          <div class="btnrow" style="margin-top:8px">
+            <button class="btn primary">保存修改</button>
+            <button class="btn">取消编辑</button>
+            <span class="stat" style="align-self:center">编辑态按钮组重标为「取消编辑 / 保存修改」</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="stat"><b>未连接（与协作面同源账号；文件面端口独立）</b><br>
+      连接失败：…（同协作面错误样式）<br>
+      空态：（收件箱为空：写条备忘录，或把文件发给自己）</div>
+
+      <div class="note">✓ 已入收件箱（同内容秒传，未重复占额）——上传前按内容哈希比对，命中即返回原对象。</div>
+      <div class="note lock">删除二次确认：「删除这条备忘录？」/「删除这个收件箱文件？」；文件删除走文件面，备忘录删除走协作面，互不牵连。</div>
+      <div class="note warn">⚠ 外部只读 token 下载即 403；入箱是外部文件向内网的唯一落点，转进群仍需人眼确认（安全缓冲）。</div>
+    </section>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

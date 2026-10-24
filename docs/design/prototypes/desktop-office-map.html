@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 办公室位置图（10×10 自绘工位面 + 命中高亮 + 管理员拖拽）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  .dialog{width:min(960px,96vw);height:min(660px,94vh)}
+  .conn-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12px;color:var(--text-2)}
+  .conn-row .f{display:flex;align-items:center;gap:5px}
+  .conn-row .f b{font-weight:600;color:var(--text-1);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px}
+  .conn-row .ok{margin-left:auto;color:var(--ok);display:flex;align-items:center;gap:5px;font-weight:600}
+  .conn-row .ok i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .wrap{flex:1;display:flex;flex-direction:column;min-height:0}
+  .bar{flex:none;display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap;font-size:12px;color:var(--text-2)}
+  .in{background:var(--panel-2);border:1px solid var(--line-strong);border-radius:6px;padding:6px 10px;color:var(--text-1);font-size:12px}
+  .in.grow{flex:1;min-width:180px}
+  .floor-lbl{flex:none;font-size:13px;font-weight:700;color:var(--text-1)}
+  .floor-lbl .s{font-size:10.5px;color:var(--text-3);font-weight:600;margin-left:4px}
+  .admin-row{flex:none;display:flex;align-items:center;gap:7px;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel-2);flex-wrap:wrap;font-size:12px;color:var(--text-3)}
+  .admin-row .in{background:var(--panel)}
+  .admin-row .lbl{font-size:11px;color:var(--text-3)}
+  .map-area{flex:1;min-height:0;overflow:auto;padding:16px;display:flex;justify-content:center;background:var(--bg)}
+  .map{background:#F5F5F0;border:1px solid var(--line-strong);border-radius:10px;padding:18px;display:grid;grid-template-columns:repeat(10, 62px);grid-auto-rows:62px;gap:0;flex:none}
+  .seat{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
+  .seat i{width:20px;height:20px;border-radius:50%;background:#BBBBBB;display:inline-block;border:1px solid rgba(0,0,0,.12)}
+  .seat.occ i{background:#E88A2A;border-color:rgba(0,0,0,.18)}
+  .seat.hit i{background:#fff;border:2px solid #E88A2A}
+  .seat.sel i{background:#2A82E8;border-color:rgba(0,0,0,.2)}
+  .seat .lb{font-size:9.5px;color:#666;white-space:nowrap;max-width:62px;overflow:hidden;text-overflow:ellipsis}
+  .seat.occ .lb{color:#8a4d17;font-weight:700}
+  .seat.sel .lb{color:#17498a;font-weight:700}
+  .legend{flex:none;display:flex;gap:16px;align-items:center;padding:8px 14px;border-top:1px solid var(--line);background:var(--panel);font-size:11px;color:var(--text-2)}
+  .legend i{width:11px;height:11px;border-radius:50%;display:inline-block;margin-right:5px;vertical-align:-1px}
+  .legend .occ i{background:#E88A2A}
+  .legend .unocc i{background:#BBBBBB}
+  .legend .sel i{background:#2A82E8}
+  .legend .hit i{background:#fff;border:2px solid #E88A2A}
+  .legend .hitnote{margin-left:auto;color:var(--text-3);font-size:10.5px}
+</style>
+</head>
+<body>
+<div class="window dialog">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span style="font-size:12.5px;color:var(--text-2)">办公室位置图</span>
+    <span class="state-badge collab" style="margin-left:10px"><i class="dot"></i>默认本层 · org-admin 可跨层</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="conn-row">
+    <span class="f">服务器地址 <b>memex.corp.local</b></span>
+    <span class="f">文件端口 <b>24362</b></span>
+    <span class="f">账号 <b>zhangwei</b></span>
+    <span class="f">口令 <b>••••••••</b></span>
+    <span class="ok"><i></i>已连接（zhangwei）</span>
+  </div>
+
+  <div class="bar">
+    <span class="floor-lbl">楼层 3F（18 个工位）<span class="s">· 编辑中（拖拽定位，松手即存）</span></span>
+    <span class="in grow">账号或工位号（命中高亮）</span>
+    <button class="btn" style="flex:none">搜索</button>
+    <button class="btn" style="flex:none">刷新</button>
+  </div>
+
+  <div class="admin-row">
+    <span class="lbl">管理（az office:manage）：</span>
+    <span class="in" style="width:64px">楼层</span>
+    <span class="in" style="width:70px">工位号</span>
+    <button class="btn" style="flex:none">新增工位</button>
+    <button class="btn" style="flex:none">删除选中</button>
+    <span class="in" style="width:110px">占用者账号</span>
+    <button class="btn" style="flex:none">绑定</button>
+    <button class="btn" style="flex:none">解绑</button>
+  </div>
+
+  <div class="map-area">
+    <div class="map">
+      <div class="seat occ sel"><i></i><span class="lb">3-01·zhangwei</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-02·liwen</span></div>
+      <div class="seat occ hit"><i></i><span class="lb">3-03·wangqian</span></div>
+      <div class="seat"><i></i><span class="lb">3-04</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-05·sunyu</span></div>
+      <div class="seat"><i></i><span class="lb">3-06</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-07·chenchen</span></div>
+      <div class="seat"><i></i><span class="lb">3-08</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-09·zhaolei</span></div>
+      <div class="seat"><i></i><span class="lb">3-10</span></div>
+      <div class="seat"><i></i><span class="lb">3-11</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-12·qianfeng</span></div>
+      <div class="seat"><i></i><span class="lb">3-13</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-14·zhoujie</span></div>
+      <div class="seat"><i></i><span class="lb">3-15</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-16·wumin</span></div>
+      <div class="seat"><i></i><span class="lb">3-17</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-18·liuyang</span></div>
+      <div class="seat"><i></i><span class="lb">3-19</span></div>
+      <div class="seat"><i></i><span class="lb">3-20</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-21·gaoxing</span></div>
+      <div class="seat"><i></i><span class="lb">3-22</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-23·xujia</span></div>
+      <div class="seat"><i></i><span class="lb">3-24</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-25·dengyu</span></div>
+      <div class="seat"><i></i><span class="lb">3-26</span></div>
+      <div class="seat"><i></i><span class="lb">3-27</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-28·shenli</span></div>
+      <div class="seat"><i></i><span class="lb">3-29</span></div>
+      <div class="seat"><i></i><span class="lb">3-30</span></div>
+      <div class="seat"><i></i><span class="lb">3-31</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-32·tangrui</span></div>
+      <div class="seat"><i></i><span class="lb">3-33</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-34·hetian</span></div>
+      <div class="seat"><i></i><span class="lb">3-35</span></div>
+      <div class="seat"><i></i><span class="lb">3-36</span></div>
+      <div class="seat occ"><i></i><span class="lb">3-37·mengxi</span></div>
+      <div class="seat"><i></i><span class="lb">3-38</span></div>
+      <div class="seat"><i></i><span class="lb">3-39</span></div>
+      <div class="seat"><i></i><span class="lb">3-40</span></div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span class="occ"><i></i>占用（橙）</span>
+    <span class="unocc"><i></i>空座（灰）</span>
+    <span class="sel"><i></i>选中（蓝）</span>
+    <span class="hit"><i></i>命中（白+描边）</span>
+    <span class="hitnote">一人一座：绑定即占；工位号同层唯一；未分配工位时显示「（未分配工位——无楼层可看）」</span>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

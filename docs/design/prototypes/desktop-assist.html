@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 远程协助（consent 只属受控方 + 五态台账 + 审计链）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  .dialog{width:min(1080px,96vw);height:min(700px,94vh)}
+  .conn-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12px;color:var(--text-2)}
+  .conn-row .f{display:flex;align-items:center;gap:5px}
+  .conn-row .f b{font-weight:600;color:var(--text-1);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px}
+  .conn-row .ok{margin-left:auto;color:var(--ok);display:flex;align-items:center;gap:5px;font-weight:600}
+  .conn-row .ok i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .split{flex:1;display:flex;min-height:0}
+  .col{flex:1;min-width:0;display:flex;flex-direction:column;gap:9px;padding:11px 13px;overflow-y:auto}
+  .col.l{border-right:1px solid var(--line)}
+  .sec-h{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700}
+  .sec-h .s{font-size:10.5px;color:var(--text-3);font-weight:600}
+  .frow{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-2);flex-wrap:wrap}
+  .in{background:var(--panel);border:1px solid var(--line-strong);border-radius:6px;padding:6px 9px;color:var(--text-1);font-size:12px}
+  .in.grow{flex:1;min-width:130px}
+  .chk{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-1)}
+  .chk i{width:13px;height:13px;border-radius:3px;background:var(--brand);position:relative;display:inline-block;flex:none}
+  .chk i:after{content:"✓";color:#fff;font-size:9px;position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .chk.off i{background:var(--panel);border:1px solid var(--line-strong)}
+  .chk.off i:after{content:""}
+  .ledger{border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+  .lrow{display:flex;gap:9px;font-size:11.5px;padding:6px 11px;border-bottom:1px dashed var(--line);align-items:baseline}
+  .lrow:last-child{border-bottom:none}
+  .lrow .id{color:var(--text-3);flex:none;width:26px}
+  .lrow .pair{flex:none;color:var(--text-2)}
+  .lrow .st{flex:none;font-weight:700}
+  .st.req{color:var(--warn)}
+  .st.appr{color:var(--brand-deep)}
+  .st.live{color:var(--ok)}
+  .st.done{color:var(--text-3)}
+  .st.denied{color:#c43a2d}
+  .lrow .perm{margin-left:auto;color:var(--text-3);font-size:10.5px;white-space:nowrap}
+  .lrow.mine-live{background:rgba(46,139,87,.10)}
+  .remote{min-height:150px;border-radius:10px;background:#222;color:#bbb;font-size:12px;display:flex;align-items:center;justify-content:center;border:1px solid #000}
+  .remote .tag{font-size:10.5px;color:#777;margin-top:6px}
+  .chain{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px 11px;font-size:11px;color:var(--text-2);line-height:1.9;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+  .chain .ts{color:var(--text-3)}
+  .chain b{color:var(--brand-deep)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .card .ch{padding:8px 12px;font-size:12px;font-weight:700;border-bottom:1px solid var(--line);background:var(--panel-2);display:flex;align-items:center;gap:8px}
+  .card .ch .s{font-size:10.5px;color:var(--text-3);font-weight:600;margin-left:auto}
+  .card .cb{padding:10px 12px}
+  .pending{border:1px dashed var(--line-strong);border-radius:8px;padding:9px 11px;font-size:12.5px;color:var(--text-1);background:var(--panel-2)}
+  .share-banner{border-radius:8px;padding:9px 12px;background:rgba(192,57,43,.10);border:1px solid rgba(192,57,43,.4);color:#c0392b;font-weight:700;font-size:12.5px;line-height:1.7}
+  .share-banner .soft{font-weight:400;font-size:11px}
+  .ops{border:1px solid var(--line);border-radius:8px;background:var(--panel-2);padding:8px 11px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;color:var(--text-2);line-height:1.95}
+  .ops .ts{color:var(--text-3)}
+  .note{display:flex;gap:7px;padding:7px 10px;border-radius:8px;background:var(--brand-softer);color:var(--brand-deep);font-size:11px;line-height:1.7}
+  .btnrow{display:flex;gap:7px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="window dialog">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span style="font-size:12.5px;color:var(--text-2)">远程协助</span>
+    <span class="state-badge collab" style="margin-left:10px"><i class="dot"></i>500ms 轮询 · 屏幕永不落盘</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="conn-row">
+    <span class="f">服务器地址 <b>memex.corp.local</b></span>
+    <span class="f">文件端口 <b>24362</b></span>
+    <span class="f">账号 <b>zhangwei</b></span>
+    <span class="f">口令 <b>••••••••</b></span>
+    <span class="ok"><i></i>已连接</span>
+  </div>
+
+  <div class="split">
+    <section class="col l">
+      <div class="card">
+        <div class="ch">我发起协助</div>
+        <div class="cb">
+          <div class="frow">
+            <span class="in grow">受控方账号（如 liwen）</span>
+            <label class="chk"><i></i>查看</label>
+            <label class="chk off"><i></i>鼠标</label>
+            <label class="chk off"><i></i>键盘</label>
+            <button class="btn primary" style="flex:none">发起协助</button>
+          </div>
+          <div class="note" style="margin-top:8px">已发起（id6）→ liwen，等受控方批准</div>
+        </div>
+      </div>
+
+      <div class="ledger">
+        <div style="padding:8px 12px;font-size:12px;font-weight:700;border-bottom:1px solid var(--line);background:var(--panel-2)">会话台账（过程持续可见）</div>
+        <div class="lrow mine-live"><span class="id">6</span><span class="pair">我→liwen</span><span class="st live">[进行中]</span><span class="perm">权 查看/鼠标</span></div>
+        <div class="lrow"><span class="id">5</span><span class="pair">sunyu→我</span><span class="st live">[进行中]</span><span class="perm">权 查看</span></div>
+        <div class="lrow"><span class="id">4</span><span class="pair">我→wangqian</span><span class="st req">[待批]</span><span class="perm">权 查看/键盘</span></div>
+        <div class="lrow"><span class="id">3</span><span class="pair">我→chenchen</span><span class="st appr">[已批待启动]</span><span class="perm">权 查看</span></div>
+        <div class="lrow"><span class="id">2</span><span class="pair">我→liwen</span><span class="st done">[已结束]</span><span class="perm">当事方结束</span></div>
+        <div class="lrow"><span class="id">1</span><span class="pair">我→sunyu</span><span class="st denied">[已拒绝]</span><span class="perm">—</span></div>
+      </div>
+      <div class="btnrow">
+        <button class="btn primary">启动选中</button>
+        <button class="btn">结束选中</button>
+        <button class="btn ghost-brand">看审计链</button>
+        <button class="btn">刷新</button>
+        <span style="font-size:10.5px;color:var(--text-3);align-self:center">选中 id6</span>
+      </div>
+
+      <div class="remote">
+        <div style="text-align:center">远端画面 seq=42
+          <div class="tag">（远端画面——选中进行中的会话自动显示）· 点击即回发鼠标事件</div>
+        </div>
+      </div>
+
+      <div class="sec-h">审计链（状态迁移留痕）<span class="s">审计链 6 笔</span></div>
+      <div class="chain">
+        <span class="ts">10-24 11:02:41</span>  zhangwei  <b>requested</b>  id6 我→liwen 权 查看/鼠标<br>
+        <span class="ts">10-24 11:02:58</span>  liwen    <b>approved</b>  id6 实批 查看（缩权：去鼠标）<br>
+        <span class="ts">10-24 11:03:10</span>  zhangwei  <b>active</b>    id6 会话已启动（进行中）<br>
+        <span class="ts">10-24 11:09:55</span>  zhangwei  <b>frame</b>     id6 帧已推（seq=42）<br>
+        <span class="ts">10-24 10:44:02</span>  zhangwei  <b>closed</b>    id2 会话已结束（终态留痕）
+      </div>
+    </section>
+
+    <aside class="col">
+      <div class="card">
+        <div class="ch">待我批（consent 只属受控方）<span class="s">批准前输入配对密码</span></div>
+        <div class="cb">
+          <div class="pending">sunyu 请求协助（申请：查看/键盘）</div>
+          <div class="frow" style="margin-top:9px">
+            <span style="font-weight:700;color:var(--text-1)">批准勾选项</span>
+            <label class="chk"><i></i>查看</label>
+            <label class="chk off"><i></i>鼠标</label>
+            <label class="chk off"><i></i>键盘</label>
+          </div>
+          <div class="frow" style="margin-top:7px">
+            <span>实批：</span>
+            <label class="chk"><i></i>查看</label>
+            <label class="chk off"><i></i>鼠标</label>
+            <label class="chk off"><i></i>键盘</label>
+            <span style="font-size:10.5px;color:var(--text-3)">实批可小于申请（缩权批准）</span>
+          </div>
+          <div class="frow" style="margin-top:8px">
+            <span class="in" style="letter-spacing:2px;color:var(--text-3)">远程控制配对密码（••••）</span>
+            <button class="btn primary" style="flex:none">批准</button>
+            <button class="btn" style="flex:none;border-color:rgba(196,58,45,.45);color:#c43a2d">拒绝</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="share-banner">
+        ● 屏幕共享中——对方正在查看你的屏幕
+        <div class="soft">随时结束＝撤权；受控方结束共享立即生效（id6 · sunyu 权 查看）</div>
+      </div>
+      <div class="btnrow">
+        <button class="btn primary">开始共享屏幕</button>
+        <button class="btn">结束共享（撤权）</button>
+        <span style="font-size:10.5px;color:var(--text-3);align-self:center">未共享时显示「有进行中的协助会话（未在共享）」</span>
+      </div>
+
+      <div class="card">
+        <div class="ch">对方操作（取走即清）<span class="s">受控方视角 · 只显示最近</span></div>
+        <div class="cb" style="padding:8px 11px">
+          <div class="ops">
+            <span class="ts">11:03:12</span> mouse_move (0.12, 0.34)<br>
+            <span class="ts">11:03:14</span> mouse_click (0.12, 0.34)<br>
+            <span class="ts">11:03:19</span> key Ctrl+S
+          </div>
+        </div>
+      </div>
+
+      <div class="note">五态固定：待批 → 已批待启动 → 进行中 → 已结束 / 已拒绝；consent 只属受控方，配对密码防「误批」；屏幕帧与操作流不落盘，仅审计链存状态迁移。</div>
+    </aside>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>

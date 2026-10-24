@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Memex 原型 · 桌面 · 会话审计（auditor 专属检索 + 查阅留痕）</title>
+<link rel="stylesheet" href="prototypes.css">
+<style>
+  .dialog{width:min(920px,96vw);height:min(640px,94vh)}
+  .conn-row{flex:none;display:flex;align-items:center;gap:8px;padding:9px 16px;border-bottom:1px solid var(--line);background:var(--panel-2);font-size:12px;color:var(--text-2)}
+  .conn-row .f{display:flex;align-items:center;gap:5px}
+  .conn-row .f b{font-weight:600;color:var(--text-1);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px}
+  .conn-row .ok{margin-left:auto;color:var(--ok);display:flex;align-items:center;gap:5px;font-weight:600}
+  .conn-row .ok i{width:7px;height:7px;border-radius:50%;background:var(--ok);display:inline-block}
+  .wrap{flex:1;display:flex;flex-direction:column;min-height:0;padding:12px 16px;gap:10px;overflow-y:auto}
+  .filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--text-2)}
+  .filters .lbl{color:var(--text-3)}
+  .in{background:var(--panel);border:1px solid var(--line-strong);border-radius:6px;padding:6px 10px;color:var(--text-1);font-size:12px}
+  .in.grow{flex:1;min-width:140px}
+  .chk{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--text-1)}
+  .chk i{width:13px;height:13px;border-radius:3px;background:var(--brand);position:relative;display:inline-block;flex:none}
+  .chk i:after{content:"✓";color:#fff;font-size:9px;position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+  .results{flex:none;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+  .results .rh{padding:8px 12px;font-size:12px;font-weight:700;border-bottom:1px solid var(--line);background:var(--panel-2);display:flex;align-items:center;gap:8px}
+  .results .rh .s{font-size:10.5px;color:var(--text-3);font-weight:600;margin-left:auto}
+  .rrow{display:flex;gap:12px;font-size:12px;padding:6px 12px;border-bottom:1px dashed var(--line);align-items:baseline}
+  .rrow:last-child{border-bottom:none}
+  .rrow .ts{color:var(--text-3);flex:none;width:96px}
+  .rrow .pair{flex:none;color:var(--brand-deep);font-weight:600;width:150px}
+  .rrow .type{flex:none;width:88px}
+  .rrow .text{flex:1;min-width:0;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rrow.recalled{opacity:.5}
+  .rrow.recalled .type{color:var(--text-3)}
+  .sec-h{display:flex;align-items:center;gap:9px;font-size:12.5px;font-weight:700;margin-top:2px}
+  .sec-h .s{font-size:10.5px;color:var(--text-3);font-weight:600}
+  .log{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:8px 12px;font-size:11.5px;color:var(--text-2);line-height:1.95;font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+  .log .ts{color:var(--text-3)}
+  .log b{color:var(--brand-deep)}
+  .note{display:flex;gap:7px;padding:7px 10px;border-radius:8px;background:var(--brand-softer);color:var(--brand-deep);font-size:11px;line-height:1.7}
+  .btnrow{display:flex;gap:8px;align-items:center}
+</style>
+</head>
+<body>
+<div class="window dialog">
+  <div class="titlebar">
+    <img class="logo" src="../../src/public/logo.svg" alt="Memex">
+    <span class="app-name">Memex</span>
+    <span class="divider-v"></span>
+    <span style="font-size:12.5px;color:var(--text-2)">会话审计</span>
+    <span class="state-badge collab" style="margin-left:10px"><i class="dot"></i>audit.message.search · 被拒也留痕</span>
+    <div class="win-controls"><span class="c-min"></span><span class="c-max"></span><span class="c-close"></span></div>
+  </div>
+
+  <div class="conn-row">
+    <span class="f">服务器地址 <b>memex.corp.local</b></span>
+    <span class="f">文件端口 <b>24362</b></span>
+    <span class="f">账号 <b>zhangwei</b></span>
+    <span class="f">口令 <b>••••••••</b></span>
+    <span class="ok"><i></i>已连接（zhangwei）</span>
+  </div>
+
+  <div class="wrap">
+    <div class="filters">
+      <span class="lbl">账号</span><span class="in" style="width:130px">liwen</span>
+      <span class="lbl">关键词</span><span class="in grow">部署</span>
+      <label class="chk"><i></i><span>时间窗</span></label>
+      <span class="in" style="width:110px">2026-10-13</span>
+      <span class="lbl">至</span>
+      <span class="in" style="width:110px">2026-10-24</span>
+    </div>
+    <div class="btnrow">
+      <button class="btn primary">检索</button>
+      <button class="btn">刷新查阅日志</button>
+      <span style="font-size:10.5px;color:var(--text-3)">账号 / 关键词可空＝全部</span>
+    </div>
+
+    <div class="results">
+      <div class="rh">检索结果<span class="s">MM-dd HH:mm　from→to　type　text（已撤回灰显）</span></div>
+      <div class="rrow"><span class="ts">10-24 09:41</span><span class="pair">liwen→研发一组</span><span class="type">TEXT</span><span class="text">staging 部署完成，可以开始回归了</span></div>
+      <div class="rrow"><span class="ts">10-24 09:55</span><span class="pair">zhangwei→liwen</span><span class="type">TEXT</span><span class="text">收到，部署脚本我这边同步一份</span></div>
+      <div class="rrow recalled"><span class="ts">10-23 18:12</span><span class="pair">liwen→研发一组</span><span class="type">TEXT（已撤回）</span><span class="text">旧连接串先别删（内容已从服务端检索面遮蔽，仅存撤回标记）</span></div>
+      <div class="rrow"><span class="ts">10-23 16:20</span><span class="pair">sunyu→研发一组</span><span class="type">TEXT</span><span class="text">预发部署演练今晚 20:00 开始，值班表见群备忘录</span></div>
+      <div class="rrow"><span class="ts">10-22 11:03</span><span class="pair">wangqian→liwen</span><span class="type">TEXT</span><span class="text">预算系统部署窗口约在下周二，避开封版期</span></div>
+      <div class="rrow"><span class="ts">10-21 15:47</span><span class="pair">liwen→研发一组</span><span class="type">FILE</span><span class="text">deploy-runbook-v3.md（1.8 MB）</span></div>
+    </div>
+
+    <div class="sec-h">查阅日志（每次检索/被拒都留痕）<span class="s">ts　op_account　action　filters　命中 N 条</span></div>
+    <div class="log">
+      <span class="ts">2026-10-24 11:20:31</span>  zhangwei  <b>audit.message.search</b>  account=liwen kw=部署 since=10-13 until=10-24  命中6条<br>
+      <span class="ts">2026-10-24 11:18:02</span>  wangqian  <b>audit.message.search</b>  （被拒：非 auditor 角色）  命中0条<br>
+      <span class="ts">2026-10-23 17:44:19</span>  zhaolei  <b>audit.message.search</b>  kw=密码  命中2条<br>
+      <span class="ts">2026-10-23 10:02:56</span>  zhangwei  <b>audit.message.search</b>  account=sunyu  命中41条
+    </div>
+
+    <div class="note">——检索与查阅日志均须 auditor 有效角色；无角色请求同样落一条「被拒」日志，审计者自身也被审计。</div>
+  </div>
+</div>
+<script>if (new URLSearchParams(location.search).get('theme') === 'dark') document.body.classList.add('dark');</script>
+</body>
+</html>
