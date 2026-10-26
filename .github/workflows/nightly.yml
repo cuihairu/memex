@@ -157,17 +157,14 @@ jobs:
       # 未随 3.4.0 发版），6.10.3 是 aqt 当前能装的最后一档；待 aqt 发版后跟进
       # 6.12。Xcode 26 SDK 移除 AGL.framework，Qt ≤6.8.3 链接报错（QTBUG-137687）
       # runner 默认 Python 已升 3.15，aqtinstall 依赖（py7zr→inflate64/pybcj/pyppmd）
-      # 无 cp315 Windows wheel、源码构建即挂，钉 3.13 取既有 wheel
-      - name: 钉 Python 3.13（aqtinstall 依赖 wheel 可用）
-        if: runner.os != 'Linux'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
+      # 无 cp315 Windows wheel、源码构建即挂；install-qt-action 内部自带
+      # setup-python 会覆盖外层 PATH，必须经其 python-version 输入钉 3.12
       - name: 安装 Qt（Windows/macOS）
         if: runner.os != 'Linux'
         uses: jurplel/install-qt-action@v4.4.1
         with:
           version: ${{ matrix.qt }}
+          python-version: '3.12'
           cache: true
           cache-key-prefix: ${{ format('memex-qt-{0}', matrix.qt) }}
 
