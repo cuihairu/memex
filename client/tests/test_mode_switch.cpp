@@ -9,8 +9,10 @@
 #include <QDir>
 #include <QFile>
 #include <QCheckBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMouseEvent>
 #include <QPixmap>
 #include <QProcess>
 #include <QPushButton>
@@ -20,6 +22,8 @@
 #include <QTemporaryDir>
 #include <QThread>
 #include <QShortcut>
+#include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QUdpSocket>
 
 #include <cstdlib>
@@ -365,6 +369,140 @@ int main(int argc, char** argv) {
     }
   }
 
+  // —— 组织架构整屏视图（原型 desktop-org.html）：CLI 造部门树＋汇报链
+  //    （alice＝研发部部长无上级，bob＝研发一组组长汇报 alice），rail
+  //    「组织架构」切三栏视图——左部门树（含计数）＋中成员卡（bob 卡＋
+  //    「我」高亮卡＋负责人胶囊）＋右档案（点卡展开，汇报链路 bob→alice）；
+  //    实况进 docs 截图目录（浅＋深；随拍随回亮色基线），回「消息」退场 ——
+  {
+    auto org_cli = [&](const QStringList& tail) {
+      QStringList args = tail;
+      args << QStringLiteral("--db") << srv_db;
+      CHECK(QProcess::execute(server_bin, args) == 0);
+    };
+    org_cli({QStringLiteral("org"), QStringLiteral("set"),
+             QStringLiteral("alice"), QStringLiteral("--dept"),
+             QStringLiteral("华信制造集团/产品研发部"), QStringLiteral("--title"),
+             QStringLiteral("部长"), QStringLiteral("--manager"),
+             QStringLiteral("none")});
+    org_cli({QStringLiteral("org"), QStringLiteral("set"),
+             QStringLiteral("bob"), QStringLiteral("--dept"),
+             QStringLiteral("华信制造集团/产品研发部/研发一组"),
+             QStringLiteral("--title"), QStringLiteral("组长"),
+             QStringLiteral("--manager"), QStringLiteral("alice")});
+    // org 重拉（拿新部门树；enter_org_view 首次进入自会拉，这里先拉好再切）
+    window.request_org();
+    CHECK(wait_until([&] {
+      return window.org_json().contains(QStringLiteral("研发一组"));
+    }, 8000));
+
+    auto* rail = window.findChild<memex::client::RailNav*>();
+    CHECK(rail != nullptr);
+    if (rail) {
+      emit rail->item_clicked(QStringLiteral("org"));
+      CHECK(wait_until([&] { return window.org_view_active(); }, 8000));
+      auto* tree = window.findChild<QTreeWidget*>(
+          QStringLiteral("org_tree"));
+      CHECK(tree != nullptr);
+      bool grp_item = false;
+      if (tree) {
+        QTreeWidgetItemIterator it(tree);
+        while (*it) {
+          if ((*it)->text(0).contains(QStringLiteral("研发一组")) &&
+              (*it)->text(1).contains(QStringLiteral("1")))
+            grp_item = true;
+          ++it;
+        }
+      }
+      CHECK(grp_item); // 部门树含「研发一组 · 1」（bob）
+      // 「全部成员」头：2 人；bob 卡与「我」卡同场；负责人胶囊如实
+      auto* head_title = window.findChild<QLabel*>(
+          QStringLiteral("org_head_title"));
+      auto* bob_card =
+          window.findChild<QWidget*>(QStringLiteral("org_card_bob"));
+      auto* me_card =
+          window.findChild<QWidget*>(QStringLiteral("org_me_card"));
+      auto* head_pill = window.findChild<QLabel*>(
+          QStringLiteral("org_head_pill"));
+      CHECK(head_title && head_title->text().contains(
+                              QStringLiteral("全部成员 · 2 人")));
+      CHECK(bob_card && !bob_card->isHidden());
+      CHECK(me_card && !me_card->isHidden());
+      // 档案栏未选人时收起
+      CHECK(window.findChild<QWidget*>(QStringLiteral("org_profile")) ==
+            nullptr || window.findChild<QWidget*>(
+                                        QStringLiteral("org_profile"))
+                                            ->isHidden());
+      // 点 bob 卡 → 右栏档案：汇报链路 bob→alice、直属上级行
+      if (bob_card) {
+        const QPointF c = QPointF(bob_card->width() / 2.0,
+                                  bob_card->height() / 2.0);
+        QMouseEvent press(QEvent::MouseButtonPress, c, c, c, Qt::LeftButton,
+                          Qt::LeftButton, Qt::NoModifier);
+        QMouseEvent release(QEvent::MouseButtonRelease, c, c, c,
+                            Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+        QApplication::sendEvent(bob_card, &press);
+        QApplication::sendEvent(bob_card, &release);
+      }
+      auto* profile = window.findChild<QWidget*>(
+          QStringLiteral("org_profile"));
+      CHECK(profile && !profile->isHidden());
+      bool chain_head = false, chain_alice = false, mgr_row = false;
+      if (profile) {
+        for (QLabel* l : profile->findChildren<QLabel*>()) {
+          if (l->text() == QStringLiteral("汇报链路")) chain_head = true;
+          if (l->text().contains(QStringLiteral("alice"))) chain_alice = true;
+        }
+        // kv 行＝行件下键/值两个 QLabel（无单标签同时含键与值）
+        for (QWidget* roww : profile->findChildren<QWidget*>()) {
+          const QList<QLabel*> ls = roww->findChildren<QLabel*>();
+          if (ls.size() == 2 &&
+              ls.at(0)->text() == QStringLiteral("直属上级") &&
+              ls.at(1)->text().contains(QStringLiteral("alice")))
+            mgr_row = true;
+        }
+      }
+      CHECK(chain_head);
+      CHECK(chain_alice); // 汇报链路含上级 alice（bob→alice）
+      CHECK(mgr_row);     // kv 行：直属上级 alice
+      CHECK(head_pill == nullptr || head_pill->isHidden() ||
+            !head_pill->text().contains(QStringLiteral("："))); // 全员视图无负责人胶囊
+      // 组织架构实况进 docs 截图目录（浅＋深；随拍随回亮色基线）
+      {
+        auto& tm = memex::client::ThemeManager::instance();
+        CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
+                                 QStringLiteral("/live-org-light.png")));
+        tm.apply(qApp);
+        tm.set_mode(QStringLiteral("dark"));
+        CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
+                                 QStringLiteral("/live-org-dark.png")));
+        tm.set_mode(QStringLiteral("light"));
+      }
+      // 还原组织数据：后续文件腿的授权裁决依赖「双方未建档＝空部门路径
+      // 相等」（见下方 win-dir 腿注释）；本腿造的不同部门会让 alice→bob
+      // 被裁决拒绝、文件全灭。清空＝部门/职务/上级全空回基线。
+      org_cli({QStringLiteral("org"), QStringLiteral("set"),
+               QStringLiteral("alice"), QStringLiteral("--dept"),
+               QStringLiteral(""), QStringLiteral("--title"),
+               QStringLiteral(""), QStringLiteral("--manager"),
+               QStringLiteral("none")});
+      org_cli({QStringLiteral("org"), QStringLiteral("set"),
+               QStringLiteral("bob"), QStringLiteral("--dept"),
+               QStringLiteral(""), QStringLiteral("--title"),
+               QStringLiteral(""), QStringLiteral("--manager"),
+               QStringLiteral("none")});
+      window.request_org();
+      // 成员 department_path 清空即可（部门行本身不删——org set 建过的
+      // 部门表记录留存，授权裁决只看成员部门路径）
+      CHECK(wait_until([&] {
+        return !window.org_json().contains(
+            QStringLiteral("\"department_path\":\"华信"));
+      }, 8000));
+      // 回「消息」：org 视图退场（会话面回场）
+      emit rail->item_clicked(QStringLiteral("messages"));
+      CHECK(wait_until([&] { return !window.org_view_active(); }, 8000));
+    }
+  }
 
   // —— 需求批⑪ 个性签名：发送面（验收缝 apply_signature）→ 服务端受理
   //    回执 → 重拉 org → own_signature 生效（持久面断言；回执状态行是

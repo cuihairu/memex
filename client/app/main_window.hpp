@@ -33,6 +33,7 @@ class QMenu;
 class QShortcut;
 class QTimer;
 class QSystemTrayIcon;
+class QTreeWidget;
 class QVBoxLayout;
 
 namespace memex::client {
@@ -100,6 +101,12 @@ public:
   // 发文件发送缝（传输面「发送文件」钮与聊天发文件钮同一路径）：
   // 守卫→直连通道发送→台账跟踪＋会话内文件卡。返回传输 id，空＝未发出。
   QString transfer_send_file(const QString& path);
+
+  // —— 组织架构面（原型 desktop-org.html，验收面）——
+  // rail「组织架构」切三栏整屏（部门树/成员网格/成员档案）；数据到达或
+  // 再次进入即刷新，离开走 rail 消息/好友或档案栏「发消息」。
+  void enter_org_view();
+  bool org_view_active() const; // 验收面：三栏是否在屏
 
   // —— T4.4 截图与标注 ——
   // 截图工具（区域选择→标注→确认即发送；测试缝见 ScreenshotTool 注释）。
@@ -384,7 +391,7 @@ private:
   void show_collab_login_dialog();
   void show_conn_settings_dialog(); // 连接设置：域名解析覆盖（部署批 424）
   void show_org_dialog();        // 菜单入口：查询＋组织架构弹窗（T3.1）
-  void build_org_tree(const QString& org_json); // 弹窗内构建部门/成员树
+  //（旧 org 弹窗树 build_org_tree 已由整屏 org 三栏视图取代并删除）
   void apply_policy(const QString& org_json); // 解析本人生效策略（T3.4）
   // 直连发送是否被策略放行：免登录使用／跨态通信两项开关（T3.4）
   bool direct_send_allowed();
@@ -490,6 +497,19 @@ private:
   // 传输卡对端显示名（协作=通讯录显示名；直连=设备号）
   QString tx_peer_display(const QString& kind, const QString& peer) const;
 
+  // —— 组织架构面内部 ——
+  void leave_org_view();
+  // 全量重建（org 数据到达/进入视图/主题切换）：树＋网格＋档案一起刷
+  void rebuild_org_view();
+  // 中栏成员网格（按当前部门；全量重建，含「我」卡高亮与在线点）
+  void refresh_org_members();
+  // 右栏档案（汇报链路沿 manager 指针上溯；无选中即清空隐藏）
+  void show_org_profile(const QString& account);
+  // 部门子树成员计数（树节点 .cnt；根=全量）
+  int org_dept_member_count(const QString& path) const;
+  // 部门负责人推导：部门内 manager 不在本部门子树者唯一时给出（否则省略）
+  QString org_dept_head(const QString& path) const;
+
   QString current_peer_;      // 当前会话对端（设备标识或协作账号或群键）
   QString current_kind_{QStringLiteral("direct")}; // 会话形态：direct／collab／group／dgroup
   bool chat_open_{false}; // 布局态：会话面板是否展开（显隐意图，与窗口可见性
@@ -523,7 +543,7 @@ private:
   int avatar_uploaded_count_{0};          // 已成功档数（状态行进度）
   qint64 avatar_new_ver_{0};              // 服务端最新版本戳（上传回包带）
   QString collab_host_;                   // 协作登录主机（文件面同源默认）
-  bool org_dialog_pending_{false}; // 已请求组织架构、等待弹窗
+  bool org_dialog_pending_{false}; // 已请求组织架构、等待视图（enter_org_view 置位）
   bool anonymous_allowed_{true};   // T3.4 生效策略：允许免登录使用（默认宽松）
   bool cross_state_allowed_{true}; // T3.4 生效策略：允许与未登录设备通信
   QMap<QString, quint64> file_sent_; // 文件名 → 最近一次进度字节（节流）
@@ -659,6 +679,28 @@ private:
   QLabel* tx_peers_hint_{nullptr};    // 侧栏「已发现同网段直传伙伴 N 台」品牌卡
   QList<TransferEntry> transfers_;    // 传输台账（会话内存级）
   int transfer_filter_{0};            // 标签筛选：0 全部／1 传输中／2 已完成／3 已暂停
+  // —— 组织架构面（原型 desktop-org.html 整屏）：rail「组织架构」切三栏 ——
+  //     左＝部门树（搜索＋计数＋可见性说明虚线卡），中＝成员卡网格，
+  //     右＝成员档案（汇报链路＋档案 kv＋动作钮）。
+  struct OrgMember {
+    QString account, name, title, dept, manager, role;
+  };
+  QWidget* org_side_{nullptr};        // 左栏部门树（240px，与会话侧栏互斥）
+  QWidget* org_page_{nullptr};        // 中栏成员网格面（与聊天面板互斥）
+  QWidget* org_profile_{nullptr};     // 右栏成员档案（260px；无选中即隐藏）
+  QLineEdit* org_search_{nullptr};    // 「搜索部门 / 成员」
+  QTreeWidget* org_tree_{nullptr};    // 部门树（节点带子树成员计数）
+  QLabel* org_note_{nullptr};         // 可见性策略虚线卡（常驻复用）
+  QVBoxLayout* org_tree_lay_{nullptr};  // 左栏容器（树全量重建用）
+  QLabel* org_head_title_{nullptr};   // 「部门 · N 人」
+  QLabel* org_head_pill_{nullptr};    // 「部门负责人：X」（推导不出即隐藏）
+  QVBoxLayout* org_grid_lay_{nullptr}; // 成员卡容器（滚动区内）
+  QLabel* org_grid_empty_{nullptr};   // 空态（常驻复用）
+  QVBoxLayout* org_profile_lay_{nullptr}; // 档案栏容器（全量重建用）
+  QList<OrgMember> org_members_;      // 最近一次 org 数据成员缓存（树/网格/档案共用）
+  QStringList org_dept_paths_;        // 可见部门全路径（server 按可见性裁剪后）
+  QString org_selected_dept_;         // 当前部门（路径；空=公司全量）
+  QString org_selected_member_;       // 档案栏当前成员账号
   QTextBrowser* chat_view_{nullptr};
   QLineEdit* input_box_{nullptr};
   QPushButton* send_btn_{nullptr};
