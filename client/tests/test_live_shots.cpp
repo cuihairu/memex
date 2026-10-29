@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QFile>
 #include <QListWidget>
+#include <QMenu>
 #include <QPixmap>
 #include <QProcess>
 #include <QSettings>
@@ -286,6 +287,25 @@ int main(int argc, char** argv) {
       if (l->text().contains(QStringLiteral("群成员 · 2"))) members_head = true;
     }
     CHECK(members_head);
+    // @ 成员选择器（原型「@ 唤起成员选择」）：输入 @ 弹成员菜单，选中回填
+    // 「@显示名 」（词头消失即菜单收起）
+    auto* input = window.findChild<QLineEdit*>(QStringLiteral("input_box"));
+    CHECK(input != nullptr);
+    if (input) {
+      input->setText(QStringLiteral("@"));
+      QCoreApplication::processEvents();
+      QMenu* at_menu = nullptr;
+      for (auto* m : window.findChildren<QMenu*>()) {
+        if (m->isVisible() && !m->actions().isEmpty()) at_menu = m;
+      }
+      CHECK(at_menu != nullptr);
+      if (at_menu) {
+        at_menu->actions().first()->trigger();
+        CHECK(input->text().startsWith(QStringLiteral("@")));
+        CHECK(input->text().endsWith(QStringLiteral(" ")));
+      }
+      input->clear();
+    }
     grab_pair(window, QStringLiteral("live-group"));
   }
 

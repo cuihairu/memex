@@ -1293,6 +1293,7 @@ void MainWindow::build_ui() {
   input_layout->addWidget(nudge_btn);
   input_layout->addWidget(date_btn);
   input_box_ = new QLineEdit(input_row);
+  input_box_->setObjectName(QStringLiteral("input_box"));
   input_box_->setPlaceholderText(QStringLiteral("输入消息…"));
   send_btn_ = new QPushButton(QStringLiteral("发送"), input_row);
   // 「Enter 发送」提示（原型 .input-toolbar .hint：右缘 11px 次要色）
@@ -1415,6 +1416,19 @@ void MainWindow::build_ui() {
   });
   connect(input_box_, &QLineEdit::returnPressed, this,
           [this] { send_btn_->click(); });
+  // —— @ 成员选择器（原型 desktop-group.html .input-toolbar .hint「@ 唤起
+  // 成员选择」）——群会话输入出现「@词头」（@ 起至串尾的无空白段）弹成员
+  // 菜单（显示名，按词头过滤，≤12 项）；菜单为 Popup 型抢键，键入经
+  // eventFilter 转发回输入框（连续输入继续过滤），选中回填「@显示名 」。
+  at_menu_ = new QMenu(this);
+  at_menu_->installEventFilter(this);
+  connect(input_box_, &QLineEdit::textChanged, this, [this](const QString& t) {
+    if (!at_menu_) return;
+    // 菜单分发中键入会同步触发本 lambda——清 actions 推迟一帧（分发中清
+    // 空 QMenu 会悬垂/崩溃），重建与显隐都走 rebuild_at_menu
+    if (in_at_key_forward_) return;
+    rebuild_at_menu(t);
+  });
   connect(file_btn, &QPushButton::clicked, this, [this] {
     if (current_peer_.isEmpty()) {
       show_status(QStringLiteral("先选择设备再发送文件"));
@@ -3061,6 +3075,60 @@ void MainWindow::update_group_panel() {
   group_panel_lay_->addWidget(card);
 }
 
+// @ 成员选择菜单（原型 desktop-group.html「@ 唤起成员选择」）：输入「@词头」
+// 时弹成员菜单（显示名按词头过滤，≤12 项）；无词头/非群会话/无成员＝收起。
+// 选中回填「@显示名 」并停用菜单（词头消失，textChanged 自动收）。
+void MainWindow::rebuild_at_menu(const QString& text) {
+  if (!at_menu_) return;
+  const bool group_ok =
+      current_kind_ == QStringLiteral("group") &&
+      collab_engine_.is_logged_in();
+  static const QRegularExpression tail_re(
+      QStringLiteral("@([A-Za-z0-9_.\\-\\x{4e00}-\\x{9fa5}]*)$"));
+  const auto m = tail_re.match(text);
+  const GroupEntry* g = group_ok ? current_group() : nullptr;
+  if (!g || !m.hasMatch()) {
+    at_menu_->hide();
+    return;
+  }
+  const QString partial = m.captured(1);
+  const int at_idx = m.capturedStart(1) - 1;
+  const QString me = collab_engine_.account();
+  at_menu_->clear();
+  int added = 0;
+  for (const QString& acc : g->members) {
+    if (acc == me) continue; // @ 自己无意义
+    QString d = roster_display(acc);
+    if (d.isEmpty()) d = acc;
+    if (!partial.isEmpty() &&
+        !d.contains(partial, Qt::CaseInsensitive) &&
+        !acc.contains(partial, Qt::CaseInsensitive)) {
+      continue;
+    }
+    QAction* act =
+        at_menu_->addAction(QStringLiteral("%1（%2）").arg(d, acc));
+    connect(act, &QAction::triggered, this, [this, d, at_idx] {
+      QString cur = input_box_->text();
+      cur = cur.left(at_idx) + QStringLiteral("@") + d + QStringLiteral(" ");
+      input_box_->setText(cur);
+      input_box_->setCursorPosition(cur.size());
+      input_box_->setFocus();
+      at_menu_->hide();
+    });
+    if (++added >= 12) break;
+  }
+  if (added == 0) {
+    at_menu_->hide();
+    return;
+  }
+  if (!at_menu_->isVisible()) {
+    at_menu_->adjustSize();
+    const QPoint pos = input_box_->mapToGlobal(QPoint(0, 0));
+    at_menu_->popup(QPoint(pos.x(),
+                           pos.y() - at_menu_->sizeHint().height() - 4));
+  }
+}
+
 // 发起单聊（原型 side-head + 钮）：候选＝组织架构成员（未拉到回落
 // 会话表∪在线表，去重去自己），选中即开该协作会话
 void MainWindow::show_new_chat_menu() {
@@ -4178,6 +4246,22 @@ void MainWindow::event_notify(bool enabled, SoundEvent ev,
 // 全局输入事件喂计时器：鼠标移动/点击、键盘、滚轮任一即重计。
 // 锁屏遮罩在屏时不再重置（锁已锁上，输密码动作不算「回来了」）。
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+  // @ 成员菜单（Qt::Popup）抢键盘：键入转发回输入框（连续输入继续按词头
+  // 过滤），菜单重建延到事件循环空转帧——分发中清 QMenu actions 会悬垂
+  // （textChanged 在转发栈内同步触发，见 rebuild_at_menu 调用方）
+  if (watched == at_menu_ && event->type() == QEvent::KeyPress) {
+    auto* ke = static_cast<QKeyEvent*>(event);
+    if (ke->key() == Qt::Key_Escape) return false; // 菜单自己收（不吞 Esc）
+    if (input_box_) {
+      in_at_key_forward_ = true;
+      input_box_->event(event); // 键入回输入框（textChanged 被标记拦下）
+      in_at_key_forward_ = false;
+      QTimer::singleShot(0, this, [this] {
+        if (at_menu_) rebuild_at_menu(input_box_->text());
+      });
+    }
+    return true;
+  }
   switch (event->type()) {
     case QEvent::MouseMove:
     case QEvent::MouseButtonPress:
@@ -5205,6 +5289,7 @@ void MainWindow::close_chat() {
   if (head_gfiles_btn_) head_gfiles_btn_->hide();
   if (head_members_btn_) head_members_btn_->hide();
   if (at_hint_) at_hint_->hide();
+  if (at_menu_) at_menu_->hide();
   chat_title_->setToolTip(QString());
   // 列表态：列表列占满 rail 之外的全部窗宽（微信/QQ 启动即列表；无论
   // 启动还是关会话，右缘都不再留空白——2026-10-14 用户报）
@@ -5317,6 +5402,7 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
   if (head_announce_btn_) head_announce_btn_->setVisible(group);
   if (head_gfiles_btn_) head_gfiles_btn_->setVisible(group);
   if (head_members_btn_) head_members_btn_->setVisible(group);
+  if (at_menu_) at_menu_->hide(); // 换会话即收 @ 成员菜单
   chat_title_->setToolTip(QString()); // 群号悬浮提示（群分支再挂，其余清空）
   QString avatar_src; // 头像取字源（原型 .chat-head .avatar.sm 首字）
   if (collab) {

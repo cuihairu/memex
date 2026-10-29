@@ -368,6 +368,7 @@ private:
   void update_banner();          // 按当前形态切换归档提示条
   void update_chat_avatar();     // 会话头像按源字＋当前令牌重刷（主题切换重取色）
   void update_group_panel();     // 群右栏重建（成员/群文件/归档说明；非群会话整栏隐藏）
+  void rebuild_at_menu(const QString& text); // @ 成员菜单按输入词头重建/显隐
   QString roster_display(const QString& account) const; // 通讯录账号→显示名（未下发＝空）
   void seed_collab_peers();      // 登录后从本地库补入历史协作会话
   void show_collab_login_dialog();
@@ -586,6 +587,10 @@ private:
                                 // 换文案；跨态/直连＝警示底，协作＝素底）
   QLabel* at_hint_{nullptr};     // 「@ 唤起成员选择」提示（原型 .input-toolbar
                                  // .hint；群会话专用）
+  QMenu* at_menu_{nullptr};      // @ 成员选择菜单（群会话输入「@词头」唤起；
+                                 // Popup 抢键经 eventFilter 转发回输入框）
+  bool in_at_key_forward_{false}; // 正在向输入框转发 @ 菜单键入（重建菜单改
+                                  // 单帧延后，防菜单分发中清 actions）
   QPushButton* head_announce_btn_{nullptr}; // 群公告钮（原型 .ch-actions icon-btn）
   QPushButton* head_gfiles_btn_{nullptr};   // 群文件钮（切群右栏显隐）
   QPushButton* head_members_btn_{nullptr};  // 成员钮（原型 .icon-btn.brand，开群资料）
