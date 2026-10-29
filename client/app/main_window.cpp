@@ -21,6 +21,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontMetrics>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -253,6 +254,83 @@ QString avatar_initial(const QString& name) {
   const QString n = name.trimmed();
   return n.isEmpty() ? QStringLiteral("?")
                      : QString(n.at(0)).toUpper();
+}
+
+// —— 原型协作列表行（desktop-collab.html .row）控件化 ——
+// 头像（40px 圆角 12、八色同源）＋在离线点（.presence 11px 描边侧栏底）
+// ＋主列（行首＝名＋右端时间；末条预览）＋右徽标（.n-count 未读数品牌
+// 胶囊）。presence：1 在线／0 离线／-1 无（群行）。WA_TransparentForMouse
+// Events 让点击/悬停穿透回列表——选中、悬浮与条目悬浮提示仍走
+// QListWidget 原生路径（UserRole 数据、itemClicked 不受行控件影响）。
+QWidget* make_session_row(const ThemeTokens& t, const QString& avatar_name,
+                          int presence, const QString& name,
+                          const QString& time, const QString& preview,
+                          int unread) {
+  auto* row = new QWidget;
+  row->setAttribute(Qt::WA_TransparentForMouseEvents);
+  auto* lay = new QHBoxLayout(row);
+  lay->setContentsMargins(10, 8, 10, 8);
+  lay->setSpacing(10);
+
+  auto* avatar = new QLabel(avatar_initial(avatar_name), row);
+  avatar->setFixedSize(40, 40);
+  avatar->setAlignment(Qt::AlignCenter);
+  avatar->setStyleSheet(QStringLiteral(
+                           "background:%1; color:%2; font-weight:700; "
+                           "font-size:15px; border-radius:12px;")
+                           .arg(avatar_hue(avatar_name).name(),
+                                t.on_brand.name()));
+  if (presence >= 0) {
+    auto* dot = new QLabel(avatar);
+    dot->setFixedSize(11, 11);
+    dot->move(29, 29);
+    dot->setStyleSheet(
+        QStringLiteral("border-radius:5px; background:%1; border:2px solid %2;")
+            .arg(presence ? t.success.name() : t.text_muted.name(),
+                 t.surface_alt.name()));
+  }
+  lay->addWidget(avatar, 0, Qt::AlignTop);
+
+  // 名与预览按侧栏余宽省略号截断（QLabel 不自省略，构建时裁）
+  const QFontMetrics fm(avatar->font());
+  auto* main = new QWidget(row);
+  auto* mlay = new QVBoxLayout(main);
+  mlay->setContentsMargins(0, 0, 0, 0);
+  mlay->setSpacing(2);
+  auto* top = new QHBoxLayout();
+  top->setSpacing(8);
+  auto* name_l =
+      new QLabel(fm.elidedText(name, Qt::ElideRight, 150), main);
+  name_l->setStyleSheet(QStringLiteral("font-weight:600; font-size:13px; "
+                                       "color:%1;")
+                            .arg(t.text.name()));
+  top->addWidget(name_l, 1);
+  if (!time.isEmpty()) {
+    auto* time_l = new QLabel(time, main);
+    time_l->setStyleSheet(
+        QStringLiteral("font-size:11px; color:%1;").arg(t.text_muted.name()));
+    top->addWidget(time_l, 0, Qt::AlignRight);
+  }
+  mlay->addLayout(top);
+  auto* sub =
+      new QLabel(fm.elidedText(preview, Qt::ElideRight, 170), main);
+  sub->setStyleSheet(
+      QStringLiteral("font-size:12px; color:%1;").arg(t.text_muted.name()));
+  mlay->addWidget(sub);
+  lay->addWidget(main, 1);
+
+  if (unread > 0) {
+    auto* pill = new QLabel(QString::number(unread), row);
+    pill->setAlignment(Qt::AlignCenter);
+    pill->setMinimumWidth(17);
+    pill->setFixedHeight(17);
+    pill->setStyleSheet(
+        QStringLiteral("background:%1; color:%2; font-size:11px; "
+                       "font-weight:700; border-radius:8px; padding:0 5px;")
+            .arg(t.brand.name(), t.on_brand.name()));
+    lay->addWidget(pill, 0, Qt::AlignRight | Qt::AlignVCenter);
+  }
+  return row;
 }
 QString avatar_html(const QString& name) {
   return QStringLiteral(
@@ -545,6 +623,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
           [this](const QString&) {
             apply_theme_styles();
             setWindowIcon(brand_icon());
+            refresh_devices(); // 列表行控件按新令牌重建（行内样式非全局 QSS）
           });
 
   // 品牌物料：缓存先行（离线也有牌）＋拉取应用后整窗换牌（设计稿
@@ -823,6 +902,16 @@ void MainWindow::build_ui() {
   side_head->addWidget(side_title);
   side_head->addStretch();
   side_head->addWidget(device_count_);
+  // 发起单聊（原型 .side-head 品牌圆角 + 钮）：协作态可见，账号菜单开聊
+  new_chat_btn_ = new QPushButton(QStringLiteral("+"), side);
+  new_chat_btn_->setObjectName(QStringLiteral("new_chat_btn"));
+  new_chat_btn_->setFixedSize(26, 26);
+  new_chat_btn_->setCursor(Qt::PointingHandCursor);
+  new_chat_btn_->setToolTip(QStringLiteral("发起单聊"));
+  new_chat_btn_->setVisible(false);
+  connect(new_chat_btn_, &QPushButton::clicked, this,
+          &MainWindow::show_new_chat_menu);
+  side_head->addWidget(new_chat_btn_);
 
   search_box_ = new QLineEdit(side);
   search_box_->setPlaceholderText(
@@ -2666,6 +2755,39 @@ MainWindow::GroupEntry* MainWindow::current_group() {
   return gid > 0 && it != groups_.end() ? &it.value() : nullptr;
 }
 
+// 发起单聊（原型 side-head + 钮）：候选＝组织架构成员（未拉到回落
+// 会话表∪在线表，去重去自己），选中即开该协作会话
+void MainWindow::show_new_chat_menu() {
+  if (!collab_engine_.is_logged_in()) return;
+  QStringList accounts;
+  const QJsonDocument od = QJsonDocument::fromJson(last_org_json_.toUtf8());
+  if (od.isObject()) {
+    for (const auto& m :
+         od.object().value(QStringLiteral("members")).toArray()) {
+      accounts << m.toObject().value(QStringLiteral("account")).toString();
+    }
+  }
+  if (accounts.isEmpty()) {
+    accounts = collab_peers_.values() + online_accounts_.values();
+  }
+  accounts.removeAll(collab_engine_.account());
+  accounts.removeDuplicates();
+  accounts.sort();
+  if (accounts.isEmpty()) {
+    show_status(QStringLiteral("暂无可发起会话的联系人（组织架构未下发）"));
+    return;
+  }
+  QMenu menu(this);
+  for (const QString& a : accounts) {
+    QAction* act = menu.addAction(a);
+    connect(act, &QAction::triggered, this, [this, a] {
+      open_chat(QStringLiteral("collab"), a);
+    });
+  }
+  menu.exec(new_chat_btn_->mapToGlobal(
+      QPoint(0, new_chat_btn_->height())));
+}
+
 // 群条目右键菜单：服务端群（拉人／公告／退群）与临时群（解散）
 void MainWindow::show_group_menu(const QPoint& pos) {
   auto* item = device_list_->itemAt(pos);
@@ -4246,6 +4368,7 @@ void MainWindow::update_side_head() {
   }
   if (device_count_) device_count_->setVisible(!collab);
   if (collab_promo_) collab_promo_->setVisible(!collab);
+  if (new_chat_btn_) new_chat_btn_->setVisible(collab);
   const QString mode =
       collab ? QStringLiteral("collab") : QStringLiteral("direct");
   if (rail_ && rail_mode_ != mode) {
@@ -4303,110 +4426,126 @@ void MainWindow::refresh_devices() {
                       .join(QLatin1Char('\n')));
   }
 
-  // 协作会话分组（登录后出现；本地历史 + 本会话窗口期的对端）。
-  // 分组标目按原型（collab 屏侧栏）：置顶（星标）/最近联系（其余）——
-  // 替原「协作会话 · 服务端归档」单组（归档口径已由常驻横幅与行文标明）。
-  if (collab_engine_.is_logged_in() && !collab_peers_.isEmpty()) {
-    QStringList sorted(collab_peers_.begin(), collab_peers_.end());
-    // T4.5：星标置顶（最近优先）、其余按最近联系、再按账号名
-    std::sort(sorted.begin(), sorted.end(), [this](const QString& a, const QString& b) {
-      const bool sa = fav_is_starred_(a), sb = fav_is_starred_(b);
-      if (sa != sb) return sa;
-      const qint64 ta = fav_last_ms_(a), tb = fav_last_ms_(b);
-      if (ta != tb) return ta > tb;
-      return a < b;
-    });
-    QStringList starred, recent;
-    for (const QString& account : sorted) {
-      (fav_is_starred_(account) ? starred : recent).append(account);
+  // 协作会话（本地历史 + 本会话窗口期的对端）与服务端群合并成原型两组
+  //（desktop-collab.html 侧栏）：置顶（星标）/最近联系（其余）——群行与
+  // 人行同列混排（原型产品研发部/MES 群均在两组内），行控件化（头像/在
+  // 离线点/末条预览/未读胶囊）替原两行纯文本。
+  if (collab_engine_.is_logged_in() &&
+      (!collab_peers_.isEmpty() || !groups_.isEmpty())) {
+    struct Entry {
+      QString key, kind, name;
+      quint64 gid{0};
+      int members{0};
+    };
+    QList<Entry> entries;
+    for (const QString& a : collab_peers_)
+      entries.push_back({a, QStringLiteral("collab"), a, 0, 0});
+    for (auto it = groups_.constBegin(); it != groups_.constEnd(); ++it) {
+      entries.push_back({QStringLiteral("group:%1").arg(it.key()),
+                         QStringLiteral("group"), it->name, it.key(),
+                         int(it->members.size())});
     }
+    // T4.5：星标置顶（最近优先）、其余按最近联系、再按显示名
+    std::sort(entries.begin(), entries.end(),
+              [this](const Entry& a, const Entry& b) {
+                const bool sa = fav_is_starred_(a.key),
+                           sb = fav_is_starred_(b.key);
+                if (sa != sb) return sa;
+                const qint64 ta = fav_last_ms_(a.key), tb = fav_last_ms_(b.key);
+                if (ta != tb) return ta > tb;
+                return a.name < b.name;
+              });
+    QList<Entry> starred, recent;
+    for (const Entry& e : entries)
+      (fav_is_starred_(e.key) ? starred : recent).push_back(e);
     auto add_header = [this](const QString& title) {
       auto* header = new QListWidgetItem(title);
       header->setFlags(Qt::NoItemFlags); // 分组标题：不可选（空 id 不进会话）
       device_list_->addItem(header);
     };
-    auto add_session_row = [this](const QString& account) {
+    auto add_session_row = [this](const Entry& e) {
+      const bool group = e.kind == QStringLiteral("group");
       auto* item = new QListWidgetItem(device_list_);
-      // T4.3：在线标识随服务端推送刷新（在线表含自己；未登录不显示本分组）
-      const QString presence = online_accounts_.contains(account)
-                                   ? QStringLiteral("●在线")
-                                   : QStringLiteral("○离线");
-      const QString star = fav_is_starred_(account)
-                               ? QStringLiteral("★ ")
-                               : QString();
-      // 未读角标＋最近联系时间（原型行 n-count 与右端 10:24 的文本位）
-      const int unread = unread_counts_.value(account);
-      const QString badge =
-          unread > 0 ? QStringLiteral("(%1) ").arg(unread) : QString();
-      // 「盯」已读提醒高亮（与直连同一位：◉ 前缀；打开该会话即清）
-      const QString watch_hi = watch_reminded_peers_.contains(account)
-                                   ? QStringLiteral("◉ ")
-                                   : QString();
-      const QString when = fmt_last_contact(fav_last_ms_(account));
-      item->setText(QStringLiteral("%1%2%3%4\n协作态 · 已归档 · %5%6")
-                        .arg(watch_hi, star, badge, account, presence,
-                             when.isEmpty()
-                                 ? QString()
-                                 : QStringLiteral(" · ") + when));
-      item->setData(Qt::UserRole, account);
-      item->setData(Qt::UserRole + 1, QStringLiteral("collab"));
-      item->setData(Qt::UserRole + 6,
-                    QStringList{account, star.trimmed()}.join(
-                        QLatin1Char('\n'))); // ⑨：账号精确/模糊皆命中
-      // 需求批⑪：签名悬浮可见（空=未设不显）
-      QStringList tips;
-      const QString sig = member_signatures_.value(account);
-      if (!sig.isEmpty()) {
-        tips << QStringLiteral("个性签名：%1").arg(sig);
+      // 末条预览（原型 .r-sub）：本地库最近一条（撤回行如实标）；文件
+      // 不落消息库（会话内存态），预览只反映文本消息。无历史走归档口径
+      // 兜底行（群行保留人数/群号信息位）。
+      QString preview;
+      const auto hist = direct_engine_.history(e.key, 1);
+      if (!hist.isEmpty()) {
+        const auto& m = hist.last();
+        const QString text =
+            m.recalled ? QStringLiteral("撤回了一条消息")
+                       : QString::fromStdString(m.text);
+        if (m.from == collab_engine_.account().toStdString()) {
+          preview = QStringLiteral("我：%1").arg(text);
+        } else if (group) {
+          preview = QStringLiteral("%1：%2")
+                        .arg(QString::fromStdString(m.from), text);
+        } else {
+          preview = text;
+        }
+      } else if (group) {
+        preview = QStringLiteral("%1 人 · 群 %2 · 已归档")
+                      .arg(QString::number(e.members),
+                           QString::number(e.gid));
+      } else {
+        preview = QStringLiteral("协作态 · 已归档");
       }
-      // 需求批⑩：在线时长悬浮可见（滚动 24h/7d/30d 并集时长）
-      const QString dur = member_online_.value(account);
-      if (!dur.isEmpty()) {
-        tips << dur;
+      // 「盯」已读提醒高亮（原文本行 ◉ 前缀位；打开该会话即清）
+      const QString name =
+          (watch_reminded_peers_.contains(e.key) ? QStringLiteral("◉ ")
+                                                 : QString()) +
+          e.name;
+      // T4.3：在离线点随服务端推送刷新（在线表含自己；群行无点）
+      QWidget* row =
+          make_session_row(tk(), e.name,
+                           group ? -1
+                                 : (online_accounts_.contains(e.key) ? 1 : 0),
+                           name, fmt_last_contact(fav_last_ms_(e.key)),
+                           preview, unread_counts_.value(e.key));
+      item->setSizeHint(row->sizeHint());
+      device_list_->addItem(item);
+      device_list_->setItemWidget(item, row);
+      item->setData(Qt::UserRole, e.key);
+      item->setData(Qt::UserRole + 1, e.kind);
+      if (group) {
+        // ⑨：群名/群号/成员账号（按成员找群＝找联系人的群面）
+        item->setData(Qt::UserRole + 6,
+                      e.name + QLatin1Char('\n') + QString::number(e.gid) +
+                          QLatin1Char('\n') +
+                          groups_.value(e.gid).members.join(
+                              QLatin1Char('\n')));
+      } else {
+        item->setData(Qt::UserRole + 6, e.key); // ⑨：账号精确/模糊皆命中
+        // 需求批⑪：签名悬浮可见（空=未设不显）
+        QStringList tips;
+        const QString sig = member_signatures_.value(e.key);
+        if (!sig.isEmpty()) {
+          tips << QStringLiteral("个性签名：%1").arg(sig);
+        }
+        // 需求批⑩：在线时长悬浮可见（滚动 24h/7d/30d 并集时长）
+        const QString dur = member_online_.value(e.key);
+        if (!dur.isEmpty()) {
+          tips << dur;
+        }
+        // 需求批⑫：头像悬浮可见（富文本首行；已设走缓存文件，未设走默认组）
+        QString tip_html =
+            QStringLiteral("<img src='%1' width='32' height='32'>")
+                .arg(avatar_tooltip_src(
+                    e.key, member_avatar_ver_.value(e.key), 32));
+        if (!tips.isEmpty()) {
+          tip_html += QStringLiteral("<br>") + tips.join(QLatin1String("<br>"));
+        }
+        item->setToolTip(tip_html);
       }
-      // 需求批⑫：头像悬浮可见（富文本首行；已设走缓存文件，未设走默认组）
-      QString tip_html =
-          QStringLiteral("<img src='%1' width='32' height='32'>")
-              .arg(avatar_tooltip_src(
-                  account, member_avatar_ver_.value(account), 32));
-      if (!tips.isEmpty()) {
-        tip_html += QStringLiteral("<br>") + tips.join(QLatin1String("<br>"));
-      }
-      item->setToolTip(tip_html);
     };
     if (!starred.isEmpty()) {
       add_header(QStringLiteral("置顶"));
-      for (const QString& account : starred) add_session_row(account);
+      for (const Entry& e : starred) add_session_row(e);
     }
     if (!recent.isEmpty()) {
       add_header(QStringLiteral("最近联系"));
-      for (const QString& account : recent) add_session_row(account);
-    }
-  }
-
-  // 群聊分组（T4.1）：服务端群，消息经服务端扇出并全量归档
-  if (collab_engine_.is_logged_in() && !groups_.isEmpty()) {
-    auto* header = new QListWidgetItem(QStringLiteral("群聊 · 服务端归档"));
-    header->setFlags(Qt::NoItemFlags);
-    device_list_->addItem(header);
-    for (auto it = groups_.constBegin(); it != groups_.constEnd(); ++it) {
-      auto* item = new QListWidgetItem(device_list_);
-      const QString gkey = QStringLiteral("group:%1").arg(it.key());
-      const int unread = unread_counts_.value(gkey);
-      item->setText(
-          (unread > 0 ? QStringLiteral("(%1) ").arg(unread) : QString()) +
-          QStringLiteral("%1\n%2 人 · 群 %3 · 已归档")
-              .arg(it->name)
-              .arg(it->members.size())
-              .arg(it.key()));
-      item->setData(Qt::UserRole, gkey);
-      item->setData(Qt::UserRole + 1, QStringLiteral("group"));
-      // ⑨：群名/群号/成员账号（按成员找群＝找联系人的群面）
-      item->setData(Qt::UserRole + 6,
-                    QStringList{it->name, QString::number(it.key())}
-                        .join(QLatin1Char('\n')) +
-                        QLatin1Char('\n') + it->members.join(
-                            QLatin1Char('\n')));
+      for (const Entry& e : recent) add_session_row(e);
     }
   }
 
@@ -5098,6 +5237,15 @@ void MainWindow::apply_theme_styles() {
   if (device_count_) {
     device_count_->setStyleSheet(
         QStringLiteral("color:%1; font-size:12px;").arg(t.success.name()));
+  }
+  if (new_chat_btn_) {
+    // 原型 .icon-btn.brand（brand-soft 底 brand-deep 字）＋悬停品牌底
+    new_chat_btn_->setStyleSheet(
+        QStringLiteral("QPushButton { background:%1; color:%2; border:none;"
+                       " border-radius:8px; font-weight:700; font-size:15px; }"
+                       "QPushButton:hover { background:%3; color:%4; }")
+            .arg(t.brand_wash.name(), t.brand_text.name(), t.brand.name(),
+                 t.on_brand.name()));
   }
   if (device_list_) {
     device_list_->setStyleSheet(QStringLiteral(

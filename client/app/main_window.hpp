@@ -409,6 +409,9 @@ private:
   void apply_favs(const QString& fav_json); // 常用联系人刷新（T4.5）
   // 群条目右键菜单：拉人／公告／退群（服务端群）；解散（临时群）
   void show_group_menu(const QPoint& pos);
+  // 发起单聊（原型 side-head + 钮）：账号菜单＝组织架构成员（未拉到回落
+  // 会话表/在线表），选中即开该协作会话
+  void show_new_chat_menu();
   // 当前会话为服务端群时返回群号与其条目；否则 0／nullptr
   quint64 current_group_id() const;
   GroupEntry* current_group();
@@ -553,6 +556,7 @@ private:
   QPointer<MessageSearchDialog> message_search_; // 聊天记录模糊搜索窗（懒建）
 
   QLabel* device_count_{nullptr};
+  QPushButton* new_chat_btn_{nullptr}; // 发起单聊 +（原型 side-head 品牌钮，协作态可见）
   RailNav* rail_{nullptr};        // 原型 rail 面：最左图标导航栏
   QMenu* opt_menu_{nullptr};      // 「设置」菜单（rail 齿轮弹同源菜单）
   QWidget* collab_promo_{nullptr}; // 直连态「登录协作态」推广卡（原型侧栏面）
