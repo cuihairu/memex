@@ -33,6 +33,7 @@ class QMenu;
 class QShortcut;
 class QTimer;
 class QSystemTrayIcon;
+class QVBoxLayout;
 
 namespace memex::client {
 
@@ -335,6 +336,8 @@ private:
     qint64 ts_ms{0};
     bool outgoing{false};
     bool at_mode{false}; // 群聊：@账号 高亮
+    bool owner_tag{false}; // 群聊收向行：发送者＝群主（meta 行「群主」标签，
+                           // 原型 .msg-meta .role）
     QString image;      // 非空＝图片消息（需求批④：text 存文件路径，气泡渲染 <img>）
     QString msg_id;     // 协作态消息标识（回执通知按它命中本行；直连恒空）
     quint64 seq{0};     // 直连域发送序号（我发出的行；直连回执按它命中本行，
@@ -364,6 +367,8 @@ private:
                     const QString& text);
   void update_banner();          // 按当前形态切换归档提示条
   void update_chat_avatar();     // 会话头像按源字＋当前令牌重刷（主题切换重取色）
+  void update_group_panel();     // 群右栏重建（成员/群文件/归档说明；非群会话整栏隐藏）
+  QString roster_display(const QString& account) const; // 通讯录账号→显示名（未下发＝空）
   void seed_collab_peers();      // 登录后从本地库补入历史协作会话
   void show_collab_login_dialog();
   void show_conn_settings_dialog(); // 连接设置：域名解析覆盖（部署批 424）
@@ -407,6 +412,9 @@ private:
   };
   // 群列表数据到达（GROUP_DATA）：解析入 groups_ 并刷新列表／当前会话标题
   void apply_groups(const QString& groups_json);
+  // 群会话头 meta 行（原型 desktop-group.html .ch-meta「N 人 · 群主：X ·
+  // 全量归档」；主题/目的为群组-1 功能面，非空缀尾）
+  QString group_meta_text(const GroupEntry& g) const;
   void apply_favs(const QString& fav_json); // 常用联系人刷新（T4.5）
   // 群条目右键菜单：拉人／公告／退群（服务端群）；解散（临时群）
   void show_group_menu(const QPoint& pos);
@@ -576,6 +584,15 @@ private:
   QLabel* input_note_{nullptr}; // 输入区固定说明条（原型 .input-note：随形态
   QLabel* noarch_pill_{nullptr}; // 输入区未归档胶囊（原型 .input-foot .pill-outline）
                                 // 换文案；跨态/直连＝警示底，协作＝素底）
+  QLabel* at_hint_{nullptr};     // 「@ 唤起成员选择」提示（原型 .input-toolbar
+                                 // .hint；群会话专用）
+  QPushButton* head_announce_btn_{nullptr}; // 群公告钮（原型 .ch-actions icon-btn）
+  QPushButton* head_gfiles_btn_{nullptr};   // 群文件钮（切群右栏显隐）
+  QPushButton* head_members_btn_{nullptr};  // 成员钮（原型 .icon-btn.brand，开群资料）
+  QWidget* group_panel_{nullptr};  // 群右栏（原型 desktop-group.html .infopanel：
+                                   // 群成员/群文件/归档说明虚线卡）
+  QVBoxLayout* group_panel_lay_{nullptr};
+  bool group_panel_hidden_{false}; // 用户经「群文件」钮收起右栏（重开群不再自动弹）
   QTextBrowser* chat_view_{nullptr};
   QLineEdit* input_box_{nullptr};
   QPushButton* send_btn_{nullptr};

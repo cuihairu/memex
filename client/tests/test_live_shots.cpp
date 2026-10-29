@@ -272,6 +272,20 @@ int main(int argc, char** argv) {
     CHECK(wait_until([&] {
       return window.chat_html().contains(QStringLiteral("检索关键词已挂"));
     }, 8000));
+    // 群会话头 meta（原型 .ch-meta）＋群主标签（.msg-meta .role，bob＝建群
+    // 者＝群主）＋群右栏（.infopanel 成员面，alice+bob 两成员）
+    CHECK(window.chat_meta().contains(QStringLiteral("2 人")));
+    CHECK(window.chat_meta().contains(QStringLiteral("群主：")));
+    CHECK(window.chat_meta().contains(QStringLiteral("全量归档")));
+    CHECK(window.chat_html().contains(QStringLiteral("群主")));
+    auto* gpanel = window.findChild<QWidget*>(QStringLiteral("group_panel"));
+    CHECK(gpanel != nullptr);
+    CHECK(!gpanel->isHidden());
+    bool members_head = false;
+    for (auto* l : gpanel->findChildren<QLabel*>()) {
+      if (l->text().contains(QStringLiteral("群成员 · 2"))) members_head = true;
+    }
+    CHECK(members_head);
     grab_pair(window, QStringLiteral("live-group"));
   }
 
