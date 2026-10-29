@@ -611,7 +611,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 - [x] 与 prototypes/desktop-chat.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/main_window.cpp` 群聊页）（✅ 2026-10-29 afa99fd：头像列/胶囊系统行/文件卡片/日期分割线/输入区说明条/未归档徽标全量补齐＋warning_wash 令牌；门禁 84/84 绿）
 - [x] 与 prototypes/desktop-collab.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/main_window.cpp` 协作态会话列表）（✅ 2026-10-30 cceec84：会话行工厂（40px 头像+在线点/姓名 600/时间 11px/预览 12px/未读胶囊 min-17）＋置顶/最近联系分区（群聊并入，头部「群聊·服务端归档」块撤）＋side-head「+」发起单聊钮（账号菜单=组织架构成员）＋主题切换行控件重建；门禁 84/84 绿。近似项见台账）
-- [ ] 与 prototypes/desktop-direct.html 逐屏比对一致(控件/布局/文案/间距)（未登录直连列表态）
+- [x] 与 prototypes/desktop-direct.html 逐屏比对一致(控件/布局/文案/间距)（未登录直连列表态）（✅ 2026-10-30 d52bfc2：直连行控件化（头像/在线点/「账号·设备」名/时间/末条预览/未读胶囊）＋「在线设备」分区＋侧栏头「自动发现 x.x.x.0/24 · UDP 2425」注脚＋计数绿点＋搜索占位改「搜索设备 / IP」（检索字段不变）；门禁 84/84 绿。近似项见台账）
 - [ ] 与 prototypes/desktop-direct-chat.html 逐屏比对一致(控件/布局/文案/间距)（直连会话展开态）
 - [ ] 与 prototypes/desktop-friends.html 逐屏比对一致(控件/布局/文案/间距)（好友列表）
 - [ ] 与 prototypes/desktop-group.html 逐屏比对一致(控件/布局/文案/间距)（群聊基础面）

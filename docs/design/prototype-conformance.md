@@ -17,7 +17,7 @@
 | --- | --- | --- | --- |
 | `desktop-chat.html` | `client/app/main_window.cpp`（群聊页：`build_group_view` 等） | 已对齐 | 跨态会话与撤回语义；2026-10-29 逐屏复核补齐：头像列/系统胶囊行/文件卡片/日期分割线/输入区说明条（`--warn-soft`→`warning_wash` 令牌）/未归档徽标（afa99fd）。近似项：日期分割线为「── 今天 ──」全宽样式（原型为行内短划）；文件卡片仅会话内存态，不持久化历史 |
 | `desktop-collab.html` | `client/app/main_window.cpp`（协作态会话列表）+ `client/app/rail_nav.cpp` | 已对齐 | 登录协作态列表；2026-10-30 逐屏复核补齐：原型会话行（40px 首字头像＋在线点/600 姓名/11px 时间/12px 预览/brand 未读胶囊）、置顶与最近联系分区（群聊并入两区，撤独立「群聊·服务端归档」块）、side-head「+」发起单聊钮（cceec84）。近似项：预览文本取消息库末条（文件传输不入库故只显文本）；行内「已读/归档自」徽标未按行建模；「+」菜单成员未拉到组织架构时回落会话表/在线表 |
-| `desktop-direct.html` | `client/app/main_window.cpp`（未登录直连列表态） | 已对齐 | 无对话不摆聊天面板 |
+| `desktop-direct.html` | `client/app/main_window.cpp`（未登录直连列表态） | 已对齐 | 无对话不摆聊天面板；2026-10-30 逐屏复核补齐：直连行控件化（头像/在线点/「账号·设备」名/时间/末条预览/未读胶囊）、「在线设备」分区、侧栏头「自动发现 本机子网/24 · UDP 2425」注脚、计数绿点、搜索占位「搜索设备 / IP」（d52bfc2）。近似项：「离线设备」分区未渲染（发现服务超时即摘除对端，无离线留存表）；行名「账号 id·设备名」对齐原型「人名·设备名」（直连态无显示名映射）；预览＝本地库末条文本，文件传输不入库故无「[文件] …」形态，无历史走「IP · 端口」元信息兜底；标题栏状态徽章＝原生标题栏（平台外观差异） |
 | `desktop-direct-chat.html` | `client/app/main_window.cpp`（`open_direct_peer` / `direct_peer_target`） | 已对齐 | 点好友后展开态 |
 | `desktop-friends.html` | `client/app/main_window.cpp`（好友列表，来自组织架构通讯录） | 已对齐 | 好友与组织通讯录同源，不另建原型 |
 | `desktop-group.html` | `client/app/main_window.cpp`（群聊页）+ `group_tools_dialog.cpp` | 已对齐 | 群基础面 |
