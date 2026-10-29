@@ -396,7 +396,11 @@ int main(int argc, char** argv) {
           QStringLiteral("FAILED"));
     CHECK(store_a.pending_sync("alice").isEmpty()); // 终态行不参与恢复
 
-    ::kill(server2.processId(), SIGCONT);
+    // 冻结态直接杀（SIGKILL 对 SIGSTOP 进程同样生效）：不先 SIGCONT——
+    // 解冻到 kill 落地之间有空窗，高载下被唤醒的服务端可处理积压套接字
+    // 数据把「登出放弃消息」归档并投给 bob（b_got 多出一条＝后续索引/对账
+    // 全线错位，全套件串行态三连红、孤立跑必绿的来源；CI 专属 runner 窗口
+    // 近零从未暴露）
     server2.kill();
     CHECK(server2.waitForFinished(5000));
   }
