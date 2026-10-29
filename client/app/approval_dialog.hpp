@@ -3,6 +3,8 @@
 // 服务端现裁——客户端只提交与展示。独立文件面会话（与 R23-3 文件助手
 // 同构：协作面同源账号、文件面独立端口）。开窗期 30s 轮询 diff 通知
 //（R27-1 口径）：新待决→提醒待决人、决定落定→提醒申请人，经通知中心。
+// 界面按 prototypes/desktop-approval.html：左「发起申请·请假」270px
+// 表单列，右「待我决 / 我的申请」双表 + 决定行 + 状态行。
 #pragma once
 
 #include <QDialog>
@@ -46,17 +48,26 @@ class ApprovalDialog : public QDialog {
 
   // —— 走查/测试观察点 ——
   QString status_text() const;
-  int approval_count() const;  // 列表总条数（我的申请＋待我决）
-  QListWidget* list() const { return list_; }
+  int total_count() const;       // 待我决＋我的申请 总条数
+  int pending_count() const;    // 待我决条数（我是审批人可见的行）
+  int mine_count() const;       // 我的申请条数（含终态留痕）
+  QListWidget* pending_list() const { return pending_list_; }
+  QListWidget* mine_list() const { return mine_list_; }
   // 选中行 id（未选中=-1）
   qint64 selected_id() const;
   // 选中行种类："mine"=我的申请、"pending"=待我决、未选中=空串
   QString selected_kind() const;
+  // 选中行显示文本（未选中=空串）
+  QString selected_text() const;
+  // 跨两表选中第一条含指定子串的行（原型双表：选中可能落在任一表）
+  bool select_row_containing(const QString& needle);
 
  private:
   void build_ui();
   void populate(const QJsonArray& mine, const QJsonArray& pending);
   void set_status(const QString& text, bool error = false);
+  // 双表当前选中行（先待我决后我的申请；未选中=空）
+  QListWidgetItem* current_item() const;
 
   // 开窗期通知 diff 记忆集（R27-1 轮询口径：只提醒开窗后新出现的变化）
   QSet<QString> seen_pending_;  // 待我决 id 已见集合（新现→通知待决人）
@@ -70,7 +81,10 @@ class ApprovalDialog : public QDialog {
   QLineEdit* account_box_;
   QLineEdit* password_;
   QLabel* status_;
-  QListWidget* list_;
+  QListWidget* pending_list_;  // 待我决（我是审批人：直属上级）
+  QListWidget* mine_list_;     // 我的申请（申请人视角，仅待决可撤回）
+  QLabel* pend_count_;
+  QLabel* mine_count_;
   QComboBox* type_;
   QLineEdit* from_;
   QLineEdit* to_;

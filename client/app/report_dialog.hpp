@@ -68,6 +68,8 @@ class ReportDialog : public QDialog {
   QLabel* status_;
   QListWidget* list_;
   QListWidget* team_list_;
+  QLabel* mine_count_;  // 我的日报计数 chip（原型 .rs-head .c）
+  QLabel* team_count_;  // 下属日报计数 chip
   QPushButton* btn_connect_;
   QPushButton* btn_save_;
   QPushButton* btn_week_save_;

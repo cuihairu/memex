@@ -134,7 +134,9 @@ void FileAssistantDialog::build_ui() {
   conn_row->addWidget(btn_connect_);
   root->addLayout(conn_row);
 
-  // —— 收件箱混排流 ——
+  // —— 收件箱混排流（原型：列表带标题行）——
+  root->addWidget(
+      new QLabel(QStringLiteral("收件箱（备忘录 · 文件 · 倒序）"), this));
   stream_ = new QListWidget(this);
   stream_->setAlternatingRowColors(true);
   root->addWidget(stream_, 1);

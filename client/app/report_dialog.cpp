@@ -1,16 +1,19 @@
 // 二期·日报周报窗口（实现）。服务端裁决一切判权（看下属归直属上级专属、
 // 当日重复=upsert 更新）——客户端只提交与展示；周报=按周过滤的聚合视图
-//（客户端过滤，不单设表）。
+//（客户端过滤，不单设表）。界面按 prototypes/desktop-report.html。
 #include "report_dialog.hpp"
 
+#include <QColor>
 #include <QDate>
 #include <QDateEdit>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QListWidgetItem>
 #include <QPalette>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -20,16 +23,54 @@
 #include "engine/collab/files_client.hpp"
 
 namespace memex::client {
+namespace {
+// 原型 .w-h / .rs-head 区块标题行：标题 + 计数 chip + 说明
+struct Head {
+  QHBoxLayout* layout;
+  QLabel* chip;
+};
+
+Head head_row(QWidget* parent, const QString& title, const QString& note) {
+  Head h;
+  h.layout = new QHBoxLayout;
+  auto* t = new QLabel(title, parent);
+  t->setStyleSheet(QStringLiteral("font-size:13px;font-weight:700;"));
+  h.layout->addWidget(t);
+  h.chip = new QLabel(parent);
+  h.chip->setStyleSheet(QStringLiteral(
+      "font-size:10.5px;font-weight:600;color:palette(mid);"
+      "background:palette(base);border:1px solid palette(mid);"
+      "border-radius:999px;padding:0 8px;"));
+  h.layout->addWidget(h.chip);
+  if (!note.isEmpty()) {
+    auto* n = new QLabel(note, parent);
+    n->setStyleSheet(QStringLiteral(
+        "font-size:10.5px;font-weight:600;color:palette(mid);"));
+    h.layout->addWidget(n);
+  }
+  h.layout->addStretch(1);
+  return h;
+}
+
+// 原型 .hint 提示行（10.5px 弱化）
+QLabel* hint_row(QWidget* parent, const QString& text) {
+  auto* h = new QLabel(text, parent);
+  h->setWordWrap(true);
+  h->setStyleSheet(QStringLiteral(
+      "font-size:10.5px;color:palette(mid);"));
+  return h;
+}
+} // namespace
 
 ReportDialog::ReportDialog(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("日报周报"));
-  resize(600, 520);
+  resize(1040, 660);
   client_ = new FilesClient(this);
   build_ui();
 
   connect(client_, &FilesClient::logged_in, this, [this] {
     set_status(QStringLiteral("已连接（") + client_->account() +
-               QStringLiteral("）"));
+               QStringLiteral("）——只读他人日报需 org_reporting_lines 权限"));
     btn_save_->setEnabled(true);
     btn_week_save_->setEnabled(true);
     refresh();
@@ -86,79 +127,148 @@ void ReportDialog::build_ui() {
                password->text());
   });
 
-  // 我的日报（date 倒序；点行回填编辑器=改当日即更新语义）
-  list_ = new QListWidget(this);
-  list_->setAlternatingRowColors(true);
-  layout->addWidget(list_, 2);
+  // —— 双列（原型 .split）：左 写日报/周报补写 420px ｜ 右 我的日报＋下属日报 ——
+  auto* split = new QHBoxLayout;
+  split->setSpacing(0);
 
-  // 编辑区：归属日＋三段自由文本（占位提示=模板）
-  auto* form = new QHBoxLayout;
-  form->addWidget(new QLabel(QStringLiteral("归属日"), this));
+  // 左列：写日报 ＋ 周报补写
+  auto* write_col = new QVBoxLayout;
+  write_col->setContentsMargins(14, 14, 14, 14);
+  write_col->setSpacing(11);
+
+  auto h1 = head_row(this, QStringLiteral("写日报"), QString());
+  h1.chip->hide();
+  write_col->addLayout(h1.layout);
+  auto* day_row = new QHBoxLayout;
+  auto* day_lb = new QLabel(QStringLiteral("归属日"), this);
+  day_lb->setStyleSheet(QStringLiteral("font-size:12px;color:palette(mid);"));
+  day_row->addWidget(day_lb);
   date_ = new QDateEdit(QDate::currentDate(), this);
   date_->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
   date_->setCalendarPopup(true);
-  form->addWidget(date_);
-  form->addStretch(1);
-  layout->addLayout(form);
+  day_row->addWidget(date_);
+  day_row->addStretch(1);
+  write_col->addLayout(day_row);
   content_ = new QPlainTextEdit(this);
   content_->setPlaceholderText(
       QStringLiteral("今日完成：\n明日计划：\nblockers（无则留空）："));
-  content_->setMaximumHeight(140);
-  layout->addWidget(content_, 1);
-
-  // 周报补写：任选周内一天→保存时归一到该周周一落笔（同周重复=更新；
-  // 与日报同表同 upsert 语义，服务端零改动）
-  auto* week_form = new QHBoxLayout;
-  week_form->addWidget(
-      new QLabel(QStringLiteral("周报补写（选周内任一天）"), this));
-  week_date_ = new QDateEdit(
-      QDate::currentDate().addDays(1 - QDate::currentDate().dayOfWeek()),
-      this); // 默认本周一
-  week_date_->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
-  week_date_->setCalendarPopup(true);
-  week_form->addWidget(week_date_);
-  week_form->addStretch(1);
-  layout->addLayout(week_form);
-
-  // 操作区
-  auto* ops = new QHBoxLayout;
+  content_->setFixedHeight(150);
+  write_col->addWidget(content_);
+  auto* day_btns = new QHBoxLayout;
   btn_save_ = new QPushButton(QStringLiteral("保存日报"), this);
   btn_save_->setEnabled(false);
-  btn_week_save_ = new QPushButton(QStringLiteral("保存周报"), this);
-  btn_week_save_->setEnabled(false);
   btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
-  ops->addWidget(btn_save_);
-  ops->addWidget(btn_week_save_);
-  ops->addWidget(btn_refresh_);
-  ops->addStretch(1);
-  layout->addLayout(ops);
+  day_btns->addWidget(btn_save_, 1);
+  day_btns->addWidget(btn_refresh_, 1);
+  write_col->addLayout(day_btns);
+  write_col->addWidget(
+      hint_row(this, QStringLiteral("当日重复提交＝更新（保留 updated_ms，"
+                                    "不留修订历史，与个人备忘录口径一致）。")));
 
-  // 团队聚合（直属上级可看下属；判权服务端裁，无下属=空列表）
-  layout->addWidget(new QLabel(QStringLiteral("下属日报（直属上级可见）"), this));
-  team_list_ = new QListWidget(this);
-  team_list_->setAlternatingRowColors(true);
-  layout->addWidget(team_list_, 1);
-  auto* team_ops = new QHBoxLayout;
+  auto* divider = new QFrame(this);
+  divider->setFrameShape(QFrame::HLine);
+  divider->setFrameShadow(QFrame::Plain);
+  write_col->addWidget(divider);
+
+  auto h2 = head_row(this, QStringLiteral("周报补写"),
+                      QStringLiteral("选周内任一天"));
+  h2.chip->hide();
+  write_col->addLayout(h2.layout);
+  auto* week_row = new QHBoxLayout;
+  auto* week_lb = new QLabel(QStringLiteral("周内日期"), this);
+  week_lb->setStyleSheet(QStringLiteral("font-size:12px;color:palette(mid);"));
+  week_row->addWidget(week_lb);
+  week_date_ = new QDateEdit(
+      QDate::currentDate().addDays(1 - QDate::currentDate().dayOfWeek()),
+      this);  // 默认本周一
+  week_date_->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
+  week_date_->setCalendarPopup(true);
+  week_row->addWidget(week_date_);
+  week_row->addStretch(1);
+  write_col->addLayout(week_row);
+  auto* week_view_row = new QHBoxLayout;
+  auto* view_lb = new QLabel(QStringLiteral("周报视图"), this);
+  view_lb->setStyleSheet(QStringLiteral("font-size:12px;color:palette(mid);"));
+  week_view_row->addWidget(view_lb);
   btn_team_week_ = new QPushButton(this);
   btn_team_week_->setCheckable(true);
   btn_team_week_->setChecked(team_week_only_);
-  team_ops->addWidget(btn_team_week_);
-  team_ops->addStretch(1);
-  layout->addLayout(team_ops);
   const auto sync_week_btn = [this] {
-    btn_team_week_->setText(team_week_only_
-                                ? QStringLiteral("只看本周（周报视图）：开")
-                                : QStringLiteral("只看本周（周报视图）：关"));
+    btn_team_week_->setText(team_week_only_ ? QStringLiteral("只看本周：开")
+                                            : QStringLiteral("只看本周：关"));
   };
   sync_week_btn();
-  connect(btn_team_week_, &QPushButton::clicked, this,
-          [this, sync_week_btn] {
-            toggle_team_week();
-            sync_week_btn();
-          });
+  week_view_row->addWidget(btn_team_week_, 1);
+  write_col->addLayout(week_view_row);
+  auto* week_btns = new QHBoxLayout;
+  btn_week_save_ = new QPushButton(QStringLiteral("保存周报"), this);
+  btn_week_save_->setEnabled(false);
+  week_btns->addWidget(btn_week_save_, 1);
+  write_col->addLayout(week_btns);
+  write_col->addWidget(hint_row(
+      this, QStringLiteral("周报＝同一 reports 表按周聚合视图，不另设 week "
+                           "维度。补写以所选周的周一日期落一行；同周重复提交"
+                           "＝更新。")));
 
+  auto* vline = new QFrame(this);
+  vline->setFrameShape(QFrame::VLine);
+  vline->setFrameShadow(QFrame::Plain);
+
+  // 右列：我的日报 ＋ 下属日报 ＋ 状态行
+  auto* read_col = new QVBoxLayout;
+  read_col->setSpacing(0);
+  read_col->setContentsMargins(0, 0, 0, 0);
+
+  auto h3 = head_row(this, QStringLiteral("我的日报"),
+                      QStringLiteral("点击条目回灌编辑器"));
+  read_col->addLayout(h3.layout);
+  mine_count_ = h3.chip;
+  auto* mine_body = new QVBoxLayout;
+  mine_body->setContentsMargins(10, 6, 10, 6);
+  list_ = new QListWidget(this);
+  list_->setAlternatingRowColors(true);
+  list_->setMaximumHeight(210);  // 原型我的日报区限高，给下属区留主体
+  mine_body->addWidget(list_);
+  read_col->addLayout(mine_body);
+
+  auto h4 = head_row(this, QStringLiteral("下属日报（直属上级可见）"),
+                      QStringLiteral("az verb report:read · 仅直属下级一层"));
+  read_col->addLayout(h4.layout);
+  team_count_ = h4.chip;
+  auto* team_body = new QVBoxLayout;
+  team_body->setContentsMargins(10, 6, 10, 6);
+  team_list_ = new QListWidget(this);
+  team_list_->setAlternatingRowColors(true);
+  team_body->addWidget(team_list_);
+  read_col->addLayout(team_body, 1);
+
+  auto* stat = new QFrame(this);
+  stat->setObjectName(QStringLiteral("reportStat"));
+  stat->setFrameShape(QFrame::NoFrame);
+  stat->setStyleSheet(QStringLiteral(
+      "QFrame#reportStat{background:palette(base);"
+      "border-top:1px solid palette(mid);}"));
+  auto* stat_row = new QHBoxLayout(stat);
+  stat_row->setContentsMargins(16, 6, 16, 6);
   status_ = new QLabel(this);
-  layout->addWidget(status_);
+  status_->setStyleSheet(QStringLiteral("font-size:11.5px;"));
+  stat_row->addWidget(status_);
+  auto* rule = new QLabel(
+      QStringLiteral("只读他人日报＝直属上级（同 R27 上级视图口径：不跨级、"
+                     "无 org-admin 兜底）"),
+      this);
+  rule->setStyleSheet(QStringLiteral("font-size:11.5px;color:palette(mid);"));
+  stat_row->addWidget(rule);
+  stat_row->addStretch(1);
+  auto* later = new QLabel(QStringLiteral("部门聚合视图＝后续再做"), this);
+  later->setStyleSheet(QStringLiteral("font-size:11.5px;color:palette(mid);"));
+  stat_row->addWidget(later);
+  read_col->addWidget(stat);
+
+  split->addLayout(write_col, 0);
+  split->addWidget(vline);
+  split->addLayout(read_col, 1);
+  layout->addLayout(split, 1);
 
   connect(btn_save_, &QPushButton::clicked, this, [this] {
     write_report(date_->date().toString(QStringLiteral("yyyy-MM-dd")),
@@ -169,6 +279,11 @@ void ReportDialog::build_ui() {
                       content_->toPlainText().trimmed());
   });
   connect(btn_refresh_, &QPushButton::clicked, this, [this] { refresh(); });
+  connect(btn_team_week_, &QPushButton::clicked, this,
+          [this, sync_week_btn] {
+            toggle_team_week();
+            sync_week_btn();
+          });
   // 点我的日报行回填编辑器（改完再存=当日 upsert 更新）
   connect(list_, &QListWidget::itemClicked, this, [this](QListWidgetItem* it) {
     if (!it) return;
@@ -247,19 +362,19 @@ void ReportDialog::refresh() {
 
 void ReportDialog::toggle_team_week() {
   team_week_only_ = !team_week_only_;
-  refresh(); // 重新聚合（过滤在客户端，重拉同源数据）
+  refresh();  // 重新聚合（过滤在客户端，重拉同源数据）
 }
 
 QString ReportDialog::week_start() {
   const QDate today = QDate::currentDate();
   return today.addDays(1 - today.dayOfWeek())
-      .toString(QStringLiteral("yyyy-MM-dd")); // 周一
+      .toString(QStringLiteral("yyyy-MM-dd"));  // 周一
 }
 
 QString ReportDialog::week_end() {
   const QDate today = QDate::currentDate();
   return today.addDays(7 - today.dayOfWeek())
-      .toString(QStringLiteral("yyyy-MM-dd")); // 周日
+      .toString(QStringLiteral("yyyy-MM-dd"));  // 周日
 }
 
 void ReportDialog::populate(const QJsonArray& reports) {
@@ -273,10 +388,11 @@ void ReportDialog::populate(const QJsonArray& reports) {
     item->setData(Qt::UserRole + 2,
                   r.value(QStringLiteral("content")).toString());
     const QString first_line =
-        r.value(QStringLiteral("content")).toString().section(QLatin1Char('\n'), 0, 0);
-    item->setText(QStringLiteral("%1  %2")
-                      .arg(date, first_line));
+        r.value(QStringLiteral("content")).toString().section(
+            QLatin1Char('\n'), 0, 0);
+    item->setText(QStringLiteral("%1  %2").arg(date, first_line));
   }
+  mine_count_->setText(QStringLiteral("%1 篇").arg(list_->count()));
 }
 
 void ReportDialog::populate_team(const QJsonArray& team) {
@@ -295,15 +411,15 @@ void ReportDialog::populate_team(const QJsonArray& team) {
       const QString first_line =
           r.value(QStringLiteral("content")).toString().section(
               QLatin1Char('\n'), 0, 0);
-      auto* item =
-          new QListWidgetItem(QStringLiteral("%1 · %2  %3")
-                                  .arg(author, date, first_line),
-                              team_list_);
+      auto* item = new QListWidgetItem(QStringLiteral("%1  %2　%3")
+                                           .arg(date, author, first_line),
+                                       team_list_);
       item->setData(Qt::UserRole + 2,
                     r.value(QStringLiteral("content")).toString());
       ++shown;
     }
   }
+  team_count_->setText(QStringLiteral("%1 篇").arg(shown));
   set_status(QStringLiteral("已刷新（我的 %1 篇 · 下属 %2 篇）")
                  .arg(list_->count())
                  .arg(shown));

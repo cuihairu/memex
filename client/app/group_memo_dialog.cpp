@@ -1,10 +1,14 @@
+// R24-2 群备忘录窗口（实现，布局按 prototypes/desktop-group-memo.html：
+// 左 430px 列表列（搜索/刷新/只看我建的），右内联编辑卡（标题+正文+动作行）
+// ＋内联修订历史面板）。服务端裁决一切判权（写=群主/管理员或开放编辑时
+// 全员，删恒归群主/管理员）——客户端只提交与展示，不自造规则。
 #include "group_memo_dialog.hpp"
 #include "collab_defaults.hpp"
 
 #include <QCheckBox>
 #include <QColor>
 #include <QDateTime>
-#include <QDialogButtonBox>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -24,10 +28,11 @@
 namespace memex::client {
 
 namespace {
-// 列表条目角色：id / 标题 / 正文（历史子对话框同构取值）
+// 列表条目角色：id / 标题 / 正文 / 作者（「只看我建的」过滤取值）
 constexpr int kRoleId = Qt::UserRole + 2;
 constexpr int kRoleTitle = Qt::UserRole + 3;
 constexpr int kRoleContent = Qt::UserRole + 4;
+constexpr int kRoleAuthor = Qt::UserRole + 5;
 
 QString fmt_time(qint64 ms) {
   return QDateTime::fromMSecsSinceEpoch(ms)
@@ -43,11 +48,31 @@ bool looks_like_secret(const QString& text) {
       QRegularExpression::CaseInsensitiveOption);
   return re.match(text).hasMatch();
 }
+
+// 原型 conn-row/.stat 面板条：底色＋分隔线（样式挂容器不挂子件）
+QFrame* panel_row(QWidget* parent, bool top_line) {
+  auto* f = new QFrame(parent);
+  f->setFrameShape(QFrame::NoFrame);
+  f->setStyleSheet(top_line
+                       ? QStringLiteral("QFrame{background:palette(base);"
+                                        "border-top:1px solid palette(mid);}")
+                       : QStringLiteral("QFrame{background:palette(base);"
+                                        "border-bottom:1px solid palette(mid);}"));
+  return f;
+}
+
+// 原型 10.5~13px 区块标题/说明字号
+QString head_style() {
+  return QStringLiteral("font-size:13px;font-weight:700;");
+}
+QString note_style() {
+  return QStringLiteral("font-size:10.5px;font-weight:600;color:palette(mid);");
+}
 } // namespace
 
 GroupMemoDialog::GroupMemoDialog(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("群备忘录"));
-  resize(600, 560);
+  resize(960, 660);  // 原型 .dialog 960×660
   client_ = new FilesClient(this);
   build_ui();
 
@@ -70,6 +95,7 @@ GroupMemoDialog::GroupMemoDialog(QWidget* parent) : QDialog(parent) {
             open_edit_->blockSignals(true);
             open_edit_->setChecked(open_edit);
             open_edit_->blockSignals(false);
+            update_edit_note();
             stream_->clear();
             for (const auto& v : memos) {
               const QJsonObject o = v.toObject();
@@ -79,24 +105,33 @@ GroupMemoDialog::GroupMemoDialog(QWidget* parent) : QDialog(parent) {
                   o.value(QStringLiteral("title")).toString();
               const QString content =
                   o.value(QStringLiteral("content")).toString();
+              const QString author =
+                  o.value(QStringLiteral("author")).toString();
+              // R24-4：疑似密码条目行内 warnhint（原型 .warnhint 口径）
+              const QString warn = looks_like_secret(title) ||
+                                           looks_like_secret(content)
+                                       ? QStringLiteral(
+                                             "\n⚠ 疑似包含凭据：密码请进群密码"
+                                             "箱（备忘录为明文共享）")
+                                       : QString();
               auto* it = new QListWidgetItem(stream_);
-              it->setText(QStringLiteral("%1 · %2 · %3\n%4")
-                              .arg(title,
-                                   o.value(QStringLiteral("author"))
-                                       .toString(),
+              it->setText(QStringLiteral("%1 · %2 · %3\n%4%5")
+                              .arg(title, author,
                                    fmt_time(static_cast<qint64>(
                                        o.value(QStringLiteral("updated_ms"))
                                            .toDouble())),
-                                   content));
+                                   content, warn));
               it->setData(kRoleId, id);
               it->setData(kRoleTitle, title);
               it->setData(kRoleContent, content);
+              it->setData(kRoleAuthor, author);
             }
             if (memos.isEmpty()) {
               auto* it = new QListWidgetItem(stream_);
               it->setText(QStringLiteral("（群备忘录暂无条目）"));
               it->setFlags(Qt::NoItemFlags);
             }
+            apply_mine_filter();
             if (secret_hint_) {
               // R24-4：疑似密码提示随刷新挂住（不被「共 N 条」冲掉）
               set_status(QStringLiteral("共 %1 条（⚠ 疑似密码内容：密码请放群密码箱"
@@ -120,6 +155,7 @@ GroupMemoDialog::GroupMemoDialog(QWidget* parent) : QDialog(parent) {
     refresh();
   });
   connect(client_, &FilesClient::group_memo_rolled_back, this, [this](qint64) {
+    close_history();  // 原型：回滚落笔即收起历史面板
     set_status(QStringLiteral("已回滚（回滚即一次编辑，落了新修订笔）"), false);
     refresh();
   });
@@ -128,9 +164,16 @@ GroupMemoDialog::GroupMemoDialog(QWidget* parent) : QDialog(parent) {
             open_edit_->blockSignals(true);
             open_edit_->setChecked(open);
             open_edit_->blockSignals(false);
+            update_edit_note();
             set_status(open ? QStringLiteral("已开放全员编辑")
                             : QStringLiteral("已收回编辑权（仅群主/管理员）"),
                        false);
+          });
+  // 内联历史面板：连接挂本窗口（面板常驻隐藏，展开即填充）
+  connect(client_, &FilesClient::group_memo_history_fetched, this,
+          [this](const QJsonArray& revisions) {
+            if (!hist_panel_ || hist_panel_->isHidden()) return;
+            populate_history(revisions);
           });
   connect(client_, &FilesClient::request_failed, this,
           [this](const QString& op, int status, const QString& error) {
@@ -150,10 +193,20 @@ GroupMemoDialog::GroupMemoDialog(QWidget* parent) : QDialog(parent) {
 
 void GroupMemoDialog::build_ui() {
   auto* root = new QVBoxLayout(this);
+  root->setContentsMargins(0, 0, 0, 0);
+  root->setSpacing(0);
 
-  // —— 连接区（登录成功后整体停用）——
+  // —— conn-row（原型：服务器地址/文件端口/账号/口令/群号 + 连接）——
+  auto* conn = panel_row(this, false);
+  auto* conn_row = new QHBoxLayout(conn);
+  conn_row->setContentsMargins(16, 9, 16, 9);
+  conn_row->setSpacing(8);
   QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
-  auto* conn_row = new QHBoxLayout;
+  const auto conn_label = [this](const QString& t) {
+    auto* lb = new QLabel(t, this);
+    lb->setStyleSheet(QStringLiteral("font-size:12px;"));
+    return lb;
+  };
   host_ = new QLineEdit(
       settings.value(QStringLiteral("host"), default_collab_host())
           .toString(),
@@ -169,59 +222,178 @@ void GroupMemoDialog::build_ui() {
   password_ = new QLineEdit(this);
   password_->setEchoMode(QLineEdit::Password);
   password_->setMaximumWidth(140);
+  gid_chip_ = new QLabel(QStringLiteral("—"), this);
+  gid_chip_->setStyleSheet(QStringLiteral(
+      "font-weight:600;border:1px solid palette(mid);border-radius:6px;"
+      "padding:3px 9px;font-size:12px;"));
   btn_connect_ = new QPushButton(QStringLiteral("连接"), this);
-  conn_row->addWidget(new QLabel(QStringLiteral("服务器"), this));
+  conn_row->addWidget(conn_label(QStringLiteral("服务器地址")));
   conn_row->addWidget(host_);
-  conn_row->addWidget(new QLabel(QStringLiteral("文件面端口"), this));
+  conn_row->addWidget(conn_label(QStringLiteral("文件端口")));
   conn_row->addWidget(port_);
-  conn_row->addWidget(new QLabel(QStringLiteral("账号"), this));
+  conn_row->addWidget(conn_label(QStringLiteral("账号")));
   conn_row->addWidget(account_);
-  conn_row->addWidget(new QLabel(QStringLiteral("口令"), this));
+  conn_row->addWidget(conn_label(QStringLiteral("口令")));
   conn_row->addWidget(password_);
+  conn_row->addWidget(conn_label(QStringLiteral("群号")));
+  conn_row->addWidget(gid_chip_);
+  conn_row->addStretch(1);
   conn_row->addWidget(btn_connect_);
-  root->addLayout(conn_row);
+  root->addWidget(conn);
 
-  // —— 搜索 + 开放编辑开关（开关勾选=全员可写；权限由服务端裁决）——
-  auto* search_row = new QHBoxLayout;
+  // —— split：左列表列 430px ｜ 右编辑卡列 ——
+  auto* split = new QHBoxLayout;
+  split->setSpacing(0);
+  root->addLayout(split, 1);
+
+  // 左列（原型 .list-col：面板底＋右分隔线）
+  auto* list_col = new QFrame(this);
+  list_col->setFrameShape(QFrame::NoFrame);
+  list_col->setStyleSheet(QStringLiteral(
+      "QFrame{background:palette(base);border-right:1px solid palette(mid);}"));
+  list_col->setFixedWidth(430);
+  auto* list_lay = new QVBoxLayout(list_col);
+  list_lay->setContentsMargins(0, 0, 0, 0);
+  list_lay->setSpacing(0);
+  split->addWidget(list_col);
+
+  // bar：搜索 + 刷新 + 只看我建的 + 开放全员编辑
+  auto* bar = new QHBoxLayout;
+  bar->setContentsMargins(12, 9, 12, 9);
+  bar->setSpacing(8);
   search_ = new QLineEdit(this);
-  search_->setPlaceholderText(QStringLiteral("搜标题或正文…（回车搜索，清空＝全部）"));
+  search_->setPlaceholderText(
+      QStringLiteral("搜标题或正文…（回车搜索，清空＝全部）"));
   btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
-  search_row->addWidget(search_, 1);
-  search_row->addWidget(btn_refresh_);
-  root->addLayout(search_row);
+  mine_only_ = new QCheckBox(QStringLiteral("只看我建的"), this);
   open_edit_ = new QCheckBox(
       QStringLiteral("开放全员编辑（默认仅群主/管理员可写；删除不开放）"),
       this);
-  root->addWidget(open_edit_);
+  open_edit_->setStyleSheet(note_style());
+  bar->addWidget(search_, 1);
+  bar->addWidget(btn_refresh_);
+  bar->addWidget(mine_only_);
+  list_lay->addLayout(bar);
+  list_lay->addWidget(open_edit_, 0, Qt::AlignLeft | Qt::AlignVCenter);
 
-  // —— 条目列表 ——
+  // 条目列表（原型 .melist：卡片行 + 行距）
   stream_ = new QListWidget(this);
-  stream_->setAlternatingRowColors(true);
   stream_->setWordWrap(true);
-  root->addWidget(stream_, 1);
+  stream_->setSpacing(4);
+  list_lay->addWidget(stream_, 1);
 
-  // —— 动作行 ——
-  auto* act_row = new QHBoxLayout;
+  // 右列（原型 .edit-col：标题行 + 标题/正文卡 + 动作行 + 历史面板）
+  auto* edit_col = new QVBoxLayout;
+  edit_col->setContentsMargins(14, 12, 14, 12);
+  edit_col->setSpacing(10);
+  split->addLayout(edit_col, 1);
+
+  auto* eh = new QHBoxLayout;
+  card_title_ = new QLabel(QStringLiteral("备忘录条目"), this);
+  card_title_->setStyleSheet(head_style());
+  edit_head_note_ = new QLabel(this);
+  edit_head_note_->setStyleSheet(note_style());
+  eh->addWidget(card_title_);
+  eh->addStretch(1);
+  eh->addWidget(edit_head_note_);
+  edit_col->addLayout(eh);
+
+  auto* frow = new QHBoxLayout;
+  auto* tlb = new QLabel(QStringLiteral("标题"), this);
+  tlb->setFixedWidth(30);
+  tlb->setStyleSheet(QStringLiteral("font-size:12px;color:palette(mid);"));
+  title_edit_ = new QLineEdit(this);
+  title_edit_->setPlaceholderText(QStringLiteral("标题（必填）"));
+  frow->addWidget(tlb);
+  frow->addWidget(title_edit_, 1);
+  edit_col->addLayout(frow);
+
+  content_edit_ = new QPlainTextEdit(this);
+  content_edit_->setPlaceholderText(
+      QStringLiteral("正文（必填；可放代码块、连接信息、值班表等共享知识）"));
+  content_edit_->setMinimumHeight(120);
+  edit_col->addWidget(content_edit_, 1);
+
+  // 动作行（原型 .btnrow；「保存」为四键外的功能键：提交卡片现值）
+  auto* btnrow = new QHBoxLayout;
+  btnrow->setSpacing(8);
   btn_new_ = new QPushButton(QStringLiteral("新建条目"), this);
+  btn_save_ = new QPushButton(QStringLiteral("保存"), this);
   btn_edit_ = new QPushButton(QStringLiteral("编辑"), this);
   btn_history_ = new QPushButton(QStringLiteral("历史与回滚…"), this);
   btn_delete_ = new QPushButton(QStringLiteral("删除"), this);
+  btn_save_->setEnabled(false);
   btn_edit_->setEnabled(false);
   btn_history_->setEnabled(false);
   btn_delete_->setEnabled(false);
-  btn_delete_->setToolTip(QStringLiteral("删除恒归群主/管理员（开放编辑开放的是写，不是删）"));
-  act_row->addWidget(btn_new_);
-  act_row->addWidget(btn_edit_);
-  act_row->addWidget(btn_history_);
-  act_row->addWidget(btn_delete_);
-  act_row->addStretch(1);
-  root->addLayout(act_row);
+  btn_delete_->setToolTip(
+      QStringLiteral("删除恒归群主/管理员（开放编辑开放的是写，不是删）"));
+  btnrow->addWidget(btn_new_);
+  btnrow->addWidget(btn_save_);
+  btnrow->addWidget(btn_edit_);
+  btnrow->addWidget(btn_history_);
+  btnrow->addWidget(btn_delete_);
+  btnrow->addStretch(1);
+  edit_col->addLayout(btnrow);
 
-  // —— 状态行 ——
-  status_ = new QLabel(QStringLiteral("未连接（与协作面同源账号；文件面端口独立）"),
-                       this);
+  // 内联修订历史面板（原型 .hist：默认收起，选中条目展开）
+  hist_panel_ = new QFrame(this);
+  hist_panel_->setStyleSheet(QStringLiteral(
+      "QFrame{background:palette(base);border:1px solid palette(mid);"
+      "border-radius:10px;}"));
+  hist_panel_->hide();
+  auto* hist_lay = new QVBoxLayout(hist_panel_);
+  hist_lay->setContentsMargins(0, 0, 0, 0);
+  hist_lay->setSpacing(0);
+  auto* hh = new QHBoxLayout;
+  hh->setContentsMargins(12, 8, 12, 8);
+  hist_head_ = new QLabel(QStringLiteral("条目修订历史"), hist_panel_);
+  hist_head_->setStyleSheet(
+      QStringLiteral("font-size:12px;font-weight:700;"));
+  auto* hh_note = new QLabel(
+      QStringLiteral("开放成员编辑时每笔修改留痕，可回滚"), hist_panel_);
+  hh_note->setStyleSheet(note_style());
+  hh->addWidget(hist_head_);
+  hh->addSpacing(8);
+  hh->addWidget(hh_note);
+  hh->addStretch(1);
+  hist_lay->addLayout(hh);
+  hist_list_ = new QListWidget(hist_panel_);
+  hist_list_->setWordWrap(true);
+  hist_lay->addWidget(hist_list_, 1);
+  auto* hist_btns = new QHBoxLayout;
+  hist_btns->setContentsMargins(12, 8, 12, 8);
+  hist_btns->setSpacing(8);
+  btn_roll_ = new QPushButton(QStringLiteral("回滚到选中这笔"), hist_panel_);
+  btn_roll_->setEnabled(false);
+  auto* btn_hist_close = new QPushButton(QStringLiteral("关闭"), hist_panel_);
+  hist_btns->addWidget(btn_roll_);
+  hist_btns->addStretch(1);
+  hist_btns->addWidget(btn_hist_close);
+  hist_lay->addLayout(hist_btns);
+  edit_col->addWidget(hist_panel_, 1);
+
+  // 底注（原型 edit-col 尾注）
+  auto* foot = new QLabel(
+      QStringLiteral("群公告（R24-1）在本群会话置顶区维护，含 @全员 强提醒与"
+                     "编辑历史（群右键「公告编辑历史…」）；管理员默认维护备忘录"
+                     "，开放成员编辑后每笔修改留痕。"),
+      this);
+  foot->setWordWrap(true);
+  foot->setStyleSheet(
+      QStringLiteral("font-size:10.5px;color:palette(mid);"));
+  edit_col->addWidget(foot);
+
+  // —— 状态行（原型 .stat 底条）——
+  auto* stat = panel_row(this, true);
+  auto* stat_lay = new QHBoxLayout(stat);
+  stat_lay->setContentsMargins(16, 6, 16, 6);
+  status_ = new QLabel(
+      QStringLiteral("未连接（与协作面同源账号；文件面端口独立）"), stat);
   status_->setWordWrap(true);
-  root->addWidget(status_);
+  status_->setStyleSheet(QStringLiteral("font-size:11.5px;"));
+  stat_lay->addWidget(status_);
+  root->addWidget(stat);
 
   connect(btn_connect_, &QPushButton::clicked, this, [this] {
     connect_to(resolve_conn_host(host_->text().trimmed()),
@@ -233,31 +405,52 @@ void GroupMemoDialog::build_ui() {
   });
   connect(search_, &QLineEdit::returnPressed, this, [this] { refresh(); });
   connect(btn_refresh_, &QPushButton::clicked, this, [this] { refresh(); });
+  connect(mine_only_, &QCheckBox::toggled, this, [this] { apply_mine_filter(); });
+  connect(open_edit_, &QCheckBox::toggled, this, [this](bool on) {
+    if (client_->is_logged_in()) client_->set_group_memo_open_edit(gid_, on);
+  });
 
   connect(stream_, &QListWidget::itemSelectionChanged, this, [this] {
-    const bool has = stream_->currentItem() != nullptr;
+    const auto* it = stream_->currentItem();
+    const bool has = it != nullptr && it->flags() != Qt::NoItemFlags;
     btn_edit_->setEnabled(has);
     btn_history_->setEnabled(has);
     btn_delete_->setEnabled(has);
+    if (has) {
+      // 选中即进卡片（查看态；「编辑」才落编辑目标）
+      end_edit();
+      title_edit_->setText(it->data(kRoleTitle).toString());
+      content_edit_->setPlainText(it->data(kRoleContent).toString());
+      card_title_->setText(
+          QStringLiteral("备忘录条目 · %1").arg(it->data(kRoleTitle).toString()));
+    }
+    update_save_enabled();
+    update_edit_note();
   });
-  // 手工路径：编辑走模态子对话框（标题+正文两字段）
-  connect(btn_edit_, &QPushButton::clicked, this, [this] {
-    const auto* it = stream_->currentItem();
-    if (!it) return;
-    QString title = it->data(kRoleTitle).toString();
-    QString content = it->data(kRoleContent).toString();
-    if (!edit_dialog(&title, &content, title, content)) return;
-    if (!confirm_secret_memo(title, content)) return;
-    secret_hint_ = looks_like_secret(title) || looks_like_secret(content);
-    client_->save_group_memo(gid_, title.trimmed(), content, it->data(kRoleId).toLongLong());
-  });
+  connect(title_edit_, &QLineEdit::textChanged, this,
+          [this] { update_save_enabled(); });
+  connect(content_edit_, &QPlainTextEdit::textChanged, this,
+          [this] { update_save_enabled(); });
+
+  // 新建：清卡进新条目态（保存即新建，编辑目标归零）
   connect(btn_new_, &QPushButton::clicked, this, [this] {
-    QString title, content;
-    if (!edit_dialog(&title, &content, QString(), QString())) return;
-    if (!confirm_secret_memo(title, content)) return;
-    secret_hint_ = looks_like_secret(title) || looks_like_secret(content);
-    client_->save_group_memo(gid_, title.trimmed(), content, 0);
+    end_edit();
+    title_edit_->clear();
+    content_edit_->clear();
+    card_title_->setText(QStringLiteral("备忘录条目 · 新建"));
+    title_edit_->setFocus();
+    update_save_enabled();
+    update_edit_note();
   });
+  // 保存：提交卡片现值（submit_entry 程序化入口同源；手工路径先过
+  // R24-4 疑似密码二次确认——程序化入口只挂提示不吊测试）
+  connect(btn_save_, &QPushButton::clicked, this, [this] {
+    const QString t = title_edit_->text();
+    const QString c = content_edit_->toPlainText();
+    if (confirm_secret_memo(t, c)) submit_entry(t, c);
+  });
+  // 编辑：选中条目进编辑态（再进一次＝取消，与测试入口同源）
+  connect(btn_edit_, &QPushButton::clicked, this, [this] { edit_selected(); });
   connect(btn_history_, &QPushButton::clicked, this,
           [this] { open_history(); });
   connect(btn_delete_, &QPushButton::clicked, this, [this] {
@@ -270,33 +463,14 @@ void GroupMemoDialog::build_ui() {
     }
     client_->delete_group_memo(gid_, it->data(kRoleId).toLongLong());
   });
-}
-
-// 标题+正文编辑子对话框（手工新建/编辑共用；OK 回传两字段）
-bool GroupMemoDialog::edit_dialog(QString* title, QString* content,
-                                  const QString& init_title,
-                                  const QString& init_content) {
-  QDialog dlg(this);
-  dlg.setWindowTitle(QStringLiteral("备忘录条目"));
-  dlg.resize(480, 360);
-  auto* layout = new QVBoxLayout(&dlg);
-  auto* title_edit = new QLineEdit(init_title, &dlg);
-  title_edit->setPlaceholderText(QStringLiteral("标题（必填）"));
-  auto* content_edit = new QPlainTextEdit(init_content, &dlg);
-  content_edit->setPlaceholderText(
-      QStringLiteral("正文（必填；可放代码块、连接信息、值班表等共享知识）"));
-  auto* buttons =
-      new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
-                           &dlg);
-  QObject::connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-  QObject::connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-  layout->addWidget(title_edit);
-  layout->addWidget(content_edit, 1);
-  layout->addWidget(buttons);
-  if (dlg.exec() != QDialog::Accepted) return false;
-  *title = title_edit->text().trimmed();
-  *content = content_edit->toPlainText();
-  return !title->isEmpty() && !content->isEmpty();
+  connect(hist_list_, &QListWidget::itemSelectionChanged, this, [this] {
+    btn_roll_->setEnabled(hist_list_->currentItem() != nullptr);
+  });
+  connect(btn_roll_, &QPushButton::clicked, this,
+          [this] { rollback_selected_rev(); });
+  connect(btn_hist_close, &QPushButton::clicked, this, [this] {
+    close_history();
+  });
 }
 
 void GroupMemoDialog::connect_to(const QString& host, quint16 files_port,
@@ -324,7 +498,9 @@ void GroupMemoDialog::set_group(quint64 gid, const QString& group_name) {
   if (gid_ == gid) return;
   gid_ = gid;
   setWindowTitle(QStringLiteral("群备忘录（%1）").arg(group_name));
+  gid_chip_->setText(QString::number(gid));
   end_edit();
+  close_history();
   stream_->clear();
   if (client_->is_logged_in()) refresh();
 }
@@ -359,12 +535,17 @@ bool GroupMemoDialog::edit_selected() {
   if (!it || it->flags() == Qt::NoItemFlags) return false;
   if (editing_id_ == it->data(kRoleId).toLongLong()) {
     end_edit(); // 再进一次＝取消编辑
+    set_status(QStringLiteral("已取消编辑"), false);
     return true;
   }
   editing_id_ = it->data(kRoleId).toLongLong();
-  set_status(QStringLiteral("正在编辑条目 #%1（submit_entry 保存；再点编辑＝取消）")
+  title_edit_->setText(it->data(kRoleTitle).toString());
+  content_edit_->setPlainText(it->data(kRoleContent).toString());
+  update_edit_note(QStringLiteral("条目 #%1").arg(editing_id_));
+  set_status(QStringLiteral("正在编辑条目 #%1（改完「保存」；再点编辑＝取消）")
                  .arg(editing_id_),
              false);
+  update_save_enabled();
   return true;
 }
 
@@ -377,64 +558,43 @@ void GroupMemoDialog::open_history() {
   const auto* it = stream_->currentItem();
   if (!it || it->flags() == Qt::NoItemFlags) return;
   hist_memo_id_ = it->data(kRoleId).toLongLong();
+  hist_head_->setText(QStringLiteral("条目修订历史（#%1）").arg(hist_memo_id_));
+  hist_list_->clear();
+  btn_roll_->setEnabled(false);
+  hist_panel_->show();
+  client_->group_memo_history(hist_memo_id_);
+}
 
-  auto* dlg = new QDialog(this);
-  dlg->setAttribute(Qt::WA_DeleteOnClose);
-  dlg->setWindowTitle(QStringLiteral("条目修订历史（#%1）").arg(hist_memo_id_));
-  dlg->resize(560, 420);
-  auto* layout = new QVBoxLayout(dlg);
-  hist_list_ = new QListWidget(dlg);
-  hist_list_->setWordWrap(true);
-  layout->addWidget(hist_list_, 1);
-  connect(dlg, &QObject::destroyed, this, [this] { hist_list_ = nullptr; });
-
-  auto* btn_roll = new QPushButton(QStringLiteral("回滚到选中这笔"), dlg);
-  btn_roll->setEnabled(false);
-  layout->addWidget(btn_roll);
-  auto* btn_close = new QPushButton(QStringLiteral("关闭"), dlg);
-  layout->addWidget(btn_close);
-  connect(btn_close, &QPushButton::clicked, dlg, &QDialog::close);
-  connect(hist_list_, &QListWidget::itemSelectionChanged, dlg,
-          [btn_roll, hist_list = hist_list_] {
-            btn_roll->setEnabled(hist_list->currentItem() != nullptr);
-          });
-  connect(btn_roll, &QPushButton::clicked, this,
-          [this] { rollback_selected_rev(); });
-  // 修订史填充（连接挂 dlg 生命周期：窗销毁连接自断）
-  connect(client_, &FilesClient::group_memo_history_fetched, dlg,
-          [this](const QJsonArray& revisions) {
-            if (!hist_list_) return;
-            hist_list_->clear();
-            for (const auto& v : revisions) {
-              const QJsonObject o = v.toObject();
-              const QString content =
-                  o.value(QStringLiteral("content")).toString();
-              auto* item = new QListWidgetItem(hist_list_);
-              item->setText(QStringLiteral("%1　%2　《%3》\n%4")
-                                .arg(fmt_time(static_cast<qint64>(
-                                         o.value(QStringLiteral("ts_ms"))
-                                             .toDouble())),
-                                     o.value(QStringLiteral("editor"))
-                                         .toString(),
-                                     o.value(QStringLiteral("title"))
-                                         .toString(),
-                                     content));
-              item->setData(
-                  kRoleId,
+void GroupMemoDialog::populate_history(const QJsonArray& revisions) {
+  hist_list_->clear();
+  for (const auto& v : revisions) {
+    const QJsonObject o = v.toObject();
+    const QString content = o.value(QStringLiteral("content")).toString();
+    auto* item = new QListWidgetItem(hist_list_);
+    item->setText(QStringLiteral("%1　%2　《%3》\n%4")
+                      .arg(QDateTime::fromMSecsSinceEpoch(static_cast<qint64>(
+                               o.value(QStringLiteral("ts_ms")).toDouble()))
+                               .toString(QStringLiteral("yyyy-MM-dd HH:mm")),
+                           o.value(QStringLiteral("editor")).toString(),
+                           o.value(QStringLiteral("title")).toString(),
+                           content));
+    item->setData(kRoleId,
                   static_cast<qint64>(
                       o.value(QStringLiteral("id")).toDouble()));
-            }
-            if (revisions.isEmpty()) {
-              auto* item = new QListWidgetItem(hist_list_);
-              item->setText(QStringLiteral("暂无修订记录"));
-              item->setFlags(Qt::NoItemFlags);
-            }
-          });
-  connect(client_, &FilesClient::group_memo_rolled_back, dlg, [dlg](qint64) {
-    dlg->close();
-  });
-  client_->group_memo_history(hist_memo_id_);
-  dlg->show(); // 非模态：信号驱动填充，不吊死交互
+  }
+  if (revisions.isEmpty()) {
+    auto* item = new QListWidgetItem(hist_list_);
+    item->setText(QStringLiteral("暂无修订记录"));
+    item->setFlags(Qt::NoItemFlags);
+  }
+}
+
+void GroupMemoDialog::close_history() {
+  if (!hist_panel_) return;
+  hist_panel_->hide();
+  hist_list_->clear();
+  btn_roll_->setEnabled(false);
+  hist_memo_id_ = 0;
 }
 
 void GroupMemoDialog::rollback_selected_rev() {
@@ -442,7 +602,7 @@ void GroupMemoDialog::rollback_selected_rev() {
   if (!cur || hist_memo_id_ == 0) return;
   client_->rollback_group_memo(hist_memo_id_,
                                cur->data(kRoleId).toLongLong());
-  // 回滚成功信号（group_memo_rolled_back）关历史窗并刷新列表
+  // 回滚成功信号（group_memo_rolled_back）收起面板并刷新列表
 }
 
 QString GroupMemoDialog::status_text() const { return status_->text(); }
@@ -454,7 +614,8 @@ bool GroupMemoDialog::open_edit_checked() const {
 int GroupMemoDialog::stream_count() const { return stream_->count(); }
 
 int GroupMemoDialog::history_count() const {
-  return hist_list_ ? hist_list_->count() : -1;
+  // 未展开/已收起＝-1（isHidden 与父窗可见性无关，离屏测试可判）
+  return hist_list_ && !hist_panel_->isHidden() ? hist_list_->count() : -1;
 }
 
 void GroupMemoDialog::set_status(const QString& text, bool error) {
@@ -466,8 +627,40 @@ void GroupMemoDialog::set_status(const QString& text, bool error) {
   status_->setPalette(p);
 }
 
-void GroupMemoDialog::end_edit() {
-  editing_id_ = 0;
+void GroupMemoDialog::end_edit() { editing_id_ = 0; }
+
+// 「只看我建的」：客户端过滤（作者≠当前账号的行隐藏，不重发请求）
+void GroupMemoDialog::apply_mine_filter() {
+  const bool mine = mine_only_->isChecked();
+  for (int i = 0; i < stream_->count(); ++i) {
+    auto* it = stream_->item(i);
+    const bool placeholder = it->flags() == Qt::NoItemFlags;
+    stream_->setRowHidden(
+        i, mine && !placeholder && it->data(kRoleAuthor).toString() !=
+                                       client_->account());
+  }
+}
+
+// 「保存」可用：卡片两字段非空（连接与否交服务端 401 兜底提示）
+void GroupMemoDialog::update_save_enabled() {
+  btn_save_->setEnabled(!title_edit_->text().trimmed().isEmpty() &&
+                        !content_edit_->toPlainText().trimmed().isEmpty());
+}
+
+// 卡片头注（原型 .eh 右注）：条目 #N / 新建 · 开放成员编辑（已开/未开）
+void GroupMemoDialog::update_edit_note(const QString& override_text) {
+  if (!edit_head_note_) return;
+  QString base = override_text;
+  if (base.isEmpty()) {
+    base = editing_id_ > 0
+               ? QStringLiteral("条目 #%1").arg(editing_id_)
+               : QStringLiteral("条目 #—");
+  }
+  edit_head_note_->setText(
+      QStringLiteral("%1 · 开放成员编辑（%2）")
+          .arg(base,
+               open_edit_->isChecked() ? QStringLiteral("已开")
+                                       : QStringLiteral("未开")));
 }
 
 } // namespace memex::client

@@ -112,12 +112,13 @@ void AuditDialog::build_ui() {
   form2->addStretch(1);
   layout->addLayout(form2);
 
-  // 检索结果
+  // 检索结果（原型：检索结果区带标题行）
+  layout->addWidget(new QLabel(QStringLiteral("检索结果"), this));
   list_ = new QListWidget(this);
   list_->setAlternatingRowColors(true);
   layout->addWidget(list_, 2);
 
-  // 操作区
+  // 操作区（原型：检索/刷新查阅日志旁带「可空=全部」提示）
   auto* ops = new QHBoxLayout;
   btn_search_ = new QPushButton(QStringLiteral("检索"), this);
   btn_search_->setEnabled(false);
@@ -125,6 +126,9 @@ void AuditDialog::build_ui() {
   btn_reads_->setEnabled(false);
   ops->addWidget(btn_search_);
   ops->addWidget(btn_reads_);
+  auto* hint = new QLabel(QStringLiteral("账号 / 关键词可空＝全部"), this);
+  hint->setStyleSheet(QStringLiteral("color:palette(mid);"));
+  ops->addWidget(hint);
   ops->addStretch(1);
   layout->addLayout(ops);
 
