@@ -609,7 +609,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ### 桌面 · 主窗口与列表面
 
-- [ ] 与 prototypes/desktop-chat.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/main_window.cpp` 群聊页）
+- [x] 与 prototypes/desktop-chat.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/main_window.cpp` 群聊页）（✅ 2026-10-29 afa99fd：头像列/胶囊系统行/文件卡片/日期分割线/输入区说明条/未归档徽标全量补齐＋warning_wash 令牌；门禁 84/84 绿）
 - [ ] 与 prototypes/desktop-collab.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/main_window.cpp` 协作态会话列表）
 - [ ] 与 prototypes/desktop-direct.html 逐屏比对一致(控件/布局/文案/间距)（未登录直连列表态）
 - [ ] 与 prototypes/desktop-direct-chat.html 逐屏比对一致(控件/布局/文案/间距)（直连会话展开态）

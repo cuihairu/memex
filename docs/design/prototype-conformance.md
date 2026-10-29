@@ -15,7 +15,7 @@
 
 | 原型文件 | 对应 C++ / Kotlin 界面文件 | 现状 | 备注 |
 | --- | --- | --- | --- |
-| `desktop-chat.html` | `client/app/main_window.cpp`（群聊页：`build_group_view` 等） | 已对齐 | 跨态会话与撤回语义 |
+| `desktop-chat.html` | `client/app/main_window.cpp`（群聊页：`build_group_view` 等） | 已对齐 | 跨态会话与撤回语义；2026-10-29 逐屏复核补齐：头像列/系统胶囊行/文件卡片/日期分割线/输入区说明条（`--warn-soft`→`warning_wash` 令牌）/未归档徽标（afa99fd）。近似项：日期分割线为「── 今天 ──」全宽样式（原型为行内短划）；文件卡片仅会话内存态，不持久化历史 |
 | `desktop-collab.html` | `client/app/main_window.cpp`（协作态会话列表）+ `client/app/rail_nav.cpp` | 已对齐 | 登录协作态列表 |
 | `desktop-direct.html` | `client/app/main_window.cpp`（未登录直连列表态） | 已对齐 | 无对话不摆聊天面板 |
 | `desktop-direct-chat.html` | `client/app/main_window.cpp`（`open_direct_peer` / `direct_peer_target`） | 已对齐 | 点好友后展开态 |
