@@ -67,10 +67,16 @@ quint16 free_port() {
 }
 
 bool port_listening(quint16 port) {
+  // 与 test_mode_switch 等 7 处同款正则：bind 成功＝端口空闲＝服务端未就绪
+  // （false 继续等）；EADDRINUSE＝在听。曾因改写成 busy 变量形把语义反转，
+  // wait_until 首探即过、零等待，登录 connect 打在 serve bind 之前（本机
+  // 高载下服务端启动慢即 3/3 连红；CI 专属 runner 竞态稳赢故从未暴露）
   QTcpServer probe;
-  const bool busy = probe.listen(QHostAddress::LocalHost, port);
-  if (busy) probe.close();
-  return busy;
+  if (probe.listen(QHostAddress::LocalHost, port)) {
+    probe.close();
+    return false;
+  }
+  return true;
 }
 
 bool reddish(QRgb c) { return qRed(c) > 150 && qGreen(c) < 100 && qBlue(c) < 100; }
