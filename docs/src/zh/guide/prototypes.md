@@ -241,4 +241,4 @@ layout-*／mobile-live-* 实况核对沿用不重摄。此前的进度口径：�
 记录/留存策略协议无查询面，屏内如实标「未接入」），android-34 模拟器＋本机
 serve 走查实况浅／深各一（`walkthrough-20/21` 同源，入 `apps/android/docs/`），
 首页轮播 mobile-me 席由原型稿渲染换实况（`mobile-live-me[-light|-dark]`）。
-八屏预览集不变，轮播十二席全实况收口；鸿蒙端承诺外维持前令。
+八屏预览集不变，轮播十二席全实况收口；鸿蒙端承诺外维持前令。2026-10-30 好友视图轮：rail「好友」钮切真·好友视图（组织架构通讯录按「星标好友＋部门」分组，`test_mode_switch` 好友视图腿程序化抓取）后，`layout-friends[-light|-dark]` 改为好友视图实况；原协作会话列表态实况改存 `layout-messages[-light|-dark]`（同测试列表态腿，抓取口径不变）。

@@ -933,10 +933,9 @@ void MainWindow::build_ui() {
       }
       if (subnet != QStringLiteral("本网段")) break;
     }
-    disc_hint_ = new QLabel(
-        QStringLiteral("自动发现 %1 · UDP %2")
-            .arg(subnet, QString::number(kDiscoveryPort)),
-        side);
+    disc_direct_text_ = QStringLiteral("自动发现 %1 · UDP %2")
+                            .arg(subnet, QString::number(kDiscoveryPort));
+    disc_hint_ = new QLabel(disc_direct_text_, side);
   }
 
   device_list_ = new QListWidget(side);
@@ -4376,6 +4375,12 @@ void MainWindow::rebuild_rail() {
   messages.icon = RailNav::Icon::Chat;
   items.append(messages);
   if (collab) {
+    // 好友视图入口（原型 desktop-friends.html：侧栏好友分组 IA）
+    RailNav::Item friends;
+    friends.id = QStringLiteral("friends");
+    friends.tip = QStringLiteral("好友");
+    friends.icon = RailNav::Icon::Person;
+    items.append(friends);
     RailNav::Item org;
     org.id = QStringLiteral("org");
     org.tip = QStringLiteral("组织架构");
@@ -4439,6 +4444,22 @@ void MainWindow::rail_clicked(const QString& id) {
   // 本版消息工作区＝设备/会话同一列表（原型直连分「消息/局域网设备」两屏，
   // 合并口径残差如实报）；两入口都落焦点到列表。
   if (id == QStringLiteral("messages") || id == QStringLiteral("devices")) {
+    if (sidebar_mode_ != QStringLiteral("sessions")) {
+      sidebar_mode_ = QStringLiteral("sessions");
+      update_side_head();
+      refresh_devices();
+    }
+    rail_->set_active(id);
+    device_list_->setFocus();
+    return;
+  }
+  if (id == QStringLiteral("friends")) {
+    if (sidebar_mode_ != QStringLiteral("friends")) {
+      sidebar_mode_ = QStringLiteral("friends");
+      update_side_head();
+      refresh_devices();
+    }
+    rail_->set_active(id);
     device_list_->setFocus();
     return;
   }
@@ -4475,26 +4496,39 @@ void MainWindow::show_file_assistant() {
   file_assistant_->activateWindow();
 }
 
-// 侧栏头随形态切换（原型：直连「局域网设备 · N 台在线」／协作「消息」）；
-// 搜索占位同换（协作「搜索消息 / 联系人 / 群聊」）；推广卡仅直连可见。
+// 侧栏头随形态切换（原型：直连「局域网设备 · N 台在线」／协作「消息」／
+// 好友视图「好友」）；搜索占位同换（协作「搜索消息 / 联系人 / 群聊」、好友
+// 「搜索好友 / 工号」）；推广卡仅直连可见。
 // rail 两套项只在模式翻转时重建（refresh_devices 高频调用）。
 void MainWindow::update_side_head() {
   const bool collab = collab_engine_.is_logged_in();
+  const bool friends = collab && sidebar_mode_ == QStringLiteral("friends");
   if (side_title_) {
-    side_title_->setText(collab ? QStringLiteral("消息")
-                                : QStringLiteral("局域网设备"));
+    side_title_->setText(friends ? QStringLiteral("好友")
+                                 : (collab ? QStringLiteral("消息")
+                                           : QStringLiteral("局域网设备")));
   }
   if (search_box_) {
     search_box_->setPlaceholderText(
-        collab ? QStringLiteral("搜索消息 / 联系人 / 群聊")
-               : QStringLiteral("搜索设备 / IP"));
+        friends ? QStringLiteral("搜索好友 / 工号")
+                : (collab ? QStringLiteral("搜索消息 / 联系人 / 群聊")
+                          : QStringLiteral("搜索设备 / IP")));
   }
-  if (disc_hint_) disc_hint_->setVisible(!collab);
-  if (device_count_) device_count_->setVisible(!collab);
+  if (disc_hint_) {
+    // 注脚随视图：直连＝发现口径；好友＝通讯录来源（应用无加友审批流，
+    // 不照抄原型「须经对方同意」）
+    disc_hint_->setText(friends ? QStringLiteral("来自组织架构通讯录")
+                                : disc_direct_text_);
+    disc_hint_->setVisible(!collab || friends);
+  }
+  if (device_count_) device_count_->setVisible(!collab || friends);
   if (collab_promo_) collab_promo_->setVisible(!collab);
   if (new_chat_btn_) new_chat_btn_->setVisible(collab);
   const QString mode =
       collab ? QStringLiteral("collab") : QStringLiteral("direct");
+  if (!collab && sidebar_mode_ != QStringLiteral("sessions")) {
+    sidebar_mode_ = QStringLiteral("sessions"); // 登出即回会话视图
+  }
   if (rail_ && rail_mode_ != mode) {
     rail_mode_ = mode;
     rebuild_rail();
@@ -4512,6 +4546,126 @@ void MainWindow::refresh_devices() {
   const QString selected = current_peer_;
   device_list_->blockSignals(true);
   device_list_->clear();
+  // 好友视图（原型 desktop-friends.html）：侧栏只摆组织架构通讯录
+  //（星标好友＋部门分组）；设备行/会话行/临时群都在消息视图
+  const bool friends_view =
+      collab_engine_.is_logged_in() &&
+      sidebar_mode_ == QStringLiteral("friends");
+  if (friends_view) {
+    struct FEntry {
+      QString account, display, dept;
+    };
+    QList<FEntry> roster;
+    const QJsonDocument od =
+        QJsonDocument::fromJson(last_org_json_.toUtf8());
+    if (od.isObject()) {
+      for (const auto& m :
+           od.object().value(QStringLiteral("members")).toArray()) {
+        const QJsonObject mo = m.toObject();
+        FEntry e;
+        e.account = mo.value(QStringLiteral("account")).toString();
+        e.display = mo.value(QStringLiteral("display_name")).toString();
+        e.dept = mo.value(QStringLiteral("department_path")).toString();
+        if (!e.account.isEmpty() && e.account != collab_engine_.account())
+          roster.push_back(e);
+      }
+    }
+    int online = 0;
+    for (const FEntry& e : roster)
+      if (online_accounts_.contains(e.account)) ++online;
+    device_count_->setText(
+        roster.isEmpty()
+            ? QStringLiteral("组织架构未下发")
+            : QStringLiteral("<span style=\"color:%1;\">●</span> %2 / %3 在线")
+                  .arg(tk().success.name())
+                  .arg(online)
+                  .arg(roster.size()));
+    auto add_header = [this](const QString& title) {
+      auto* header = new QListWidgetItem(title);
+      header->setFlags(Qt::NoItemFlags);
+      device_list_->addItem(header);
+    };
+    auto add_friend_row = [this](const FEntry& e) {
+      const QString shown =
+          e.display.isEmpty() ? e.account : e.display;
+      // 原型行名「人名 · 部门」（部门取路径末级；未分配不拼）
+      QString leaf;
+      if (!e.dept.isEmpty()) leaf = e.dept.section(QChar('/'), -1);
+      const QString rowname =
+          leaf.isEmpty()
+              ? shown
+              : QStringLiteral("%1 · %2").arg(shown, leaf);
+      // 末条预览：与协作会话行同口径（撤回如实标；无历史「暂无消息」）
+      QString preview;
+      const auto hist = direct_engine_.history(e.account, 1);
+      if (!hist.isEmpty()) {
+        const QString text =
+            hist.last().recalled
+                ? QStringLiteral("撤回了一条消息")
+                : QString::fromStdString(hist.last().text);
+        preview = hist.last().from == collab_engine_.account().toStdString()
+                      ? QStringLiteral("我：%1").arg(text)
+                      : text;
+      } else {
+        preview = QStringLiteral("暂无消息");
+      }
+      auto* item = new QListWidgetItem(device_list_);
+      QWidget* row = make_session_row(
+          tk(), shown, online_accounts_.contains(e.account) ? 1 : 0,
+          rowname, fmt_last_contact(fav_last_ms_(e.account)), preview,
+          unread_counts_.value(e.account));
+      item->setSizeHint(row->sizeHint());
+      device_list_->setItemWidget(item, row);
+      item->setData(Qt::UserRole, e.account);
+      item->setData(Qt::UserRole + 1, QStringLiteral("collab"));
+      item->setData(Qt::UserRole + 6,
+                    QStringList{e.account, e.display, e.dept}.join(
+                        QLatin1Char('\n')));
+      item->setToolTip(QStringLiteral("账号：%1\n部门：%2")
+                           .arg(e.account,
+                                e.dept.isEmpty()
+                                    ? QStringLiteral("（未分配）")
+                                    : e.dept));
+    };
+    if (roster.isEmpty()) {
+      auto* hint = new QListWidgetItem(
+          QStringLiteral("组织架构未下发（登录后自动拉取）"));
+      hint->setFlags(Qt::NoItemFlags);
+      device_list_->addItem(hint);
+    } else {
+      QList<FEntry> starred, plain;
+      for (const FEntry& e : roster)
+        (fav_is_starred_(e.account) ? starred : plain).push_back(e);
+      if (!starred.isEmpty()) {
+        add_header(QStringLiteral("星标好友"));
+        for (const FEntry& e : starred) add_friend_row(e);
+      }
+      // 部门分组：全路径为键（末级同名不撞），组内按显示名
+      std::sort(plain.begin(), plain.end(),
+                [](const FEntry& a, const FEntry& b) {
+                  return a.display < b.display;
+                });
+      QMap<QString, QList<FEntry>> by_dept;
+      for (const FEntry& e : plain)
+        by_dept[e.dept.isEmpty() ? QStringLiteral("（未分配部门）")
+                                 : e.dept].push_back(e);
+      for (auto it = by_dept.constBegin(); it != by_dept.constEnd(); ++it) {
+        add_header(QStringLiteral("%1 · %2 人").arg(it.key()).arg(it->size()));
+        for (const FEntry& e : it.value()) add_friend_row(e);
+      }
+    }
+    device_list_->blockSignals(false);
+    if (!selected.isEmpty()) {
+      for (int i = 0; i < device_list_->count(); ++i) {
+        if (device_list_->item(i)->data(Qt::UserRole).toString() ==
+            selected) {
+          device_list_->setCurrentRow(i, QItemSelectionModel::NoUpdate);
+          break;
+        }
+      }
+    }
+    return;
+  }
   const auto peers = direct_engine_.peers();
   // 原型直连列表（desktop-direct.html）：「在线设备」一组会话行（头像/在
   // 线点/姓名·设备/时间/末条预览/未读胶囊）。离线对端由发现服务超时即摘，

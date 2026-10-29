@@ -26,6 +26,7 @@
 #include <functional>
 
 #include <app/main_window.hpp>
+#include <app/rail_nav.hpp>
 #include <app/net_guard.hpp>
 #include <app/net_remote_settings.hpp>
 #include <app/theme.hpp>
@@ -310,6 +311,61 @@ int main(int argc, char** argv) {
   window.request_org();
   CHECK(wait_until([&] { return window.org_json().contains("bob"); }, 8000));
 
+  // —— 好友视图（原型 desktop-friends.html）：rail「好友」切侧栏 IA——
+  //    通讯录行（org 成员 bob）以 collab 会话行入场＋部门分组头；切回
+  //    「消息」分组头退场（会话视图回场）
+  {
+    auto* rail = window.findChild<memex::client::RailNav*>();
+    CHECK(rail != nullptr);
+    auto* flist =
+        window.findChild<QListWidget*>(QStringLiteral("device_list"));
+    CHECK(rail && flist);
+    if (rail && flist) {
+      emit rail->item_clicked(QStringLiteral("friends"));
+      CHECK(wait_until([&] {
+        bool bob_row = false, dept_head = false;
+        for (int i = 0; i < flist->count(); ++i) {
+          auto* it = flist->item(i);
+          if (it->data(Qt::UserRole).toString() ==
+                  QStringLiteral("bob") &&
+              it->data(Qt::UserRole + 1).toString() ==
+                  QStringLiteral("collab"))
+            bob_row = true;
+          if (it->text().contains(QStringLiteral("· 1 人")))
+            dept_head = true;
+        }
+        return bob_row && dept_head;
+      }, 8000));
+      emit rail->item_clicked(QStringLiteral("messages"));
+      CHECK(wait_until([&] {
+        for (int i = 0; i < flist->count(); ++i)
+          if (flist->item(i)->text().contains(QStringLiteral("· 1 人")))
+            return false;
+        return true;
+      }, 8000));
+      // 好友视图实况进 docs 截图目录（浅＋深；随拍随回亮色基线）
+      emit rail->item_clicked(QStringLiteral("friends"));
+      CHECK(wait_until([&] {
+        for (int i = 0; i < flist->count(); ++i)
+          if (flist->item(i)->text().contains(QStringLiteral("· 1 人")))
+            return true;
+        return false;
+      }, 8000));
+      {
+        auto& tm = memex::client::ThemeManager::instance();
+        CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
+                                 QStringLiteral("/layout-friends-light.png")));
+        tm.apply(qApp);
+        tm.set_mode(QStringLiteral("dark"));
+        CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
+                                 QStringLiteral("/layout-friends-dark.png")));
+        tm.set_mode(QStringLiteral("light"));
+      }
+      emit rail->item_clicked(QStringLiteral("messages"));
+    }
+  }
+
+
   // —— 需求批⑪ 个性签名：发送面（验收缝 apply_signature）→ 服务端受理
   //    回执 → 重拉 org → own_signature 生效（持久面断言；回执状态行是
   //    瞬态提示，不等它）——
@@ -347,10 +403,11 @@ int main(int argc, char** argv) {
   // —— T4.5 常用联系人（主窗验收）：发送后 FAV 数据应含 bob，星标可切换 ——
   CHECK(wait_until([&] { return window.fav_json().contains("bob"); }, 8000));
 
-  // —— 好友列表屏实况（布局令列表态·协作侧）：协作会话已建立（bob 入
-  //    「协作会话·服务端归档」分组）后，经生产 ✕ 路径关回列表态——
-  //    「左菜单+好友列表」长方形面板（局域网设备＋协作会话两分组），抓
-  //    一张浅色进 docs 截图目录 ——
+  // —— 协作会话列表态实况（布局令列表态·协作侧）：协作会话已建立（bob
+  //    入「最近联系」分组）后，经生产 ✕ 路径关回列表态——「左菜单+列表」
+  //    长方形面板（在线设备＋协作会话两分组），抓一张浅色进 docs 截图目录。
+  //    2026-10-30 起改存 layout-messages-*（layout-friends-* 让位真·好友
+  //    视图实况，见上方好友视图腿） ——
   {
     QPushButton* close_btn = nullptr;
     for (QPushButton* b : window.findChildren<QPushButton*>()) {
@@ -364,7 +421,7 @@ int main(int argc, char** argv) {
       close_btn->click();
       CHECK(!window.chat_panel_visible());
       CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
-                               QStringLiteral("/layout-friends-light.png")));
+                               QStringLiteral("/layout-messages-light.png")));
       // 深色随需补摄（2026-10-10 浅深配平轮）：同一列表态切暗再抓一张，
       // 随后显式回亮色（同 layout-chat-dark 还原法——system 档判暗会回读
       // 已被染暗的调色板再落回深色）
@@ -373,7 +430,7 @@ int main(int argc, char** argv) {
         tm.apply(qApp);
         tm.set_mode(QStringLiteral("dark"));
         CHECK(window.grab().save(QStringLiteral(MEMEX_DOCS_SHOT_DIR) +
-                                 QStringLiteral("/layout-friends-dark.png")));
+                                 QStringLiteral("/layout-messages-dark.png")));
         tm.set_mode(QStringLiteral("light"));
       }
     }
