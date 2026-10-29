@@ -33,6 +33,7 @@
 #include <QLabel>
 #include <QMenuBar>
 #include <QMenu>
+#include <QNetworkInterface>
 
 #include "file_assistant.hpp"
 #include "emoji_pack_dialog.hpp"
@@ -914,9 +915,29 @@ void MainWindow::build_ui() {
   side_head->addWidget(new_chat_btn_);
 
   search_box_ = new QLineEdit(side);
-  search_box_->setPlaceholderText(
-      QStringLiteral("查找：昵称 / 账号 / IP / 群名"));
+  search_box_->setPlaceholderText(QStringLiteral("搜索设备 / IP"));
   search_box_->setClearButtonEnabled(true);
+
+  // 发现口径注脚（原型 side-head：自动发现本网段 x.x.x.0/24 · UDP 2425）：
+  // 子网按本机首个非环回 IPv4 推 /24；取不到地址时退「本网段」不编数。
+  {
+    QString subnet = QStringLiteral("本网段");
+    for (const QNetworkInterface& ni : QNetworkInterface::allInterfaces()) {
+      if (ni.flags() & QNetworkInterface::IsLoopBack) continue;
+      for (const QNetworkAddressEntry& e : ni.addressEntries()) {
+        const QHostAddress a = e.ip();
+        if (a.protocol() != QAbstractSocket::IPv4Protocol) continue;
+        const quint32 v = a.toIPv4Address();
+        subnet = QHostAddress(v & 0xFFFFFF00u).toString() + QStringLiteral("/24");
+        break;
+      }
+      if (subnet != QStringLiteral("本网段")) break;
+    }
+    disc_hint_ = new QLabel(
+        QStringLiteral("自动发现 %1 · UDP %2")
+            .arg(subnet, QString::number(kDiscoveryPort)),
+        side);
+  }
 
   device_list_ = new QListWidget(side);
   device_list_->setObjectName(QStringLiteral("device_list"));
@@ -954,6 +975,7 @@ void MainWindow::build_ui() {
 
   side_layout->addLayout(side_head);
   side_layout->addWidget(search_box_);
+  side_layout->addWidget(disc_hint_);
   side_layout->addWidget(collab_promo_);
   side_layout->addWidget(device_list_, 1);
   side_layout->insertWidget(0, brand_row_);
@@ -4364,8 +4386,9 @@ void MainWindow::update_side_head() {
   if (search_box_) {
     search_box_->setPlaceholderText(
         collab ? QStringLiteral("搜索消息 / 联系人 / 群聊")
-               : QStringLiteral("查找：昵称 / 账号 / IP / 群名"));
+               : QStringLiteral("搜索设备 / IP"));
   }
+  if (disc_hint_) disc_hint_->setVisible(!collab);
   if (device_count_) device_count_->setVisible(!collab);
   if (collab_promo_) collab_promo_->setVisible(!collab);
   if (new_chat_btn_) new_chat_btn_->setVisible(collab);
@@ -4389,7 +4412,24 @@ void MainWindow::refresh_devices() {
   device_list_->blockSignals(true);
   device_list_->clear();
   const auto peers = direct_engine_.peers();
-  for (const Peer& p : peers) {
+  // 原型直连列表（desktop-direct.html）：「在线设备」一组会话行（头像/在
+  // 线点/姓名·设备/时间/末条预览/未读胶囊）。离线对端由发现服务超时即摘，
+  // 无离线留存表——「离线设备」分区不渲染（台账近似项）。
+  if (!peers.isEmpty()) {
+    auto* header = new QListWidgetItem(QStringLiteral("在线设备"));
+    header->setFlags(Qt::NoItemFlags);
+    device_list_->addItem(header);
+  }
+  QList<QPair<qint64, const Peer*>> order;
+  for (const Peer& p : peers) order.push_back({fav_last_ms_(QString::fromStdString(p.device_id)), &p});
+  std::sort(order.begin(), order.end(),
+            [](const QPair<qint64, const Peer*>& a,
+               const QPair<qint64, const Peer*>& b) {
+              if (a.first != b.first) return a.first > b.first;
+              return a.second->name < b.second->name;
+            });
+  for (const auto& kv : order) {
+    const Peer& p = *kv.second;
     auto* item = new QListWidgetItem(device_list_);
     const QString id = QString::fromStdString(p.device_id);
     const QString name =
@@ -4401,28 +4441,47 @@ void MainWindow::refresh_devices() {
             ? QStringLiteral("飞秋 · UDP %1").arg(p.address.toString())
             : QStringLiteral("%1 · TCP %2")
                   .arg(p.address.toString(), QString::number(p.tcp_port));
-    // T4.2：对端登录账号入列表行（仅作显示；空=未登录）
-    const QString acct = p.account.empty()
-                             ? QString()
-                             : QStringLiteral(" · 协作账号 %1")
-                                   .arg(QString::fromStdString(p.account));
-    // 未读角标（原型行 n-count 的文本位；行级富文本委托另批）
-    const int unread = unread_counts_.value(id);
-    // 「盯」已读提醒触发的会话高亮（todo「盯」单）：◉ 前缀复用未读
-    // 角标位（同一行渲染路径；打开该会话即清）
-    const QString watch_hi =
-        watch_reminded_peers_.contains(id) ? QStringLiteral("◉ ") : QString();
-    item->setText(
-        watch_hi +
-        (unread > 0 ? QStringLiteral("(%1) ").arg(unread) : QString()) +
-        QStringLiteral("%1\n%2%3").arg(name, meta, acct));
+    // T4.2：对端协作账号（仅作显示；空=未登录）——原型行「人名 · 设备名」，
+    // 应用侧账号 id 即人名位
+    const QString account = QString::fromStdString(p.account);
+    const QString display =
+        account.isEmpty() ? name
+                          : QStringLiteral("%1 · %2").arg(account, name);
+    // 末条预览（原型 .r-sub）：本地库最近一条（撤回如实标）；文件传输
+    // 不落库，无历史走元信息行兜底（IP · 口）
+    QString preview;
+    const auto hist = direct_engine_.history(id, 1);
+    if (!hist.isEmpty()) {
+      preview = hist.last().recalled
+                    ? QStringLiteral("撤回了一条消息")
+                    : QString::fromStdString(hist.last().text);
+    } else {
+      preview = meta;
+    }
+    // 「盯」已读提醒高亮（原文本行 ◉ 前缀位；打开该会话即清）
+    const QString shown =
+        (watch_reminded_peers_.contains(id) ? QStringLiteral("◉ ")
+                                            : QString()) +
+        display;
+    // 列表内对端都在发现超时窗内＝在线（presence=1）；头像首字取人名位
+    QWidget* row = make_session_row(
+        tk(), account.isEmpty() ? name : account, 1, shown,
+        fmt_last_contact(fav_last_ms_(id)), preview,
+        unread_counts_.value(id));
+    item->setSizeHint(row->sizeHint());
+    device_list_->setItemWidget(item, row);
+    // 元信息（IP/端口/协作账号）退悬浮——行面让位原型会话行
+    item->setToolTip(QStringLiteral("%1\n%2%3").arg(
+        display, meta,
+        account.isEmpty()
+            ? QString()
+            : QStringLiteral("\n协作账号 %1").arg(account)));
     item->setData(Qt::UserRole, id);
     item->setData(Qt::UserRole + 1, QStringLiteral("direct"));
     // 需求批⑨查找：可检索字段＝昵称/设备 id/IP/协作账号（\n 分行，整行比对
     // ＝精确、子串＝模糊，两态都能命中）
     item->setData(Qt::UserRole + 6,
-                  QStringList{name, id, p.address.toString(),
-                             QString::fromStdString(p.account)}
+                  QStringList{name, id, p.address.toString(), account}
                       .join(QLatin1Char('\n')));
   }
 
@@ -4570,9 +4629,13 @@ void MainWindow::refresh_devices() {
     }
   }
   device_list_->blockSignals(false);
-  device_count_->setText(peers.isEmpty()
-                             ? QStringLiteral("未发现设备")
-                             : QStringLiteral("%1 台在线").arg(peers.size()));
+  // 原型 device-count：success 绿点＋muted 计数；空表如实「未发现设备」
+  device_count_->setText(
+      peers.isEmpty()
+          ? QStringLiteral("未发现设备")
+          : QStringLiteral("<span style=\"color:%1;\">●</span> %2 台在线")
+                .arg(tk().success.name())
+                .arg(peers.size()));
 
   // 当前会话设备离线 → 保留视图但提示；列表选中态恢复
   if (!selected.isEmpty()) {
@@ -5235,8 +5298,13 @@ void MainWindow::apply_theme_styles() {
             .arg(t.text.name()));
   }
   if (device_count_) {
+    // 原型 device-count：绿点 + text-3 计数（点走富文本 success 跨度）
     device_count_->setStyleSheet(
-        QStringLiteral("color:%1; font-size:12px;").arg(t.success.name()));
+        QStringLiteral("color:%1; font-size:12px;").arg(t.text_muted.name()));
+  }
+  if (disc_hint_) {
+    disc_hint_->setStyleSheet(
+        QStringLiteral("color:%1; font-size:11px;").arg(t.text_muted.name()));
   }
   if (new_chat_btn_) {
     // 原型 .icon-btn.brand（brand-soft 底 brand-deep 字）＋悬停品牌底

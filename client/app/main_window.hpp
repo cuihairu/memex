@@ -556,6 +556,7 @@ private:
   QPointer<MessageSearchDialog> message_search_; // 聊天记录模糊搜索窗（懒建）
 
   QLabel* device_count_{nullptr};
+  QLabel* disc_hint_{nullptr}; // 直连态发现口径行（原型 side-head 11px 注脚）
   QPushButton* new_chat_btn_{nullptr}; // 发起单聊 +（原型 side-head 品牌钮，协作态可见）
   RailNav* rail_{nullptr};        // 原型 rail 面：最左图标导航栏
   QMenu* opt_menu_{nullptr};      // 「设置」菜单（rail 齿轮弹同源菜单）

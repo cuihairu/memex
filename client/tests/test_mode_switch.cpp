@@ -265,9 +265,11 @@ int main(int argc, char** argv) {
       // —— 需求批⑨ 查找：昵称/账号(设备 id)/IP 多字段，模糊+精确 ——
       // 模糊＝子串（dev- 前缀全命中）；精确＝整 id（dev-A2 只剩一台）；
       // 不存在串全隐；清空恢复（列表里 dev-A2/dev-B2 来自双引擎宣告）
+      // （占位文案 2026-10-30 对齐原型 desktop-direct.html 改「搜索设备 / IP」，
+      //  检索字段不变）
       QLineEdit* search = nullptr;
       for (QLineEdit* e : window.findChildren<QLineEdit*>()) {
-        if (e->placeholderText().contains(QStringLiteral("查找："))) {
+        if (e->placeholderText().contains(QStringLiteral("搜索设备"))) {
           search = e;
           break;
         }
