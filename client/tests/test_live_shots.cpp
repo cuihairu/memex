@@ -12,6 +12,9 @@
 #include <QFile>
 #include <QListWidget>
 #include <QMenu>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QPixmap>
 #include <QProcess>
 #include <QSettings>
@@ -344,6 +347,37 @@ int main(int argc, char** argv) {
     CHECK(wait_until([&] {
       return window.chat_html().contains(QStringLiteral("合同扫描件-2026Q3.pdf"));
     }, 15000));
+    // —— 原型 desktop-files.html 整屏：rail「文件传输」切传输管理面 ——
+    //    台账真实落账（发出的文件夹作业＋收到的 PDF，均已完成态），侧栏
+    //    「传输通道」与头部 meta/标签随真实数据渲染
+    // 显隐互斥在 apply_view_mode 内同步 activate() 重算布局；此处仍排一次
+    // 事件队列再断言，杜绝抓图腿抢在布局结算前
+    window.enter_transfers_view();
+    QCoreApplication::processEvents();
+    auto* tpage = window.findChild<QWidget*>(QStringLiteral("transfer_page"));
+    CHECK(tpage != nullptr);
+    CHECK(!tpage->isHidden());
+    auto* tside = window.findChild<QWidget*>(QStringLiteral("transfer_side"));
+    CHECK(tside != nullptr);
+    CHECK(!tside->isHidden());
+    CHECK(wait_until([&] {
+      return window.transfers_json().contains(QStringLiteral("合同归档")) &&
+             window.transfers_json().contains(
+                 QStringLiteral("合同扫描件-2026Q3.pdf"));
+    }, 8000));
+    {
+      const QJsonDocument doc =
+          QJsonDocument::fromJson(window.transfers_json().toUtf8());
+      const auto arr =
+          doc.object().value(QStringLiteral("transfers")).toArray();
+      int done = 0;
+      for (const auto& v : arr) {
+        const QJsonObject o = v.toObject();
+        CHECK(o.value(QStringLiteral("state")).toInt() == 1);
+        ++done;
+      }
+      CHECK(done >= 2); // 文件夹作业＋接收 PDF 都已完成
+    }
     grab_pair(window, QStringLiteral("live-files"));
     db.set_collab_account("");
   }

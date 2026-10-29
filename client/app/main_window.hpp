@@ -91,6 +91,16 @@ public:
   // 是否已发现该局域网设备（发现表在窗体私有引擎里）。
   bool has_direct_peer(const QString& device_id) const;
 
+  // —— 文件传输面（原型 desktop-files.html，验收面）——
+  // rail「文件传输」切整屏传输管理视图（再次进入＝刷新；离开走 rail
+  // 消息/好友或传输卡「所在会话」）。
+  void enter_transfers_view();
+  // 传输台账（本机本次运行内：发送/接收/完成/中断逐条；验收面）。
+  QString transfers_json() const;
+  // 发文件发送缝（传输面「发送文件」钮与聊天发文件钮同一路径）：
+  // 守卫→直连通道发送→台账跟踪＋会话内文件卡。返回传输 id，空＝未发出。
+  QString transfer_send_file(const QString& path);
+
   // —— T4.4 截图与标注 ——
   // 截图工具（区域选择→标注→确认即发送；测试缝见 ScreenshotTool 注释）。
   ScreenshotTool* screenshot_tool() { return &screenshot_tool_; }
@@ -440,6 +450,46 @@ private:
   QString dgroup_title(const QString& dgroup_id) const; // 「临时群 N」标题
   QStringList org_accounts() const; // 组织架构全部账号（建群/拉人数据源）
 
+  // —— 文件传输面（原型 desktop-files.html 整屏）——
+  // 台账条目：引擎 transfer/job id 贯穿（进度/终态/取消都按 id 命中）；
+  // 会话内存级（文件不落消息库，重启从零累计——如实口径，空态有说明）
+  struct TransferEntry {
+    QString id;             // 引擎传输/作业 id（收侧回执同）
+    QString name;           // 文件/文件夹名
+    QString kind;           // 会话形态 direct/collab（「所在会话」回跳键）
+    QString peer;           // 会话对端（设备号或账号；回跳键）
+    QString peer_display;   // 对端显示名（发给 X／来自 X）
+    QString path;           // 本机路径（发=源；收=落盘）
+    QString note;           // 中断/取消原因（foot 副注）
+    quint64 bytes_done{0};
+    quint64 bytes_total{0};
+    quint64 files_done{0};  // 文件夹作业：已完成文件数
+    quint64 files_total{0}; // 文件夹作业：文件总数（0=未上报）
+    double speed_bps{0};    // 最近进度差分字节率（0=未知）
+    qint64 last_prog_ms{0}; // 上次进度时刻（速度差分）
+    qint64 ts_ms{0};        // 条目创建时刻
+    qint64 done_ms{0};      // 完成时刻（今日完成计数）
+    int state{0};           // 0 传输中／1 已完成／2 已中断／3 已取消
+    bool outgoing{true};
+    bool is_folder{false};
+  };
+  // 入账（同 id 覆盖）＋传输面可见即刷新
+  void track_transfer(const TransferEntry& e);
+  // 进度差分入账（file_progress：字节累计＋速度估计）
+  void update_tx_progress(const QString& id, quint64 done, quint64 total);
+  // 终态入账（file_finished/directory_finished：ok=false 且非取消＝中断）
+  void finish_tx_entry(const QString& id, bool ok, const QString& note);
+  // 台账 → 传输卡列表/头部 meta/标签计数（全量重建；主题切换同路）
+  void refresh_transfers_view();
+  // 侧栏「已发现 N 台」品牌卡文案（发现表实时数）
+  void rebuild_transfer_side();
+  // 视图编排：传输面 ↔ 会话面互斥显隐（rail 活动项随切）；离开且无会话
+  // ＝回列表态几何，有会话＝复展开聊天面板
+  void apply_view_mode();
+  void leave_transfers_view();
+  // 传输卡对端显示名（协作=通讯录显示名；直连=设备号）
+  QString tx_peer_display(const QString& kind, const QString& peer) const;
+
   QString current_peer_;      // 当前会话对端（设备标识或协作账号或群键）
   QString current_kind_{QStringLiteral("direct")}; // 会话形态：direct／collab／group／dgroup
   bool chat_open_{false}; // 布局态：会话面板是否展开（显隐意图，与窗口可见性
@@ -568,7 +618,7 @@ private:
   QLabel* device_count_{nullptr};
   QLabel* disc_hint_{nullptr}; // 直连态发现口径行（原型 side-head 11px 注脚）
   QString disc_direct_text_;   // 直连态注脚文案（好友视图复用同一控件换字）
-  QString sidebar_mode_{QStringLiteral("sessions")}; // 侧栏视图：sessions／friends（rail 好友钮）
+  QString sidebar_mode_{QStringLiteral("sessions")}; // 侧栏视图：sessions／friends（rail 好友钮）／transfers（rail 文件传输钮整屏）
   QPushButton* new_chat_btn_{nullptr}; // 发起单聊 +（原型 side-head 品牌钮，协作态可见）
   RailNav* rail_{nullptr};        // 原型 rail 面：最左图标导航栏
   QMenu* opt_menu_{nullptr};      // 「设置」菜单（rail 齿轮弹同源菜单）
@@ -598,6 +648,17 @@ private:
                                    // 群成员/群文件/归档说明虚线卡）
   QVBoxLayout* group_panel_lay_{nullptr};
   bool group_panel_hidden_{false}; // 用户经「群文件」钮收起右栏（重开群不再自动弹）
+  // —— 文件传输面（原型 desktop-files.html）：rail「文件传输」切整屏 ——
+  QWidget* transfer_side_{nullptr};   // 侧栏「传输通道」页（220px，与会话侧栏互斥）
+  QWidget* transfer_page_{nullptr};   // 主区传输管理面（与聊天面板互斥）
+  QLabel* tx_meta_{nullptr};          // 头部 meta「正在传输 N · 今日完成 N · 累计 X」
+  QPushButton* tx_send_btn_{nullptr}; // 「发送文件」（brand 钮，发往当前会话）
+  QPushButton* tx_tabs_[4] = {nullptr, nullptr, nullptr, nullptr}; // 全部/传输中/已完成/已暂停
+  QVBoxLayout* tx_list_lay_{nullptr}; // 传输卡容器（滚动区内）
+  QLabel* tx_empty_{nullptr};         // 空态/已暂停如实说明
+  QLabel* tx_peers_hint_{nullptr};    // 侧栏「已发现同网段直传伙伴 N 台」品牌卡
+  QList<TransferEntry> transfers_;    // 传输台账（会话内存级）
+  int transfer_filter_{0};            // 标签筛选：0 全部／1 传输中／2 已完成／3 已暂停
   QTextBrowser* chat_view_{nullptr};
   QLineEdit* input_box_{nullptr};
   QPushButton* send_btn_{nullptr};
