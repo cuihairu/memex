@@ -84,6 +84,7 @@ ThemeTokens light_tokens() {
   t.success = QColor(QStringLiteral("#6f8f6a"));
   t.warning = QColor(QStringLiteral("#c98a3c"));
   t.success_wash = QColor(QStringLiteral("#eaf3e7"));
+  t.warning_wash = QColor(QStringLiteral("#f7efe4"));
   t.success_text = QColor(QStringLiteral("#3f6b3a"));
   t.danger = QColor(QStringLiteral("#c0492f"));
   t.disabled_bg = QColor(QStringLiteral("#d9cfc4"));
@@ -117,6 +118,7 @@ ThemeTokens dark_tokens() {
   t.success = QColor(QStringLiteral("#8fae88"));
   t.warning = QColor(QStringLiteral("#d9a066"));
   t.success_wash = QColor(QStringLiteral("#22301f"));
+  t.warning_wash = QColor(QStringLiteral("#342920"));
   t.success_text = QColor(QStringLiteral("#a8cfa4"));
   t.danger = QColor(QStringLiteral("#d9705a"));
   t.disabled_bg = QColor(QStringLiteral("#3a352f"));
@@ -208,6 +210,7 @@ ThemeTokens build_default_theme(const DefaultThemeSpec& spec) {
     t.success = QColor(QStringLiteral("#6f8f6a"));
     t.warning = QColor(QStringLiteral("#c98a3c"));
     t.success_wash = QColor(QStringLiteral("#eaf3e7"));
+    t.warning_wash = QColor(QStringLiteral("#f7efe4"));
     t.success_text = QColor(QStringLiteral("#3f6b3a"));
     t.danger = QColor(QStringLiteral("#c0492f"));
     t.disabled_bg = hsl(h, 0.08, 0.83);
@@ -237,6 +240,7 @@ ThemeTokens build_default_theme(const DefaultThemeSpec& spec) {
     t.success = QColor(QStringLiteral("#8fae88"));
     t.warning = QColor(QStringLiteral("#d9a066"));
     t.success_wash = QColor(QStringLiteral("#22301f"));
+    t.warning_wash = QColor(QStringLiteral("#342920"));
     t.success_text = QColor(QStringLiteral("#a8cfa4"));
     t.danger = QColor(QStringLiteral("#d9705a"));
     t.disabled_bg = hsl(h, 0.06, spec.surface_l + 0.115);
@@ -310,6 +314,7 @@ QHash<QString, QColor> ThemeTokens::as_map() const {
           {QStringLiteral("success"), success},
           {QStringLiteral("warning"), warning},
           {QStringLiteral("success_wash"), success_wash},
+          {QStringLiteral("warning_wash"), warning_wash},
           {QStringLiteral("success_text"), success_text},
           {QStringLiteral("danger"), danger},
           {QStringLiteral("disabled_bg"), disabled_bg},

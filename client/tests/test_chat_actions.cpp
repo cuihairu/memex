@@ -67,7 +67,10 @@ QPushButton* find_button(QWidget& root, const QString& text) {
 
 QLineEdit* find_input(MainWindow& window) {
   for (QLineEdit* e : window.findChildren<QLineEdit*>()) {
-    if (e->placeholderText().contains(QStringLiteral("回车发送"))) return e;
+    // 原型口径：占位「输入消息…」＋旁挂「Enter 发送」提示（旧占位文案
+    // 「输入消息，回车发送」已随 612 批改版；降级态占位为「未归档通信…」，
+    // 本缝只在常规态使用）
+    if (e->placeholderText().contains(QStringLiteral("输入消息"))) return e;
   }
   return nullptr;
 }
@@ -512,9 +515,17 @@ int main(int argc, char** argv) {
     const QDate yesterday = today.addDays(-1);
     const qint64 yesterday_ts =
         QDateTime(yesterday, QTime(12, 0)).toMSecsSinceEpoch();
+    // 日头口吻随 612 批对齐原型（.day-divider「今天 13:38」）：近两日
+    // 「今天／昨天」，更早 yyyy-MM-dd——与 main_window day_divider_html 同式
     const auto divider = [](const QDate& d) {
-      return QStringLiteral("── %1 ──").arg(
-          d.toString(QStringLiteral("yyyy-MM-dd")));
+      const QDate today = QDate::currentDate();
+      QString label = d.toString(QStringLiteral("yyyy-MM-dd"));
+      if (d == today) {
+        label = QStringLiteral("今天");
+      } else if (d == today.addDays(-1)) {
+        label = QStringLiteral("昨天");
+      }
+      return QStringLiteral("── %1 ──").arg(label);
     };
     // 昨日首条 → 前插昨日日头
     window.inject_message(QStringLiteral("dev-D5"), QStringLiteral("昨日气泡"),

@@ -37,6 +37,8 @@ struct ThemeTokens {
   QColor success;
   QColor warning;
   QColor success_wash;    // 成功提示条底（协作态横幅）
+  QColor warning_wash;    // 警示提示条底（原型 --warn-soft：输入区说明条、
+                          // 未归档徽标底；语义族预混不透明，同 success_wash）
   QColor success_text;    // 成功提示条文本
   QColor danger;
   QColor disabled_bg;     // 禁用控件底

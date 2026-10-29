@@ -286,8 +286,15 @@ private:
   // 图片消息气泡（需求批④）：气泡内直接渲染图片（<img>，非文件系统行）
   void append_image_message(const QString& from_id, const QString& image_path,
                             qint64 ts_ms, bool outgoing, const QString& source);
+  // 文件卡气泡（原型 .bubble.file-card）：图标格＋文件名 700＋元数据行；
+  // 会话级渲染（文件传输不入消息库，历史重载口径与既有系统行一致）
+  void append_file_card(const QString& from_id, const QString& file_name,
+                        const QString& file_meta, qint64 ts_ms, bool outgoing);
   QString direct_peer_target() const; // 直连文件通道目标设备（collab 按账号匹配）
   void append_system_line(const QString& text);
+  // 胶囊系统行（原型 .sys-hint .pill：panel-2 底细边，正文与系统行同口径
+  // 不转义）；跨态标注（A7/A8）走此呈现
+  void append_chip_line(const QString& text);
   void show_guidance();
   void render_guidance();  // 空态引导正文（颜色走令牌，主题切换可重渲）
   // —— T4.9 主题（R19）——
@@ -335,6 +342,11 @@ private:
     QString receipt;    // 我发出消息的回执态（''/delivered/read，需求批⑦）
     QString watch_key;  // 「盯」行键（我发出的行：直连 d:<对端>:<序号>／
                         // 协作 c:<msg_id>；空＝不可盯——图片/群/收向行）
+    bool file_card{false}; // 非空＝文件卡气泡（原型 .bubble.file-card：
+                           // text 存文件名，file_meta 存「大小 · 直传 · 状态」）
+    QString file_meta;     // 文件卡元数据行
+    bool chip{false};      // 系统行变体：居中胶囊（原型 .sys-hint .pill，
+                           // 重渲按 chip_line_html 走，不落回灰字系统行）
   };
   // 分日分隔线判定（需求批⑧余量收口）：ts_ms 行前是否需先插日头——
   // chat_rows_ 倒扫最近一条消息行（系统行不参与日序），日不同（或尚无
@@ -551,6 +563,8 @@ private:
   QLabel* chat_title_{nullptr};
   QLabel* chat_meta_{nullptr};
   QLabel* banner_{nullptr}; // 归档提示条（objectName: mode_banner）
+  QLabel* input_note_{nullptr}; // 输入区固定说明条（原型 .input-note：随形态
+                                // 换文案；跨态/直连＝警示底，协作＝素底）
   QTextBrowser* chat_view_{nullptr};
   QLineEdit* input_box_{nullptr};
   QPushButton* send_btn_{nullptr};

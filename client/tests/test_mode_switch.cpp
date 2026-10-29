@@ -331,9 +331,15 @@ int main(int argc, char** argv) {
   CHECK(!window.banner_text().contains(QStringLiteral("消息不进归档")));
 
   // —— 协作会话发送：经服务端受理（回执）——
+  // 只等持久面（delivery_text＝最近一条发出消息的状态，send 同步重置为
+  // 「发送中…」后由服务端受理回执单调推进到「协作消息已送达」）。原断言
+  // 等状态栏 contains("已送达")＝匹配到早前腿的残留文案：孤立跑采样快即
+  // 绿、高载下 org/在线时长刷新回包覆盖后即红（假断言面，非实现回归）。
+  // 气泡 ✓（DELIVER_NOTICE）本腿到不了——bob 离线，须对端 ACK，T4.3 腿
+  //（后文 delivery_text 已送达/已读）才覆盖该面
   CHECK(window.send_in_current_chat(QStringLiteral("模式切换验收消息")));
   CHECK(wait_until([&] {
-    return window.status_text().contains(QStringLiteral("已送达"));
+    return window.delivery_text().contains(QStringLiteral("协作消息已送达"));
   }, 8000));
 
   // —— T4.5 常用联系人（主窗验收）：发送后 FAV 数据应含 bob，星标可切换 ——

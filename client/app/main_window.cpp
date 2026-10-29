@@ -235,6 +235,57 @@ QString collab_watch_key(const QString& msg_id) {
   return QStringLiteral("c:%1").arg(msg_id);
 }
 
+// —— 原型桌面会话面（desktop-chat.html）行控件化 ——
+// 头像八色（prototypes.css .avatar.v2–v9）：按显示名稳定取色（同人同色，
+// 跨主题恒同——人色不随浅深主题漂移）。首字头像 28px（.avatar.sm 近似，
+// 富文本以嵌套表格＋cellpadding 实现）。
+QColor avatar_hue(const QString& name) {
+  static const QColor kHues[] = {
+      QColor(0x7c, 0x5c, 0xbf), QColor(0x2e, 0x8b, 0x8b),
+      QColor(0xb7, 0x79, 0x1f), QColor(0x5b, 0x7f, 0xbf),
+      QColor(0xbf, 0x5b, 0x82), QColor(0x4f, 0x8a, 0x4a),
+      QColor(0x8a, 0x6d, 0x4f), QColor(0x5f, 0x6b, 0x7a)};
+  quint32 h = 2166136261u; // FNV-1a：对 QString 逐 UTF-16 码位
+  for (const QChar c : name) h = (h ^ c.unicode()) * 16777619u;
+  return kHues[h % 8];
+}
+QString avatar_initial(const QString& name) {
+  const QString n = name.trimmed();
+  return n.isEmpty() ? QStringLiteral("?")
+                     : QString(n.at(0)).toUpper();
+}
+QString avatar_html(const QString& name) {
+  return QStringLiteral(
+             "<table cellspacing=\"0\" cellpadding=\"7\"><tr><td "
+             "bgcolor=\"%1\" align=\"center\"><span style=\"color:#ffffff; "
+             "font-weight:700;\">%2</span></td></tr></table>")
+      .arg(avatar_hue(name).name(), esc(avatar_initial(name)));
+}
+// 文件卡图标字（.bubble.file-card .f-icon）：按扩展名映射一字
+QString file_icon_char(const QString& name) {
+  const QString sfx = QFileInfo(name).suffix().toLower();
+  if (sfx == QStringLiteral("xlsx") || sfx == QStringLiteral("xls") ||
+      sfx == QStringLiteral("csv"))
+    return QStringLiteral("表");
+  if (sfx == QStringLiteral("zip") || sfx == QStringLiteral("rar") ||
+      sfx == QStringLiteral("7z") || sfx == QStringLiteral("tar") ||
+      sfx == QStringLiteral("gz"))
+    return QStringLiteral("压");
+  if (sfx == QStringLiteral("png") || sfx == QStringLiteral("jpg") ||
+      sfx == QStringLiteral("jpeg") || sfx == QStringLiteral("gif"))
+    return QStringLiteral("图");
+  return QStringLiteral("文");
+}
+QString human_size(qint64 bytes) {
+  if (bytes < 1024) return QStringLiteral("%1 B").arg(bytes);
+  if (bytes < 1024 * 1024) return QStringLiteral("%1 KB").arg(bytes / 1024);
+  if (bytes < 1024LL * 1024 * 1024)
+    return QStringLiteral("%1 MB")
+        .arg(QString::number(static_cast<double>(bytes) / 1048576.0, 'f', 1));
+  return QStringLiteral("%1 GB")
+      .arg(QString::number(static_cast<double>(bytes) / 1073741824.0, 'f', 2));
+}
+
 QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
                     bool outgoing, bool at_mode = false,
                     const QString& image = {},
@@ -273,8 +324,10 @@ QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
                 "<span style=\"color:%2; font-size:small;\">图片消息 %3</span>")
                 .arg(image, t.text_muted.name(), esc(QFileInfo(image).fileName()));
   if (at_mode && image.isEmpty()) {
+    // @成员高亮（T4.1）：中文昵称同为账号字符——ASCII-only 正则曾漏配
+    // 「@张伟」（2026-10-29 原型比对发现），补 CJK 基本区
     static const QRegularExpression at_re(
-        QStringLiteral("@[A-Za-z0-9_.\\-]+"));
+        QStringLiteral("@[A-Za-z0-9_.\\-\\x{4e00}-\\x{9fa5}]+"));
     QString highlighted;
     qsizetype pos = 0;
     auto it = at_re.globalMatch(content);
@@ -308,16 +361,67 @@ QString bubble_html(const QString& name, const QString& text, qint64 ts_ms,
                                 outgoing ? t.bubble_out_text.name()
                                          : t.bubble_in_text.name(),
                                 content);
+  // 头像列（原型 .msg .avatar 28px 首字）：己方居右、对方居左；meta 行随
+  // 气泡侧对齐（原型 .msg-col：己方元信息/回执勾在气泡上方右缘）
+  const QString av = avatar_html(name);
   if (outgoing) {
     return QStringLiteral(
-               "<div>%1</div><table width=\"100%\" cellspacing=\"0\"><tr>"
-               "<td width=\"28%\"></td><td align=\"right\">%2</td></tr></table>")
-        .arg(meta, body);
+               "<div align=\"right\">%1</div>"
+               "<table width=\"100%\" cellspacing=\"6\"><tr>"
+               "<td width=\"28%\"></td><td align=\"right\" "
+               "valign=\"top\">%2</td><td valign=\"top\">%3</td></tr></table>")
+        .arg(meta, body, av);
   }
   return QStringLiteral(
-             "<div>%1</div><table width=\"100%\" cellspacing=\"0\"><tr>"
-             "<td align=\"left\">%2</td><td width=\"28%\"></td></tr></table>")
-      .arg(meta, body);
+             "<div>%1</div>"
+             "<table width=\"100%\" cellspacing=\"6\"><tr>"
+             "<td valign=\"top\">%2</td><td align=\"left\" "
+             "valign=\"top\">%3</td><td width=\"28%\"></td></tr></table>")
+      .arg(meta, av, body);
+}
+
+// 文件卡气泡（原型 .bubble.file-card：38px 图标格＋名称 700＋11px 元数据；
+// 收发两向同款，仅左右与气泡底色随 outgoing 翻转）
+QString file_bubble_html(const QString& name, const QString& file_name,
+                         const QString& file_meta, qint64 ts_ms,
+                         bool outgoing) {
+  const ThemeTokens& t = tk();
+  const QString meta =
+      QStringLiteral("<div%1><span style=\"color:%2; font-size:small;\">%3 "
+                     "%4</span></div>")
+          .arg(outgoing ? QStringLiteral(" align=\"right\"") : QString(),
+               t.text_muted.name(), esc(name), hhmm(ts_ms));
+  const QString card =
+      QStringLiteral(
+          "<table cellspacing=\"0\" cellpadding=\"6\"><tr><td bgcolor=\"%1\">"
+          "<table cellspacing=\"0\" cellpadding=\"0\"><tr>"
+          "<td bgcolor=\"%2\" width=\"38\" height=\"38\" align=\"center\" "
+          "valign=\"middle\"><span style=\"color:%3; font-weight:800; "
+          "font-size:16px;\">%4</span></td>"
+          "<td width=\"8\"></td>"
+          "<td><span style=\"color:%5; font-weight:700;\">%6</span><br>"
+          "<span style=\"color:%7; font-size:small;\">%8</span></td>"
+          "</tr></table></td></tr></table>")
+          .arg(outgoing ? t.bubble_out.name() : t.bubble_in.name(),
+               t.brand_tint.name(), t.brand_text.name(),
+               esc(file_icon_char(file_name)),
+               outgoing ? t.bubble_out_text.name() : t.bubble_in_text.name(),
+               esc(file_name), t.text_muted.name(), esc(file_meta));
+  const QString av = avatar_html(name);
+  if (outgoing) {
+    return QStringLiteral(
+               "<div align=\"right\">%1</div>"
+               "<table width=\"100%\" cellspacing=\"6\"><tr>"
+               "<td width=\"28%\"></td><td align=\"right\" "
+               "valign=\"top\">%2</td><td valign=\"top\">%3</td></tr></table>")
+        .arg(meta, card, av);
+  }
+  return QStringLiteral(
+             "<div>%1</div>"
+             "<table width=\"100%\" cellspacing=\"6\"><tr>"
+             "<td valign=\"top\">%2</td><td align=\"left\" "
+             "valign=\"top\">%3</td><td width=\"28%\"></td></tr></table>")
+      .arg(meta, av, card);
 }
 
 // 居中系统行（建立会话提示／跨态说明／文件进度）：次要文本色。
@@ -326,6 +430,18 @@ QString system_line_html(const QString& text) {
   return QStringLiteral("<div align=\"center\"><span style=\"color:%1; "
                         "font-size:small;\">%2</span></div>")
       .arg(ThemeManager::instance().tokens().text_muted.name(), text);
+}
+
+// 胶囊系统行（原型 .sys-hint .pill／.recalled .pill：panel-2 底＋细边，
+// 富文本以单元格底色近似圆角胶囊）
+QString chip_line_html(const QString& text) {
+  const ThemeTokens& t = tk();
+  return QStringLiteral(
+             "<div align=\"center\"><table cellspacing=\"0\" "
+             "cellpadding=\"3\"><tr><td bgcolor=\"%1\" align=\"center\">"
+             "<span style=\"color:%2; font-size:small;\">%3</span></td></tr>"
+             "</table></div>")
+      .arg(t.surface_alt.name(), t.text_muted.name(), text);
 }
 
 // —— 需求批⑧ 聊天记录按日期 ——
@@ -351,10 +467,17 @@ QString day_label(qint64 ms) {
                       QStringLiteral("yyyy-MM-dd"))
                 : QStringLiteral("…");
 }
-// 分日分隔线（需求批⑧余量收口）：居中日头，与筛选头同 yyyy-MM-dd 口径。
+// 分日分隔线（需求批⑧余量收口）：居中日头；近两日用「今天／昨天」口吻
+//（原型 .day-divider「今天 13:38」），更早沿用 yyyy-MM-dd 全量口径。
 QString day_divider_html(const QDate& d) {
-  return system_line_html(
-      QStringLiteral("── %1 ──").arg(d.toString(QStringLiteral("yyyy-MM-dd"))));
+  const QDate today = QDate::currentDate();
+  QString label = d.toString(QStringLiteral("yyyy-MM-dd"));
+  if (d == today) {
+    label = QStringLiteral("今天");
+  } else if (d == today.addDays(-1)) {
+    label = QStringLiteral("昨天");
+  }
+  return system_line_html(QStringLiteral("── %1 ──").arg(label));
 }
 // 需求批⑩ 在线时长秒数展示：服务端按秒计（滚动窗并集），四舍五入到
 // 分钟级可读量——秒级展示太抖（ORG_QUERY 每次现算都在涨）。
@@ -941,14 +1064,26 @@ void MainWindow::build_ui() {
   input_layout->addWidget(nudge_btn);
   input_layout->addWidget(date_btn);
   input_box_ = new QLineEdit(input_row);
-  input_box_->setPlaceholderText(QStringLiteral("输入消息，回车发送"));
+  input_box_->setPlaceholderText(QStringLiteral("输入消息…"));
   send_btn_ = new QPushButton(QStringLiteral("发送"), input_row);
+  // 「Enter 发送」提示（原型 .input-toolbar .hint：右缘 11px 次要色）
+  auto* enter_hint = new QLabel(QStringLiteral("Enter 发送"), input_row);
+  enter_hint->setStyleSheet(
+      QStringLiteral("color:%1; font-size:11px;")
+          .arg(ThemeManager::instance().tokens().text_muted.name()));
   input_layout->addWidget(input_box_, 1);
+  input_layout->addWidget(enter_hint);
   input_layout->addWidget(send_btn_);
+
+  // 输入区固定说明条（原型 .input-note）：随形态换文案（update_banner 同
+  // 一状态机），跨态/直连＝警示底不可关闭，协作＝素底归档说明
+  input_note_ = new QLabel(chat);
+  input_note_->setWordWrap(true);
 
   chat_layout->addWidget(head);
   chat_layout->addWidget(banner_);
   chat_layout->addWidget(chat_view_, 1);
+  chat_layout->addWidget(input_note_);
   chat_layout->addWidget(input_row);
 
   auto* central = new QWidget(this);
@@ -1055,7 +1190,17 @@ void MainWindow::build_ui() {
     }
     const QString name = QFileInfo(path).fileName();
     file_sent_.insert(name, 0);
-    append_system_line(QStringLiteral("[文件] %1 开始发送").arg(esc(name)));
+    // 文件卡气泡（原型 .bubble.file-card）：协作单聊＝传输元数据入归档，
+    // 直连/跨态＝仅双方本机保存（文案如实随形态，不虚构归档）
+    append_file_card(
+        QString(), name,
+        QStringLiteral("%1 · 直传 · %2")
+            .arg(human_size(QFileInfo(path).size()),
+                 (current_kind_ == QStringLiteral("collab") &&
+                  collab_engine_.is_logged_in())
+                     ? QStringLiteral("传输元数据已入归档")
+                     : QStringLiteral("仅双方本机保存")),
+        QDateTime::currentMSecsSinceEpoch(), /*outgoing=*/true);
     show_status(QStringLiteral("文件发送中：%1").arg(name));
   });
   // 需求批⑤ 发文件夹：点击＝守卫先行（无会话等场景不应弹目录选择框），
@@ -1218,8 +1363,12 @@ void MainWindow::wire_engines() {
                                    QStringLiteral("direct"));
               show_status(QStringLiteral("图片消息已接收：%1").arg(path));
             } else {
-              append_system_line(
-                  QStringLiteral("[文件] 已接收：%1").arg(esc(path)));
+              append_file_card(
+                  id, QFileInfo(path).fileName(),
+                  QStringLiteral("%1 · 直传 · 已接收")
+                      .arg(human_size(QFileInfo(path).size())),
+                  QDateTime::currentMSecsSinceEpoch(),
+                  /*outgoing=*/false);
               show_status(QStringLiteral("文件已接收：%1").arg(path));
             }
             // 收到文件→弹通知窗（与消息同款激活门：激活中不打扰）
@@ -3781,7 +3930,57 @@ void MainWindow::update_banner() {
     input_box_->setPlaceholderText(QStringLiteral(
         "未归档通信（已降级直连）：此会话消息不进服务端归档"));
   } else {
-    input_box_->setPlaceholderText(QStringLiteral("输入消息，回车发送"));
+    input_box_->setPlaceholderText(QStringLiteral("输入消息…"));
+  }
+  // 输入区固定说明条（原型 .input-note：跨态/直连＝警示底「不可关闭」，
+  // 协作＝素底归档说明）；头部徽标（.noarch）只在未归档会话挂「未归档」
+  if (input_note_) {
+    const QString warn_note =
+        QStringLiteral("background:%1; color:%2; font-size:11px; "
+                       "padding:6px 18px;")
+            .arg(t.warning_wash.name(), t.warning.name());
+    const QString plain_note =
+        QStringLiteral("background:transparent; color:%1; font-size:11px; "
+                       "padding:6px 18px;")
+            .arg(t.text_muted.name());
+    if (collab_session) {
+      input_note_->setStyleSheet(plain_note);
+      input_note_->setText(
+          current_kind_ == QStringLiteral("group")
+              ? QStringLiteral("群聊 · 消息经服务端按成员扇出并全量归档")
+              : QStringLiteral("协作态 · 本会话消息将进入服务端归档"));
+    } else if (collab_degraded_) {
+      input_note_->setStyleSheet(warn_note);
+      input_note_->setText(QStringLiteral(
+          "已降级直连：服务端不可达，消息暂不归档；恢复后协作消息自动补传归档。"
+          "此说明固定显示，不可关闭。"));
+    } else if (current_kind_ == QStringLiteral("direct") &&
+               is_cross_state(current_peer_)) {
+      input_note_->setStyleSheet(warn_note);
+      input_note_->setText(QStringLiteral(
+          "本会话当前为跨态直达：你发出的消息不进入归档。"
+          "此说明固定显示，不可关闭。"));
+    } else if (!current_peer_.isEmpty()) {
+      input_note_->setStyleSheet(warn_note);
+      input_note_->setText(QStringLiteral(
+          "直连态：消息点对点传输、不经服务器、不进入归档（仅保存在双方本机）。"));
+    } else {
+      input_note_->setStyleSheet(plain_note);
+      input_note_->setText(QString());
+    }
+  }
+  if (local_badge_) {
+    if (collab_session) {
+      local_badge_->hide(); // 归档会话无「未归档」徽标（原型仅未归档会话挂）
+    } else {
+      local_badge_->setText(QStringLiteral("未归档"));
+      local_badge_->setStyleSheet(
+          QStringLiteral("background:%1; color:%2; border:1px dashed %3; "
+                         "border-radius:999px; padding:1px 8px; font-size:11px; "
+                         "font-weight:700;")
+              .arg(t.warning_wash.name(), t.warning.name(), t.warning.name()));
+      local_badge_->show();
+    }
   }
 }
 
@@ -4461,14 +4660,14 @@ void MainWindow::render_open_history() {
   // 标识常驻不可关闭，无论历史空否都打。
   if (kind == QStringLiteral("direct") && is_cross_state(id)) {
     if (collab_engine_.is_logged_in()) {
-      append_system_line(QStringLiteral(
+      append_chip_line(QStringLiteral(
           "跨态会话 · 未归档：与未登录终端点对点传输（标记常驻不可关闭）；"
           "归档自 %1（本次协作态登录时刻，此前跨态直连消息不进归档）")
-                             .arg(QDateTime::fromMSecsSinceEpoch(collab_login_ms_)
-                                      .toString(QStringLiteral(
-                                          "yyyy-MM-dd HH:mm:ss"))));
+                           .arg(QDateTime::fromMSecsSinceEpoch(collab_login_ms_)
+                                    .toString(QStringLiteral(
+                                        "yyyy-MM-dd HH:mm:ss"))));
     } else {
-      append_system_line(QStringLiteral(
+      append_chip_line(QStringLiteral(
           "跨态会话 · 未归档：对端已登录协作态，本机未登录——本机消息不进归档"
           "（标记常驻不可关闭）"));
     }
@@ -4797,12 +4996,56 @@ void MainWindow::append_image_message(const QString& from_id,
   bar->setValue(bar->maximum());
 }
 
+void MainWindow::append_file_card(const QString& from_id,
+                                  const QString& file_name,
+                                  const QString& file_meta, qint64 ts_ms,
+                                  bool outgoing) {
+  QString name = from_id;
+  if (outgoing) {
+    name = QStringLiteral("我");
+  } else if (current_kind_ != QStringLiteral("collab") &&
+             current_kind_ != QStringLiteral("group")) {
+    const Peer p = direct_engine_.peer(from_id.toStdString());
+    if (!p.name.empty()) name = QString::fromStdString(p.name);
+  }
+  ChatRow row;
+  row.system = false;
+  row.name = name;
+  row.text = file_name;
+  row.file_card = true;
+  row.file_meta = file_meta;
+  row.ts_ms = ts_ms;
+  row.outgoing = outgoing;
+  if (needs_day_divider(chat_rows_, row.ts_ms))
+    append_system_line(day_divider_html(
+        QDateTime::fromMSecsSinceEpoch(row.ts_ms).date()));
+  chat_rows_.append(row);
+  chat_view_->append(day_anchor(row.ts_ms) +
+                     file_bubble_html(row.name, file_name, file_meta, ts_ms,
+                                      outgoing));
+  auto* bar = chat_view_->verticalScrollBar();
+  bar->setValue(bar->maximum());
+}
+
 void MainWindow::append_system_line(const QString& text) {
   ChatRow row;
   row.system = true;
   row.text = text;
   chat_rows_.append(row);
   chat_view_->append(system_line_html(text));
+  auto* bar = chat_view_->verticalScrollBar();
+  bar->setValue(bar->maximum());
+}
+
+// 居中胶囊系统行（原型 .sys-hint .pill）：跨态/归档提示用——语义仍是系统行
+//（不参与日序判定），但重渲按 chip 样式走
+void MainWindow::append_chip_line(const QString& text) {
+  ChatRow row;
+  row.system = true;
+  row.chip = true;
+  row.text = text;
+  chat_rows_.append(row);
+  chat_view_->append(chip_line_html(text));
   auto* bar = chat_view_->verticalScrollBar();
   bar->setValue(bar->maximum());
 }
@@ -4950,7 +5193,12 @@ void MainWindow::rerender_chat() {
   chat_view_->clear();
   for (const ChatRow& row : chat_rows_) {
     if (row.system) {
-      chat_view_->append(system_line_html(row.text));
+      chat_view_->append(row.chip ? chip_line_html(row.text)
+                                  : system_line_html(row.text));
+    } else if (row.file_card) {
+      chat_view_->append(day_anchor(row.ts_ms) +
+                         file_bubble_html(row.name, row.text, row.file_meta,
+                                          row.ts_ms, row.outgoing));
     } else {
       chat_view_->append(day_anchor(row.ts_ms) +
                          bubble_html(row.name, row.text, row.ts_ms,
