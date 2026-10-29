@@ -623,10 +623,10 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 ### 桌面 · 对话框（已实现面，按原型收口偏差）
 
 - [ ] 与 prototypes/desktop-tasks.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/task_dialog.cpp`）
-- [ ] 与 prototypes/desktop-approval.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/approval_dialog.cpp`）
-- [ ] 与 prototypes/desktop-report.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/report_dialog.cpp`）
+- [x] 与 prototypes/desktop-approval.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/approval_dialog.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
+- [x] 与 prototypes/desktop-report.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/report_dialog.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
 - [ ] 与 prototypes/desktop-group-tools.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_tools_dialog.cpp`）
-- [ ] 与 prototypes/desktop-group-memo.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_memo_dialog.cpp`）
+- [x] 与 prototypes/desktop-group-memo.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_memo_dialog.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
 - [ ] 与 prototypes/desktop-group-vault.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_vault_dialog.cpp`）
 - [ ] 与 prototypes/desktop-group-ci.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_ci_dialog.cpp`）
 - [ ] 与 prototypes/desktop-group-pack.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_pack_dialog.cpp`）
@@ -634,8 +634,8 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [ ] 与 prototypes/desktop-group-record.html 逐屏比对一致(控件/布局/文案/间距)（`MainWindow::group_record_export_dialog`）
 - [ ] 与 prototypes/desktop-assist.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/assist_dialog.cpp`）
 - [ ] 与 prototypes/desktop-office-map.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/office_map_dialog.cpp`）
-- [ ] 与 prototypes/desktop-audit.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/audit_dialog.cpp`）
-- [ ] 与 prototypes/desktop-file-assistant.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/file_assistant.cpp`）
+- [x] 与 prototypes/desktop-audit.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/audit_dialog.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
+- [x] 与 prototypes/desktop-file-assistant.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/file_assistant.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
 
 ### 桌面 · 设置页
 
