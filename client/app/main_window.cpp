@@ -991,6 +991,11 @@ void MainWindow::build_ui() {
   head_ = head;
   auto* head_layout = new QHBoxLayout(head);
   head_layout->setContentsMargins(14, 10, 14, 10);
+  head_layout->setSpacing(10);
+  // 会话头像（原型 .chat-head .avatar.sm 28px 首字）：随会话与主题重刷
+  chat_avatar_ = new QLabel(head);
+  chat_avatar_->setFixedSize(28, 28);
+  chat_avatar_->setAlignment(Qt::AlignCenter);
   chat_title_ = new QLabel(QStringLiteral("直连态"), head);
   chat_meta_ = new QLabel(QStringLiteral("未选择设备"), head);
   auto* local_badge = new QLabel(QStringLiteral("本机保存"), head);
@@ -1040,11 +1045,68 @@ void MainWindow::build_ui() {
   close_chat_btn->setToolTip(QStringLiteral("关闭会话（回到列表态）"));
   connect(close_chat_btn, &QPushButton::clicked, this,
           &MainWindow::close_chat);
+  // 头部动作位（原型 .ch-actions 文件/更多）：文件走生产发文件路径；
+  // 更多＝既有会话操作菜单（按会话形态给真实项，不摆空钮）。语音无实现
+  // 不入面（台账近似项）
+  auto* head_file_btn = new QPushButton(QStringLiteral("📄"), head);
+  head_file_btn->setFlat(true);
+  head_file_btn->setFixedSize(30, 30);
+  head_file_btn->setCursor(Qt::PointingHandCursor);
+  head_file_btn->setToolTip(QStringLiteral("发送文件（点对点）"));
+  connect(head_file_btn, &QPushButton::clicked, this,
+          [this] { file_btn_->click(); });
+  auto* head_more_btn = new QPushButton(QStringLiteral("⋮"), head);
+  head_more_btn->setFlat(true);
+  head_more_btn->setFixedSize(30, 30);
+  head_more_btn->setCursor(Qt::PointingHandCursor);
+  head_more_btn->setToolTip(QStringLiteral("更多会话操作"));
+  connect(head_more_btn, &QPushButton::clicked, this, [this, btn = head_more_btn] {
+    QMenu menu(this);
+    const QString kind = current_kind_;
+    if (kind == QStringLiteral("group")) {
+      const quint64 gid = current_group_id();
+      if (gid) {
+        connect(menu.addAction(QStringLiteral("群资料…")),
+                &QAction::triggered, this,
+                [this, gid] { group_profile_dialog(gid); });
+        connect(menu.addAction(QStringLiteral("拉人进群…")),
+                &QAction::triggered, this,
+                [this, gid] { group_invite_dialog(gid); });
+        connect(menu.addAction(QStringLiteral("群公告编辑…")),
+                &QAction::triggered, this,
+                [this, gid] { group_announce_dialog(gid); });
+        connect(menu.addAction(QStringLiteral("导出群记录…")),
+                &QAction::triggered, this,
+                [this, gid] { group_record_export_dialog(gid); });
+      }
+      connect(menu.addAction(QStringLiteral("群工具…")), &QAction::triggered,
+              this, [this] {
+                if (!group_tools_dialog_) {
+                  group_tools_dialog_ = new GroupToolsDialog(this);
+                  group_tools_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+                }
+                group_tools_dialog_->show();
+                group_tools_dialog_->raise();
+                group_tools_dialog_->activateWindow();
+              });
+    } else {
+      QAction* nudge = menu.addAction(QStringLiteral("窗口抖动"));
+      connect(nudge, &QAction::triggered, this, [this] { nudge_btn_->click(); });
+      QAction* by_date = menu.addAction(QStringLiteral("按日期查看…"));
+      connect(by_date, &QAction::triggered, this, [this] { date_btn_->click(); });
+      QAction* search = menu.addAction(QStringLiteral("搜索本机记录…"));
+      connect(search, &QAction::triggered, this, [this] { chat_search_btn_->click(); });
+    }
+    menu.exec(btn->mapToGlobal(QPoint(0, btn->height())));
+  });
+  head_layout->addWidget(chat_avatar_);
   head_layout->addWidget(chat_title_);
   head_layout->addWidget(chat_meta_);
   head_layout->addStretch();
   head_layout->addWidget(local_badge);
   head_layout->addWidget(chat_search_btn);
+  head_layout->addWidget(head_file_btn);
+  head_layout->addWidget(head_more_btn);
   head_layout->addWidget(close_chat_btn);
 
   // 「未归档」语义标记：常驻不可关（留痕铁律的界面表达）；
@@ -1182,8 +1244,12 @@ void MainWindow::build_ui() {
   enter_hint->setStyleSheet(
       QStringLiteral("color:%1; font-size:11px;")
           .arg(ThemeManager::instance().tokens().text_muted.name()));
+  // 未归档口径小胶囊（原型 .input-foot .pill-outline「直连 · 无归档」）：
+  // 随形态换字，归档会话不挂
+  noarch_pill_ = new QLabel(input_row);
   input_layout->addWidget(input_box_, 1);
   input_layout->addWidget(enter_hint);
+  input_layout->addWidget(noarch_pill_);
   input_layout->addWidget(send_btn_);
 
   // 输入区固定说明条（原型 .input-note）：随形态换文案（update_banner 同
@@ -4020,6 +4086,21 @@ void MainWindow::set_autostart(bool on) {
 // 「消息不进归档」——切换与降级共用这一条提示（A7、A11 界面口径）。
 // 平台-7 降级显式化：DEGRADED 压过跨态（服务端不可达对本会话恒真，
 // 是更具体的口径——跨态细节由会话标记承载）；输入框提示随态同步。
+void MainWindow::update_chat_avatar() {
+  if (!chat_avatar_) return;
+  if (chat_avatar_src_.isEmpty()) {
+    chat_avatar_->clear();
+    chat_avatar_->setStyleSheet(QString());
+    return;
+  }
+  // 原型 .avatar.sm：28px 圆角 8、底＝名源哈希色、字＝on_brand 700
+  chat_avatar_->setText(avatar_initial(chat_avatar_src_));
+  chat_avatar_->setStyleSheet(
+      QStringLiteral("background:%1; color:%2; font-weight:700; "
+                     "font-size:12px; border-radius:8px;")
+          .arg(avatar_hue(chat_avatar_src_).name(), tk().on_brand.name()));
+}
+
 void MainWindow::update_banner() {
   // 协作单聊与服务端群聊都走服务端转发归档（T4.1 后者同口径）
   const bool collab_session =
@@ -4124,6 +4205,26 @@ void MainWindow::update_banner() {
                          "font-weight:700;")
               .arg(t.warning_wash.name(), t.warning.name(), t.warning.name()));
       local_badge_->show();
+    }
+  }
+  // 输入区未归档胶囊（原型 .input-foot .pill-outline）：文案随形态，
+  // 归档会话不挂
+  if (noarch_pill_) {
+    if (collab_session || current_peer_.isEmpty()) {
+      noarch_pill_->clear();
+      noarch_pill_->setStyleSheet(QString());
+    } else {
+      noarch_pill_->setText(
+          collab_degraded_
+              ? QStringLiteral("降级 · 未归档")
+              : (current_kind_ == QStringLiteral("direct") &&
+                         is_cross_state(current_peer_)
+                     ? QStringLiteral("跨态 · 未归档")
+                     : QStringLiteral("直连 · 无归档")));
+      noarch_pill_->setStyleSheet(
+          QStringLiteral("color:%1; border:1px solid %1; border-radius:999px; "
+                         "padding:2px 8px; font-size:11px;")
+              .arg(t.text_muted.name()));
     }
   }
 }
@@ -4783,17 +4884,21 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
 
   const bool collab = kind == QStringLiteral("collab");
   const bool group = kind == QStringLiteral("group");
+  QString avatar_src; // 头像取字源（原型 .chat-head .avatar.sm 首字）
   if (collab) {
     chat_title_->setText(id);
     chat_meta_->setText(QStringLiteral("%1 · 协作态 · 消息进入服务端归档")
                             .arg(id));
+    avatar_src = id;
   } else if (group) {
     // 服务端群会话（T4.1）：标题群名，公告与成员数入 meta
     const quint64 gid = id.mid(QStringLiteral("group:").size()).toULongLong();
     const GroupEntry g = groups_.value(gid);
-    chat_title_->setText(g.name.isEmpty()
-                             ? QStringLiteral("群 %1").arg(gid)
-                             : g.name);
+    const QString gname = g.name.isEmpty()
+                              ? QStringLiteral("群 %1").arg(gid)
+                              : g.name;
+    chat_title_->setText(gname);
+    avatar_src = gname;
     QString meta = QStringLiteral("%1 人 · 群 %2 · 协作态 · 消息进入服务端归档")
                        .arg(g.members.size())
                        .arg(gid);
@@ -4816,10 +4921,16 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
         QStringLiteral("%1 台设备 · 点对点扇出 · 消息不进归档；对端回复落在"
                        "与其的单聊会话")
             .arg(dgroup_members_.value(id).size()));
+    avatar_src = dgroup_title(id);
   } else {
     const Peer p = direct_engine_.peer(id.toStdString());
     const QString name = p.name.empty() ? id.left(8) : QString::fromStdString(p.name);
-    chat_title_->setText(name);
+    // 原型行名「人名 · 设备名」：对端登录账号即人名位（未登录＝纯设备名）
+    const QString account = QString::fromStdString(p.account);
+    chat_title_->setText(account.isEmpty()
+                             ? name
+                             : QStringLiteral("%1 · %2").arg(account, name));
+    avatar_src = account.isEmpty() ? name : account;
     // 平台-7：降级态 meta 固定「已降级 · 未归档」前缀（服务端不可达对本
     // 会话恒真，压过跨态——更具体的口径）；T4.2 跨态次之（A7）
     if (collab_degraded_) {
@@ -4836,6 +4947,8 @@ void MainWindow::open_chat(const QString& kind, const QString& id) {
               .arg(p.address.toString(), QString::number(p.tcp_port)));
     }
   }
+  chat_avatar_src_ = avatar_src;
+  update_chat_avatar();
   update_banner();
 
   // 需求批⑧：筛选态与挂起跳转只属于当前会话——换会话即复位
@@ -4892,9 +5005,9 @@ void MainWindow::render_open_history() {
               .arg(esc(chat_title_->text()))
               .arg(dgroup_members_.value(id).size()));
     } else {
+      // 原型 .sys-hint 胶囊口径：发现方式＋不归档（2026-10-30 对齐文案）
       append_system_line(
-          QStringLiteral("已与 %1 建立点对点会话 · 本对话不归档")
-              .arg(esc(chat_title_->text())));
+          QStringLiteral("已通过 UDP 广播发现对方 · 本对话不归档"));
     }
   }
   for (const StoredMessage& m : hist) {
@@ -5324,8 +5437,14 @@ void MainWindow::apply_theme_styles() {
              t.selection.name(), t.text.name()));
   }
   if (head_) {
+    // 原型 .ch-actions .icon-btn：30px 圆角 8 透明描边、悬停浮面底
     head_->setStyleSheet(
-        QStringLiteral("background:%1;").arg(t.surface_raised.name()));
+        QStringLiteral(
+            "background:%1;"
+            "QPushButton { border:none; border-radius:8px; color:%2; }"
+            "QPushButton:hover { background:%3; }")
+            .arg(t.surface_raised.name(), t.text_muted.name(),
+                 t.surface_alt.name()));
   }
   if (chat_title_) {
     chat_title_->setStyleSheet(
@@ -5336,6 +5455,7 @@ void MainWindow::apply_theme_styles() {
     chat_meta_->setStyleSheet(
         QStringLiteral("color:%1; font-size:12px;").arg(t.text_muted.name()));
   }
+  update_chat_avatar(); // on_brand 随主题，头像字色须重取
   if (local_badge_) {
     local_badge_->setStyleSheet(
         QStringLiteral("background:%1; color:%2; border-radius:8px; "

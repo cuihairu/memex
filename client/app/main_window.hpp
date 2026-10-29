@@ -363,6 +363,7 @@ private:
   void event_notify(bool enabled, SoundEvent ev, const QString& title,
                     const QString& text);
   void update_banner();          // 按当前形态切换归档提示条
+  void update_chat_avatar();     // 会话头像按源字＋当前令牌重刷（主题切换重取色）
   void seed_collab_peers();      // 登录后从本地库补入历史协作会话
   void show_collab_login_dialog();
   void show_conn_settings_dialog(); // 连接设置：域名解析覆盖（部署批 424）
@@ -567,8 +568,11 @@ private:
   QListWidget* device_list_{nullptr};
   QLabel* chat_title_{nullptr};
   QLabel* chat_meta_{nullptr};
+  QLabel* chat_avatar_{nullptr};   // 会话头像（原型 .chat-head .avatar.sm）
+  QString chat_avatar_src_;        // 头像取字源（随会话换；主题重刷取色用）
   QLabel* banner_{nullptr}; // 归档提示条（objectName: mode_banner）
   QLabel* input_note_{nullptr}; // 输入区固定说明条（原型 .input-note：随形态
+  QLabel* noarch_pill_{nullptr}; // 输入区未归档胶囊（原型 .input-foot .pill-outline）
                                 // 换文案；跨态/直连＝警示底，协作＝素底）
   QTextBrowser* chat_view_{nullptr};
   QLineEdit* input_box_{nullptr};

@@ -315,7 +315,8 @@ void test_end_to_end() {
   CHECK(wait_until([&] { return window.has_direct_peer(peer_id); }, 10000));
 
   window.open_direct_peer(peer_id);
-  CHECK(window.chat_html().contains(QStringLiteral("点对点会话")));
+  // 系统胶囊行文案 2026-10-30 对齐原型 desktop-direct-chat.html（sys-hint）
+  CHECK(window.chat_html().contains(QStringLiteral("已通过 UDP 广播发现对方")));
 
   // 注入截屏（测试缝：跳过真实取屏）→ 标注窗出现
   QPixmap fake(1200, 800);
