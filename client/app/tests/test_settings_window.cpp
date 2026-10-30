@@ -164,6 +164,27 @@ int main(int argc, char** argv) {
     CHECK(!sw0.autostart_checked());
   }
 
+  // —— ⑦b 账号页：无服务端＝未登录诚实态（头像空位＋「未登录」＋登录态
+  //    行置灰）；控件齐三组结构 ——
+  {
+    CHECK(sw.show_page(QStringLiteral("account")));
+    auto* name =
+        sw.findChild<QLineEdit*>(QStringLiteral("settings_acct_name"));
+    auto* avatar_btn =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_acct_avatar_btn"));
+    auto* logout_btn =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_acct_logout_btn"));
+    CHECK(name);
+    CHECK(avatar_btn);
+    CHECK(logout_btn);
+    if (name && avatar_btn && logout_btn) {
+      CHECK(name->text() == QStringLiteral("未登录"));
+      CHECK(!avatar_btn->isEnabled());
+      CHECK(!logout_btn->isEnabled());
+    }
+    CHECK(sw.show_page(QStringLiteral("general")));
+  }
+
   // —— ⑧ 文档站实况抓图（grab_pair 同式：亮暗各一、抓完显式回亮）——
   {
     const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
@@ -179,6 +200,23 @@ int main(int argc, char** argv) {
     QThread::msleep(120);
     QApplication::processEvents(QEventLoop::AllEvents, 30);
     CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-general-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+
+    // 账号页抓图（未登录诚实态：头像空位＋「未登录」＋三组结构；登录态下
+    // 头像/昵称/退出登录随真实状态回填，同布局）
+    CHECK(sw.show_page(QStringLiteral("account")));
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.page_title() == QStringLiteral("账号"));
+    tm.apply(qApp);
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-account-light.png")));
+    tm.set_mode(QStringLiteral("dark"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-account-dark.png")));
     tm.set_mode(QStringLiteral("light"));
     QThread::msleep(120);
     QApplication::processEvents(QEventLoop::AllEvents, 30);

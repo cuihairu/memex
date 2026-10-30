@@ -11,9 +11,11 @@
 
 class QCheckBox;
 class QComboBox;
+class QLabel;
 class QLineEdit;
 class QListWidget;
 class QPushButton;
+class QShowEvent;
 class QStackedWidget;
 
 namespace memex::client {
@@ -41,8 +43,11 @@ class SettingsWindow : public QDialog {
  private:
   void build_ui();
   QWidget* build_general_page();
+  QWidget* build_account_page();
   QWidget* build_stub_page(const QString& title, const QString& sub,
                            const QString& note);
+  void refresh_account_page(); // 头像/昵称/登录态开关按真实状态回填
+  void showEvent(QShowEvent* e) override;
 
   MainWindow* win_;
   QListWidget* nav_ = nullptr;
@@ -52,6 +57,12 @@ class SettingsWindow : public QDialog {
   QCheckBox* autostart_check_ = nullptr;
   QPushButton* shortcut_btn_ = nullptr;
   QLineEdit* download_dir_ = nullptr;
+  // 账号页控件
+  QLabel* acct_avatar_ = nullptr;   // 头像（42px 圆角；登录态回填）
+  QLineEdit* acct_name_ = nullptr;  // 昵称只读字段
+  QPushButton* acct_avatar_btn_ = nullptr;  // 更换头像（登录门＋文件面门）
+  QPushButton* acct_profile_btn_ = nullptr; // 编辑资料（签名编辑对话框）
+  QPushButton* acct_logout_btn_ = nullptr;  // 退出登录
 };
 
 } // namespace memex::client

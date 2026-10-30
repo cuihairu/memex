@@ -2302,6 +2302,22 @@ void MainWindow::logout_collab() {
   refresh_devices();
 }
 
+QString MainWindow::self_account() const {
+  return collab_engine_.account();
+}
+
+QString MainWindow::self_display_name() const {
+  const QString n = roster_display(collab_engine_.account());
+  return n.isEmpty() ? collab_engine_.account() : n;
+}
+
+QPixmap MainWindow::self_avatar(int size) const {
+  const QString acc = collab_engine_.account();
+  if (acc.isEmpty()) return {};
+  // 与 rail 自头像同源（main_window.cpp:7907 同式）
+  return avatar_for(acc, member_avatar_ver_.value(acc), size);
+}
+
 void MainWindow::open_collab_peer(const QString& account) {
   if (account.isEmpty()) return;
   if (account.startsWith(QStringLiteral("group:"))) { // 历史群会话键

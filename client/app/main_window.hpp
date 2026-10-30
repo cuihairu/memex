@@ -8,6 +8,7 @@
 #include <QDialog>
 #include <QHash>
 #include <QLabel>
+#include <QPixmap>
 #include <QPointer>
 #include <QLineEdit>
 #include <QListWidget>
@@ -62,6 +63,9 @@ class SettingsWindow;
 class FilesClient;
 
 class MainWindow : public QMainWindow {
+  // 二期·设置窗口需触发主窗私设入口（更换头像／编辑资料签名框）
+  friend class SettingsWindow;
+
 public:
   explicit MainWindow(QWidget* parent = nullptr);
 
@@ -71,6 +75,10 @@ public:
                     const QString& password);
   // 登出协作态，回到直连态（本地历史保留，合并展示不受影响）。
   void logout_collab();
+  // —— 二期·设置窗口账号页数据源（当前登录态）——
+  QString self_account() const;        // 当前协作账号（未登录＝空）
+  QString self_display_name() const;   // 通讯录显示名（未下发＝账号）
+  QPixmap self_avatar(int size) const; // 当前账号头像（未登录＝空）
   // 打开（或发起）与某账号的协作会话。
   void open_collab_peer(const QString& account);
   // 按当前会话形态路由发送；true=已受理（回执异步）。
