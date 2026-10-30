@@ -26,10 +26,12 @@
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QGraphicsOpacityEffect>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QIcon>
 #include <QInputDialog>
+#include <QPlainTextEdit>
 #include <QTextEdit>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -5013,24 +5015,56 @@ void MainWindow::group_record_export_dialog(quint64 group_id) {
   const auto it = groups_.find(group_id);
   if (it == groups_.end()) return;
   QDialog dlg(this);
-  dlg.setWindowTitle(QStringLiteral("导出群记录（群 %1）").arg(group_id));
-  dlg.resize(480, 240);
-  auto* form = new QFormLayout(&dlg);
+  dlg.setWindowTitle(QStringLiteral("导出群记录（群 %1 · %2）")
+                         .arg(QString::number(group_id), it->name));
+  dlg.resize(980, 620);
+  auto* root = new QVBoxLayout(&dlg);
+  root->setContentsMargins(12, 12, 12, 12);
+  root->setSpacing(8);
+  // 双栏 split（原型 .split）：左导出区间表单列＋右产物结构参考列
+  auto* split = new QHBoxLayout;
+  split->setSpacing(8);
+  auto* form_col = new QWidget(&dlg);
+  form_col->setFixedWidth(360);
+  auto* form_col_lay = new QVBoxLayout(form_col);
+  form_col_lay->setContentsMargins(0, 0, 0, 0);
+  form_col_lay->setSpacing(8);
+
+  // 区间头（原型 .eh）
+  {
+    auto* eh = new QLabel(QStringLiteral("导出区间（群右键「导出群记录…」）"),
+                          form_col);
+    QFont f = eh->font();
+    f.setBold(true);
+    eh->setFont(f);
+    form_col_lay->addWidget(eh);
+  }
+  auto* form = new QFormLayout();
+  form->setLabelAlignment(Qt::AlignLeft);
   auto* from_edit =
-      new QDateTimeEdit(QDateTime::currentDateTime().addDays(-7), &dlg);
+      new QDateTimeEdit(QDateTime::currentDateTime().addDays(-7), form_col);
   from_edit->setCalendarPopup(true);
   from_edit->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
   form->addRow(QStringLiteral("起始时间（含）"), from_edit);
-  auto* to_edit = new QDateTimeEdit(QDateTime::currentDateTime(), &dlg);
+  auto* to_edit = new QDateTimeEdit(QDateTime::currentDateTime(), form_col);
   to_edit->setCalendarPopup(true);
   to_edit->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
   form->addRow(QStringLiteral("截止时间（含）"), to_edit);
+  form_col_lay->addLayout(form);
   auto* cb_ai = new QCheckBox(
-      QStringLiteral("生成 AI 总结（未接线则自动降级为普通文档）"), &dlg);
-  form->addRow(QStringLiteral("总结档"), cb_ai);
-  auto* progress = new QLabel(QStringLiteral("尚未导出"), &dlg);
-  form->addRow(QStringLiteral("进度"), progress);
-  auto* buttons = new QDialogButtonBox(&dlg);
+      QStringLiteral("生成 AI 总结（未接线则自动降级为普通文档）"), form_col);
+  form_col_lay->addWidget(cb_ai);
+
+  // 进度区（原型 .progress：进度文＋可中断续传注）
+  auto* progress = new QLabel(QStringLiteral("尚未导出"), form_col);
+  progress->setWordWrap(true);
+  form_col_lay->addWidget(progress);
+  form_col_lay->addWidget(new QLabel(
+      QStringLiteral("可中断：中断后按 after_id 续传，不重导已导页"),
+      form_col));
+
+  // 按钮行（原型 .btnrow：开始导出／保存为 Markdown…／关闭）
+  auto* buttons = new QDialogButtonBox(form_col);
   auto* btn_start = buttons->addButton(QStringLiteral("开始导出"),
                                        QDialogButtonBox::ActionRole);
   auto* btn_save = buttons->addButton(QStringLiteral("保存为 Markdown…"),
@@ -5038,7 +5072,71 @@ void MainWindow::group_record_export_dialog(quint64 group_id) {
   auto* btn_close =
       buttons->addButton(QStringLiteral("关闭"), QDialogButtonBox::RejectRole);
   btn_save->setEnabled(false);
-  form->addRow(buttons);
+  form_col_lay->addWidget(buttons);
+  Q_UNUSED(btn_close);
+
+  // 导出完成态卡（原型 .card2：完成口径＋truncated 续传游标）
+  auto* done_card = new QGroupBox(QStringLiteral("导出完成态"), form_col);
+  auto* done_lay = new QVBoxLayout(done_card);
+  done_lay->setSpacing(2);
+  auto* done_lbl = new QLabel(QStringLiteral("（尚未导出）"), done_card);
+  done_lbl->setWordWrap(true);
+  done_lay->addWidget(done_lbl);
+  form_col_lay->addWidget(done_card);
+
+  // 权限/审计说明条（原型 .note）
+  {
+    auto* n = new QLabel(
+        QStringLiteral("权限：群成员均可导出，非成员 403。\n审计：每次导出写"
+                       "一条审计行（谁 / 何时 / 哪个群 / 区间 / 条数 / AI 标"
+                       "记），管理台可查。"),
+        form_col);
+    n->setWordWrap(true);
+    form_col_lay->addWidget(n);
+  }
+  form_col_lay->addStretch(1);
+  split->addWidget(form_col);
+
+  // 右列（原型 .ref-col：产物结构参考；导出完成后载真实 md 预览）
+  auto* ref_col = new QWidget(&dlg);
+  auto* ref_lay = new QVBoxLayout(ref_col);
+  ref_lay->setContentsMargins(0, 0, 0, 0);
+  ref_lay->setSpacing(8);
+  {
+    auto* h = new QHBoxLayout;
+    auto* t = new QLabel(
+        QStringLiteral("导出产物结构（Markdown，非本窗）"), ref_col);
+    QFont f = t->font();
+    f.setBold(true);
+    t->setFont(f);
+    h->addWidget(t);
+    h->addWidget(new QLabel(
+        QStringLiteral("三段固定 · 撤回带标记 · 不静默截断"), ref_col));
+    h->addStretch(1);
+    ref_lay->addLayout(h);
+  }
+  auto* doc = new QPlainTextEdit(ref_col);
+  doc->setReadOnly(true);
+  doc->setPlaceholderText(QStringLiteral(
+      "（导出完成后此处载入真实产物预览；结构＝# 群记录导出 / ## 参与者 / "
+      "## 时间范围 / ## 聊天记录 三段固定；撤回行带（撤回）标记；触顶尾"
+      "部 truncated 标注＋续传 after_id）"));
+  ref_lay->addWidget(doc, 1);
+  {
+    auto* box = new QGroupBox(QStringLiteral("与群配置快照的区别"), ref_col);
+    auto* lay = new QVBoxLayout(box);
+    lay->setSpacing(2);
+    auto* n = new QLabel(
+        QStringLiteral("群配置快照（「群打包 / 导出」）＝配置面（工具白名单"
+                       " / 凭据状态 / 成员表，不含消息）；本导出＝消息归档正"
+                       "文（参与者 + 时间范围 + 聊天记录），两者互不覆盖。"),
+        box);
+    n->setWordWrap(true);
+    lay->addWidget(n);
+    ref_lay->addWidget(box);
+  }
+  split->addWidget(ref_col, 1);
+  root->addLayout(split, 1);
 
   // 导出会话状态（逐页累积；随对话框销毁自动作废）
   struct ExportState {
@@ -5055,6 +5153,10 @@ void MainWindow::group_record_export_dialog(quint64 group_id) {
 
   auto finish = [&](const QString& msg, bool can_save) {
     progress->setText(msg);
+    done_lbl->setText(msg);
+    if (can_save && !st->md.isEmpty()) {
+      doc->setPlainText(st->md); // 右栏载真实产物预览（非示意文）
+    }
     btn_start->setEnabled(true);
     btn_save->setEnabled(can_save);
   };
