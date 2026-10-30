@@ -29,7 +29,7 @@
 | `mobile-init.html` | `.../ui/InitActivity.kt`、`LoginActivity.kt` + `activity_init.xml`、`activity_login.xml` | 已对齐 | 服务器地址初始化 + 登录 |
 | `mobile-me.html` | `.../ui/MeActivity.kt` + `activity_me.xml` | 已对齐 | 移动端「我」 |
 | `mobile-sessions.html` | `.../ui/MainActivity.kt` + `activity_main.xml` | 已对齐 | 移动端会话列表 |
-| `settings-general.html` | `client/app/theme_settings_page.cpp`、`theme_pack.cpp`、`brand_settings_page.cpp`（推断映射） | 有偏差 | 主题/主题包/品牌；原型含品牌色板示意 |
+| `settings-general.html` | `client/app/settings_window.cpp`（统一设置窗口·通用页；rail 齿轮入口 `main_window.cpp::show_settings_window`） | 已对齐 | 2026-10-30 落地：rail 齿轮开统一设置窗口（1120×720 QDialog）——侧栏「设置」组头＋五项导航（通用/账号/消息/隐私/高级；brand_tint 选中左条，亮暗随令牌重刷）＋通用页按原型分组（外观：主题/界面字号；偏好：语言/快捷键/登录后自动启动/下载位置）逐行对齐。已实现行真实接线：主题 QComboBox→`ThemeManager::set_mode`（跟随系统/亮色/暗色，即时生效持久化）；快捷键按钮→`ShortcutSettingsDialog`（判权/冲突检测权威在主窗）；登录后自动启动 QCheckBox→`MainWindow::set_autostart`（freedesktop 自启动项，`MEMEX_TEST_AUTOSTART_DIR` 隔离）；下载位置只读真实系统下载目录。未实现行置灰＋「未提供」注（界面字号全局缩放／语言多语言／下载位置更改）——诚实降级不造假控件。近似项：独立 QDialog 对话框（原型为主窗内整窗视图含 rail/标题栏；齿轮入口在主窗 rail，rail 不重复内嵌）；组头为标准 QGroupBox 标题浮于上边（原型 panel-2 通栏头条）；下载位置显示绝对真实路径（原型示意「~/Downloads/Memex」）；未实现行 sub 追加「未提供」注（原型 sub 为占位文案）；原生窗口标题栏「设置」（原型 42px 自绘标题栏含 logo）；暗色抓图输入控件底色随应用主题既有渲染（同其余对齐对话框口径） |
 | `settings-account.html` | `client/app/main_window.cpp:4998`「个人资料 · 个性签名」+ 登录设备管理（推断映射） | 有偏差 | 账号与设备 |
 | `settings-message.html` | `client/app/main_window.cpp:1722`「表情」+ `emoji_pack_dialog.cpp`（推断映射） | 有偏差 | 表情/截图偏好 |
 | `settings-privacy.html` | `client/app/away_settings.cpp`、`lock_screen.cpp`、`notify_prefs.cpp`（推断映射） | 有偏差 | 离开/锁屏/通知偏好 |
@@ -52,7 +52,7 @@
 | `mobile-mailbox.html` | ——（`apps/android/` 下无 MailboxActivity） | **未实现** | 移动端邮箱面，与桌面邮箱同设计 |
 | `mobile-tasks.html` | `apps/android/.../ui/TasksActivity.kt` + `res/layout/activity_tasks.xml` | 有偏差 | 列表 + 横滑看板（列宽 160dp，<600dp 自动降级） |
 
-**统计**：原型 36 张（桌面 23 / 移动 4 / 设置 5 / 空态参考 1 / 管理台 1）；已对齐 16、有偏差 18、未实现 2。
+**统计**：原型 36 张（桌面 23 / 移动 4 / 设置 5 / 空态参考 1 / 管理台 1）；已对齐 17、有偏差 17、未实现 2。
 
 ## 留痕铁律（所有涉及归档的界面统一适用）
 

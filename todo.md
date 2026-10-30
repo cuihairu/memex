@@ -639,7 +639,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ### 桌面 · 设置页
 
-- [ ] 与 prototypes/settings-general.html 逐屏比对一致(控件/布局/文案/间距)（主题/主题包/品牌）
+- [x] 与 prototypes/settings-general.html 逐屏比对一致(控件/布局/文案/间距)（主题/主题包/品牌）（803a188 统一设置窗口·通用页：侧栏五项导航＋通用页外观/偏好分组逐行对齐——主题→ThemeManager、快捷键→快捷键设置对话框、登录后自动启动→freedesktop 自启动项、下载位置只读真实目录；界面字号/语言/更改置灰＋未提供注；账号/消息/隐私/高级占位页待 643-646；test_settings_window 86/86 绿）
 - [ ] 与 prototypes/settings-account.html 逐屏比对一致(控件/布局/文案/间距)（账号与设备）
 - [ ] 与 prototypes/settings-message.html 逐屏比对一致(控件/布局/文案/间距)（表情/截图偏好）
 - [ ] 与 prototypes/settings-privacy.html 逐屏比对一致(控件/布局/文案/间距)（离开/锁屏/通知偏好）
