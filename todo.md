@@ -641,7 +641,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 - [x] 与 prototypes/settings-general.html 逐屏比对一致(控件/布局/文案/间距)（主题/主题包/品牌）（803a188 统一设置窗口·通用页：侧栏五项导航＋通用页外观/偏好分组逐行对齐——主题→ThemeManager、快捷键→快捷键设置对话框、登录后自动启动→freedesktop 自启动项、下载位置只读真实目录；界面字号/语言/更改置灰＋未提供注；账号/消息/隐私/高级占位页待 643-646；test_settings_window 86/86 绿）
 - [x] 与 prototypes/settings-account.html 逐屏比对一致(控件/布局/文案/间距)（账号与设备）（7881b64 统一设置窗口·账号页：个人资料（头像 42px 圆角＋更换头像→change_avatar、昵称只读＋编辑资料→show_profile_dialog）＋安全与设备（账号安全/设备管理置灰未提供）＋登录状态（退出登录→logout_collab 回直连态即时回填）；头像/昵称/登录态随真实登录状态回填，未登录诚实态；test_settings_window 86/86 绿）
-- [ ] 与 prototypes/settings-message.html 逐屏比对一致(控件/布局/文案/间距)（表情/截图偏好）
+- [x] 与 prototypes/settings-message.html 逐屏比对一致(控件/布局/文案/间距)（表情/截图偏好）（611545f 统一设置窗口·消息页：通知方式四开关＋提示音三档走 NotifyPrefs load→改→save（只动本页字段，分级/全屏/传输完成/声音子位原值保留）、免打扰 dnd＋22:00–08:00 时段、已读回执→receipts/send_read 全局键、迁移备份置灰「暂未提供」；默认态＝原型展示态；test_settings_window 86/86 绿）
 - [ ] 与 prototypes/settings-privacy.html 逐屏比对一致(控件/布局/文案/间距)（离开/锁屏/通知偏好）
 - [ ] 与 prototypes/settings-advanced.html 逐屏比对一致(控件/布局/文案/间距)（网络与远程/快捷键/连接）
 
