@@ -731,10 +731,13 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 
-  # 二期·统一设置窗口冒烟（settings-general）：无服务端真 MainWindow 独立
-  # 构造（同 test_window_layout）——五页导航堆叠＋通用页真实接线（主题→
-  # ThemeManager、快捷键→主窗口径、开机启动→freedesktop 文件隔离、下载
-  # 位置只读）＋四页诚实占位；win 空＝行置灰；亮暗实况抓图入 docs。
+  # 二期·统一设置窗口冒烟（settings-general/account/message/privacy/
+  # advanced）：无服务端真 MainWindow 独立构造（同 test_window_layout）——
+  # 五页导航堆叠＋逐页真实接线（主题→ThemeManager、快捷键→主窗口径、开机
+  # 启动→freedesktop 文件隔离、下载位置只读、通知/免打扰→NotifyPrefs、
+  # 已读回执→主窗全局键、黑名单/锁屏/连接设置/关于→主窗共用入口或真实键）；
+  # win 空＝行置灰；亮暗实况抓图入 docs（MEMEX_VERSION 同主目标口径）。
+
   add_executable(test_settings_window
     app/tests/test_settings_window.cpp
     app/settings_window.cpp
@@ -789,7 +792,8 @@ if(MEMEX_BUILD_TESTS)
     OpenSSL::Crypto)
   target_compile_definitions(test_settings_window PRIVATE
     MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
-    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots"
+    MEMEX_VERSION="${PROJECT_VERSION}")
   add_test(NAME settings_window COMMAND test_settings_window)
   set_tests_properties(settings_window PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"

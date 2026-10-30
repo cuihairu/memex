@@ -6,7 +6,9 @@
 // 权威在主窗）；消息页通知/免打扰/提示音走 NotifyPrefs（load→改→save，
 // 只动本页字段，不碰未展示的分级/全屏/传输完成/声音子位），已读回执走
 // MainWindow（空 peer＝全局）；隐私页网段黑名单/离开锁屏走 MainWindow
-// 共用入口，存储说明列真实本机数据目录。
+// 共用入口，存储说明列真实本机数据目录；高级页网段黑名单开关走
+// net_blacklist 真实键，域名解析覆盖/关于走 MainWindow 共用入口，版本标签
+// 列真实安装版本，代理/开发者选项/运行日志置灰「暂未提供」。
 #pragma once
 
 #include <QDialog>
@@ -61,8 +63,7 @@ class SettingsWindow : public QDialog {
   QWidget* build_account_page();
   QWidget* build_message_page();
   QWidget* build_privacy_page();
-  QWidget* build_stub_page(const QString& title, const QString& sub,
-                           const QString& note);
+  QWidget* build_advanced_page();
   void refresh_account_page(); // 头像/昵称/登录态开关按真实状态回填
   void showEvent(QShowEvent* e) override;
 
@@ -90,6 +91,8 @@ class SettingsWindow : public QDialog {
   QTimeEdit* msg_dnd_start_ = nullptr;      // dnd_start "HH:mm"
   QTimeEdit* msg_dnd_end_ = nullptr;        // dnd_end "HH:mm"
   QCheckBox* msg_read_receipt_ = nullptr;   // receipts/send_read（空 peer）
+  // 高级页控件
+  QCheckBox* adv_blacklist_ = nullptr;      // net_blacklist 真实键开关
 };
 
 } // namespace memex::client

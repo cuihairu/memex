@@ -1,13 +1,15 @@
 // 二期·统一设置窗口冒烟（原型 settings-general/account/message/privacy
-// .html）：侧栏导航五页堆叠（通用/账号/消息/隐私/高级）＋通用页真实接线
-// （主题下拉→ThemeManager、截图快捷键→MainWindow::screenshot_shortcut、
-// 开机启动→set_autostart（freedesktop 文件，MEMEX_TEST_AUTOSTART_DIR 隔离）、
-// 下载位置只读真实目录；界面字号/语言置灰「未提供」）＋账号页登录态回填
-// ＋消息页 NotifyPrefs 直写（load→改→save 保未展示字段；已读回执走主窗
-// receipts/send_read 全局键；迁移备份置灰「暂未提供」）＋隐私页主窗共用
-// 入口（网段黑名单/离开锁屏点击真开对话框；存储说明列真实本机目录）＋
-// 高级页诚实占位。无服务端（MainWindow 独立构造，同 test_window_layout）；
-// 离屏。
+// /advanced.html）：侧栏导航五页堆叠（通用/账号/消息/隐私/高级）＋通用页
+// 真实接线（主题下拉→ThemeManager、截图快捷键→
+// MainWindow::screenshot_shortcut、开机启动→set_autostart（freedesktop
+// 文件，MEMEX_TEST_AUTOSTART_DIR 隔离）、下载位置只读真实目录；界面字号/
+// 语言置灰「未提供」）＋账号页登录态回填＋消息页 NotifyPrefs 直写
+// （load→改→save 保未展示字段；已读回执走主窗 receipts/send_read 全局键；
+// 迁移备份置灰「暂未提供」）＋隐私页主窗共用入口（网段黑名单/离开锁屏
+// 点击真开对话框；存储说明列真实本机目录）＋高级页三组接线（网段黑名单
+// 开关→net_blacklist 真实键直写；版本标签列 MEMEX_VERSION；域名解析覆盖/
+// 关于按钮接主窗入口但不点击——目标对话框 exec() 模态会卡死离屏测试）。
+// 无服务端（MainWindow 独立构造，同 test_window_layout）；离屏。
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -29,6 +31,7 @@
 
 #include <app/away_settings.hpp>
 #include <app/main_window.hpp>
+#include <app/net_guard.hpp>
 #include <app/net_remote_settings.hpp>
 #include <app/notify_prefs.hpp>
 #include <app/settings_window.hpp>
@@ -333,6 +336,51 @@ int main(int argc, char** argv) {
     CHECK(sw.show_page(QStringLiteral("general")));
   }
 
+  // —— ⑦e 高级页：黑名单开关→net_blacklist 真实键；版本标签＝真实
+  //    MEMEX_VERSION；代理/开发者选项/运行日志置灰「暂未提供」；域名解析
+  //    覆盖/关于按钮可用但不点击（exec() 模态卡死离屏测试）——
+  {
+    CHECK(sw.show_page(QStringLiteral("advanced")));
+    CHECK(sw.page_title() == QStringLiteral("高级"));
+    auto* proxy_btn =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_adv_proxy"));
+    auto* dns_btn =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_adv_dns"));
+    auto* dev_btn =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_adv_dev"));
+    auto* log_btn =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_adv_log"));
+    auto* about_btn =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_adv_about"));
+    auto* blacklist =
+        sw.findChild<QCheckBox*>(QStringLiteral("settings_adv_blacklist"));
+    auto* ver_tag =
+        sw.findChild<QLabel*>(QStringLiteral("settings_adv_ver_tag"));
+    CHECK(proxy_btn);
+    CHECK(dns_btn);
+    CHECK(dev_btn);
+    CHECK(log_btn);
+    CHECK(about_btn);
+    CHECK(blacklist);
+    CHECK(ver_tag);
+    if (proxy_btn) CHECK(!proxy_btn->isEnabled()); // 无代理配置面
+    if (dev_btn) CHECK(!dev_btn->isEnabled());     // 无开发者选项面板
+    if (log_btn) CHECK(!log_btn->isEnabled());     // 本版不写日志文件
+    if (dns_btn) CHECK(dns_btn->isEnabled()); // 模态对话框：只验结构不点击
+    if (about_btn) CHECK(about_btn->isEnabled());
+    if (ver_tag)
+      CHECK(ver_tag->text() == QStringLiteral(MEMEX_VERSION));
+    if (blacklist) {
+      CHECK(blacklist->isChecked() ==
+            memex::client::net_blacklist::enabled()); // 建页回读真实键
+      blacklist->setChecked(true);
+      CHECK(memex::client::net_blacklist::enabled()); // 直写同一键
+      blacklist->setChecked(false); // 还原默认关（抓图态＝原型 toggle off）
+      CHECK(!memex::client::net_blacklist::enabled());
+    }
+    CHECK(sw.show_page(QStringLiteral("general")));
+  }
+
   // —— ⑧ 文档站实况抓图（grab_pair 同式：亮暗各一、抓完显式回亮）——
   {
     const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
@@ -398,6 +446,22 @@ int main(int argc, char** argv) {
     QThread::msleep(120);
     QApplication::processEvents(QEventLoop::AllEvents, 30);
     CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-privacy-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+
+    // 高级页抓图（默认态＝原型展示态：黑名单开关关、版本标签真实版本号）
+    CHECK(sw.show_page(QStringLiteral("advanced")));
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.page_title() == QStringLiteral("高级"));
+    tm.apply(qApp);
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-advanced-light.png")));
+    tm.set_mode(QStringLiteral("dark"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-advanced-dark.png")));
     tm.set_mode(QStringLiteral("light"));
     QThread::msleep(120);
     QApplication::processEvents(QEventLoop::AllEvents, 30);
