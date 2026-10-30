@@ -70,6 +70,10 @@ class GroupServerDialog : public QDialog {
   QLineEdit* srv_host_;
   QLineEdit* token_;
   QLabel* status_;
+  // 原型 desktop-group-servers conn-row 右上「已连接」徽章＋「群号 N」位
+  // （过渡消息仍走底部状态行）
+  QLabel* conn_badge_{nullptr};
+  QLabel* gid_tag_{nullptr};
   QListWidget* servers_;
   QListWidget* sessions_;
   QLineEdit* cmd_;

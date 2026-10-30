@@ -8,6 +8,7 @@
 // test_files_api 与 test_agent，不在此重复。
 #include <QApplication>
 #include <QColor>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QLineEdit>
 #include <QListWidget>
@@ -19,6 +20,7 @@
 #include <functional>
 
 #include <app/group_server_dialog.hpp>
+#include <app/theme.hpp>
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
 
@@ -291,6 +293,31 @@ int main(int argc, char** argv) {
            member.session_list_widget()->item(1)->text().contains(
                QStringLiteral("已收尾"));
   }, 8000));
+
+  // 文档站实况抓图（test_live_shots grab_pair 同式——亮暗各一、抓完显式
+  // 回亮）。owner 面：两台服务器红绿灯（web-1 agent 在线绿·真心跳指标，
+  // db-1 从未打点红）＋右栏会话留痕两笔（alice 进行中、bob 已收尾）＋
+  // 发起会话卡的已兑现本地命令框。
+  {
+    const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+    CHECK(QDir().mkpath(dir));
+    owner.show();
+    QApplication::processEvents();
+    auto& tm = memex::client::ThemeManager::instance();
+    tm.apply(qApp);
+    QThread::msleep(120);
+    QApplication::processEvents();
+    CHECK(owner.grab().save(
+        dir + QStringLiteral("/live-group-servers-light.png")));
+    tm.set_mode(QStringLiteral("dark"));
+    QThread::msleep(120);
+    QApplication::processEvents();
+    CHECK(owner.grab().save(
+        dir + QStringLiteral("/live-group-servers-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents();
+  }
 
   server.terminate();
   server.waitForFinished(3000);

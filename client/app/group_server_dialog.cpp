@@ -4,6 +4,8 @@
 
 #include <QColor>
 #include <QDateTime>
+#include <QFont>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QJsonObject>
 #include <QLabel>
@@ -60,7 +62,7 @@ bool spawn_ssh_terminal(const QString& host) {
 
 GroupServerDialog::GroupServerDialog(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("群服务器"));
-  resize(640, 560);
+  resize(1000, 640);
   client_ = new FilesClient(this);
   build_ui();
 
@@ -68,6 +70,11 @@ GroupServerDialog::GroupServerDialog(QWidget* parent) : QDialog(parent) {
     set_status(QStringLiteral("已连接：%1@%2:%3")
                    .arg(client_->account(), host_->text(), port_->text()),
                false);
+    conn_badge_->setText(
+        QStringLiteral("已连接（agent 心跳 15s · 掉线 60s 判离线）"));
+    conn_badge_->setStyleSheet(
+        QStringLiteral("color:%1;font-weight:600;")
+            .arg(QColor(Qt::green).name()));
     btn_connect_->setEnabled(false);
     for (QLineEdit* e : {host_, port_, account_, password_}) {
       e->setEnabled(false);
@@ -76,6 +83,8 @@ GroupServerDialog::GroupServerDialog(QWidget* parent) : QDialog(parent) {
   });
   connect(client_, &FilesClient::login_failed, this, [this](const QString& r) {
     set_status(QStringLiteral("连接失败：%1").arg(r), true);
+    conn_badge_->setText(QStringLiteral("未连接"));
+    conn_badge_->setStyleSheet(QString());
     btn_connect_->setEnabled(true);
   });
   // 列表：●绿=agent 在线（90s 新鲜度窗）、●红=失联或从未打点；详情=
@@ -246,8 +255,11 @@ GroupServerDialog::GroupServerDialog(QWidget* parent) : QDialog(parent) {
 
 void GroupServerDialog::build_ui() {
   auto* root = new QVBoxLayout(this);
+  root->setContentsMargins(12, 12, 12, 12);
+  root->setSpacing(8);
 
-  // —— 连接区（登录成功后整体停用）——
+  // —— 连接区（登录成功后整体停用；原型 conn-row 右上「已连接」徽章＋
+  //    「群号 N」位）——
   QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
   auto* conn_row = new QHBoxLayout;
   host_ = new QLineEdit(
@@ -266,6 +278,9 @@ void GroupServerDialog::build_ui() {
   password_->setEchoMode(QLineEdit::Password);
   password_->setMaximumWidth(140);
   btn_connect_ = new QPushButton(QStringLiteral("连接"), this);
+  gid_tag_ = new QLabel(this);
+  conn_badge_ = new QLabel(QStringLiteral("未连接"), this);
+  conn_badge_->setObjectName(QStringLiteral("srv_conn_badge"));
   conn_row->addWidget(new QLabel(QStringLiteral("服务器"), this));
   conn_row->addWidget(host_);
   conn_row->addWidget(new QLabel(QStringLiteral("文件面端口"), this));
@@ -275,68 +290,148 @@ void GroupServerDialog::build_ui() {
   conn_row->addWidget(new QLabel(QStringLiteral("口令"), this));
   conn_row->addWidget(password_);
   conn_row->addWidget(btn_connect_);
+  conn_row->addWidget(gid_tag_);
+  conn_row->addStretch(1);
+  conn_row->addWidget(conn_badge_);
   root->addLayout(conn_row);
 
+  // —— 双栏 split（原型 .split）：左服务器列＋右会话/凭据列 ——
+  auto* split = new QHBoxLayout;
+  split->setSpacing(8);
+  auto* left = new QWidget(this);
+  auto* left_lay = new QVBoxLayout(left);
+  left_lay->setContentsMargins(0, 0, 0, 0);
+  left_lay->setSpacing(8);
+
+  // —— 服务器 sec-head（原型 .sec-h：粗题＋灰副题）——
+  auto* srv_head = new QHBoxLayout;
+  {
+    auto* t = new QLabel(QStringLiteral("共享服务器（红绿灯 + 负载）"), left);
+    QFont f = t->font();
+    f.setBold(true);
+    t->setFont(f);
+    srv_head->addWidget(t);
+    srv_head->addWidget(
+        new QLabel(QStringLiteral("入群即视 · 退群即失"), left));
+  }
+  srv_head->addStretch(1);
+  left_lay->addLayout(srv_head);
+
   // —— 服务器列表（红绿灯＋状态详情）——
-  servers_ = new QListWidget(this);
+  servers_ = new QListWidget(left);
   servers_->setAlternatingRowColors(true);
   servers_->setWordWrap(true);
-  root->addWidget(servers_, 2);
+  left_lay->addWidget(servers_, 1);
 
-  // —— 登记行（群主/管理员；重登记=轮换令牌须确认）——
+  // —— 登记行（原型 .frow；群主/管理员；重登记=轮换令牌须确认）——
   auto* enroll_row = new QHBoxLayout;
-  srv_name_ = new QLineEdit(this);
+  srv_name_ = new QLineEdit(left);
   srv_name_->setPlaceholderText(QStringLiteral("服务器名（如 web-1）"));
-  srv_name_->setMaximumWidth(180);
-  srv_host_ = new QLineEdit(this);
+  srv_name_->setMaximumWidth(150);
+  srv_host_ = new QLineEdit(left);
   srv_host_->setPlaceholderText(QStringLiteral("地址（如 10.0.0.9）"));
-  btn_enroll_ = new QPushButton(QStringLiteral("登记服务器"), this);
-  btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
+  btn_enroll_ = new QPushButton(QStringLiteral("登记服务器"), left);
+  btn_refresh_ = new QPushButton(QStringLiteral("刷新"), left);
   enroll_row->addWidget(srv_name_);
   enroll_row->addWidget(srv_host_, 1);
   enroll_row->addWidget(btn_enroll_);
   enroll_row->addWidget(btn_refresh_);
-  root->addLayout(enroll_row);
+  left_lay->addLayout(enroll_row);
 
   // —— 注册令牌（登记后一次性显示；喂给 agent --token）——
-  token_ = new QLineEdit(this);
+  token_ = new QLineEdit(left);
   token_->setReadOnly(true);
   token_->setPlaceholderText(
       QStringLiteral("注册令牌（登记后生成一次；重登记作废旧令牌）"));
-  root->addWidget(token_);
+  left_lay->addWidget(token_);
 
-  // —— SSH 会话区（R26-3：选中服务器→发起；短票不出框、命令框可复制）——
-  auto* session_row = new QHBoxLayout;
-  btn_session_ = new QPushButton(QStringLiteral("发起 SSH 会话"), this);
-  btn_close_ = new QPushButton(QStringLiteral("关闭会话"), this);
-  session_row->addWidget(btn_session_);
-  session_row->addWidget(btn_close_);
-  session_row->addStretch(1);
-  root->addLayout(session_row);
+  // —— 范围说明条（原型 .note.lock）——
+  {
+    auto* n = new QLabel(
+        QStringLiteral("memex 面只做「查看 + 连接」；重启服务 / 改配置等高"
+                       "危动作不入本面（走审批流）。每次访问留痕：谁 / 何时"
+                       " / 哪台机 / 协议 / 时长。"),
+        left);
+    n->setWordWrap(true);
+    left_lay->addWidget(n);
+  }
+  split->addWidget(left, 1);
 
-  cmd_ = new QLineEdit(this);
-  cmd_->setReadOnly(true);
-  cmd_->setPlaceholderText(QStringLiteral(
-      "本地命令（会话兑现后给出；唤不起终端时手动执行）"));
-  root->addWidget(cmd_);
+  // —— 右列（原型 aside.col：会话卡＋发起卡＋凭据卡）——
+  auto* right = new QWidget(this);
+  auto* right_lay = new QVBoxLayout(right);
+  right_lay->setContentsMargins(0, 0, 0, 0);
+  right_lay->setSpacing(8);
 
-  sessions_ = new QListWidget(this);
-  sessions_->setAlternatingRowColors(true);
-  sessions_->setWordWrap(true);
-  root->addWidget(sessions_, 1);
+  // —— 远程会话卡（一次性短票；留痕同屏）——
+  {
+    auto* box = new QGroupBox(right);
+    auto* lay = new QVBoxLayout(box);
+    lay->setSpacing(4);
+    auto* h = new QHBoxLayout;
+    auto* t = new QLabel(QStringLiteral("远程会话（一次性短票）"), box);
+    QFont f = t->font();
+    f.setBold(true);
+    t->setFont(f);
+    h->addWidget(t);
+    h->addStretch(1);
+    h->addWidget(new QLabel(
+        QStringLiteral("#id · 服务器 · 协议 · actor · 状态 · 时长"), box));
+    lay->addLayout(h);
+    sessions_ = new QListWidget(box);
+    sessions_->setAlternatingRowColors(true);
+    sessions_->setWordWrap(true);
+    lay->addWidget(sessions_);
+    right_lay->addWidget(box, 1);
+  }
 
-  // —— 服务器凭据行（R26-4：仅群主/管理员；作用于选中行；密码态输入）——
-  auto* cred_row = new QHBoxLayout;
-  srv_cred_ = new QLineEdit(this);
-  srv_cred_->setEchoMode(QLineEdit::Password);
-  srv_cred_->setPlaceholderText(QStringLiteral(
-      "所选服务器凭据（口令/密钥——只送服务端加密，客户端不留存）"));
-  btn_cred_set_ = new QPushButton(QStringLiteral("存凭据"), this);
-  btn_cred_del_ = new QPushButton(QStringLiteral("删凭据"), this);
-  cred_row->addWidget(srv_cred_, 1);
-  cred_row->addWidget(btn_cred_set_);
-  cred_row->addWidget(btn_cred_del_);
-  root->addLayout(cred_row);
+  // —— 发起会话卡（SSH 先行；短票不出框——服务端签发即兑现）——
+  {
+    auto* box = new QGroupBox(
+        QStringLiteral("发起会话（SSH 先行 · RDP/VNC 后续）"), right);
+    auto* lay = new QVBoxLayout(box);
+    lay->setSpacing(4);
+    auto* row = new QHBoxLayout;
+    btn_session_ = new QPushButton(QStringLiteral("发起 SSH 会话"), box);
+    btn_close_ = new QPushButton(QStringLiteral("关闭会话"), box);
+    row->addWidget(btn_session_);
+    row->addWidget(btn_close_);
+    row->addStretch(1);
+    lay->addLayout(row);
+    cmd_ = new QLineEdit(box);
+    cmd_->setReadOnly(true);
+    cmd_->setPlaceholderText(QStringLiteral(
+        "本地命令（会话兑现后给出；唤不起终端时手动执行）"));
+    lay->addWidget(cmd_);
+    lay->addWidget(new QLabel(
+        QStringLiteral("短票＝一次性 · 服务端不回显；凭据由服务端注入会话"
+                       "参数，客户端零凭据"),
+        box));
+    right_lay->addWidget(box);
+  }
+
+  // —— 服务器凭据卡（R26-4：仅群主/管理员；作用于选中行；密码态输入）——
+  {
+    auto* box = new QGroupBox(QStringLiteral("服务器凭据"), right);
+    auto* lay = new QVBoxLayout(box);
+    lay->setSpacing(4);
+    auto* row = new QHBoxLayout;
+    srv_cred_ = new QLineEdit(box);
+    srv_cred_->setEchoMode(QLineEdit::Password);
+    srv_cred_->setPlaceholderText(QStringLiteral(
+        "所选服务器凭据（口令/密钥——只送服务端加密，客户端不留存）"));
+    btn_cred_set_ = new QPushButton(QStringLiteral("存凭据"), box);
+    btn_cred_del_ = new QPushButton(QStringLiteral("删凭据"), box);
+    row->addWidget(srv_cred_, 1);
+    row->addWidget(btn_cred_set_);
+    row->addWidget(btn_cred_del_);
+    lay->addLayout(row);
+    lay->addWidget(new QLabel(
+        QStringLiteral("服务器凭据只存服务端加密面（同 R24 保险柜）"), box));
+    right_lay->addWidget(box);
+  }
+  split->addWidget(right, 1);
+  root->addLayout(split, 1);
 
   // —— 状态行 ——
   status_ = new QLabel(QStringLiteral("未连接（与协作面同源账号；文件面端口独立）"),
@@ -392,6 +487,9 @@ bool GroupServerDialog::is_connected() const { return client_->is_logged_in(); }
 void GroupServerDialog::set_group(quint64 gid, const QString& group_name) {
   gid_ = gid;
   setWindowTitle(QStringLiteral("群服务器 — %1").arg(group_name));
+  gid_tag_->setText(gid_ > 0
+                        ? QStringLiteral("群号 %1").arg(QString::number(gid_))
+                        : QString());
   servers_->clear();
   token_->clear();
   sessions_->clear();
