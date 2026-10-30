@@ -824,13 +824,16 @@ if(MEMEX_BUILD_TESTS)
   # test_files_api 位置图段，不在此重复
   add_executable(test_office_map_dialog
     app/tests/test_office_map_dialog.cpp
-    app/office_map_dialog.cpp)
+    app/office_map_dialog.cpp
+    app/theme.cpp
+    app/theme_pack.cpp)
   target_link_libraries(test_office_map_dialog PRIVATE
-    memex_engine_collab Qt6::Widgets)
+    memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
   target_include_directories(test_office_map_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_office_map_dialog PRIVATE
-    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
   add_test(NAME office_map_dialog COMMAND test_office_map_dialog)
   set_tests_properties(office_map_dialog PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"

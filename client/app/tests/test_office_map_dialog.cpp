@@ -5,6 +5,7 @@
 // 楼层归属）→解绑复原空图。换座 409／越界夹回／幽灵绑定等判权与协议
 // 腿走 test_files_api 位置图段，不在此重复。
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QProcess>
 #include <QTcpServer>
@@ -15,6 +16,7 @@
 #include <iostream>
 
 #include <app/office_map_dialog.hpp>
+#include <app/theme.hpp>
 
 using memex::client::OfficeMapDialog;
 
@@ -226,6 +228,35 @@ int main(int argc, char** argv) {
         return dlg_admin.status_text().contains(QStringLiteral("占用已更新"));
       },
       8000));
+
+  // 文档站实况抓图（test_live_shots grab_pair 同式——亮暗各一、抓完显式
+  // 回亮）。owner1 管理面：3F 两座——A-01 占 member1（选中蓝）＋A-02 命中
+  // 白+描边——＋图例四态与「一人一座」注入画；未分配工位态（floor 空）与
+  // 空座灰由 member1 侧不同帧呈现——近似项入台账。
+  {
+    const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+    CHECK(QDir().mkpath(dir));
+    dlg_admin.show();
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    // 选中/命中须在 show 后点（隐藏期画布未布局，归一化坐标换算错位）
+    dlg_admin.select_at(0.2, 0.8); // 选中 A-01（蓝）
+    dlg_admin.set_search(QStringLiteral("A-02")); // A-02 命中（白+描边）
+    auto& tm = memex::client::ThemeManager::instance();
+    tm.apply(qApp);
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(dlg_admin.grab().save(
+        dir + QStringLiteral("/live-office-map-light.png")));
+    tm.set_mode(QStringLiteral("dark"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(dlg_admin.grab().save(
+        dir + QStringLiteral("/live-office-map-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    dlg_admin.set_search(QString());
+  }
 
   // —— 工位即楼层归属：member1 被绑定后自楼层互见（3F 两座全见）——
   dlg.refresh();

@@ -72,6 +72,7 @@ class OfficeMapDialog : public QDialog {
   QPushButton* btn_bind_;
   QPushButton* btn_unbind_;
   QPushButton* btn_refresh_;
+  QLabel* conn_badge_{nullptr};   // 连接徽章（连接行右端，原型 ok 位）
   bool can_manage_{false};
   QString view_floor_; // org-admin 的当前编辑视图层（空=自楼层）
 };

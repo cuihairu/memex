@@ -4,6 +4,8 @@
 #include "office_map_dialog.hpp"
 #include "collab_defaults.hpp"
 
+#include <QColor>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -131,22 +133,44 @@ class OfficeCanvas : public QWidget {
       const auto& s = seats_[static_cast<size_t>(i)];
       const QPointF c(s.x * width(), s.y * height());
       const bool hit = matches(s);
-      // 命中亮（橙）/其余淡（灰）；空位白底描边
-      QColor fill = hit ? QColor(0xE8, 0x8A, 0x2A) : QColor(0xBB, 0xBB, 0xBB);
-      if (s.account.isEmpty()) {
-        fill = hit ? QColor(0xFF, 0xFF, 0xFF) : QColor(0xE8, 0xE8, 0xE8);
+      const bool sel = (i == selected_);
+      // 图例四态（与原型 .legend 一致）：占用橙／空座灰／选中蓝／命中
+      // 白底＋橙描边——选中与命中是叠加态，底色仍按占用/空座给
+      QColor fill;
+      QPen border;
+      QColor label_color;
+      if (sel) {
+        fill = QColor(0x2A, 0x82, 0xE8); // 选中蓝
+        border = QPen(QColor(0, 0, 0, 51), 1);
+        label_color = QColor(0x17, 0x49, 0x8A);
+      } else if (hit) {
+        fill = QColor(0xFF, 0xFF, 0xFF); // 命中白底
+        border = QPen(QColor(0xE8, 0x8A, 0x2A), 2); // 橙描边
+        label_color = s.account.isEmpty() ? QColor(0x66, 0x66, 0x66)
+                                          : QColor(0x8A, 0x4D, 0x17);
+      } else if (s.account.isEmpty()) {
+        fill = QColor(0xBB, 0xBB, 0xBB); // 空座灰
+        border = QPen(QColor(0, 0, 0, 31), 1);
+        label_color = QColor(0x66, 0x66, 0x66);
+      } else {
+        fill = QColor(0xE8, 0x8A, 0x2A); // 占用橙
+        border = QPen(QColor(0, 0, 0, 46), 1);
+        label_color = QColor(0x8A, 0x4D, 0x17);
       }
-      if (i == selected_) fill = QColor(0x2A, 0x82, 0xE8); // 选中蓝
-      p.setPen(QPen(QColor(0x66, 0x66, 0x66), 1));
+      p.setPen(border);
       p.setBrush(fill);
       p.drawEllipse(c, 10, 10);
-      p.setPen(QPen(hit || i == selected_ ? QColor(0x33, 0x33, 0x33)
-                                          : QColor(0x99, 0x99, 0x99)));
+      QFont lf = p.font();
+      lf.setBold(sel || !s.account.isEmpty());
+      p.setFont(lf);
+      p.setPen(label_color);
       const QString text = s.account.isEmpty()
                                ? s.label
                                : s.label + QStringLiteral("·") + s.account;
       p.drawText(QRectF(c.x() - 70, c.y() + 12, 140, 32), Qt::AlignHCenter,
                  text);
+      lf.setBold(false);
+      p.setFont(lf);
     }
   }
 
@@ -183,18 +207,25 @@ class OfficeCanvas : public QWidget {
 
 OfficeMapDialog::OfficeMapDialog(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("办公室位置图"));
-  resize(620, 600);
+  resize(960, 660);
   client_ = new FilesClient(this);
   build_ui();
 
   connect(client_, &FilesClient::logged_in, this, [this] {
     set_status(QStringLiteral("已连接（") + client_->account() +
                QStringLiteral("）"));
+    conn_badge_->setText(QStringLiteral("已连接（") + client_->account() +
+                         QStringLiteral("）"));
+    conn_badge_->setStyleSheet(
+        QStringLiteral("color:%1;font-weight:600;")
+            .arg(QColor(Qt::green).name()));
     refresh();
   });
   connect(client_, &FilesClient::login_failed, this,
           [this](const QString& r) {
             set_status(QStringLiteral("连接失败：") + r, true);
+            conn_badge_->setText(QStringLiteral("未连接"));
+            conn_badge_->setStyleSheet(QString());
             btn_connect_->setEnabled(true);
           });
   connect(client_, &FilesClient::office_map_fetched, this,
@@ -223,7 +254,7 @@ OfficeMapDialog::OfficeMapDialog(QWidget* parent) : QDialog(parent) {
 void OfficeMapDialog::build_ui() {
   auto* layout = new QVBoxLayout(this);
 
-  // 连接区（与文件助手同构：地址/端口/账号/口令）
+  // 连接区（与文件助手同构：地址/端口/账号/口令＋右端连接徽章）
   auto* conn = new QHBoxLayout;
   auto* host = new QLineEdit(this);
   host->setPlaceholderText(QStringLiteral("服务器地址"));
@@ -242,6 +273,9 @@ void OfficeMapDialog::build_ui() {
   conn->addWidget(account_box);
   conn->addWidget(password);
   conn->addWidget(btn_connect_);
+  conn_badge_ = new QLabel(QStringLiteral("未连接"), this);
+  conn->addStretch(1);
+  conn->addWidget(conn_badge_);
   layout->addLayout(conn);
   connect(btn_connect_, &QPushButton::clicked, this,
           [this, host, port, account_box, password] {
@@ -249,49 +283,92 @@ void OfficeMapDialog::build_ui() {
                        account_box->text(), password->text());
           });
 
-  // 平面标题（楼层号由服务端回带）
+  // 工具行（原型 .bar）：楼层标签＋搜索输入＋搜索/刷新钮＋层范围注
+  auto* bar = new QHBoxLayout;
   floor_label_ = new QLabel(QStringLiteral(" "), this);
-  layout->addWidget(floor_label_);
+  QFont floor_font = floor_label_->font();
+  floor_font.setBold(true);
+  floor_label_->setFont(floor_font);
+  bar->addWidget(floor_label_);
+  search_ = new QLineEdit(this);
+  search_->setPlaceholderText(QStringLiteral("账号或工位号（命中高亮）"));
+  bar->addWidget(search_, 1);
+  auto* btn_search = new QPushButton(QStringLiteral("搜索"), this);
+  bar->addWidget(btn_search);
+  btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
+  bar->addWidget(btn_refresh_);
+  auto* scope = new QLabel(QStringLiteral("默认本层 · org-admin 可跨层"), this);
+  scope->setStyleSheet(QStringLiteral("color:%1;font-size:10.5px;")
+                           .arg(QColor(Qt::gray).name()));
+  bar->addWidget(scope);
+  layout->addLayout(bar);
+  connect(search_, &QLineEdit::textChanged, this, [this](const QString& t) {
+    set_search(t);
+  });
+  connect(btn_search, &QPushButton::clicked, this,
+          [this] { set_search(search_->text()); });
+  connect(btn_refresh_, &QPushButton::clicked, this, [this] { refresh(); });
+
+  // 管理行（原型 .admin-row：前缀＋楼层/工位号/账号定宽输入＋动作钮）
+  auto* erow = new QHBoxLayout;
+  erow->addWidget(
+      new QLabel(QStringLiteral("管理（az office:manage）："), this));
+  new_floor_ = new QLineEdit(this);
+  new_floor_->setPlaceholderText(QStringLiteral("楼层"));
+  new_floor_->setFixedWidth(64);
+  new_label_ = new QLineEdit(this);
+  new_label_->setPlaceholderText(QStringLiteral("工位号"));
+  new_label_->setFixedWidth(70);
+  btn_add_ = new QPushButton(QStringLiteral("新增工位"), this);
+  btn_delete_ = new QPushButton(QStringLiteral("删除选中"), this);
+  bind_account_ = new QLineEdit(this);
+  bind_account_->setPlaceholderText(QStringLiteral("占用者账号"));
+  bind_account_->setFixedWidth(110);
+  btn_bind_ = new QPushButton(QStringLiteral("绑定"), this);
+  btn_unbind_ = new QPushButton(QStringLiteral("解绑"), this);
+  erow->addWidget(new_floor_);
+  erow->addWidget(new_label_);
+  erow->addWidget(btn_add_);
+  erow->addWidget(btn_delete_);
+  erow->addWidget(bind_account_);
+  erow->addWidget(btn_bind_);
+  erow->addWidget(btn_unbind_);
+  erow->addStretch(1);
+  layout->addLayout(erow);
 
   // 画布（拖拽落位=org-admin；松手上抛保存）
   canvas_ = new OfficeCanvas(this);
   layout->addWidget(canvas_, 1);
 
-  // 搜索定位（账号/工位号过滤高亮）
-  auto* srow = new QHBoxLayout;
-  srow->addWidget(new QLabel(QStringLiteral("搜索"), this));
-  search_ = new QLineEdit(this);
-  search_->setPlaceholderText(QStringLiteral("账号或工位号（命中高亮）"));
-  srow->addWidget(search_, 1);
-  layout->addLayout(srow);
-  connect(search_, &QLineEdit::textChanged, this, [this](const QString& t) {
-    set_search(t);
-  });
-
-  // 编辑区（can_manage 时才可用；客户端灰是门面，判权在服务端）
-  auto* erow = new QHBoxLayout;
-  new_floor_ = new QLineEdit(this);
-  new_floor_->setPlaceholderText(QStringLiteral("楼层"));
-  new_floor_->setMaximumWidth(70);
-  new_label_ = new QLineEdit(this);
-  new_label_->setPlaceholderText(QStringLiteral("工位号"));
-  new_label_->setMaximumWidth(90);
-  btn_add_ = new QPushButton(QStringLiteral("新增工位"), this);
-  btn_delete_ = new QPushButton(QStringLiteral("删除选中"), this);
-  bind_account_ = new QLineEdit(this);
-  bind_account_->setPlaceholderText(QStringLiteral("占用者账号"));
-  btn_bind_ = new QPushButton(QStringLiteral("绑定"), this);
-  btn_unbind_ = new QPushButton(QStringLiteral("解绑"), this);
-  btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
-  erow->addWidget(new_floor_);
-  erow->addWidget(new_label_);
-  erow->addWidget(btn_add_);
-  erow->addWidget(btn_delete_);
-  erow->addWidget(bind_account_, 1);
-  erow->addWidget(btn_bind_);
-  erow->addWidget(btn_unbind_);
-  erow->addWidget(btn_refresh_);
-  layout->addLayout(erow);
+  // 图例（原型 .legend：占用橙/空座灰/选中蓝/命中白+描边＋一人一座注）
+  auto* legend = new QHBoxLayout;
+  auto add_legend = [&](const QString& color, const QString& border,
+                        const QString& text) {
+    auto* d = new QLabel(this);
+    d->setFixedSize(11, 11);
+    d->setStyleSheet(
+        QStringLiteral("background:%1;border:1px solid %2;border-radius:5px;")
+            .arg(color, border));
+    legend->addWidget(d);
+    legend->addWidget(new QLabel(text, this));
+  };
+  add_legend(QColor(0xE8, 0x8A, 0x2A).name(), QStringLiteral("#00000020"),
+             QStringLiteral("占用（橙）"));
+  add_legend(QColor(0xBB, 0xBB, 0xBB).name(), QStringLiteral("#00000020"),
+             QStringLiteral("空座（灰）"));
+  add_legend(QColor(0x2A, 0x82, 0xE8).name(), QStringLiteral("#00000020"),
+             QStringLiteral("选中（蓝）"));
+  add_legend(QStringLiteral("#ffffff"), QStringLiteral("#E88A2A"),
+             QStringLiteral("命中（白+描边）"));
+  auto* hitnote = new QLabel(
+      QStringLiteral("一人一座：绑定即占；工位号同层唯一；未分配工位时显示"
+                     "「（未分配工位——无楼层可看）」"),
+      this);
+  hitnote->setStyleSheet(QStringLiteral("color:%1;font-size:10.5px;")
+                             .arg(QColor(Qt::gray).name()));
+  legend->addStretch(1);
+  legend->addWidget(hitnote);
+  layout->addLayout(legend);
 
   status_ = new QLabel(this);
   layout->addWidget(status_);
@@ -306,7 +383,6 @@ void OfficeMapDialog::build_ui() {
   });
   connect(btn_unbind_, &QPushButton::clicked, this,
           [this] { bind_selected(QString()); });
-  connect(btn_refresh_, &QPushButton::clicked, this, [this] { refresh(); });
   // 松手即保存（画布上抛；can_manage 才真发网）
   connect(canvas_, &OfficeCanvas::seat_moved, this,
           [this](qint64, const QString& floor, const QString& label, double x,
@@ -419,8 +495,8 @@ void OfficeMapDialog::apply_map(const QJsonObject& map) {
                                   .arg(floor)
                                   .arg(seats.size())
                                   .arg(can_manage_
-                                           ? QStringLiteral("  · 编辑中（拖"
-                                                            "拽落位）")
+                                           ? QStringLiteral(" · 编辑中（拖拽"
+                                                            "定位，松手即存）")
                                            : QString()));
   canvas_->set_seats(std::move(seats));
 }
