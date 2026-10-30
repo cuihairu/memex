@@ -61,6 +61,10 @@ class GroupPackDialog : public QDialog {
   QLineEdit* version_;
   QLineEdit* note_;
   QLabel* status_;
+  // 原型 desktop-group-pack conn-row 右上「已连接」徽章＋「群号 N」位
+  // （过渡消息仍走底部状态行）
+  QLabel* conn_badge_{nullptr};
+  QLabel* gid_tag_{nullptr};
   QListWidget* artifacts_;
   QPlainTextEdit* snapshot_;
   QPushButton* btn_connect_;
@@ -69,6 +73,7 @@ class GroupPackDialog : public QDialog {
   QPushButton* btn_delete_;
   QPushButton* btn_open_;
   QPushButton* btn_export_;
+  QPushButton* btn_save_as_{nullptr}; // 快照另存为文件（原型 .btnrow）
 };
 
 } // namespace memex::client

@@ -3,6 +3,8 @@
 // （谁出可回溯）→同款重打覆盖→删除恒归管理员（成员越权 403 走服务端
 // 腿）→导出群配置快照（成员/白名单/流水线在快照；密文面不进快照）。
 #include <QApplication>
+#include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QLineEdit>
 #include <QListWidget>
@@ -15,6 +17,7 @@
 #include <functional>
 
 #include <app/group_pack_dialog.hpp>
+#include <app/theme.hpp>
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
 
@@ -231,6 +234,33 @@ int main(int argc, char** argv) {
            member.artifact_list()->item(0)->text().contains(
                QStringLiteral("bob"));
   }, 8000));
+
+  // 文档站实况抓图（test_live_shots grab_pair 同式——亮暗各一、抓完显式
+  // 回亮）。owner 面：产物台账两件（app 1.0.0·alice、成员 bob 打包的
+  // lib 2.0）＋右栏已导出的脱敏快照 JSON。先重拉等 owner 台账追平成员侧
+  // （只等持久面条目文，不等状态行）。
+  {
+    const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+    CHECK(QDir().mkpath(dir));
+    owner.refresh();
+    CHECK(wait_until([&] { return owner.artifact_count() == 2; }, 8000));
+    owner.show();
+    QApplication::processEvents();
+    auto& tm = memex::client::ThemeManager::instance();
+    tm.apply(qApp);
+    QThread::msleep(120);
+    QApplication::processEvents();
+    CHECK(owner.grab().save(
+        dir + QStringLiteral("/live-group-pack-light.png")));
+    tm.set_mode(QStringLiteral("dark"));
+    QThread::msleep(120);
+    QApplication::processEvents();
+    CHECK(owner.grab().save(
+        dir + QStringLiteral("/live-group-pack-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents();
+  }
 
   server.terminate();
   server.waitForFinished(3000);

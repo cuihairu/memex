@@ -410,7 +410,8 @@ if(MEMEX_BUILD_TESTS)
   target_include_directories(test_group_pack_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_group_pack_dialog PRIVATE
-    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
   add_test(NAME group_pack_dialog COMMAND test_group_pack_dialog)
   set_tests_properties(group_pack_dialog PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
