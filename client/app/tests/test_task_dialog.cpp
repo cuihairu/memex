@@ -209,7 +209,9 @@ int main(int argc, char** argv) {
       8000));
   CHECK(!dlg.is_connected());
 
-  // 正口令：已连接并自动拉空列表
+  // 正口令：已连接并自动拉空列表。连接握手走 server 文件面，套件串行
+  // 高载（load30+ 实测）下往返可超 8s——预算放宽到 15s（同 mode_switch
+  // TIMEOUT 90→240 口径：环境载压不算逻辑回归）
   dlg.connect_to(QStringLiteral("127.0.0.1"), files_port,
                  QStringLiteral("alice"), QStringLiteral("pass-1"));
   CHECK(wait_until(
@@ -217,7 +219,7 @@ int main(int argc, char** argv) {
         return dlg.is_connected() &&
                dlg.status_text().contains(QStringLiteral("已连接"));
       },
-      8000));
+      15000));
 
   // 自建一条（不设提醒）
   CHECK(dlg.add_task(QStringLiteral("自建任务"), QString(), 0, QString()));

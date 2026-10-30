@@ -9,6 +9,7 @@
 #include <QColor>
 #include <QComboBox>
 #include <QGroupBox>
+#include <QGridLayout>
 #include <QDateTime>
 #include <QDateTimeEdit>
 #include <QDesktopServices>
@@ -53,7 +54,7 @@ TaskDialog::TaskDialog(QWidget* parent, TaskHttp* http,
                        TaskProviderStore* store)
     : QDialog(parent) {
   setWindowTitle(QStringLiteral("任务清单"));
-  resize(560, 520);
+  resize(1180, 760);
   client_ = new FilesClient(this);
   if (http != nullptr) {
     http_ = http; // 测试注入（非拥有，调用方保存续）
@@ -73,6 +74,11 @@ TaskDialog::TaskDialog(QWidget* parent, TaskHttp* http,
   connect(client_, &FilesClient::logged_in, this, [this] {
     set_status(QStringLiteral("已连接（") + client_->account() +
                QStringLiteral("）"));
+    conn_badge_->setText(
+        QStringLiteral("已连接（30s 轮询到期提醒）"));
+    conn_badge_->setStyleSheet(
+        QStringLiteral("color:%1;font-weight:600;")
+            .arg(QColor(Qt::green).name()));
     btn_add_->setEnabled(true);
     btn_add_ext_->setEnabled(true);
     refresh();
@@ -92,6 +98,8 @@ TaskDialog::TaskDialog(QWidget* parent, TaskHttp* http,
   connect(client_, &FilesClient::login_failed, this,
           [this](const QString& r) {
             set_status(QStringLiteral("连接失败：") + r, true);
+            conn_badge_->setText(QStringLiteral("未连接"));
+            conn_badge_->setStyleSheet(QString());
             btn_connect_->setEnabled(true);
           });
   connect(client_, &FilesClient::tasks_listed, this,
@@ -154,8 +162,12 @@ TaskDialog::TaskDialog(QWidget* parent, TaskHttp* http,
 
 void TaskDialog::build_ui() {
   auto* layout = new QVBoxLayout(this);
+  layout->setContentsMargins(12, 12, 12, 12);
+  layout->setSpacing(8);
 
-  // 连接区（与文件助手同构：地址/端口/账号/口令）
+  // —— 连接区（原型 desktop-tasks conn-row：地址/端口/账号/口令徽章＋
+  //    右上「已连接」绿点）。实现兼连接入口——字段可编辑＋连接按钮，
+  //    已连接徽章常显状态；过渡消息仍走底部状态行 ——
   auto* conn = new QHBoxLayout;
   host_ = new QLineEdit(this);
   host_->setPlaceholderText(QStringLiteral("服务器地址"));
@@ -169,30 +181,260 @@ void TaskDialog::build_ui() {
   password_->setPlaceholderText(QStringLiteral("口令"));
   password_->setEchoMode(QLineEdit::Password);
   btn_connect_ = new QPushButton(QStringLiteral("连接"), this);
+  conn_badge_ = new QLabel(QStringLiteral("未连接"), this);
+  conn_badge_->setObjectName(QStringLiteral("task_conn_badge"));
   conn->addWidget(host_);
   conn->addWidget(port_);
   conn->addWidget(account_box_);
   conn->addWidget(password_);
   conn->addWidget(btn_connect_);
+  conn->addStretch(1);
+  conn->addWidget(conn_badge_);
   layout->addLayout(conn);
 
-  // R27-1 余量 日历视图：月历标到期日（品牌橙加粗），点日筛该日到期
-  // 任务，再点同日清筛选回全量。默认收起，「日历」按钮开关。
-  calendar_ = new QCalendarWidget(this);
-  calendar_->setObjectName(QStringLiteral("task_calendar"));
-  calendar_->setGridVisible(true);
-  calendar_->setVerticalHeaderFormat(QCalendarWidget::NoVerticalHeader);
-  calendar_->setVisible(false);
-  layout->addWidget(calendar_);
+  // —— 工具行（原型 tool-row）：动作按钮左，拉取外部/任务设置/模板右 ——
+  auto* ops = new QHBoxLayout;
+  btn_add_ = new QPushButton(QStringLiteral("添加任务"), this);
+  btn_add_->setEnabled(false);
+  btn_toggle_ = new QPushButton(QStringLiteral("完成 / 回退"), this);
+  btn_status_ = new QPushButton(QStringLiteral("开始 / 暂停"), this);
+  btn_delete_ = new QPushButton(QStringLiteral("撤回"), this);
+  btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
+  btn_calendar_ = new QPushButton(QStringLiteral("日历"), this);
+  btn_kanban_ = new QPushButton(QStringLiteral("看板（切列表）"), this);
+  cb_lead_ = new QCheckBox(QStringLiteral("领导视角"), this);
+  cb_lead_->setObjectName(QStringLiteral("task_lead_view"));
+  {
+    const QSettings s(QStringLiteral("memex"), QStringLiteral("collab"));
+    cb_lead_->setChecked(
+        s.value(QStringLiteral("task_lead_view"), true).toBool());
+  }
+  ops->addWidget(btn_add_);
+  ops->addWidget(btn_toggle_);
+  ops->addWidget(btn_status_);
+  ops->addWidget(btn_delete_);
+  ops->addWidget(btn_refresh_);
+  ops->addWidget(btn_calendar_);
+  ops->addWidget(btn_kanban_);
+  ops->addWidget(cb_lead_);
+  ops->addStretch(1);
+  // R27-3 拉取行（原型并入 tool-row 右侧）：已配置凭据且声明 L2 的
+  // provider 直拉外部任务（不经 memex 服务端，断连也可用）；⚙ 进设置面
+  ops->addWidget(new QLabel(QStringLiteral("拉取外部"), this));
+  pull_provider_ = new QComboBox(this);
+  pull_provider_->setMinimumWidth(150);
+  btn_pull_ = new QPushButton(QStringLiteral("拉取"), this);
+  btn_settings_ = new QPushButton(QStringLiteral("任务设置…"), this);
+  btn_templates_ = new QPushButton(QStringLiteral("模板…"), this);
+  ops->addWidget(pull_provider_);
+  ops->addWidget(btn_pull_);
+  ops->addWidget(btn_settings_);
+  ops->addWidget(btn_templates_);
+  layout->addLayout(ops);
+
+  // —— body-split：左 298px 录入列（月历/录入区/外部登记/脚注）＋右视图
+  //    列（任务清单列表 / 看板 / 领导视角 / 状态行）——
+  auto* body = new QHBoxLayout;
+  body->setSpacing(8);
+
+  // —— entry-col（原型 aside.entry-col 固定 298px）——
+  auto* entry = new QWidget(this);
+  entry->setFixedWidth(298);
+  auto* entry_lay = new QVBoxLayout(entry);
+  entry_lay->setContentsMargins(8, 8, 8, 8);
+  entry_lay->setSpacing(10);
+
+  // 月历（到期日标注 · 点日过滤）：默认收起，「日历」按钮开关；图例常显
+  auto* cal_box = new QGroupBox(
+      QStringLiteral("月历（到期日标注 · 点日过滤）"), entry);
+  {
+    auto* cbl = new QVBoxLayout(cal_box);
+    calendar_ = new QCalendarWidget(cal_box);
+    calendar_->setObjectName(QStringLiteral("task_calendar"));
+    calendar_->setGridVisible(true);
+    calendar_->setVerticalHeaderFormat(QCalendarWidget::NoVerticalHeader);
+    calendar_->setVisible(false);
+    cbl->addWidget(calendar_);
+    auto* legend = new QLabel(
+        QStringLiteral("橙底＝有到期任务 · 橙实底＝今天 · 再点一次清除过滤"),
+        cal_box);
+    legend->setWordWrap(true); // 298px 列宽内不断行截断
+    cbl->addWidget(legend);
+  }
+  entry_lay->addWidget(cal_box);
+
+  // 录入区（原型 aside 录入区 fgroup）：标题/备注/截止/分配给/类型/
+  // 开始/提醒纵向成行
+  auto* form_box = new QGroupBox(QStringLiteral("录入区"), entry);
+  {
+    auto* fl = new QGridLayout(form_box);
+    fl->setVerticalSpacing(7);
+    fl->setHorizontalSpacing(7);
+    auto mk_label = [form_box](const QString& t) {
+      auto* l = new QLabel(t, form_box);
+      l->setMinimumWidth(64);
+      return l;
+    };
+    int row = 0;
+    title_ = new QLineEdit(form_box);
+    title_->setPlaceholderText(QStringLiteral("任务标题"));
+    fl->addWidget(mk_label(QStringLiteral("任务标题")), row, 0);
+    fl->addWidget(title_, row, 1, 1, 2);
+    ++row;
+    note_ = new QLineEdit(form_box);
+    note_->setPlaceholderText(QStringLiteral("可空"));
+    fl->addWidget(mk_label(QStringLiteral("备注")), row, 0);
+    fl->addWidget(note_, row, 1, 1, 2);
+    ++row;
+    due_ = new QDateTimeEdit(form_box);
+    due_->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
+    due_->setCalendarPopup(true);
+    due_->setDateTime(QDateTime::currentDateTime());
+    fl->addWidget(mk_label(QStringLiteral("截止（deadline）")), row, 0);
+    fl->addWidget(due_, row, 1, 1, 2);
+    ++row;
+    assignee_ = new QComboBox(form_box);
+    assignee_->setEditable(true);
+    assignee_->addItem(QStringLiteral("（自己）"));
+    fl->addWidget(mk_label(QStringLiteral("分配给")), row, 0);
+    fl->addWidget(assignee_, row, 1, 1, 2);
+    ++row;
+    // R27-6 类型：清单从服务端拉取（缺省=默认类型）；下发说明行常显
+    type_ = new QComboBox(form_box);
+    type_->setObjectName(QStringLiteral("task_type"));
+    fl->addWidget(mk_label(QStringLiteral("类型")), row, 0);
+    fl->addWidget(type_, row, 1, 1, 2);
+    ++row;
+    fl->addWidget(new QLabel(QStringLiteral("类型清单由服务端下发"
+                                            "（管理台可增删改）"),
+                             form_box),
+                  row, 0, 1, 3);
+    ++row;
+    // R27-6 开始时间：勾选才生效（0=未设）
+    start_on_ = new QCheckBox(QStringLiteral("开始"), form_box);
+    start_on_->setObjectName(QStringLiteral("task_start_on"));
+    start_ = new QDateTimeEdit(form_box);
+    start_->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
+    start_->setCalendarPopup(true);
+    start_->setDateTime(QDateTime::currentDateTime());
+    start_->setEnabled(false);
+    fl->addWidget(start_on_, row, 0);
+    fl->addWidget(start_, row, 1, 1, 2);
+    ++row;
+    connect(start_on_, &QCheckBox::toggled, start_,
+            &QDateTimeEdit::setEnabled);
+    // R27-6 提醒开关同一处：开始到点提醒＋deadline 到期提醒（默认开，
+    // QSettings 持久；提醒仍走通知中心现口径，回执只提醒一次）
+    cb_start_remind_ = new QCheckBox(QStringLiteral("开始到点提醒"), form_box);
+    cb_start_remind_->setObjectName(QStringLiteral("task_remind_start"));
+    cb_due_remind_ = new QCheckBox(QStringLiteral("截止到期提醒"), form_box);
+    cb_due_remind_->setObjectName(QStringLiteral("task_remind_due"));
+    const QSettings rem(QStringLiteral("memex"), QStringLiteral("collab"));
+    cb_start_remind_->setChecked(
+        rem.value(QStringLiteral("task_remind_start"), true).toBool());
+    cb_due_remind_->setChecked(
+        rem.value(QStringLiteral("task_remind_due"), true).toBool());
+    connect(cb_start_remind_, &QCheckBox::toggled, this, [this](bool on) {
+      QSettings(QStringLiteral("memex"), QStringLiteral("collab"))
+          .setValue(QStringLiteral("task_remind_start"), on);
+    });
+    connect(cb_due_remind_, &QCheckBox::toggled, this, [this](bool on) {
+      QSettings(QStringLiteral("memex"), QStringLiteral("collab"))
+          .setValue(QStringLiteral("task_remind_due"), on);
+    });
+    auto* remind_row = new QHBoxLayout;
+    remind_row->addWidget(cb_start_remind_);
+    remind_row->addWidget(cb_due_remind_);
+    remind_row->addStretch(1);
+    fl->addLayout(remind_row, row, 0, 1, 3);
+    ++row;
+    fl->setColumnStretch(1, 1);
+  }
+  entry_lay->addWidget(form_box);
+
+  // 外部任务登记（R27-2）：provider（内置 L1 预设＋自定义模板）＋键
+  //（「project#键」或完整链接）。登记前本地解析 detail URL——解析不出
+  // 不发网不落库。
+  auto* ext_box = new QGroupBox(QStringLiteral("外部任务登记"), entry);
+  {
+    auto* el = new QGridLayout(ext_box);
+    el->setVerticalSpacing(7);
+    el->setHorizontalSpacing(7);
+    ext_provider_ = new QComboBox(ext_box);
+    refresh_ext_combo();
+    ext_key_ = new QLineEdit(ext_box);
+    ext_key_->setPlaceholderText(
+        QStringLiteral("仓库/站点#键 或完整链接（如 org/repo#12）"));
+    btn_add_ext_ = new QPushButton(
+        QStringLiteral("登记外部任务（本地先解析跳转链接）"), ext_box);
+    btn_add_ext_->setEnabled(false);
+    el->addWidget(new QLabel(QStringLiteral("Provider"), ext_box), 0, 0);
+    el->addWidget(ext_provider_, 0, 1);
+    el->addWidget(new QLabel(QStringLiteral("键 / 链接"), ext_box), 1, 0);
+    el->addWidget(ext_key_, 1, 1);
+    el->addWidget(btn_add_ext_, 2, 0, 1, 2);
+    el->setColumnStretch(1, 1);
+  }
+  entry_lay->addWidget(ext_box);
+
+  // 脚注（原型 aside 尾部说明）
+  auto* footnote = new QLabel(
+      QStringLiteral("⇣ 行＝服务端拉取的只读镜像；🌐 行＝双击跳外部详情；"
+                     "勾选外部条目＝本地 memex 标记（回写属 L3）。凭据在"
+                     "「任务设置」里加密保存，本窗口零凭据。"),
+      entry);
+  footnote->setWordWrap(true);
+  entry_lay->addWidget(footnote);
+  entry_lay->addStretch(1);
+  body->addWidget(entry);
+
+  // —— view-col（原型 section.view-col）——
+  auto* view = new QWidget(this);
+  auto* view_lay = new QVBoxLayout(view);
+  view_lay->setContentsMargins(8, 8, 8, 8);
+  view_lay->setSpacing(8);
+
+  // 任务清单 sec-head：计数（我的/派给我/外部）＋只看未完成开关
+  list_head_ = new QWidget(view);
+  {
+    auto* hl = new QHBoxLayout(list_head_);
+    hl->setContentsMargins(0, 0, 0, 0);
+    hl->addWidget(new QLabel(QStringLiteral("任务清单"), list_head_));
+    counts_ = new QLabel(QStringLiteral("我的 0 · 派给我 0 · 外部 0"),
+                         list_head_);
+    hl->addWidget(counts_);
+    hl->addStretch(1);
+    cb_only_open_ = new QCheckBox(QStringLiteral("只看未完成"), list_head_);
+    cb_only_open_->setObjectName(QStringLiteral("task_only_open"));
+    hl->addWidget(cb_only_open_);
+  }
+  view_lay->addWidget(list_head_);
 
   // 任务列表
-  list_ = new QListWidget(this);
+  list_ = new QListWidget(view);
   list_->setAlternatingRowColors(true);
-  layout->addWidget(list_, 1);
+  view_lay->addWidget(list_, 1);
+
+  // 看板 sec-head（列表↔看板互斥；toggle_kanban 切两头显隐）
+  kanban_head_ = new QWidget(view);
+  kanban_head_->setVisible(false);
+  {
+    auto* hl = new QHBoxLayout(kanban_head_);
+    hl->setContentsMargins(0, 0, 0, 0);
+    hl->addWidget(new QLabel(QStringLiteral("看板"), kanban_head_));
+    hl->addWidget(new QLabel(QStringLiteral("同一批任务的另一视图 · "
+                                            "双击卡片推进状态"),
+                             kanban_head_));
+    hl->addStretch(1);
+    hl->addWidget(new QLabel(QStringLiteral("逾期红 · 3 天内到期金黄"
+                                            "（task_due_warn_days 可调）"),
+                             kanban_head_));
+  }
+  view_lay->addWidget(kanban_head_);
 
   // R27-6 看板：同一批任务数据的另一视图（不新建数据模型/通道），与
   // 列表并存切换，默认隐藏。三列=待办/进行中/完成（读 status 语义）。
-  kanban_ = new QSplitter(Qt::Horizontal, this);
+  kanban_ = new QSplitter(Qt::Horizontal, view);
   kanban_->setObjectName(QStringLiteral("task_kanban"));
   auto mkcol = [this](const QString& title, const QString& object) {
     auto* box = new QWidget(kanban_);
@@ -211,146 +453,39 @@ void TaskDialog::build_ui() {
       mkcol(QStringLiteral("进行中"), QStringLiteral("kanban_doing"));
   kanban_done_ = mkcol(QStringLiteral("完成"), QStringLiteral("kanban_done"));
   kanban_->setVisible(false);
-  layout->addWidget(kanban_, 1);
+  view_lay->addWidget(kanban_, 1);
 
   // R27-7 领导视角：直属下属任务泳道（A 泳道式=每下属一条，一眼看压
   // 力分布；负荷统计口径写死 未完成/已逾期/7 天内到期）。默认开（个人
-  // 可关，QSettings task_lead_view）；无下属或判权全过滤时自动隐藏
-  cb_lead_ = new QCheckBox(QStringLiteral("领导视角"), this);
-  cb_lead_->setObjectName(QStringLiteral("task_lead_view"));
-  {
-    const QSettings s(QStringLiteral("memex"), QStringLiteral("collab"));
-    cb_lead_->setChecked(
-        s.value(QStringLiteral("task_lead_view"), true).toBool());
-  }
-  lead_scroll_ = new QScrollArea(this);
+  // 可关，QSettings task_lead_view）；无下属或判权全过滤时自动隐藏。
+  // 说明头随泳道同显隐（原型 .lead 说明行）
+  lead_head_ = new QLabel(
+      QStringLiteral("领导视角 · 仅直属下级一层（不跨级）；关闭后此区隐藏"
+                     "并持久化"),
+      view);
+  lead_head_->setVisible(false);
+  view_lay->addWidget(lead_head_);
+  lead_scroll_ = new QScrollArea(view);
   lead_scroll_->setObjectName(QStringLiteral("task_lead_pane"));
   lead_scroll_->setWidgetResizable(true);
   lead_scroll_->setMinimumHeight(170);
   lead_scroll_->setVisible(false);
-  layout->addWidget(lead_scroll_);
+  view_lay->addWidget(lead_scroll_);
 
-  // 录入区：标题＋备注＋到期＋分配给
-  auto* form1 = new QHBoxLayout;
-  title_ = new QLineEdit(this);
-  title_->setPlaceholderText(QStringLiteral("任务标题"));
-  note_ = new QLineEdit(this);
-  note_->setPlaceholderText(QStringLiteral("备注（可空）"));
-  form1->addWidget(title_, 2);
-  form1->addWidget(note_, 3);
-  layout->addLayout(form1);
-  auto* form2 = new QHBoxLayout;
-  due_ = new QDateTimeEdit(this);
-  due_->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
-  due_->setCalendarPopup(true);
-  due_->setDateTime(QDateTime::currentDateTime());
-  assignee_ = new QComboBox(this);
-  assignee_->setEditable(true);
-  assignee_->addItem(QStringLiteral("（自己）"));
-  form2->addWidget(new QLabel(QStringLiteral("截止（deadline）"), this));
-  form2->addWidget(due_);
-  form2->addWidget(new QLabel(QStringLiteral("分配给"), this));
-  form2->addWidget(assignee_, 1);
-  layout->addLayout(form2);
-  // R27-6 类型＋开始时间：类型清单从服务端拉取（缺省=默认类型）；开始
-  // 时间勾选才生效（0=未设）
-  auto* form2b = new QHBoxLayout;
-  form2b->addWidget(new QLabel(QStringLiteral("类型"), this));
-  type_ = new QComboBox(this);
-  type_->setObjectName(QStringLiteral("task_type"));
-  form2b->addWidget(type_);
-  start_on_ = new QCheckBox(QStringLiteral("开始"), this);
-  start_on_->setObjectName(QStringLiteral("task_start_on"));
-  start_ = new QDateTimeEdit(this);
-  start_->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
-  start_->setCalendarPopup(true);
-  start_->setDateTime(QDateTime::currentDateTime());
-  start_->setEnabled(false);
-  form2b->addWidget(start_on_);
-  form2b->addWidget(start_, 1);
-  connect(start_on_, &QCheckBox::toggled, start_, &QDateTimeEdit::setEnabled);
-  layout->addLayout(form2b);
-  // R27-6 提醒开关同一处：开始到点提醒＋deadline 到期提醒（默认开，
-  // QSettings 持久；提醒仍走通知中心现口径，回执只提醒一次）
-  auto* form2c = new QHBoxLayout;
-  cb_start_remind_ = new QCheckBox(QStringLiteral("开始到点提醒"), this);
-  cb_start_remind_->setObjectName(QStringLiteral("task_remind_start"));
-  cb_due_remind_ = new QCheckBox(QStringLiteral("截止到期提醒"), this);
-  cb_due_remind_->setObjectName(QStringLiteral("task_remind_due"));
-  const QSettings rem(QStringLiteral("memex"), QStringLiteral("collab"));
-  cb_start_remind_->setChecked(
-      rem.value(QStringLiteral("task_remind_start"), true).toBool());
-  cb_due_remind_->setChecked(
-      rem.value(QStringLiteral("task_remind_due"), true).toBool());
-  connect(cb_start_remind_, &QCheckBox::toggled, this, [this](bool on) {
-    QSettings(QStringLiteral("memex"), QStringLiteral("collab"))
-        .setValue(QStringLiteral("task_remind_start"), on);
-  });
-  connect(cb_due_remind_, &QCheckBox::toggled, this, [this](bool on) {
-    QSettings(QStringLiteral("memex"), QStringLiteral("collab"))
-        .setValue(QStringLiteral("task_remind_due"), on);
-  });
-  form2c->addWidget(cb_start_remind_);
-  form2c->addWidget(cb_due_remind_);
-  form2c->addStretch(1);
-  layout->addLayout(form2c);
+  // 状态行（原型 .statusline）：动态状态＋两条固定说明
+  auto* status_row = new QHBoxLayout;
+  status_ = new QLabel(view);
+  status_row->addWidget(status_, 1);
+  status_row->addWidget(new QLabel(
+      QStringLiteral("任务类型由服务端配置（管理台可增删改）"), view));
+  status_row->addWidget(new QLabel(
+      QStringLiteral("server-side pull 默认关；开启后 ⇣ 镜像由服务端"
+                     "长连接推送"),
+      view));
+  view_lay->addLayout(status_row);
 
-  // 外部任务登记区（R27-2）：provider（内置 L1 预设＋自定义模板）＋键
-  //（「project#键」或完整链接）。登记前本地解析 detail URL——解析不出
-  // 不发网不落库。
-  auto* form3 = new QHBoxLayout;
-  form3->addWidget(new QLabel(QStringLiteral("外部任务"), this));
-  ext_provider_ = new QComboBox(this);
-  refresh_ext_combo();
-  ext_key_ = new QLineEdit(this);
-  ext_key_->setPlaceholderText(
-      QStringLiteral("仓库/站点#键 或完整链接（如 org/repo#12）"));
-  btn_add_ext_ = new QPushButton(QStringLiteral("登记外部任务"), this);
-  btn_add_ext_->setEnabled(false);
-  form3->addWidget(ext_provider_);
-  form3->addWidget(ext_key_, 1);
-  form3->addWidget(btn_add_ext_);
-  layout->addLayout(form3);
-
-  // 操作区
-  auto* ops = new QHBoxLayout;
-  btn_add_ = new QPushButton(QStringLiteral("添加任务"), this);
-  btn_add_->setEnabled(false);
-  btn_toggle_ = new QPushButton(QStringLiteral("完成/回退"), this);
-  btn_status_ = new QPushButton(QStringLiteral("开始"), this);
-  btn_delete_ = new QPushButton(QStringLiteral("撤回"), this);
-  btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
-  btn_calendar_ = new QPushButton(QStringLiteral("日历"), this);
-  btn_kanban_ = new QPushButton(QStringLiteral("看板"), this);
-  ops->addWidget(btn_add_);
-  ops->addWidget(btn_toggle_);
-  ops->addWidget(btn_status_);
-  ops->addWidget(btn_delete_);
-  ops->addWidget(btn_refresh_);
-  ops->addWidget(btn_calendar_);
-  ops->addWidget(btn_kanban_);
-  ops->addWidget(cb_lead_);
-  ops->addStretch(1);
-  layout->addLayout(ops);
-
-  // R27-3 拉取行：已配置凭据且声明 L2 的 provider 直拉外部任务（不经
-  // memex 服务端，断连也可用）；⚙ 进设置面（凭据录入/加密落盘）
-  auto* form4 = new QHBoxLayout;
-  form4->addWidget(new QLabel(QStringLiteral("拉取外部"), this));
-  pull_provider_ = new QComboBox(this);
-  pull_provider_->setMinimumWidth(150);
-  btn_pull_ = new QPushButton(QStringLiteral("拉取"), this);
-  btn_settings_ = new QPushButton(QStringLiteral("任务设置…"), this);
-  btn_templates_ = new QPushButton(QStringLiteral("模板…"), this);
-  form4->addWidget(pull_provider_);
-  form4->addWidget(btn_pull_);
-  form4->addWidget(btn_settings_);
-  form4->addWidget(btn_templates_);
-  form4->addStretch(1);
-  layout->addLayout(form4);
-
-  status_ = new QLabel(this);
-  layout->addWidget(status_);
+  body->addWidget(view, 1);
+  layout->addLayout(body, 1);
 
   connect(btn_connect_, &QPushButton::clicked, this, [this] {
     connect_to(resolve_conn_host(host_->text()), port_->text().toUShort(),
@@ -396,6 +531,9 @@ void TaskDialog::build_ui() {
     if (on && is_connected()) client_->fetch_team_tasks();
     render_lead();
   });
+  // 只看未完成：隐藏已完成行（与日历筛选叠加；不持久，开窗默认为关）
+  connect(cb_only_open_, &QCheckBox::toggled, this,
+          [this](bool) { apply_day_filter(); });
   // 选中态同步状态按钮文案（开始/暂停）
   connect(list_, &QListWidget::itemSelectionChanged, this, [this] {
     const auto* item = list_->currentItem();
@@ -503,14 +641,19 @@ void TaskDialog::update_day_marks() {
 
 int TaskDialog::apply_day_filter() {
   int visible = 0;
+  const bool only_open = cb_only_open_ != nullptr && cb_only_open_->isChecked();
   for (int i = 0; i < list_->count(); ++i) {
     auto* it = list_->item(i);
     const qint64 due = it->data(Qt::UserRole + 2).toLongLong();
     const bool hit =
         day_filter_.isValid() && due > 0 &&
         QDateTime::fromMSecsSinceEpoch(due).date() == day_filter_;
-    // 筛选态只留命中日；无到期数据行（派出/⇣/未设提醒）一并隐藏
-    it->setHidden(day_filter_.isValid() && !hit);
+    // 筛选态只留命中日；无到期数据行（派出/⇣/未设提醒）一并隐藏。
+    // 只看未完成：done 行（UserRole+1 或 status=完成）隐藏，与日历叠加
+    const bool done = it->data(Qt::UserRole + 1).toBool() ||
+                      it->data(Qt::UserRole + 10).toString() ==
+                          QStringLiteral("完成");
+    it->setHidden((day_filter_.isValid() && !hit) || (only_open && done));
     if (!it->isHidden()) ++visible;
   }
   return visible;
@@ -678,7 +821,10 @@ void TaskDialog::toggle_kanban() {
   const bool show = !kanban_->isVisible();
   kanban_->setVisible(show);
   list_->setVisible(!show);
-  btn_kanban_->setText(show ? QStringLiteral("列表") : QStringLiteral("看板"));
+  if (list_head_ != nullptr) list_head_->setVisible(!show);
+  if (kanban_head_ != nullptr) kanban_head_->setVisible(show);
+  btn_kanban_->setText(show ? QStringLiteral("列表（切看板）")
+                            : QStringLiteral("看板（切列表）"));
   if (show) render_kanban();
 }
 
@@ -760,6 +906,7 @@ void TaskDialog::render_lead() {
   // 负荷统计三数，卡片带类型与开始/截止，逾期红/临近黄/完成灰
   const bool show = cb_lead_->isChecked() && !team_cache_.isEmpty();
   lead_scroll_->setVisible(show);
+  if (lead_head_ != nullptr) lead_head_->setVisible(show);
   if (!show) return;
   const QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
   const qint64 warn =
@@ -1105,9 +1252,20 @@ void TaskDialog::populate(const QJsonArray& mine, const QJsonArray& assigned) {
   // 日历视图：重标到期日＋重施筛选（30s 轮询刷新重建列表，筛选态保持）
   update_day_marks();
   apply_day_filter();
+  // 任务清单 sec-head 计数（我的/派给我/外部拉取镜像）
+  int ext_n = 0;
+  for (auto it = ext_cache_.constBegin(); it != ext_cache_.constEnd(); ++it) {
+    ext_n += it.value().size();
+  }
+  if (counts_ != nullptr) {
+    counts_->setText(QStringLiteral("我的 %1 · 派给我 %2 · 外部 %3")
+                         .arg(static_cast<int>(mine.size()))
+                         .arg(static_cast<int>(assigned.size()))
+                         .arg(ext_n));
+  }
   // R27-6 看板同批数据重渲染（隐藏时也保持最新，切换即现）＋状态按钮复位
   render_kanban();
-  btn_status_->setText(QStringLiteral("开始"));
+  btn_status_->setText(QStringLiteral("开始 / 暂停"));
   set_status(QStringLiteral("清单已刷新（%1 项）").arg(mine.size()));
 }
 

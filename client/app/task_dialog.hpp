@@ -161,6 +161,14 @@ class TaskDialog : public QDialog {
   QLineEdit* account_box_;
   QLineEdit* password_;
   QLabel* status_;
+  // 原型 desktop-tasks 结构件：连接区「已连接」徽章、任务清单 sec-head
+  // 计数/只看未完成、看板 sec-head、领导视角说明头、双栏 body-split
+  QLabel* conn_badge_{nullptr};
+  QWidget* list_head_{nullptr};
+  QWidget* kanban_head_{nullptr};
+  QLabel* counts_{nullptr};
+  QCheckBox* cb_only_open_{nullptr};
+  QLabel* lead_head_{nullptr};
   QListWidget* list_;
   QLineEdit* title_;
   QLineEdit* note_;
