@@ -35,7 +35,7 @@
 | `settings-privacy.html` | `client/app/away_settings.cpp`、`lock_screen.cpp`、`notify_prefs.cpp`（推断映射） | 有偏差 | 离开/锁屏/通知偏好 |
 | `settings-advanced.html` | `client/app/net_remote_settings.cpp`、`shortcut_settings.cpp`、`main_window.cpp:3884`「连接设置」（推断映射） | 有偏差 | 网络与远程/快捷键/连接 |
 | `desktop-mailbox.html` | ——（`client/` 下无 mailbox 实现） | **未实现** | 设计见 `mailbox.md`；邮箱＝视图+已读态，非新通道 |
-| `desktop-tasks.html` | `client/app/task_dialog.cpp`（`task_provider_store.cpp` / `task_provider_settings.cpp` / `task_template_settings.cpp`） | 有偏差 | 原型含日历月历、看板、领导视角三块参考栏，真实弹窗未渲染 |
+| `desktop-tasks.html` | `client/app/task_dialog.cpp`（`task_provider_store.cpp` / `task_provider_settings.cpp` / `task_template_settings.cpp`） | 已对齐 | 双栏 body-split（298px 录入列：月历/录入区/外部任务登记/脚注；视图列：任务清单列表/看板/领导视角泳道/状态行）＋连接区（已连接徽章）＋工具行（拉取外部并入右侧）。近似：连接区可编辑兼连接入口（原型只读徽章）；列表↔看板按「看板」按钮互斥切换（原型静态并示两栏）；截止/开始为单 QDateTimeEdit（原型拆日期+时间两格）；月历默认收起、QCalendarWidget（原型自绘网格）；状态行文案沿用测试口径「清单已刷新」；只看未完成默认关 |
 | `desktop-approval.html` | `client/app/approval_dialog.cpp` | 有偏差 | 四态与权限说明为原型补充栏 |
 | `desktop-report.html` | `client/app/report_dialog.cpp` | 有偏差 | 原型含周报补写与下属日报两栏示意 |
 | `desktop-group-tools.html` | `client/app/group_tools_dialog.cpp` | 有偏差 | 投票/接龙/群任务三页；原型以并列展示模拟 Tab |

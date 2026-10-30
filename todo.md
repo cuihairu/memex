@@ -622,7 +622,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ### 桌面 · 对话框（已实现面，按原型收口偏差）
 
-- [ ] 与 prototypes/desktop-tasks.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/task_dialog.cpp`）
+- [x] 与 prototypes/desktop-tasks.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/task_dialog.cpp`）✅ 2026-10-30 e0b397e（双栏 body-split 重排：298px 录入列月历/录入区/外部登记/脚注＋视图列 sec-head 计数与「只看未完成」/列表↔看板互斥/领导视角/状态行；连接区已连接徽章、拉取行并入工具行右侧；近似项见 prototype-conformance 台账。门禁 85/85 绿（task_dialog 连接握手 wait 8000→15000 放宽，套件高载 load37 实测超 8s＝环境载压非回归）；实况浅深重摄像素核验）
 - [x] 与 prototypes/desktop-approval.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/approval_dialog.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
 - [x] 与 prototypes/desktop-report.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/report_dialog.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
 - [ ] 与 prototypes/desktop-group-tools.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_tools_dialog.cpp`）
