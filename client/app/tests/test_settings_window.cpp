@@ -1,8 +1,10 @@
-// 二期·统一设置窗口冒烟（原型 settings-general.html）：
+// 二期·统一设置窗口冒烟（原型 settings-general/account/message.html）：
 // 侧栏导航五页堆叠（通用/账号/消息/隐私/高级）＋通用页真实接线
 // （主题下拉→ThemeManager、截图快捷键→MainWindow::screenshot_shortcut、
 // 开机启动→set_autostart（freedesktop 文件，MEMEX_TEST_AUTOSTART_DIR 隔离）、
-// 下载位置只读真实目录；界面字号/语言置灰「未提供」）＋四页诚实占位。
+// 下载位置只读真实目录；界面字号/语言置灰「未提供」）＋账号页登录态回填
+// ＋消息页 NotifyPrefs 直写（load→改→save 保未展示字段；已读回执走主窗
+// receipts/send_read 全局键；迁移备份置灰「暂未提供」）＋两页诚实占位。
 // 无服务端（MainWindow 独立构造，同 test_window_layout）；离屏。
 #include <QApplication>
 #include <QCheckBox>
@@ -15,11 +17,14 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QTime>
+#include <QTimeEdit>
 
 #include <iostream>
 #include <unistd.h>
 
 #include <app/main_window.hpp>
+#include <app/notify_prefs.hpp>
 #include <app/settings_window.hpp>
 #include <app/theme.hpp>
 
@@ -185,6 +190,84 @@ int main(int argc, char** argv) {
     CHECK(sw.show_page(QStringLiteral("general")));
   }
 
+  // —— ⑦c 消息页：NotifyPrefs 直写（load→改→save 保未展示字段）＋
+  //    已读回执走主窗全局键；默认态与原型展示态一致 ——
+  {
+    CHECK(sw.show_page(QStringLiteral("message")));
+    CHECK(sw.page_title() == QStringLiteral("消息"));
+    const memex::client::NotifyPrefs def;
+    CHECK(sw.msg_desktop_notif() == def.popup_message);
+    CHECK(sw.msg_flash() == def.flash_alert);
+    CHECK(sw.msg_peer_online() == def.popup_peer_online);
+    CHECK(sw.msg_file_arrive() == def.popup_file_arrive);
+    CHECK(sw.msg_sound_mode() == def.sound_mode);
+    CHECK(sw.msg_dnd() == def.dnd);
+    CHECK(sw.msg_dnd_start() == def.dnd_start);
+    CHECK(sw.msg_dnd_end() == def.dnd_end);
+    CHECK(sw.msg_read_receipts() == w.read_receipts_enabled(QString()));
+
+    auto* desktop =
+        sw.findChild<QCheckBox*>(QStringLiteral("settings_msg_desktop"));
+    auto* sound =
+        sw.findChild<QComboBox*>(QStringLiteral("settings_msg_sound"));
+    auto* dnd_check =
+        sw.findChild<QCheckBox*>(QStringLiteral("settings_msg_dnd"));
+    auto* dnd_start =
+        sw.findChild<QTimeEdit*>(QStringLiteral("settings_msg_dnd_start"));
+    auto* dnd_end =
+        sw.findChild<QTimeEdit*>(QStringLiteral("settings_msg_dnd_end"));
+    auto* receipts =
+        sw.findChild<QCheckBox*>(QStringLiteral("settings_msg_receipts"));
+    auto* backup =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_msg_backup"));
+    CHECK(desktop);
+    CHECK(sound);
+    CHECK(dnd_check);
+    CHECK(dnd_start);
+    CHECK(dnd_end);
+    CHECK(receipts);
+    CHECK(backup);
+    if (backup) CHECK(!backup->isEnabled()); // 迁移备份＝诚实「暂未提供」
+
+    if (desktop) {
+      desktop->setChecked(false);
+      CHECK(!memex::client::NotifyPrefs::load().popup_message);
+      // 本页未展示的字段不被整存清掉（load→改→save）
+      CHECK(memex::client::NotifyPrefs::load().flash_alert);
+      CHECK(memex::client::NotifyPrefs::load().popup_important);
+      desktop->setChecked(true);
+      CHECK(memex::client::NotifyPrefs::load().popup_message);
+    }
+    if (sound) {
+      sound->setCurrentIndex(1);
+      CHECK(memex::client::NotifyPrefs::load().sound_mode == 1);
+      sound->setCurrentIndex(0);
+      CHECK(memex::client::NotifyPrefs::load().sound_mode == 0);
+    }
+    if (dnd_check && dnd_start && dnd_end) {
+      dnd_check->setChecked(true);
+      CHECK(memex::client::NotifyPrefs::load().dnd);
+      dnd_start->setTime(QTime(23, 30));
+      dnd_end->setTime(QTime(6, 15));
+      const memex::client::NotifyPrefs p =
+          memex::client::NotifyPrefs::load();
+      CHECK(p.dnd_start == QStringLiteral("23:30"));
+      CHECK(p.dnd_end == QStringLiteral("06:15"));
+      // 还原默认（抓图态＝原型展示态：免打扰关 22:00–08:00）
+      dnd_check->setChecked(false);
+      dnd_start->setTime(QTime(22, 0));
+      dnd_end->setTime(QTime(8, 0));
+      CHECK(!memex::client::NotifyPrefs::load().dnd);
+    }
+    if (receipts) {
+      receipts->setChecked(false);
+      CHECK(!w.read_receipts_enabled(QString()));
+      receipts->setChecked(true);
+      CHECK(w.read_receipts_enabled(QString()));
+    }
+    CHECK(sw.show_page(QStringLiteral("general")));
+  }
+
   // —— ⑧ 文档站实况抓图（grab_pair 同式：亮暗各一、抓完显式回亮）——
   {
     const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
@@ -217,6 +300,23 @@ int main(int argc, char** argv) {
     QThread::msleep(120);
     QApplication::processEvents(QEventLoop::AllEvents, 30);
     CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-account-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+
+    // 消息页抓图（默认态＝原型展示态：通知四开关开、提示音关闭、
+    // 免打扰关、时段 22:00–08:00、已读回执开）
+    CHECK(sw.show_page(QStringLiteral("message")));
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.page_title() == QStringLiteral("消息"));
+    tm.apply(qApp);
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-message-light.png")));
+    tm.set_mode(QStringLiteral("dark"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-message-dark.png")));
     tm.set_mode(QStringLiteral("light"));
     QThread::msleep(120);
     QApplication::processEvents(QEventLoop::AllEvents, 30);
