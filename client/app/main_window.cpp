@@ -61,6 +61,7 @@
 #include "net_guard.hpp"
 #include "assist_dialog.hpp"
 #include "audit_dialog.hpp"
+#include "archive_console.hpp"
 #include "office_map_dialog.hpp"
 #include "message_search_dialog.hpp"
 #include <QMessageBox>
@@ -800,6 +801,18 @@ void MainWindow::build_ui() {
     audit_dialog_->show();
     audit_dialog_->raise();
     audit_dialog_->activateWindow();
+  });
+  // 管理台·归档检索台（原型 desktop-search）：auditor 整窗控制台——条件
+  // 检索＋五列命中表＋上下文/撤回事件/导出留证（每次查阅服务端留痕）
+  auto* act_console = collab_menu->addAction(QStringLiteral("归档检索台…"));
+  connect(act_console, &QAction::triggered, this, [this] {
+    if (!archive_console_) {
+      archive_console_ = new ArchiveConsole(this);
+      archive_console_->setAttribute(Qt::WA_DeleteOnClose);
+    }
+    archive_console_->show();
+    archive_console_->raise();
+    archive_console_->activateWindow();
   });
   // 二期·办公室位置图：抽象平面＋拖拽落位（编辑归 org-admin，服务端现裁）
   auto* act_office = collab_menu->addAction(QStringLiteral("办公室位置图…"));

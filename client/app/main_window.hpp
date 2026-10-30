@@ -49,6 +49,7 @@ class TaskDialog;
 class ApprovalDialog;
 class ReportDialog;
 class AuditDialog;
+class ArchiveConsole;
 class OfficeMapDialog;
 class AssistDialog;
 class GroupToolsDialog;
@@ -626,6 +627,7 @@ private:
   QPointer<ApprovalDialog> approval_dialog_; // 二期·审批窗口（懒建）
   QPointer<ReportDialog> report_dialog_; // 二期·日报周报窗口（懒建）
   QPointer<AuditDialog> audit_dialog_; // 二期·会话审计窗口（懒建）
+  QPointer<ArchiveConsole> archive_console_; // 管理台·归档检索台窗口（懒建）
   QPointer<OfficeMapDialog> office_dialog_; // 二期·办公室位置图窗口（懒建）
   QPointer<AssistDialog> assist_dialog_; // 二期·远程协助窗口（懒建）
   QPointer<GroupToolsDialog> group_tools_dialog_; // 二期·群工具三件窗口（懒建）

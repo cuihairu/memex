@@ -2978,6 +2978,118 @@ std::size_t ServerStore::recall_event_count(const std::string& msg_id) {
   return n;
 }
 
+// —— 管理台归档检索（desktop-search）三面 ——
+
+std::optional<ServerStore::RecallEventRow> ServerStore::last_recall_event(
+    const std::string& msg_id) {
+  // 对账副本在前（含撤回人＋时刻齐备）；缺行回落事件表（平台-4 主证）。
+  {
+    const char* sql = "SELECT by_account, ts_ms FROM recall_events"
+                      " WHERE msg_id = ? ORDER BY id DESC LIMIT 1;";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) == SQLITE_OK) {
+      sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+      if (sqlite3_step(st) == SQLITE_ROW) {
+        RecallEventRow row;
+        row.msg_id = msg_id;
+        row.by_account =
+            reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+        row.ts_ms = sqlite3_column_int64(st, 1);
+        sqlite3_finalize(st);
+        return row;
+      }
+      sqlite3_finalize(st);
+    }
+  }
+  const char* sql = "SELECT by_account, ts_ms FROM message_events"
+                    " WHERE msg_id = ? AND event = 'recalled'"
+                    " ORDER BY id DESC LIMIT 1;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK)
+    return std::nullopt;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  std::optional<RecallEventRow> out;
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    RecallEventRow row;
+    row.msg_id = msg_id;
+    row.by_account =
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    row.ts_ms = sqlite3_column_int64(st, 1);
+    out = row;
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<ArchivedMessage> ServerStore::context_around(
+    const std::string& msg_id, int span) {
+  std::vector<ArchivedMessage> out;
+  if (span < 1) span = 1;
+  if (span > 50) span = 50;
+  // 命中行定位：id（游标）＋会话键（群=to 群键；单聊=from/to 成对）
+  sqlite3_stmt* st = nullptr;
+  const char* probe_sql =
+      "SELECT id, from_account, to_account FROM messages WHERE msg_id = ?;";
+  std::int64_t hit_id = 0;
+  std::string side_a, side_b;
+  if (sqlite3_prepare_v2(db_, probe_sql, -1, &st, nullptr) != SQLITE_OK)
+    return out;
+  sqlite3_bind_text(st, 1, msg_id.c_str(), -1, SQLITE_TRANSIENT);
+  if (sqlite3_step(st) == SQLITE_ROW) {
+    hit_id = sqlite3_column_int64(st, 0);
+    side_a = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    side_b = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+  }
+  sqlite3_finalize(st);
+  if (hit_id == 0) return out;
+
+  // 会话键 WHERE 片段：群消息（to="group:N"）按群键；单聊按双方成对
+  //（与 search_messages 的 peer 口径同构——上下文即「该会话」的窗口）
+  std::string where;
+  std::vector<std::string> params;
+  if (side_b.rfind("group:", 0) == 0) {
+    where = "to_account = ?";
+    params.push_back(side_b);
+  } else {
+    where = "((from_account = ? AND to_account = ?) OR"
+            " (from_account = ? AND to_account = ?))";
+    params.push_back(side_a);
+    params.push_back(side_b);
+    params.push_back(side_b);
+    params.push_back(side_a);
+  }
+  const std::string sql =
+      "SELECT msg_id, from_account, to_account, type, text, ts_ms, recall, id"
+      " FROM messages WHERE " +
+      where + " AND id BETWEEN ? AND ? ORDER BY id ASC LIMIT ?;";
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK)
+    return out;
+  int idx = 1;
+  for (const auto& p : params) {
+    sqlite3_bind_text(st, idx++, p.c_str(), -1, SQLITE_TRANSIENT);
+  }
+  sqlite3_bind_int64(st, idx++, hit_id - span);
+  sqlite3_bind_int64(st, idx++, hit_id + span);
+  sqlite3_bind_int(st, idx, span * 2 + 1);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    ArchivedMessage m;
+    m.msg_id = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    m.from_account =
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    m.to_account = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    m.type = sqlite3_column_int(st, 3);
+    const char* text_ptr =
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    m.text = text_ptr ? text_ptr : "";
+    m.ts_ms = sqlite3_column_int64(st, 5);
+    m.recalled = sqlite3_column_int(st, 6) != 0;
+    m.row_id = sqlite3_column_int64(st, 7);
+    out.push_back(std::move(m));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
 // —— T2.6 组织架构 ——
 
 // 部门路径逐级创建："公司/研发部/客户端组" → 三级，已存在即复用

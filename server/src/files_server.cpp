@@ -939,6 +939,17 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (path_ == "/files/audit/reads" && method_ == "GET") {
       return route_audit_reads();
     }
+    // 管理台归档检索（desktop-search）三面：上下文／撤回事件／导出留证
+    //（判权与留痕同检索面——auditor 有效角色，每次查阅落 audit_reads）
+    if (path_ == "/files/audit/context" && method_ == "GET") {
+      return route_audit_context();
+    }
+    if (path_ == "/files/audit/recall-event" && method_ == "GET") {
+      return route_audit_recall_event();
+    }
+    if (path_ == "/files/audit/export" && method_ == "POST") {
+      return route_audit_export(body);
+    }
     // 办公室位置图（二期）：看自楼层（org-admin 可 ?floor= 指定层）/
     // 编辑工位/绑定占用者
     if (path_ == "/files/office-map" && method_ == "GET") {
@@ -2338,6 +2349,183 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
                      {"ts_ms", r.ts_ms}});
     }
     respond_json(200, {{"ok", true}, {"reads", std::move(arr)}});
+  }
+
+  // —— 管理台归档检索（desktop-search）三面：与检索面同闸（auditor 有效
+  //    角色）同留痕（每次查阅落 audit_reads；被拒落 audit.denied）——
+
+  // audit 判权＋被拒留痕（三面共用；通过返回 true 并已应答 403）
+  bool audit_gate_denied(const std::string& account,
+                         const std::string& filters) {
+    const Decision d = impl_.az.authorize(
+        {account, "audit:read", "audit", "owner=" + account});
+    if (d.allowed) return false;
+    AuditReadRow denied;
+    denied.op_account = account;
+    denied.action = "audit.denied";
+    denied.filters = filters;
+    denied.ts_ms = now_ms();
+    impl_.store.add_audit_read(denied);
+    respond_json(403, {{"ok", false},
+                       {"error",
+                        "无 auditor 有效角色；被拒尝试已留痕"}});
+    return true;
+  }
+
+  // GET /files/audit/context?msg_id=&span=：命中消息的会话窗口（升序，
+  // 命中行前后各 span 行，span 夹 1..50）
+  void route_audit_context() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    const std::string msg_id = query_param(query_, "msg_id");
+    if (msg_id.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "msg_id 不能为空"}});
+      return;
+    }
+    int span = 5;
+    const std::string span_s = query_param(query_, "span");
+    if (!span_s.empty()) {
+      const int parsed = std::atoi(span_s.c_str());
+      if (parsed > 0) span = parsed;
+    }
+    const std::string filters = "msg_id=" + msg_id.substr(0, 12);
+    if (audit_gate_denied(account, filters)) return;
+    const auto rows = impl_.store.context_around(msg_id, span);
+    AuditReadRow rec;
+    rec.op_account = account;
+    rec.action = "audit.message.context";
+    rec.filters = filters;
+    rec.result_count = static_cast<int>(rows.size());
+    rec.ts_ms = now_ms();
+    impl_.store.add_audit_read(rec);
+    std::cout << "[MEMEX] audit context account=" << account
+              << " rows=" << rows.size() << std::endl;
+    json arr = json::array();
+    for (const auto& m : rows) {
+      arr.push_back({{"msg_id", m.msg_id},
+                     {"from", m.from_account},
+                     {"to", m.to_account},
+                     {"type", memex::protocol::msg_type_name(
+                                  static_cast<memex::protocol::MsgType>(
+                                      m.type))},
+                     {"recalled", m.recalled},
+                     {"ts_ms", m.ts_ms},
+                     {"text", m.text}});
+    }
+    respond_json(200, {{"ok", true}, {"msg_id", msg_id},
+                       {"messages", std::move(arr)}});
+  }
+
+  // GET /files/audit/recall-event?msg_id=：该消息的撤回事件（撤回人＋时刻；
+  // 未撤回 exists=false）
+  void route_audit_recall_event() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    const std::string msg_id = query_param(query_, "msg_id");
+    if (msg_id.empty()) {
+      respond_json(400, {{"ok", false}, {"error", "msg_id 不能为空"}});
+      return;
+    }
+    const std::string filters = "msg_id=" + msg_id.substr(0, 12);
+    if (audit_gate_denied(account, filters)) return;
+    const auto ev = impl_.store.last_recall_event(msg_id);
+    AuditReadRow rec;
+    rec.op_account = account;
+    rec.action = "audit.recall.event";
+    rec.filters = filters;
+    rec.result_count = ev.has_value() ? 1 : 0;
+    rec.ts_ms = now_ms();
+    impl_.store.add_audit_read(rec);
+    json body = {{"ok", true}, {"msg_id", msg_id}, {"exists", ev.has_value()}};
+    if (ev.has_value()) {
+      body["by_account"] = ev->by_account;
+      body["ts_ms"] = ev->ts_ms;
+    }
+    respond_json(200, body);
+  }
+
+  // POST /files/audit/export：与检索同条件重跑＋落 audit.message.export 留痕
+  //（证据文件由客户端写盘——路径在操作者本机，服务端只回行与对账元数据）
+  void route_audit_export(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j = json::object();
+    if (!body.empty()) {
+      try {
+        j = json::parse(body);
+      } catch (const std::exception&) {
+        respond_json(400, {{"ok", false}, {"error", "请求体不是合法 JSON"}});
+        return;
+      }
+    }
+    if (!j.is_object()) {
+      respond_json(400, {{"ok", false}, {"error", "请求体须为对象"}});
+      return;
+    }
+    const std::string target =
+        j.contains("account") && j["account"].is_string()
+            ? j["account"].get<std::string>()
+            : "";
+    const std::string keyword =
+        j.contains("keyword") && j["keyword"].is_string()
+            ? j["keyword"].get<std::string>()
+            : "";
+    const std::int64_t since_ms =
+        j.contains("since_ms") && j["since_ms"].is_number_integer()
+            ? j["since_ms"].get<std::int64_t>()
+            : 0;
+    const std::int64_t until_ms =
+        j.contains("until_ms") && j["until_ms"].is_number_integer()
+            ? j["until_ms"].get<std::int64_t>()
+            : 0;
+    int limit = j.contains("limit") && j["limit"].is_number_integer()
+                    ? static_cast<int>(j["limit"].get<std::int64_t>())
+                    : 200;
+    if (limit < 1) limit = 1;
+    if (limit > 1000) limit = 1000;
+    std::string filters;
+    const auto append_filter = [&filters](const std::string& kv) {
+      if (!filters.empty()) filters += " ";
+      filters += kv;
+    };
+    if (!target.empty()) append_filter("账号=" + target);
+    if (!keyword.empty()) append_filter("关键词=" + keyword);
+    if (since_ms > 0) append_filter("起=" + std::to_string(since_ms));
+    if (until_ms > 0) append_filter("止=" + std::to_string(until_ms));
+    if (audit_gate_denied(account, filters)) return;
+    MessageSearch q;
+    q.account = target;
+    q.keyword = keyword;
+    q.since_ms = since_ms;
+    q.until_ms = until_ms;
+    q.limit = limit;
+    const auto rows = impl_.store.search_messages(q);
+    const std::int64_t now = now_ms();
+    AuditReadRow rec;
+    rec.op_account = account;
+    rec.action = "audit.message.export";
+    rec.filters = filters;
+    rec.result_count = static_cast<int>(rows.size());
+    rec.ts_ms = now;
+    impl_.store.add_audit_read(rec);
+    std::cout << "[MEMEX] audit export account=" << account
+              << " rows=" << rows.size() << std::endl;
+    json arr = json::array();
+    for (const auto& m : rows) {
+      arr.push_back({{"msg_id", m.msg_id},
+                     {"from", m.from_account},
+                     {"to", m.to_account},
+                     {"type", memex::protocol::msg_type_name(
+                                  static_cast<memex::protocol::MsgType>(
+                                      m.type))},
+                     {"recalled", m.recalled},
+                     {"ts_ms", m.ts_ms},
+                     {"text", m.text}});
+    }
+    respond_json(200, {{"ok", true},
+                       {"messages", std::move(arr)},
+                       {"operator", account},
+                       {"exported_ms", now}});
   }
 
   // —— 办公室位置图（二期，设计稿 docs/design/办公室位置图.md）：

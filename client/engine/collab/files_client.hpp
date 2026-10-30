@@ -218,6 +218,15 @@ class FilesClient : public QObject {
                     qint64 since_ms, qint64 until_ms);
   // 查阅日志（台账自阅，同样持证）
   void fetch_audit_reads();
+  // —— 管理台归档检索（desktop-search）三面（同闸同留痕）——
+  // 命中消息的会话上下文（前后各 span 行升序；span 夹 1..50 服务端裁）
+  void audit_context(const QString& msg_id, int span = 5);
+  // 撤回事件（撤回人＋时刻；未撤回 exists=false）
+  void audit_recall_event(const QString& msg_id);
+  // 导出留证：服务端按当前条件重跑＋落 audit.message.export 留痕，回行集
+  //与对账元数据（operator/exported_ms）；证据文件由调用方写盘
+  void audit_export(const QString& account, const QString& keyword,
+                    qint64 since_ms, qint64 until_ms);
 
   // —— 办公室位置图（二期 /files/office-map）——
   // 看平面（floor 空=自楼层；org-admin 可指定层；回包含 can_manage）
@@ -399,6 +408,13 @@ class FilesClient : public QObject {
   void team_reports_listed(const QJsonArray& team); // author 分组＋reports
   void audit_searched(const QJsonArray& messages);
   void audit_reads_listed(const QJsonArray& reads);
+  // —— 管理台归档检索三面 ——
+  void audit_context_fetched(const QString& msg_id,
+                             const QJsonArray& messages);
+  void audit_recall_event_fetched(const QString& msg_id, bool exists,
+                                  const QString& by_account, qint64 ts_ms);
+  void audit_exported(const QJsonArray& messages, const QString& op_account,
+                      qint64 exported_ms);
   void office_map_fetched(const QJsonObject& map); // floor/can_manage/seats
   void office_seat_saved(qint64 id);
   void office_seat_deleted();

@@ -945,6 +945,63 @@ void FilesClient::fetch_audit_reads() {
             });
 }
 
+// —— 管理台归档检索（desktop-search）三面 ——
+
+void FilesClient::audit_context(const QString& msg_id, int span) {
+  QString path = QStringLiteral("/files/audit/context?msg_id=") +
+                 QString::fromUtf8(QUrl::toPercentEncoding(msg_id)) +
+                 QStringLiteral("&span=%1").arg(span);
+  send_json(QStringLiteral("audit.context"), QStringLiteral("GET"), path, {},
+            [this, msg_id](bool ok, int, const QJsonObject& resp,
+                           const QString&) {
+              if (ok) {
+                emit audit_context_fetched(
+                    msg_id, resp.value(QStringLiteral("messages")).toArray());
+              }
+            });
+}
+
+void FilesClient::audit_recall_event(const QString& msg_id) {
+  const QString path = QStringLiteral("/files/audit/recall-event?msg_id=") +
+                       QString::fromUtf8(QUrl::toPercentEncoding(msg_id));
+  send_json(QStringLiteral("audit.recall-event"), QStringLiteral("GET"), path,
+            {},
+            [this, msg_id](bool ok, int, const QJsonObject& resp,
+                           const QString&) {
+              if (ok) {
+                emit audit_recall_event_fetched(
+                    msg_id, resp.value(QStringLiteral("exists")).toBool(),
+                    resp.value(QStringLiteral("by_account")).toString(),
+                    static_cast<qint64>(
+                        resp.value(QStringLiteral("ts_ms")).toDouble()));
+              }
+            });
+}
+
+void FilesClient::audit_export(const QString& account, const QString& keyword,
+                               qint64 since_ms, qint64 until_ms) {
+  QJsonObject body;
+  if (!account.isEmpty()) body.insert(QStringLiteral("account"), account);
+  if (!keyword.isEmpty()) body.insert(QStringLiteral("keyword"), keyword);
+  if (since_ms > 0) {
+    body.insert(QStringLiteral("since_ms"), static_cast<double>(since_ms));
+  }
+  if (until_ms > 0) {
+    body.insert(QStringLiteral("until_ms"), static_cast<double>(until_ms));
+  }
+  send_json(QStringLiteral("audit.export"), QStringLiteral("POST"),
+            QStringLiteral("/files/audit/export"), body,
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (ok) {
+                emit audit_exported(
+                    resp.value(QStringLiteral("messages")).toArray(),
+                    resp.value(QStringLiteral("operator")).toString(),
+                    static_cast<qint64>(
+                        resp.value(QStringLiteral("exported_ms")).toDouble()));
+              }
+            });
+}
+
 // —— 办公室位置图（二期）——
 
 void FilesClient::fetch_office_map(const QString& floor) {

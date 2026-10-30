@@ -85,6 +85,8 @@ qt_add_executable(memex_client
   app/report_dialog.cpp
   app/group_tools_dialog.cpp
   app/audit_dialog.cpp
+  app/archive_console.cpp
+  app/archive_console.hpp
   app/office_map_dialog.cpp
   app/assist_dialog.cpp
   engine/task/task_provider.cpp
@@ -605,6 +607,7 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
+    app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
@@ -665,6 +668,7 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
+    app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
@@ -720,6 +724,27 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_audit_dialog
     app/tests/test_audit_dialog.cpp
     app/audit_dialog.cpp)
+
+  # 管理台·归档检索台冒烟（desktop-search）：真服务端 × 离屏控制台——
+  # 造归档（含已撤回行）→无角色检索被拒→授 auditor→条件检索命中五列
+  # 行（已撤回标记胶囊）→查看上下文回会话窗口→撤回事件回撤回人→导出
+  # 留证落证据文件→查阅日志见 search/context/recall/export 四类留痕
+  add_executable(test_archive_console
+    app/tests/test_archive_console.cpp
+    app/archive_console.cpp
+    app/theme.cpp
+    app/theme_pack.cpp)
+  target_link_libraries(test_archive_console PRIVATE
+    memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
+  target_include_directories(test_archive_console PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(test_archive_console PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
+  add_test(NAME archive_console COMMAND test_archive_console)
+  set_tests_properties(archive_console PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 120)
   target_link_libraries(test_audit_dialog PRIVATE
     memex_engine_collab Qt6::Widgets)
   target_include_directories(test_audit_dialog PRIVATE
@@ -821,6 +846,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
     app/main_window.cpp
+    app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
@@ -888,6 +914,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_live_shots
     tests/test_live_shots.cpp
     app/main_window.cpp
+    app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
@@ -950,6 +977,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_tray
     tests/test_tray.cpp
     app/main_window.cpp
+    app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
@@ -1013,6 +1041,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_screenshot
     tests/test_screenshot.cpp
     app/main_window.cpp
+    app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
@@ -1098,6 +1127,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_icon
     tests/test_icon.cpp
     app/main_window.cpp
+    app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
@@ -1162,6 +1192,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_theme
     tests/test_theme.cpp
     app/main_window.cpp
+    app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
@@ -1224,6 +1255,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_chat_actions
     tests/test_chat_actions.cpp
     app/main_window.cpp
+    app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
@@ -1291,6 +1323,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_watch_reminder
     tests/test_watch_reminder.cpp
     app/main_window.cpp
+    app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
@@ -1364,6 +1397,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_flash_alert
     tests/test_flash_alert.cpp
     app/main_window.cpp
+    app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
     app/avatar_store.cpp
