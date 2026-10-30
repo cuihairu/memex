@@ -643,7 +643,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] 与 prototypes/settings-account.html 逐屏比对一致(控件/布局/文案/间距)（账号与设备）（7881b64 统一设置窗口·账号页：个人资料（头像 42px 圆角＋更换头像→change_avatar、昵称只读＋编辑资料→show_profile_dialog）＋安全与设备（账号安全/设备管理置灰未提供）＋登录状态（退出登录→logout_collab 回直连态即时回填）；头像/昵称/登录态随真实登录状态回填，未登录诚实态；test_settings_window 86/86 绿）
 - [x] 与 prototypes/settings-message.html 逐屏比对一致(控件/布局/文案/间距)（表情/截图偏好）（611545f 统一设置窗口·消息页：通知方式四开关＋提示音三档走 NotifyPrefs load→改→save（只动本页字段，分级/全屏/传输完成/声音子位原值保留）、免打扰 dnd＋22:00–08:00 时段、已读回执→receipts/send_read 全局键、迁移备份置灰「暂未提供」；默认态＝原型展示态；test_settings_window 86/86 绿）
 - [x] 与 prototypes/settings-privacy.html 逐屏比对一致(控件/布局/文案/间距)（f2d01cb 统一设置窗口·隐私页：三组逐行对齐——黑名单「管理网络黑名单」→主窗共用入口 show_net_dialog＋行内标签「当前提供网段黑名单」、本机锁屏「离开与锁屏…」→共用入口 show_away_dialog、本机消息数据「查看存储说明」→非模态框列真实存储语义＋真实本机数据目录（AppDataLocation：avatars/brand/emoji/sent-shots/crashes）、在线状态静态标签「自动」、加好友验证置灰「暂未提供」（无好友申请流程，原型同口径）；test_settings_window 86/86 绿）
-- [ ] 与 prototypes/settings-advanced.html 逐屏比对一致(控件/布局/文案/间距)（网络与远程/快捷键/连接）
+- [x] 与 prototypes/settings-advanced.html 逐屏比对一致(控件/布局/文案/间距)（网络与远程/快捷键/连接）（557ee98 统一设置窗口·高级页：三组逐行对齐——网络组代理置灰「暂未提供」/域名解析覆盖「连接设置…」→主窗共用入口 show_conn_settings_dialog/网段黑名单 QCheckBox 直写 net_blacklist 真实键（与网络与远程设置对话框同键，切页回读同步）；诊断组开发者选项/运行日志置灰「暂未提供」（运行日志注脚指向隐私·存储崩溃转储说明）；关于组版本描边标签列真实 MEMEX_VERSION＋「关于 Memex…」→show_about。test_settings_window 86/86 绿）
 
 ### 邮箱（未实现面，先建后比）
 
