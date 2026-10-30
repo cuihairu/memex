@@ -1,5 +1,6 @@
 #include "group_ci_dialog.hpp"
 #include "collab_defaults.hpp"
+#include "theme.hpp"
 
 #include <QColor>
 #include <QDateTime>
@@ -441,7 +442,8 @@ QString GroupCiDialog::credential_state_text() const {
 void GroupCiDialog::set_status(const QString& text, bool error) {
   status_->setText(text);
   status_->setStyleSheet(
-      error ? QStringLiteral("color: #c62828;")
+      error ? QStringLiteral("color:%1;")
+                  .arg(ThemeManager::instance().tokens().danger.name())
             : QStringLiteral(""));
 }
 

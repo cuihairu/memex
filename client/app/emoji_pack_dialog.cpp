@@ -1,6 +1,7 @@
 // 表情包云素材管理（需求批②）——实现说明见头文件。
 #include "emoji_pack_dialog.hpp"
 #include "collab_defaults.hpp"
+#include "theme.hpp"
 
 #include <QFileDialog>
 #include <QFileInfo>
@@ -239,8 +240,10 @@ void EmojiPackDialog::populate(const QJsonArray& assets) {
 
 void EmojiPackDialog::set_status(const QString& text, bool error) {
   status_->setText(text);
-  status_->setStyleSheet(error ? QStringLiteral("color:#c0392b;")
-                               : QString());
+  status_->setStyleSheet(
+      error ? QStringLiteral("color:%1;")
+                  .arg(ThemeManager::instance().tokens().danger.name())
+            : QString());
 }
 
 } // namespace memex::client

@@ -378,9 +378,11 @@ if(MEMEX_BUILD_TESTS)
   # →结果卡片回群（服务端面留痕走 test_files_api，不在此重复）
   add_executable(test_group_ci_dialog
     app/tests/test_group_ci_dialog.cpp
-    app/group_ci_dialog.cpp)
+    app/group_ci_dialog.cpp
+    app/theme.cpp
+    app/theme_pack.cpp)
   target_link_libraries(test_group_ci_dialog PRIVATE
-    memex_engine_collab Qt6::Widgets)
+    memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
   target_include_directories(test_group_ci_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_group_ci_dialog PRIVATE
@@ -396,9 +398,11 @@ if(MEMEX_BUILD_TESTS)
   # 走 test_files_api 服务端腿，不在此重复
   add_executable(test_group_pack_dialog
     app/tests/test_group_pack_dialog.cpp
-    app/group_pack_dialog.cpp)
+    app/group_pack_dialog.cpp
+    app/theme.cpp
+    app/theme_pack.cpp)
   target_link_libraries(test_group_pack_dialog PRIVATE
-    memex_engine_collab Qt6::Widgets)
+    memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
   target_include_directories(test_group_pack_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_group_pack_dialog PRIVATE
@@ -413,9 +417,11 @@ if(MEMEX_BUILD_TESTS)
   # 状态行（服务端判权矩阵走 test_files_api，不在此重复）
   add_executable(test_group_server_dialog
     app/tests/test_group_server_dialog.cpp
-    app/group_server_dialog.cpp)
+    app/group_server_dialog.cpp
+    app/theme.cpp
+    app/theme_pack.cpp)
   target_link_libraries(test_group_server_dialog PRIVATE
-    memex_engine_collab Qt6::Widgets)
+    memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
   target_include_directories(test_group_server_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_group_server_dialog PRIVATE
@@ -762,9 +768,11 @@ if(MEMEX_BUILD_TESTS)
   # magic/1MiB/判权协议腿走服务端 test_emoji，不在此重复
   add_executable(test_emoji_pack_dialog
     app/tests/test_emoji_pack_dialog.cpp
-    app/emoji_pack_dialog.cpp)
+    app/emoji_pack_dialog.cpp
+    app/theme.cpp
+    app/theme_pack.cpp)
   target_link_libraries(test_emoji_pack_dialog PRIVATE
-    memex_engine_collab Qt6::Widgets)
+    memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
   target_include_directories(test_emoji_pack_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_emoji_pack_dialog PRIVATE
@@ -829,9 +837,11 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_assist_dialog
     app/net_guard.cpp
     app/tests/test_assist_dialog.cpp
-    app/assist_dialog.cpp)
+    app/assist_dialog.cpp
+    app/theme.cpp
+    app/theme_pack.cpp)
   target_link_libraries(test_assist_dialog PRIVATE
-    memex_engine_collab Qt6::Widgets)
+    memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
   target_include_directories(test_assist_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_assist_dialog PRIVATE

@@ -7724,7 +7724,9 @@ void MainWindow::show_profile_dialog() {
     // 状态行红字明示（既有 request_failed 通道的对话框内显影；窗口销毁
     // 即断连，不影响主窗状态栏通道）
     auto* avatar_status = new QLabel(&dlg);
-    avatar_status->setStyleSheet(QStringLiteral("color:#c62828;"));
+    avatar_status->setStyleSheet(
+        QStringLiteral("color:%1;")
+            .arg(ThemeManager::instance().tokens().danger.name()));
     avatar_status->setWordWrap(true);
     layout->addWidget(avatar_status);
     const QPointer<QLabel> status_guard(avatar_status);

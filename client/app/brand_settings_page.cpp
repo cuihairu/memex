@@ -3,6 +3,7 @@
 // 本地形态预检（accent 坏形态不发网）与提交展示；403 状态行明示归属。
 #include "brand_settings_page.hpp"
 #include "collab_defaults.hpp"
+#include "theme.hpp"
 
 #include <QColorDialog>
 #include <QFileDialog>
@@ -358,8 +359,10 @@ void BrandSettingsDialog::apply_branding(const QJsonObject& b) {
 
 void BrandSettingsDialog::set_status(const QString& text, bool error) {
   status_->setText(text);
-  status_->setStyleSheet(error ? QStringLiteral("color:#c0392b;")
-                               : QString());
+  status_->setStyleSheet(
+      error ? QStringLiteral("color:%1;")
+                  .arg(ThemeManager::instance().tokens().danger.name())
+            : QString());
 }
 
 } // namespace memex::client

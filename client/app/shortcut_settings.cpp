@@ -2,6 +2,7 @@
 // （apply_screenshot_shortcut：应用内其他 QShortcut／带键 QAction）；
 // 本页只做输入、预填与结果展示——冲突红字不关窗，成功即存即生效。
 #include "shortcut_settings.hpp"
+#include "theme.hpp"
 
 #include <QKeySequenceEdit>
 #include <QLabel>
@@ -50,7 +51,9 @@ void ShortcutSettingsDialog::save_sequence(const QKeySequence& seq) {
   const QString conflict = win_->apply_screenshot_shortcut(seq);
   if (!conflict.isEmpty()) {
     status_->setText(conflict);
-    status_->setStyleSheet(QStringLiteral("color:#c0392b;"));
+    status_->setStyleSheet(
+        QStringLiteral("color:%1;")
+            .arg(ThemeManager::instance().tokens().danger.name()));
     return; // 冲突不关窗（明示后可改）
   }
   status_->setText(QStringLiteral("已保存：") +

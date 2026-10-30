@@ -5,6 +5,7 @@
 // 一可移植原语，深度注入属平台层留后续）。
 #include "assist_dialog.hpp"
 #include "collab_defaults.hpp"
+#include "theme.hpp"
 #include <app/net_guard.hpp>
 
 #include <QApplication>
@@ -336,7 +337,8 @@ void AssistDialog::build_ui() {
   right->addLayout(grows);
   share_label_ = new QLabel(this);
   share_label_->setStyleSheet(
-      QStringLiteral("color:#c0392b;font-weight:bold;"));
+      QStringLiteral("color:%1;font-weight:bold;")
+          .arg(ThemeManager::instance().tokens().danger.name()));
   right->addWidget(share_label_);
   btn_share_ = new QPushButton(QStringLiteral("开始共享屏幕"), this);
   right->addWidget(btn_share_);

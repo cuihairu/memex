@@ -1,5 +1,6 @@
 #include "group_pack_dialog.hpp"
 #include "collab_defaults.hpp"
+#include "theme.hpp"
 
 #include <QDateTime>
 #include <QHBoxLayout>
@@ -285,7 +286,9 @@ QString GroupPackDialog::snapshot_text() const {
 void GroupPackDialog::set_status(const QString& text, bool error) {
   status_->setText(text);
   status_->setStyleSheet(
-      error ? QStringLiteral("color: #c62828;") : QStringLiteral(""));
+      error ? QStringLiteral("color:%1;")
+                  .arg(ThemeManager::instance().tokens().danger.name())
+            : QStringLiteral(""));
 }
 
 } // namespace memex::client

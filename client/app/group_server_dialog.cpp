@@ -1,5 +1,6 @@
 #include "group_server_dialog.hpp"
 #include "collab_defaults.hpp"
+#include "theme.hpp"
 
 #include <QColor>
 #include <QDateTime>
@@ -487,7 +488,8 @@ QString GroupServerDialog::session_command_text() const {
 void GroupServerDialog::set_status(const QString& text, bool error) {
   status_->setText(text);
   status_->setStyleSheet(
-      error ? QStringLiteral("color: #c62828;")
+      error ? QStringLiteral("color:%1;")
+                  .arg(ThemeManager::instance().tokens().danger.name())
             : QStringLiteral(""));
 }
 
