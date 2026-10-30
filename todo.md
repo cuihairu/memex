@@ -629,7 +629,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] 与 prototypes/desktop-group-memo.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_memo_dialog.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
 - [x] 与 prototypes/desktop-group-vault.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_vault_dialog.cpp`）✅ 2026-10-30 280c27b（双栏 split 重排：400px 条目列解锁行/掩码列表/条目动作行/箱管理区「群主/管理员：」＋四钮＋右注独占一行（≈原型 flex-wrap）＋详情列「条目详情 · 查看/复制均为显式动作，服务端全留痕」卡与 ⚠ 硬性分离告警；连接区已连接徽章；窗 1000×660；近似项见 prototype-conformance 台账。门禁 85/85 绿两轮（重排轮＋抓图腿轮）；`test_group_vault_dialog` 新增抓图腿，实况浅深首摄像素核验）
 - [x] 与 prototypes/desktop-group-ci.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_ci_dialog.cpp`）✅ 2026-10-30 8ed9265（双栏 split 重排：左流水线列 sec-head 红绿灯副题＋列表＋触发行留痕注＋管理区两行；右列运行历史卡＋工具凭据卡＋动作语义/危险动作说明条；连接区已连接徽章与「群号 N」位；窗 1000×640；近似项见 prototype-conformance 台账。门禁 85/85 绿一次过；`test_group_ci_dialog` 新增抓图腿，实况浅深首摄像素核验）
-- [ ] 与 prototypes/desktop-group-pack.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_pack_dialog.cpp`）
+- [x] 与 prototypes/desktop-group-pack.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_pack_dialog.cpp`）✅ 2026-10-30 184bae2（双栏 split 重排：左出产物列 sec-head 留痕副题＋台账＋白名单说明条＋打包行＋动作行（删除选中/开放成员打包/刷新＋危险动作注）；右列快照导出面（脱敏副题＋只读 JSON＋导出/另存为＋同源留痕说明条）；连接区已连接徽章与「群号 N」位；窗 1000×640；「另存为文件…」新增；近似项见 prototype-conformance 台账。门禁 85/85 绿一次过；`test_group_pack_dialog` 新增抓图腿，实况浅深首摄像素核验）
 - [ ] 与 prototypes/desktop-group-servers.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_server_dialog.cpp`）
 - [ ] 与 prototypes/desktop-group-record.html 逐屏比对一致(控件/布局/文案/间距)（`MainWindow::group_record_export_dialog`）
 - [ ] 与 prototypes/desktop-assist.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/assist_dialog.cpp`）
