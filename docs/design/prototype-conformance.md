@@ -38,7 +38,7 @@
 | `desktop-tasks.html` | `client/app/task_dialog.cpp`（`task_provider_store.cpp` / `task_provider_settings.cpp` / `task_template_settings.cpp`） | 已对齐 | 双栏 body-split（298px 录入列：月历/录入区/外部任务登记/脚注；视图列：任务清单列表/看板/领导视角泳道/状态行）＋连接区（已连接徽章）＋工具行（拉取外部并入右侧）。近似：连接区可编辑兼连接入口（原型只读徽章）；列表↔看板按「看板」按钮互斥切换（原型静态并示两栏）；截止/开始为单 QDateTimeEdit（原型拆日期+时间两格）；月历默认收起、QCalendarWidget（原型自绘网格）；状态行文案沿用测试口径「清单已刷新」；只看未完成默认关 |
 | `desktop-approval.html` | `client/app/approval_dialog.cpp` | 有偏差 | 四态与权限说明为原型补充栏 |
 | `desktop-report.html` | `client/app/report_dialog.cpp` | 有偏差 | 原型含周报补写与下属日报两栏示意 |
-| `desktop-group-tools.html` | `client/app/group_tools_dialog.cpp` | 有偏差 | 投票/接龙/群任务三页；原型以并列展示模拟 Tab |
+| `desktop-group-tools.html` | `client/app/group_tools_dialog.cpp` | 已对齐 | 三页 Tab（原型自注「实现为三页 Tab，原型并列展示三页」）；每页 ts-head 规则副题＋单行发起区（录入字段吸收余宽、操作钮贴右）＋连接区「已连接」徽章＋脚行判权/结果卡说明；窗题「群工具 — 群 N」。近似：连接区可编辑兼连接入口（原型只读徽章）；条目行 QListWidget 文本行（[进行中]/[已截止] 前缀，原型 pill 徽标＋计数条卡片）——行文案为测试契约口径 |
 | `desktop-group-memo.html` | `client/app/group_memo_dialog.cpp` + `main_window.cpp:2913`「公告编辑历史」 | 有偏差 | 修订历史与凭据检测提示 |
 | `desktop-group-vault.html` | `client/app/group_vault_dialog.cpp`（`group_vault_crypto.cpp`） | 有偏差 | 端到端密文，客户端零凭据 |
 | `desktop-group-ci.html` | `client/app/group_ci_dialog.cpp` | 有偏差 | 客户端只见按钮不见凭据 |
