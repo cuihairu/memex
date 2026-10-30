@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1180" viewBox="0 0 1280 1180" role="img" aria-labelledby="title desc" xml:lang="zh-CN">
+<title id="title">Memex · 系统架构</title>
+<desc id="desc">双引擎客户端与单进程集中服务端。桌面客户端内置直连引擎与协作引擎；移动客户端全部为协作态。协作态经服务端长连接全量归档；直连态点对点不经服务端。服务端为单机单进程六模块，存储为单一 SQLite 与 S3 兼容对象存储，文件面字节经服务端代理入对象存储，聊天文件点对点旁路。图示基于代码与文档事实。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="context-stroke"/></marker></defs>
+<style>text{font-family:Arial,'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#172b4d}.title{font-size:30px;font-weight:700}.name{font-size:22px;font-weight:700}.body{font-size:16px;fill:#435570}.small{font-size:14px;fill:#52647b}.label{font-size:14px;fill:#435570;paint-order:stroke;stroke:#f8fafc;stroke-width:5px;stroke-linejoin:round}.edge{fill:none;stroke-linejoin:round}.dash{stroke-dasharray:7 5}</style>
+<rect width="1280" height="1180" rx="20" fill="#f8fafc"/>
+<text x="40" y="48" class="title" text-anchor="start">Memex · 系统架构</text>
+<text x="40" y="80" class="body" text-anchor="start">双引擎客户端 · 单机集中服务端 · 文件双通道 · 以代码与文档事实为准</text>
+
+<path d="M560 310 V370 H245 V490" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="desktop-collab" data-from="collab-engine" data-to="access-gateway" d="M560 310 V370 H245 V490" class="edge" style="stroke:#2563eb;stroke-width:2.5" marker-end="url(#arrow)"/>
+<path d="M1010 360 V370 H245 V490" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="mobile-collab" data-from="mobile-client" data-to="access-gateway" d="M1010 360 V370 H245 V490" class="edge" style="stroke:#2563eb;stroke-width:2.5" marker-end="url(#arrow)"/>
+<path d="M200 310 V365" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="direct-p2p" data-from="direct-engine" data-to="direct-peer" d="M200 310 V365" class="edge" style="stroke:#0891b2;stroke-width:2.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M370 810 V880" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="server-sqlite" data-from="server" data-to="sqlite" d="M370 810 V880" class="edge" style="stroke:#7c3aed;stroke-width:2.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M1025 730 V880" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="server-s3" data-from="file-metadata" data-to="s3" d="M1025 730 V880" class="edge" style="stroke:#087f5b;stroke-width:2.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+
+<g id="desktop-client" data-node="desktop-client"><rect x="40" y="130" width="700" height="230" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="60" y="166" class="name" text-anchor="start">桌面客户端 · C++17 + Qt（Windows / macOS / 统信 UOS / 麒麟）</text>
+<rect x="60" y="190" width="320" height="120" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="80" y="222" class="name" text-anchor="start">直连引擎（未登录 · 默认）</text>
+<text x="80" y="252" class="body" text-anchor="start">UDP 广播发现同网段</text>
+<text x="80" y="277" class="body" text-anchor="start">TCP 点对点收发 · 飞秋/IPMSG 兼容</text>
+<text x="80" y="302" class="body" text-anchor="start">文件字节 P2P 旁路 · 仅本机留存</text>
+<rect x="400" y="190" width="320" height="120" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="420" y="222" class="name" text-anchor="start">协作引擎（登录后）</text>
+<text x="420" y="252" class="body" text-anchor="start">服务端长连接 · 全量归档</text>
+<text x="420" y="277" class="body" text-anchor="start">组织 / 群聊 / 云历史 / 检索</text>
+<text x="420" y="302" class="body" text-anchor="start">跨态会话显式标注「未归档」</text>
+<text x="60" y="345" class="small" text-anchor="start">本机 SQLite 缓存（storage_local / local_store）· 只读本地，不写入归档</text>
+</g>
+<g id="mobile-client" data-node="mobile-client"><rect x="780" y="130" width="460" height="230" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="800" y="166" class="name" text-anchor="start">移动客户端 · 全部为协作态</text>
+<text x="800" y="200" class="body" text-anchor="start">Android（Kotlin · 已落地）</text>
+<text x="800" y="228" class="body" text-anchor="start">iOS（Swift · 代码＋CI）</text>
+<text x="800" y="256" class="body" text-anchor="start">HarmonyOS NEXT（ArkTS · 代码＋CI）</text>
+<text x="800" y="290" class="small" text-anchor="start">首启需设服务器地址 · 无免登录匿名使用</text>
+</g>
+<g id="direct-peer" data-node="direct-peer"><rect x="40" y="365" width="240" height="50" rx="10" fill="#fff" stroke="#0891b2" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="60" y="396" class="body" text-anchor="start">同网段对端客户端（直连态）</text>
+</g>
+<text x="300" y="340" class="label" text-anchor="start" style="fill:#0891b2">点对点 · 不经服务端</text>
+<text x="560" y="350" class="label" text-anchor="start" style="fill:#2563eb">协作态长连接（WSS）· 全量归档</text>
+<text x="760" y="430" class="label" text-anchor="start" style="fill:#2563eb">移动端协作态长连接</text>
+
+<g id="server" data-node="server"><rect x="40" y="430" width="1200" height="380" rx="14" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+<text x="60" y="466" class="name" text-anchor="start">Collaboration Server · C++17 · 单机集中部署 · 单进程（六模块收敛合一）</text>
+<rect x="60" y="490" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="80" y="522" class="name" text-anchor="start">接入网关</text>
+<text x="80" y="552" class="body" text-anchor="start">WSS · 会话 · 限流 · 绑定</text>
+<text x="80" y="580" class="small" text-anchor="start">server.cpp / session.cpp</text>
+<rect x="450" y="490" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="470" y="522" class="name" text-anchor="start">账号与设备</text>
+<text x="470" y="552" class="body" text-anchor="start">凭证 · 设备 · LDAP 集成</text>
+<text x="470" y="580" class="small" text-anchor="start">cred.cpp / ldap.cpp</text>
+<rect x="840" y="490" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="860" y="522" class="name" text-anchor="start">组织架构</text>
+<text x="860" y="552" class="body" text-anchor="start">部门树 · 直属上级 · 通讯录可见性</text>
+<text x="860" y="580" class="small" text-anchor="start">store.cpp（组织表）</text>
+<rect x="60" y="620" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="80" y="652" class="name" text-anchor="start">消息与归档</text>
+<text x="80" y="682" class="body" text-anchor="start">投递 · 去重 · 撤回仅显示层</text>
+<text x="80" y="710" class="small" text-anchor="start">store.cpp / session.cpp</text>
+<rect x="450" y="620" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="470" y="652" class="name" text-anchor="start">策略服务</text>
+<text x="470" y="682" class="body" text-anchor="start">授权 · 审计 · 通知 webhook</text>
+<text x="470" y="710" class="small" text-anchor="start">authz.cpp / webhook.cpp</text>
+<rect x="840" y="620" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="860" y="652" class="name" text-anchor="start">文件元数据服务</text>
+<text x="860" y="682" class="body" text-anchor="start">许可校验 · 元数据（暂缓入库）</text>
+<text x="860" y="710" class="small" text-anchor="start">files_server.cpp / storage.cpp</text>
+<text x="60" y="762" class="small" text-anchor="start">扩展面：模型网关（model_gateway）· 群助手（group_assistant）· 任务拉取（task_pull）· 出网代理（agent_main）</text>
+<text x="60" y="788" class="small" text-anchor="start">部署：memex-server 单进程 · Admin 网页后台为独立进程（admin/，直连同一 SQLite）· RustFS / MinIO 提供 S3 兼容对象存储</text>
+</g>
+
+<g id="sqlite" data-node="sqlite"><rect x="60" y="880" width="620" height="100" rx="14" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="80" y="918" class="name" text-anchor="start">SQLite（单一库）</text>
+<text x="80" y="948" class="body" text-anchor="start">账号 · 组织 · 消息 · 归档 · 策略 · 审计</text>
+</g>
+<g id="s3" data-node="s3"><rect x="720" y="880" width="520" height="100" rx="14" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="740" y="918" class="name" text-anchor="start">S3 兼容对象存储（RustFS / MinIO / 云 S3）</text>
+<text x="740" y="948" class="body" text-anchor="start">文件面字节 · 对象前缀 groups/users/inbox</text>
+</g>
+<text x="370" y="862" class="label" text-anchor="middle" style="fill:#7c3aed">单库读写</text>
+<text x="1025" y="862" class="label" text-anchor="middle" style="fill:#087f5b">文件面字节 · 服务端代理（客户端不直连对象存储）</text>
+
+<text x="40" y="1030" class="small" text-anchor="start">文件双通道：聊天文件点对点字节不经服务端（仅元数据，暂缓入库）；文件面（群文件 / 个人文件 / 文件助手 / 外网上传）经服务端代理入对象存储。</text>
+<text x="40" y="1058" class="small" text-anchor="start">直连态「不留痕」是形态固有属性（不经服务端），非按需隐藏；协作态「留痕」是建设目的，不因任何技术手段豁免。</text>
+<text x="40" y="1086" class="small" text-anchor="start">虚线：点对点旁路 · 实线：业务数据 · 无圆点交叉不表示连通</text>
+</svg>

@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1180" viewBox="0 0 1280 1180" role="img" aria-labelledby="title desc" xml:lang="en">
+<title id="title">Memex · System Architecture</title>
+<desc id="desc">Dual-engine clients and a single-process centralized server. The desktop client bundles a direct engine and a collaboration engine; mobile clients are entirely collaboration mode. Collaboration mode archives everything over a server long-connection; direct mode is peer-to-peer and bypasses the server. The server is a single-machine single-process build with six modules, backed by a single SQLite database and an S3-compatible object store; file-surface bytes are proxied by the server into object storage, while chat files bypass it peer-to-peer. Based on code and documentation facts.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10Z" fill="context-stroke"/></marker></defs>
+<style>text{font-family:Arial,'Noto Sans CJK SC','Microsoft YaHei',sans-serif;fill:#172b4d}.title{font-size:30px;font-weight:700}.name{font-size:22px;font-weight:700}.body{font-size:16px;fill:#435570}.small{font-size:14px;fill:#52647b}.label{font-size:14px;fill:#435570;paint-order:stroke;stroke:#f8fafc;stroke-width:5px;stroke-linejoin:round}.edge{fill:none;stroke-linejoin:round}.dash{stroke-dasharray:7 5}</style>
+<rect width="1280" height="1180" rx="20" fill="#f8fafc"/>
+<text x="40" y="48" class="title" text-anchor="start">Memex · System Architecture</text>
+<text x="40" y="80" class="body" text-anchor="start">Dual-engine clients · single-machine centralized server · dual file channel · based on code and documentation facts</text>
+
+<path d="M560 310 V370 H245 V490" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="desktop-collab" data-from="collab-engine" data-to="access-gateway" d="M560 310 V370 H245 V490" class="edge" style="stroke:#2563eb;stroke-width:2.5" marker-end="url(#arrow)"/>
+<path d="M1010 360 V370 H245 V490" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="mobile-collab" data-from="mobile-client" data-to="access-gateway" d="M1010 360 V370 H245 V490" class="edge" style="stroke:#2563eb;stroke-width:2.5" marker-end="url(#arrow)"/>
+<path d="M200 310 V365" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="direct-p2p" data-from="direct-engine" data-to="direct-peer" d="M200 310 V365" class="edge" style="stroke:#0891b2;stroke-width:2.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M370 810 V880" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="server-sqlite" data-from="server" data-to="sqlite" d="M370 810 V880" class="edge" style="stroke:#7c3aed;stroke-width:2.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+<path d="M1025 730 V880" fill="none" stroke="#f8fafc" stroke-width="9"/>
+<path id="server-s3" data-from="file-metadata" data-to="s3" d="M1025 730 V880" class="edge" style="stroke:#087f5b;stroke-width:2.5" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+
+<g id="desktop-client" data-node="desktop-client"><rect x="40" y="130" width="700" height="230" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="60" y="166" class="name" text-anchor="start">Desktop client · C++17 + Qt (Windows / macOS / UnionTech UOS / Kylin)</text>
+<rect x="60" y="190" width="320" height="120" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="80" y="222" class="name" text-anchor="start">Direct engine (not logged in · default)</text>
+<text x="80" y="252" class="body" text-anchor="start">UDP broadcast discovers same-subnet peers</text>
+<text x="80" y="277" class="body" text-anchor="start">TCP peer-to-peer · FeiQ / IPMSG compatible</text>
+<text x="80" y="302" class="body" text-anchor="start">File bytes bypass P2P · local machine only</text>
+<rect x="400" y="190" width="320" height="120" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="420" y="222" class="name" text-anchor="start">Collaboration engine (after login)</text>
+<text x="420" y="252" class="body" text-anchor="start">Server long-connection · full archive</text>
+<text x="420" y="277" class="body" text-anchor="start">Organization / group / cloud history / search</text>
+<text x="420" y="302" class="body" text-anchor="start">Cross-state sessions explicitly labeled "not archived"</text>
+<text x="60" y="345" class="small" text-anchor="start">Local SQLite cache (storage_local / local_store) · local only, never written into the archive</text>
+</g>
+<g id="mobile-client" data-node="mobile-client"><rect x="780" y="130" width="460" height="230" rx="14" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+<text x="800" y="166" class="name" text-anchor="start">Mobile clients · entirely collaboration mode</text>
+<text x="800" y="200" class="body" text-anchor="start">Android (Kotlin · shipped)</text>
+<text x="800" y="228" class="body" text-anchor="start">iOS (Swift · code + CI)</text>
+<text x="800" y="256" class="body" text-anchor="start">HarmonyOS NEXT (ArkTS · code + CI)</text>
+<text x="800" y="290" class="small" text-anchor="start">First launch requires a server address · no login-free anonymous use</text>
+</g>
+<g id="direct-peer" data-node="direct-peer"><rect x="40" y="365" width="240" height="50" rx="10" fill="#fff" stroke="#0891b2" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="60" y="396" class="body" text-anchor="start">Same-subnet peer client (direct mode)</text>
+</g>
+<text x="300" y="340" class="label" text-anchor="start" style="fill:#0891b2">peer-to-peer · bypasses server</text>
+<text x="560" y="350" class="label" text-anchor="start" style="fill:#2563eb">collaboration long-connection (WSS) · full archive</text>
+<text x="760" y="430" class="label" text-anchor="start" style="fill:#2563eb">mobile collaboration long-connection</text>
+
+<g id="server" data-node="server"><rect x="40" y="430" width="1200" height="380" rx="14" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+<text x="60" y="466" class="name" text-anchor="start">Collaboration Server · C++17 · single-machine centralized · single process (six modules converged)</text>
+<rect x="60" y="490" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="80" y="522" class="name" text-anchor="start">Access gateway</text>
+<text x="80" y="552" class="body" text-anchor="start">WSS · session · rate limit · binding</text>
+<text x="80" y="580" class="small" text-anchor="start">server.cpp / session.cpp</text>
+<rect x="450" y="490" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="470" y="522" class="name" text-anchor="start">Accounts and devices</text>
+<text x="470" y="552" class="body" text-anchor="start">Credentials · devices · LDAP integration</text>
+<text x="470" y="580" class="small" text-anchor="start">cred.cpp / ldap.cpp</text>
+<rect x="840" y="490" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="860" y="522" class="name" text-anchor="start">Organizational structure</text>
+<text x="860" y="552" class="body" text-anchor="start">Department tree · direct supervisor · visibility policy</text>
+<text x="860" y="580" class="small" text-anchor="start">store.cpp (org tables)</text>
+<rect x="60" y="620" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="80" y="652" class="name" text-anchor="start">Messages and archiving</text>
+<text x="80" y="682" class="body" text-anchor="start">Delivery · dedupe · recall display-layer only</text>
+<text x="80" y="710" class="small" text-anchor="start">store.cpp / session.cpp</text>
+<rect x="450" y="620" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="470" y="652" class="name" text-anchor="start">Policy service</text>
+<text x="470" y="682" class="body" text-anchor="start">Authorization · audit · notification webhook</text>
+<text x="470" y="710" class="small" text-anchor="start">authz.cpp / webhook.cpp</text>
+<rect x="840" y="620" width="370" height="110" rx="10" fill="#fff" stroke="#cbd5e1" stroke-width="1.5"/>
+<text x="860" y="652" class="name" text-anchor="start">File metadata service</text>
+<text x="860" y="682" class="body" text-anchor="start">Permission check · metadata (deferred)</text>
+<text x="860" y="710" class="small" text-anchor="start">files_server.cpp / storage.cpp</text>
+<text x="60" y="762" class="small" text-anchor="start">Extensions: model gateway (model_gateway) · group assistant (group_assistant) · task pull (task_pull) · egress agent (agent_main)</text>
+<text x="60" y="788" class="small" text-anchor="start">Deployment: memex-server single process · Admin web backend is a separate process (admin/, connects to the same SQLite) · RustFS / MinIO provide S3-compatible object storage</text>
+</g>
+
+<g id="sqlite" data-node="sqlite"><rect x="60" y="880" width="620" height="100" rx="14" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="80" y="918" class="name" text-anchor="start">SQLite (single database)</text>
+<text x="80" y="948" class="body" text-anchor="start">Accounts · org · messages · archive · policy · audit</text>
+</g>
+<g id="s3" data-node="s3"><rect x="720" y="880" width="520" height="100" rx="14" fill="#edf5ff" stroke="#93b9e3" stroke-width="1.5"/>
+<text x="740" y="918" class="name" text-anchor="start">S3-compatible object storage (RustFS / MinIO / cloud S3)</text>
+<text x="740" y="948" class="body" text-anchor="start">File-surface bytes · object prefixes groups/users/inbox</text>
+</g>
+<text x="370" y="862" class="label" text-anchor="middle" style="fill:#7c3aed">single-database reads and writes</text>
+<text x="1025" y="862" class="label" text-anchor="middle" style="fill:#087f5b">file-surface bytes · server proxied (clients never connect to object storage directly)</text>
+
+<text x="40" y="1030" class="small" text-anchor="start">Dual file channel: chat files bypass the server at the byte level (metadata only, deferred); file-surface (group / personal / file assistant / external uplink) is proxied by the server into object storage.</text>
+<text x="40" y="1058" class="small" text-anchor="start">Direct mode's non-traceability is inherent to that form (it does not pass through the server), not an on-demand hidden mode; collaboration mode's traceability is the purpose of the build and is not exempted by any technical means.</text>
+<text x="40" y="1086" class="small" text-anchor="start">Dashed: peer-to-peer bypass · Solid: business data · Crossings without a dot are not connections</text>
+</svg>

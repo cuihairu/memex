@@ -36,6 +36,12 @@ features:
 
 
 
+## 系统架构
+
+![Memex 系统架构图](/images/architecture-zh.svg)
+
+---
+
 <script setup>
 const desktopSlides = [
   { key: 'live-direct', title: '桌面端 · 未登录直连态', desc: '零配置自动发现同网段终端，本机留存，不入归档' },

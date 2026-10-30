@@ -36,6 +36,12 @@ features:
 
 
 
+## System Architecture
+
+![Memex system architecture diagram](/images/architecture-en.svg)
+
+---
+
 <script setup>
 const desktopSlides = [
   { key: 'live-direct', title: 'Desktop · Unauthenticated Direct Mode', desc: 'Zero-configuration discovery of endpoints on the same subnet; retained on the local machine, not archived' },
