@@ -6,6 +6,7 @@
 // b64 存取面走 test_files_client 引擎级腿，不在此重复。
 #include <QApplication>
 #include <QClipboard>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QLineEdit>
 #include <QListWidget>
@@ -18,6 +19,7 @@
 
 #include <app/group_vault_crypto.hpp>
 #include <app/group_vault_dialog.hpp>
+#include <app/theme.hpp>
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
 
@@ -324,6 +326,53 @@ int main(int argc, char** argv) {
     }
     return member.status_text().contains(QStringLiteral("共 1 条"));
   }, 8000));
+
+  // 文档站实况抓图（test_live_shots grab_pair 同式——亮暗各一、抓完显式
+  // 回亮）。owner 台账补两条真条目成 3 行掩码列表，选中一条 reveal 让
+  // 右栏详情卡带真实解密面（名称/账号/密码/URL/备注）入画。
+  {
+    CHECK(owner.submit_entry(QStringLiteral("staging 只读库"),
+                             QStringLiteral("staging-readonly"),
+                             QStringLiteral("rO0yA7Kc2Q"),
+                             QStringLiteral("https://staging.db.internal:5432"),
+                             QStringLiteral("只读账号；写操作走工单")));
+    CHECK(owner.submit_entry(QStringLiteral("发布机 SSH"),
+                             QStringLiteral("deploy@10.0.0.9"),
+                             QStringLiteral("D3p1oy!9kQz"),
+                             QString(), QString()));
+    owner.refresh();
+    CHECK(wait_until([&] { return owner.stream_count() == 3; }, 8000));
+    const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+    CHECK(QDir().mkpath(dir));
+    // 列表序不保证新条目在首行——按掩码名选中 staging 那条再查看
+    for (int i = 0; i < owner.stream()->count(); ++i) {
+      if (owner.stream()->item(i)->text().contains(
+              QStringLiteral("staging 只读库"))) {
+        owner.stream()->setCurrentRow(i);
+        break;
+      }
+    }
+    CHECK(owner.reveal_selected());
+    CHECK(wait_until([&] {
+      return owner.details_text().contains(QStringLiteral("rO0yA7Kc2Q"));
+    }, 8000));
+    owner.show();
+    QApplication::processEvents();
+    auto& tm = memex::client::ThemeManager::instance();
+    tm.apply(qApp);
+    QThread::msleep(120);
+    QApplication::processEvents();
+    CHECK(owner.grab().save(
+        dir + QStringLiteral("/live-group-vault-light.png")));
+    tm.set_mode(QStringLiteral("dark"));
+    QThread::msleep(120);
+    QApplication::processEvents();
+    CHECK(owner.grab().save(
+        dir + QStringLiteral("/live-group-vault-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents();
+  }
 
   server.terminate();
   server.waitForFinished(3000);

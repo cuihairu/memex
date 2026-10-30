@@ -114,6 +114,9 @@ class GroupVaultDialog : public QDialog {
   QLineEdit* vault_pass_;
   QLabel* status_;
   QLabel* details_;
+  // 原型 desktop-group-vault conn-row 右上「已连接」徽章（过渡消息仍走
+  // 底部状态行）
+  QLabel* conn_badge_{nullptr};
   QListWidget* stream_;
   QPushButton* btn_connect_;
   QPushButton* btn_init_;

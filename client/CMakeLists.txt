@@ -361,13 +361,16 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_group_vault_dialog
     app/tests/test_group_vault_dialog.cpp
     app/group_vault_dialog.cpp
-    app/group_vault_crypto.cpp)
+    app/group_vault_crypto.cpp
+    app/theme.cpp
+    app/theme_pack.cpp)
   target_link_libraries(test_group_vault_dialog PRIVATE
     memex_engine_collab Qt6::Widgets OpenSSL::Crypto)
   target_include_directories(test_group_vault_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_group_vault_dialog PRIVATE
-    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
   add_test(NAME group_vault_dialog COMMAND test_group_vault_dialog)
   set_tests_properties(group_vault_dialog PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"

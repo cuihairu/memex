@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QHBoxLayout>
+#include <QGroupBox>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -40,7 +41,7 @@ QString fmt_time(qint64 ms) {
 
 GroupVaultDialog::GroupVaultDialog(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("群密码箱"));
-  resize(640, 560);
+  resize(1000, 660);
   client_ = new FilesClient(this);
   build_ui();
 
@@ -48,6 +49,11 @@ GroupVaultDialog::GroupVaultDialog(QWidget* parent) : QDialog(parent) {
     set_status(QStringLiteral("已连接：%1@%2:%3（箱密码只在本机派生）")
                    .arg(client_->account(), host_->text(), port_->text()),
                false);
+    conn_badge_->setText(
+        QStringLiteral("已连接（箱密码仅本地参与解密，服务端不可找回）"));
+    conn_badge_->setStyleSheet(
+        QStringLiteral("color:%1;font-weight:600;")
+            .arg(QColor(Qt::green).name()));
     btn_connect_->setEnabled(false);
     for (QLineEdit* e : {host_, port_, account_, password_}) {
       e->setEnabled(false);
@@ -56,6 +62,8 @@ GroupVaultDialog::GroupVaultDialog(QWidget* parent) : QDialog(parent) {
   });
   connect(client_, &FilesClient::login_failed, this, [this](const QString& r) {
     set_status(QStringLiteral("连接失败：%1").arg(r), true);
+    conn_badge_->setText(QStringLiteral("未连接"));
+    conn_badge_->setStyleSheet(QString());
     btn_connect_->setEnabled(true);
   });
   connect(client_, &FilesClient::group_vault_info_fetched, this,
@@ -270,8 +278,10 @@ GroupVaultDialog::GroupVaultDialog(QWidget* parent) : QDialog(parent) {
 
 void GroupVaultDialog::build_ui() {
   auto* root = new QVBoxLayout(this);
+  root->setContentsMargins(12, 12, 12, 12);
+  root->setSpacing(8);
 
-  // —— 连接区（登录成功后整体停用）——
+  // —— 连接区（登录成功后整体停用；原型 conn-row 右上「已连接」徽章）——
   QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
   auto* conn_row = new QHBoxLayout;
   host_ = new QLineEdit(
@@ -290,6 +300,8 @@ void GroupVaultDialog::build_ui() {
   password_->setEchoMode(QLineEdit::Password);
   password_->setMaximumWidth(140);
   btn_connect_ = new QPushButton(QStringLiteral("连接"), this);
+  conn_badge_ = new QLabel(QStringLiteral("未连接"), this);
+  conn_badge_->setObjectName(QStringLiteral("vault_conn_badge"));
   conn_row->addWidget(new QLabel(QStringLiteral("服务器"), this));
   conn_row->addWidget(host_);
   conn_row->addWidget(new QLabel(QStringLiteral("文件面端口"), this));
@@ -299,44 +311,48 @@ void GroupVaultDialog::build_ui() {
   conn_row->addWidget(new QLabel(QStringLiteral("口令"), this));
   conn_row->addWidget(password_);
   conn_row->addWidget(btn_connect_);
+  conn_row->addStretch(1);
+  conn_row->addWidget(conn_badge_);
   root->addLayout(conn_row);
+
+  // —— 双栏 split（原型 .split）：左 400px 条目列＋右详情列 ——
+  auto* split = new QHBoxLayout;
+  split->setSpacing(8);
+  auto* left = new QWidget(this);
+  left->setFixedWidth(400);
+  auto* left_lay = new QVBoxLayout(left);
+  left_lay->setContentsMargins(0, 0, 0, 0);
+  left_lay->setSpacing(8);
 
   // —— 解锁区（已建箱未解锁时可见；建箱按钮仅未建箱时可见）——
   auto* unlock_row = new QHBoxLayout;
-  btn_init_ = new QPushButton(QStringLiteral("建箱…"), this);
+  btn_init_ = new QPushButton(QStringLiteral("建箱…"), left);
   btn_init_->setToolTip(
       QStringLiteral("建箱仅群主/管理员；箱密码服务端不可找回"));
-  vault_pass_ = new QLineEdit(this);
+  vault_pass_ = new QLineEdit(left);
   vault_pass_->setEchoMode(QLineEdit::Password);
   vault_pass_->setPlaceholderText(QStringLiteral("箱密码"));
   vault_pass_->setMaximumWidth(200);
-  btn_unlock_ = new QPushButton(QStringLiteral("解锁"), this);
+  btn_unlock_ = new QPushButton(QStringLiteral("解锁"), left);
   unlock_row->addWidget(btn_init_);
   unlock_row->addWidget(vault_pass_, 1);
   unlock_row->addWidget(btn_unlock_);
-  root->addLayout(unlock_row);
+  left_lay->addLayout(unlock_row);
 
   // —— 条目列表（掩码：名称 · 账号 · 维护人 · 时间）——
-  stream_ = new QListWidget(this);
+  stream_ = new QListWidget(left);
   stream_->setAlternatingRowColors(true);
   stream_->setWordWrap(true);
-  root->addWidget(stream_, 1);
-
-  // —— 查看详情区（reveal 落这里；复制不落明文）——
-  details_ = new QLabel(this);
-  details_->setWordWrap(true);
-  details_->setTextInteractionFlags(Qt::TextSelectableByMouse);
-  details_->hide();
-  root->addWidget(details_);
+  left_lay->addWidget(stream_, 1);
 
   // —— 条目动作行 ——
   auto* act_row = new QHBoxLayout;
-  btn_new_ = new QPushButton(QStringLiteral("新建条目"), this);
-  btn_edit_ = new QPushButton(QStringLiteral("编辑"), this);
-  btn_reveal_ = new QPushButton(QStringLiteral("查看"), this);
-  btn_copy_ = new QPushButton(QStringLiteral("复制密码"), this);
-  btn_delete_ = new QPushButton(QStringLiteral("删除"), this);
-  btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
+  btn_new_ = new QPushButton(QStringLiteral("新建条目"), left);
+  btn_edit_ = new QPushButton(QStringLiteral("编辑"), left);
+  btn_reveal_ = new QPushButton(QStringLiteral("查看"), left);
+  btn_copy_ = new QPushButton(QStringLiteral("复制密码"), left);
+  btn_delete_ = new QPushButton(QStringLiteral("删除"), left);
+  btn_refresh_ = new QPushButton(QStringLiteral("刷新"), left);
   btn_edit_->setEnabled(false);
   btn_reveal_->setEnabled(false);
   btn_copy_->setEnabled(false);
@@ -352,15 +368,17 @@ void GroupVaultDialog::build_ui() {
   act_row->addWidget(btn_copy_);
   act_row->addWidget(btn_delete_);
   act_row->addWidget(btn_refresh_);
-  act_row->addStretch(1);
-  root->addLayout(act_row);
+  left_lay->addLayout(act_row);
 
-  // —— 箱管理行（改箱密码/重置箱/审计=群主管理员；名单仅群主）——
+  // —— 箱管理区（原型 .admin：改箱密码/重置箱/审计=群主管理员；名单仅
+  //    群主；flex-wrap 换行≈按钮一行＋右注独占一行）——
+  auto* mgmt = new QVBoxLayout;
+  mgmt->setSpacing(2);
   auto* mgmt_row = new QHBoxLayout;
-  btn_pass_ = new QPushButton(QStringLiteral("改箱密码…"), this);
-  btn_reset_ = new QPushButton(QStringLiteral("重置箱…"), this);
-  btn_acl_ = new QPushButton(QStringLiteral("授权名单…"), this);
-  btn_audit_ = new QPushButton(QStringLiteral("查看审计…"), this);
+  btn_pass_ = new QPushButton(QStringLiteral("改箱密码…"), left);
+  btn_reset_ = new QPushButton(QStringLiteral("重置箱…"), left);
+  btn_acl_ = new QPushButton(QStringLiteral("授权名单…"), left);
+  btn_audit_ = new QPushButton(QStringLiteral("查看审计…"), left);
   btn_pass_->setEnabled(false);
   btn_reset_->setEnabled(false);
   btn_acl_->setEnabled(false);
@@ -370,12 +388,42 @@ void GroupVaultDialog::build_ui() {
       QStringLiteral("新箱钥匙全量重加密：逐条取回重加密落回（均留痕）"));
   btn_acl_->setToolTip(QStringLiteral("授权名单仅群主可改；空名单=全成员可解锁"));
   btn_audit_->setToolTip(QStringLiteral("谁/何时/哪条/查看还是复制（倒序）"));
+  mgmt_row->addWidget(new QLabel(QStringLiteral("群主/管理员："), left));
   mgmt_row->addWidget(btn_pass_);
   mgmt_row->addWidget(btn_reset_);
   mgmt_row->addWidget(btn_acl_);
   mgmt_row->addWidget(btn_audit_);
   mgmt_row->addStretch(1);
-  root->addLayout(mgmt_row);
+  mgmt->addLayout(mgmt_row);
+  auto* mgmt_note = new QLabel(
+      QStringLiteral("默认全体成员可解锁；群主可收紧为仅授权名单"), left);
+  mgmt_note->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  mgmt->addWidget(mgmt_note);
+  left_lay->addLayout(mgmt);
+  split->addWidget(left);
+
+  // —— 详情列（原型 .det-col：详情卡＋硬性分离告警）——
+  auto* right = new QWidget(this);
+  auto* right_lay = new QVBoxLayout(right);
+  right_lay->setContentsMargins(0, 0, 0, 0);
+  right_lay->setSpacing(8);
+  auto* det_box = new QGroupBox(
+      QStringLiteral("条目详情 · 查看/复制均为显式动作，服务端全留痕"), right);
+  auto* det_lay = new QVBoxLayout(det_box);
+  details_ = new QLabel(det_box);
+  details_->setWordWrap(true);
+  details_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  details_->hide();
+  det_lay->addWidget(details_);
+  right_lay->addWidget(det_box, 1);
+  auto* warn = new QLabel(
+      QStringLiteral("⚠ 与群备忘录（明文）硬性分离：密码类内容只进本箱；箱"
+                     "密码服务端不可找回，重置＝全箱重加密后旧条目不可恢复。"),
+      right);
+  warn->setWordWrap(true);
+  right_lay->addWidget(warn);
+  split->addWidget(right, 1);
+  root->addLayout(split, 1);
 
   // —— 状态行 ——
   status_ = new QLabel(
