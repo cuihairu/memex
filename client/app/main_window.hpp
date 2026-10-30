@@ -407,6 +407,8 @@ private:
   void seed_collab_peers();      // 登录后从本地库补入历史协作会话
   void show_collab_login_dialog();
   void show_conn_settings_dialog(); // 连接设置：域名解析覆盖（部署批 424）
+  void show_away_dialog(); // 离开与锁屏设置（选项菜单与统一设置窗·隐私页共用）
+  void show_net_dialog();  // 网络与远程设置（选项菜单与统一设置窗·隐私页共用）
   void show_org_dialog();        // 菜单入口：查询＋组织架构弹窗（T3.1）
   //（旧 org 弹窗树 build_org_tree 已由整屏 org 三栏视图取代并删除）
   void apply_policy(const QString& org_json); // 解析本人生效策略（T3.4）

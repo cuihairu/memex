@@ -892,26 +892,10 @@ void MainWindow::build_ui() {
   });
   // —— 离开锁屏设置（用户令 2026-10-08 ④：离开密码＋无操作超时＋启用）——
   auto* act_away = opt_menu->addAction(QStringLiteral("离开与锁屏…"));
-  connect(act_away, &QAction::triggered, this, [this] {
-    if (!away_dialog_) {
-      away_dialog_ = new AwayLockSettingsDialog(this, this);
-      away_dialog_->setAttribute(Qt::WA_DeleteOnClose);
-    }
-    away_dialog_->show();
-    away_dialog_->raise();
-    away_dialog_->activateWindow();
-  });
+  connect(act_away, &QAction::triggered, this, &MainWindow::show_away_dialog);
   // —— 网络与远程设置（用户令 2026-10-08 ⑤：网段黑名单＋远程控制密码）——
   auto* act_net = opt_menu->addAction(QStringLiteral("网络与远程…"));
-  connect(act_net, &QAction::triggered, this, [this] {
-    if (!net_dialog_) {
-      net_dialog_ = new NetRemoteSettingsDialog(this, this);
-      net_dialog_->setAttribute(Qt::WA_DeleteOnClose);
-    }
-    net_dialog_->show();
-    net_dialog_->raise();
-    net_dialog_->activateWindow();
-  });
+  connect(act_net, &QAction::triggered, this, &MainWindow::show_net_dialog);
   opt_menu->addSeparator();
   act_autostart_ =
       opt_menu->addAction(QStringLiteral("开机启动（登录后自动运行）"));
@@ -6280,6 +6264,29 @@ void MainWindow::show_collab_login_dialog() {
 // 连接设置（部署批 424）：域名→IP 解析覆盖编辑。规则串 host_overrides
 // （空=不覆盖，公网解析不受影响）；hosts/内网 DNS 等标准做法见 README
 // 「公网接入：Cloudflare tunnel」节——此处只管本机客户端覆盖项。
+// 离开与锁屏设置（选项菜单与统一设置窗·隐私页共用入口；懒建＋关即毁，
+// 同 shortcut/conn 弹窗口径）
+void MainWindow::show_away_dialog() {
+  if (!away_dialog_) {
+    away_dialog_ = new AwayLockSettingsDialog(this, this);
+    away_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+  }
+  away_dialog_->show();
+  away_dialog_->raise();
+  away_dialog_->activateWindow();
+}
+
+// 网络与远程设置（选项菜单与统一设置窗·隐私页共用入口）
+void MainWindow::show_net_dialog() {
+  if (!net_dialog_) {
+    net_dialog_ = new NetRemoteSettingsDialog(this, this);
+    net_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+  }
+  net_dialog_->show();
+  net_dialog_->raise();
+  net_dialog_->activateWindow();
+}
+
 void MainWindow::show_conn_settings_dialog() {
   QDialog dlg(this);
   dlg.setWindowTitle(QStringLiteral("连接设置"));

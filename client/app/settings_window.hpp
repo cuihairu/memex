@@ -5,7 +5,8 @@
 // 与截图快捷键（含快捷键设置对话框）走 MainWindow（判权与冲突检测
 // 权威在主窗）；消息页通知/免打扰/提示音走 NotifyPrefs（load→改→save，
 // 只动本页字段，不碰未展示的分级/全屏/传输完成/声音子位），已读回执走
-// MainWindow（空 peer＝全局）。
+// MainWindow（空 peer＝全局）；隐私页网段黑名单/离开锁屏走 MainWindow
+// 共用入口，存储说明列真实本机数据目录。
 #pragma once
 
 #include <QDialog>
@@ -59,6 +60,7 @@ class SettingsWindow : public QDialog {
   QWidget* build_general_page();
   QWidget* build_account_page();
   QWidget* build_message_page();
+  QWidget* build_privacy_page();
   QWidget* build_stub_page(const QString& title, const QString& sub,
                            const QString& note);
   void refresh_account_page(); // 头像/昵称/登录态开关按真实状态回填

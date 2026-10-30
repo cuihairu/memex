@@ -1,17 +1,21 @@
-// 二期·统一设置窗口冒烟（原型 settings-general/account/message.html）：
-// 侧栏导航五页堆叠（通用/账号/消息/隐私/高级）＋通用页真实接线
+// 二期·统一设置窗口冒烟（原型 settings-general/account/message/privacy
+// .html）：侧栏导航五页堆叠（通用/账号/消息/隐私/高级）＋通用页真实接线
 // （主题下拉→ThemeManager、截图快捷键→MainWindow::screenshot_shortcut、
 // 开机启动→set_autostart（freedesktop 文件，MEMEX_TEST_AUTOSTART_DIR 隔离）、
 // 下载位置只读真实目录；界面字号/语言置灰「未提供」）＋账号页登录态回填
 // ＋消息页 NotifyPrefs 直写（load→改→save 保未展示字段；已读回执走主窗
-// receipts/send_read 全局键；迁移备份置灰「暂未提供」）＋两页诚实占位。
-// 无服务端（MainWindow 独立构造，同 test_window_layout）；离屏。
+// receipts/send_read 全局键；迁移备份置灰「暂未提供」）＋隐私页主窗共用
+// 入口（网段黑名单/离开锁屏点击真开对话框；存储说明列真实本机目录）＋
+// 高级页诚实占位。无服务端（MainWindow 独立构造，同 test_window_layout）；
+// 离屏。
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
 #include <QFile>
+#include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
 #include <QStandardPaths>
@@ -23,7 +27,9 @@
 #include <iostream>
 #include <unistd.h>
 
+#include <app/away_settings.hpp>
 #include <app/main_window.hpp>
+#include <app/net_remote_settings.hpp>
 #include <app/notify_prefs.hpp>
 #include <app/settings_window.hpp>
 #include <app/theme.hpp>
@@ -268,6 +274,65 @@ int main(int argc, char** argv) {
     CHECK(sw.show_page(QStringLiteral("general")));
   }
 
+  // —— ⑦d 隐私页：网段黑名单/离开锁屏＝主窗共用入口（点击真开对话框）；
+  //    存储说明列真实本机目录；加好友验证置灰「暂未提供」——
+  {
+    CHECK(sw.show_page(QStringLiteral("privacy")));
+    CHECK(sw.page_title() == QStringLiteral("隐私"));
+    auto* net_btn =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_priv_net"));
+    auto* friend_btn =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_priv_friend"));
+    auto* storage_btn =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_priv_storage"));
+    auto* away_btn =
+        sw.findChild<QPushButton*>(QStringLiteral("settings_priv_away"));
+    auto* net_tag =
+        sw.findChild<QLabel*>(QStringLiteral("settings_priv_net_tag"));
+    auto* online_tag =
+        sw.findChild<QLabel*>(QStringLiteral("settings_priv_online_tag"));
+    CHECK(net_btn);
+    CHECK(friend_btn);
+    CHECK(storage_btn);
+    CHECK(away_btn);
+    CHECK(net_tag);
+    CHECK(online_tag);
+    if (net_tag)
+      CHECK(net_tag->text() == QStringLiteral("当前提供网段黑名单"));
+    if (online_tag) CHECK(online_tag->text() == QStringLiteral("自动"));
+    if (friend_btn) CHECK(!friend_btn->isEnabled()); // 无好友验证流程＝置灰
+
+    if (net_btn) {
+      net_btn->click();
+      QApplication::processEvents(QEventLoop::AllEvents, 30);
+      auto* net_dlg = w.findChild<memex::client::NetRemoteSettingsDialog*>();
+      CHECK(net_dlg);
+      if (net_dlg) net_dlg->close(); // WA_DeleteOnClose（关即毁，不残留）
+      QApplication::processEvents(QEventLoop::AllEvents, 30);
+    }
+    if (away_btn) {
+      away_btn->click();
+      QApplication::processEvents(QEventLoop::AllEvents, 30);
+      auto* away_dlg = w.findChild<memex::client::AwayLockSettingsDialog*>();
+      CHECK(away_dlg);
+      if (away_dlg) away_dlg->close();
+      QApplication::processEvents(QEventLoop::AllEvents, 30);
+    }
+    if (storage_btn) {
+      storage_btn->click();
+      QApplication::processEvents(QEventLoop::AllEvents, 30);
+      auto* note = sw.findChild<QMessageBox*>(
+          QStringLiteral("settings_priv_storage_note"));
+      CHECK(note);
+      if (note) {
+        CHECK(note->informativeText().contains(QStringLiteral("本机数据目录")));
+        note->close(); // WA_DeleteOnClose
+      }
+      QApplication::processEvents(QEventLoop::AllEvents, 30);
+    }
+    CHECK(sw.show_page(QStringLiteral("general")));
+  }
+
   // —— ⑧ 文档站实况抓图（grab_pair 同式：亮暗各一、抓完显式回亮）——
   {
     const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
@@ -317,6 +382,22 @@ int main(int argc, char** argv) {
     QThread::msleep(120);
     QApplication::processEvents(QEventLoop::AllEvents, 30);
     CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-message-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+
+    // 隐私页抓图（默认态＝原型展示态：标签「当前提供网段黑名单」/「自动」）
+    CHECK(sw.show_page(QStringLiteral("privacy")));
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.page_title() == QStringLiteral("隐私"));
+    tm.apply(qApp);
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-privacy-light.png")));
+    tm.set_mode(QStringLiteral("dark"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-privacy-dark.png")));
     tm.set_mode(QStringLiteral("light"));
     QThread::msleep(120);
     QApplication::processEvents(QEventLoop::AllEvents, 30);
