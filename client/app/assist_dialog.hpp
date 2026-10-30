@@ -8,6 +8,7 @@
 
 #include <QDialog>
 #include <QJsonArray>
+#include <QPixmap>
 #include <QString>
 
 #include <QtGlobal>
@@ -105,10 +106,16 @@ class AssistDialog : public QDialog {
   QPushButton* btn_audit_;
   QPushButton* btn_share_;
   QPushButton* btn_refresh_;
+  QLineEdit* pwd_edit_{nullptr};  // 配对密码内联框（原型批准行；开远程控制时校验）
+  QLabel* conn_badge_{nullptr};   // 连接徽章（连接行右端，原型 ok 位）
+  QLabel* sel_lbl_{nullptr};      // 台账选中提示（动作行尾，原型 muted 位）
+  QLabel* audit_sub_{nullptr};    // 审计链计数副题（sec-h .s 位）
   QTimer* timer_;
   QLabel* status_;
   QString account_;
   qint64 frame_seq_{0};
+  QPixmap frame_src_; // 最近帧原图（Resize 时按当前画面框重缩放，隐藏期首帧不再烙小图）
+  QString injected_frame_b64_; // 测试注帧（非空=轮询推帧用注入帧，离屏抓屏垃圾帧绕行）
   bool sharing_{false};
 };
 

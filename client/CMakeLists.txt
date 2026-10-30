@@ -851,7 +851,8 @@ if(MEMEX_BUILD_TESTS)
   target_include_directories(test_assist_dialog PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_definitions(test_assist_dialog PRIVATE
-    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
   add_test(NAME assist_dialog COMMAND test_assist_dialog)
   set_tests_properties(assist_dialog PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"

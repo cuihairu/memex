@@ -9,6 +9,7 @@
 #include <QBuffer>
 #include <QDateTime>
 #include <QElapsedTimer>
+#include <QDir>
 #include <QImage>
 #include <QProcess>
 #include <QTcpServer>
@@ -20,6 +21,7 @@
 
 #include <app/assist_dialog.hpp>
 #include <app/net_guard.hpp>
+#include <app/theme.hpp>
 
 using memex::client::AssistDialog;
 namespace remote_control = memex::client::remote_control;
@@ -237,6 +239,34 @@ int main(int argc, char** argv) {
   helper.click_frame(0.5, 0.25);
   CHECK(wait_until(
       [&] { return subject.input_log_count() == 1; }, 8000));
+
+  // 文档站实况抓图（test_live_shots grab_pair 同式——亮暗各一、抓完显式
+  // 回亮）。发起方 helper 面：台账进行中高亮行＋真实远端帧（合成 JPEG 已
+  // 拉回渲染）＋审计链 request/approve/start 三迁移。受控侧横幅与输入日
+  // 志属对侧实例（subject），不同帧出现——近似项入台账。
+  {
+    helper.select_session(0);
+    helper.show_audit();
+    CHECK(wait_until([&] { return helper.audit_count() >= 3; }, 8000));
+    const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+    CHECK(QDir().mkpath(dir));
+    helper.show();
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    auto& tm = memex::client::ThemeManager::instance();
+    tm.apply(qApp);
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(helper.grab().save(
+        dir + QStringLiteral("/live-assist-light.png")));
+    tm.set_mode(QStringLiteral("dark"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+    CHECK(helper.grab().save(
+        dir + QStringLiteral("/live-assist-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+  }
 
   // 受控方结束=撤权即时生效：发起方台账见终态
   subject.stop_sharing();

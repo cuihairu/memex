@@ -5,7 +5,6 @@
 // 一可移植原语，深度注入属平台层留后续）。
 #include "assist_dialog.hpp"
 #include "collab_defaults.hpp"
-#include "theme.hpp"
 #include <app/net_guard.hpp>
 
 #include <QApplication>
@@ -14,12 +13,13 @@
 #include <QColor>
 #include <QCursor>
 #include <QDateTime>
+#include <QFont>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -27,6 +27,7 @@
 #include <QPalette>
 #include <QPixmap>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QScreen>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -63,19 +64,26 @@ QString short_id(const QString& id) { return id.right(6); }
 
 AssistDialog::AssistDialog(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("远程协助"));
-  resize(760, 560);
+  resize(1080, 700);
   client_ = new FilesClient(this);
   build_ui();
 
   connect(client_, &FilesClient::logged_in, this, [this] {
     account_ = client_->account();
     set_status(QStringLiteral("已连接（") + account_ + QStringLiteral("）"));
+    conn_badge_->setText(
+        QStringLiteral("已连接（500ms 轮询 · 屏幕永不落盘）"));
+    conn_badge_->setStyleSheet(
+        QStringLiteral("color:%1;font-weight:600;")
+            .arg(QColor(Qt::green).name()));
     timer_->start(500); // 轮询台账＋媒体搬运=过程持续可见
     client_->fetch_assist_sessions();
   });
   connect(client_, &FilesClient::login_failed, this,
           [this](const QString& r) {
             set_status(QStringLiteral("连接失败：") + r, true);
+            conn_badge_->setText(QStringLiteral("未连接"));
+            conn_badge_->setStyleSheet(QString());
             btn_connect_->setEnabled(true);
           });
   connect(client_, &FilesClient::assist_requested, this,
@@ -148,6 +156,11 @@ AssistDialog::AssistDialog(QWidget* parent) : QDialog(parent) {
               }
             }
             sessions_->blockSignals(false);
+            // 台账 500ms 重建清选中——选中提示同步清（真实选中态为准）
+            sel_lbl_->setText(selected_session().isEmpty()
+                                  ? QString()
+                                  : QStringLiteral("选中 %1")
+                                        .arg(short_id(selected_session())));
             // 共享中指示（受控侧持续可见）＋共享按钮面
             const QString share_id = active_id_as_target();
             if (!share_id.isEmpty() && sharing_) {
@@ -178,6 +191,7 @@ AssistDialog::AssistDialog(QWidget* parent) : QDialog(parent) {
                            a.value(QStringLiteral("detail")).toString()));
             }
             set_status(QStringLiteral("审计链 %1 笔").arg(rows.size()));
+            audit_sub_->setText(QStringLiteral("审计链 %1 笔").arg(rows.size()));
           });
   connect(client_, &FilesClient::assist_frame_pushed, this,
           [this](qint64 seq) {
@@ -190,6 +204,7 @@ AssistDialog::AssistDialog(QWidget* parent) : QDialog(parent) {
             pm.loadFromData(QByteArray::fromBase64(jpeg_b64.toUtf8()),
                             "JPEG");
             if (!pm.isNull()) {
+              frame_src_ = pm;
               frame_->setPixmap(pm.scaled(
                   frame_->size(), Qt::KeepAspectRatio,
                   Qt::SmoothTransformation));
@@ -241,9 +256,12 @@ AssistDialog::AssistDialog(QWidget* parent) : QDialog(parent) {
 
 void AssistDialog::build_ui() {
   auto* layout = new QVBoxLayout(this);
+  layout->setContentsMargins(12, 12, 12, 12);
+  layout->setSpacing(8);
 
-  // 连接区（与文件助手同构）
+  // 连接区（原型 conn-row：字段行＋右端已连接徽章）
   auto* conn = new QHBoxLayout;
+  conn->setSpacing(6);
   auto* host = new QLineEdit(this);
   host->setPlaceholderText(QStringLiteral("服务器地址"));
   auto* port = new QLineEdit(this);
@@ -261,6 +279,10 @@ void AssistDialog::build_ui() {
   conn->addWidget(account_box);
   conn->addWidget(password);
   conn->addWidget(btn_connect_);
+  conn->addStretch(1);
+  conn_badge_ = new QLabel(QStringLiteral("未连接"), this);
+  conn_badge_->setObjectName(QStringLiteral("assist_conn_badge"));
+  conn->addWidget(conn_badge_);
   layout->addLayout(conn);
   connect(btn_connect_, &QPushButton::clicked, this,
           [this, host, port, account_box, password] {
@@ -268,27 +290,65 @@ void AssistDialog::build_ui() {
                        account_box->text(), password->text());
           });
 
-  auto* cols = new QHBoxLayout;
+  // sec-h 小工具（原型 .sec-h：粗题＋灰副题——副题走默认调色板随主题换）
+  auto bold_lbl = [this](const QString& text) {
+    auto* l = new QLabel(text, this);
+    QFont f = l->font();
+    f.setBold(true);
+    l->setFont(f);
+    return l;
+  };
 
-  // —— 左列：我发起协助 ——
+  auto* cols = new QHBoxLayout;
+  cols->setSpacing(8);
+
+  // —— 左列：我发起协助（发起方）——
   auto* left = new QVBoxLayout;
-  auto* rrow = new QHBoxLayout;
-  target_edit_ = new QLineEdit(this);
-  target_edit_->setPlaceholderText(QStringLiteral("受控方账号"));
-  chk_view_ = new QCheckBox(QStringLiteral("查看"), this);
-  chk_view_->setChecked(true);
-  chk_mouse_ = new QCheckBox(QStringLiteral("鼠标"), this);
-  chk_kb_ = new QCheckBox(QStringLiteral("键盘"), this);
-  btn_request_ = new QPushButton(QStringLiteral("发起协助"), this);
-  rrow->addWidget(target_edit_, 1);
-  rrow->addWidget(chk_view_);
-  rrow->addWidget(chk_mouse_);
-  rrow->addWidget(chk_kb_);
-  rrow->addWidget(btn_request_);
-  left->addLayout(rrow);
-  left->addWidget(new QLabel(QStringLiteral("会话台账（过程持续可见）"), this));
+  left->setSpacing(8);
+
+  // 卡：我发起协助（原型 .card）
+  {
+    auto* card = new QGroupBox(QStringLiteral("我发起协助"), this);
+    auto* body = new QVBoxLayout(card);
+    body->setContentsMargins(10, 6, 10, 10);
+    body->setSpacing(8);
+    auto* rrow = new QHBoxLayout;
+    target_edit_ = new QLineEdit(card);
+    target_edit_->setPlaceholderText(QStringLiteral("受控方账号（如 liwen）"));
+    chk_view_ = new QCheckBox(QStringLiteral("查看"), card);
+    chk_view_->setChecked(true);
+    chk_mouse_ = new QCheckBox(QStringLiteral("鼠标"), card);
+    chk_kb_ = new QCheckBox(QStringLiteral("键盘"), card);
+    btn_request_ = new QPushButton(QStringLiteral("发起协助"), card);
+    rrow->addWidget(target_edit_, 1);
+    rrow->addWidget(chk_view_);
+    rrow->addWidget(chk_mouse_);
+    rrow->addWidget(chk_kb_);
+    rrow->addWidget(btn_request_);
+    body->addLayout(rrow);
+    auto* n = new QLabel(
+        QStringLiteral("consent 只属受控方——发起后等对方批准；对方可缩权实"
+                       "批（实批 ⊆ 申请）。"),
+        card);
+    n->setWordWrap(true);
+    body->addWidget(n);
+    left->addWidget(card);
+  }
+
+  // 会话台账（原型 .ledger：头行＋五态行）
+  {
+    auto* led_head = new QHBoxLayout;
+    led_head->addWidget(bold_lbl(QStringLiteral("会话台账（过程持续可见）")));
+    led_head->addWidget(new QLabel(
+        QStringLiteral("五态：待批 / 已批待启动 / 进行中 / 已结束 / 已拒绝"),
+        this));
+    led_head->addStretch(1);
+    left->addLayout(led_head);
+  }
   sessions_ = new QListWidget(this);
   left->addWidget(sessions_, 2);
+
+  // 动作行（原型 .btnrow：启动/结束/审计/刷新＋尾端选中提示）
   auto* orow = new QHBoxLayout;
   btn_start_ = new QPushButton(QStringLiteral("启动选中"), this);
   btn_end_ = new QPushButton(QStringLiteral("结束选中"), this);
@@ -298,53 +358,136 @@ void AssistDialog::build_ui() {
   orow->addWidget(btn_end_);
   orow->addWidget(btn_audit_);
   orow->addWidget(btn_refresh_);
+  orow->addStretch(1);
+  sel_lbl_ = new QLabel(this);
+  orow->addWidget(sel_lbl_);
   left->addLayout(orow);
-  frame_ = new QLabel(QStringLiteral("（远端画面——选中进行中的会话自动显示）"),
-                      this);
-  frame_->setMinimumSize(320, 200);
+
+  // 远端画面（原型 .remote：深底画面区）
+  frame_ = new QLabel(
+      QStringLiteral("（远端画面——选中进行中的会话自动显示）"
+                     " · 点击即回发鼠标事件"),
+      this);
+  frame_->setMinimumSize(320, 190);
   frame_->setAlignment(Qt::AlignCenter);
   frame_->setStyleSheet(
       QStringLiteral("background:#222;color:#bbb;font-size:12px;"));
   frame_->installEventFilter(this); // 点画面→发鼠标事件
   left->addWidget(frame_, 1);
-  left->addWidget(new QLabel(QStringLiteral("审计链（状态迁移留痕）"), this));
+
+  // 审计链 sec-h（计数副题随拉取更新）
+  {
+    auto* aud_head = new QHBoxLayout;
+    aud_head->addWidget(bold_lbl(QStringLiteral("审计链（状态迁移留痕）")));
+    audit_sub_ = new QLabel(this);
+    aud_head->addWidget(audit_sub_);
+    aud_head->addStretch(1);
+    left->addLayout(aud_head);
+  }
   audit_ = new QListWidget(this);
-  audit_->setMaximumHeight(110);
+  {
+    QFont mono(QStringLiteral("monospace"));
+    mono.setStyleHint(QFont::TypeWriter);
+    audit_->setFont(mono);
+  }
+  audit_->setMaximumHeight(140);
   left->addWidget(audit_);
   cols->addLayout(left, 1);
 
   // —— 右列：别人协助我（受控方）——
   auto* right = new QVBoxLayout;
-  right->addWidget(new QLabel(QStringLiteral("待我批（consent 只属受控方）"),
-                              this));
-  pending_ = new QListWidget(this);
-  right->addWidget(pending_, 1);
-  auto* prow = new QHBoxLayout;
-  btn_approve_ = new QPushButton(QStringLiteral("批准勾选项"), this);
-  btn_deny_ = new QPushButton(QStringLiteral("拒绝"), this);
-  prow->addWidget(btn_approve_);
-  prow->addWidget(btn_deny_);
-  right->addLayout(prow);
-  auto* grows = new QHBoxLayout;
-  grows->addWidget(new QLabel(QStringLiteral("实批："), this));
-  gview_ = new QCheckBox(QStringLiteral("查看"), this);
-  gview_->setChecked(true);
-  gmouse_ = new QCheckBox(QStringLiteral("鼠标"), this);
-  gkb_ = new QCheckBox(QStringLiteral("键盘"), this);
-  grows->addWidget(gview_);
-  grows->addWidget(gmouse_);
-  grows->addWidget(gkb_);
-  right->addLayout(grows);
+  right->setSpacing(8);
+
+  // 卡：待我批（原型 .card＋pending 虚线框：待批行＋批准勾选项＋配对密码行）
+  {
+    auto* card = new QGroupBox(
+        QStringLiteral("待我批（consent 只属受控方）"), this);
+    auto* body = new QVBoxLayout(card);
+    body->setContentsMargins(10, 6, 10, 10);
+    body->setSpacing(8);
+    pending_ = new QListWidget(card);
+    body->addWidget(pending_, 1);
+    auto* crow = new QHBoxLayout;
+    crow->addWidget(bold_lbl(QStringLiteral("批准勾选项")));
+    gview_ = new QCheckBox(QStringLiteral("查看"), card);
+    gview_->setChecked(true);
+    gmouse_ = new QCheckBox(QStringLiteral("鼠标"), card);
+    gkb_ = new QCheckBox(QStringLiteral("键盘"), card);
+    crow->addWidget(gview_);
+    crow->addWidget(gmouse_);
+    crow->addWidget(gkb_);
+    crow->addStretch(1);
+    body->addLayout(crow);
+    auto* gnote = new QLabel(
+        QStringLiteral("实批可小于申请（缩权批准）；批准前输入配对密码。"),
+        card);
+    gnote->setWordWrap(true);
+    body->addWidget(gnote);
+    auto* prow = new QHBoxLayout;
+    pwd_edit_ = new QLineEdit(card);
+    pwd_edit_->setPlaceholderText(QStringLiteral("远程控制配对密码"));
+    pwd_edit_->setEchoMode(QLineEdit::Password);
+    btn_approve_ = new QPushButton(QStringLiteral("批准"), card);
+    btn_deny_ = new QPushButton(QStringLiteral("拒绝"), card);
+    btn_deny_->setStyleSheet(
+        QStringLiteral("border-color:rgba(196,58,45,0.45);color:#c43a2d;"));
+    prow->addWidget(pwd_edit_, 1);
+    prow->addWidget(btn_approve_);
+    prow->addWidget(btn_deny_);
+    body->addLayout(prow);
+    right->addWidget(card, 1);
+  }
+
+  // 共享横幅（原型 .share-banner：共享中红色警示，未共享降级说明）
   share_label_ = new QLabel(this);
+  share_label_->setWordWrap(true);
   share_label_->setStyleSheet(
-      QStringLiteral("color:%1;font-weight:bold;")
-          .arg(ThemeManager::instance().tokens().danger.name()));
+      QStringLiteral("background:rgba(192,57,43,0.10);"
+                     "border:1px solid rgba(192,57,43,0.40);"
+                     "border-radius:6px;padding:8px 10px;color:#c0392b;"
+                     "font-weight:600;"));
   right->addWidget(share_label_);
-  btn_share_ = new QPushButton(QStringLiteral("开始共享屏幕"), this);
-  right->addWidget(btn_share_);
-  right->addWidget(new QLabel(QStringLiteral("对方操作（取走即清）"), this));
-  inputs_ = new QListWidget(this);
-  right->addWidget(inputs_, 1);
+  {
+    auto* srow = new QHBoxLayout;
+    btn_share_ = new QPushButton(QStringLiteral("开始共享屏幕"), this);
+    srow->addWidget(btn_share_);
+    srow->addStretch(1);
+    srow->addWidget(new QLabel(
+        QStringLiteral("未共享时显示「有进行中的协助会话（未在共享）」"),
+        this));
+    right->addLayout(srow);
+  }
+
+  // 卡：对方操作（原型 .card .ops：受控侧输入日志，取走即清）
+  {
+    auto* card = new QGroupBox(QStringLiteral("对方操作（取走即清）"), this);
+    auto* body = new QVBoxLayout(card);
+    body->setContentsMargins(10, 6, 10, 10);
+    body->setSpacing(6);
+    body->addWidget(new QLabel(QStringLiteral("受控方视角 · 只显示最近"), card));
+    inputs_ = new QListWidget(card);
+    {
+      QFont mono(QStringLiteral("monospace"));
+      mono.setStyleHint(QFont::TypeWriter);
+      inputs_->setFont(mono);
+    }
+    body->addWidget(inputs_, 1);
+    right->addWidget(card, 1);
+  }
+
+  // 尾注（原型 .note：五态/consent/不落盘红线）
+  {
+    auto* tail = new QLabel(
+        QStringLiteral("五态固定：待批 → 已批待启动 → 进行中 → 已结束 / 已拒"
+                       "绝；consent 只属受控方，配对密码防「误批」；屏幕帧"
+                       "与操作流不落盘，仅审计链存状态迁移。"),
+        this);
+    tail->setWordWrap(true);
+    tail->setStyleSheet(
+        QStringLiteral("background:rgba(47,109,219,0.08);border-radius:6px;"
+                       "padding:7px 10px;"));
+    right->addWidget(tail);
+  }
   cols->addLayout(right, 1);
   layout->addLayout(cols);
 
@@ -364,15 +507,14 @@ void AssistDialog::build_ui() {
           [this] { client_->fetch_assist_sessions(); });
   connect(btn_approve_, &QPushButton::clicked, this, [this] {
     // 远程控制配对密码门（用户令 2026-10-08 ⑤）：设置里开了远程＝批准
-    // 前须输对配对密码；拒绝与取消不走此门（密码关着时直批同旧路径）。
+    // 前须输对配对密码（内联框直输，同 try_approve 一条路）；拒绝不走
+    // 此门（密码关着时直批同旧路径）。
     if (remote_control::enabled()) {
-      bool ok = false;
-      const QString pwd = QInputDialog::getText(
-          this, QStringLiteral("远程控制配对密码"),
-          QStringLiteral("批准前请输入配对密码"), QLineEdit::Password,
-          QString(), &ok);
-      if (!ok) return; // 取消＝不动（请求保持待批）
-      const QString err = try_approve(pwd, grant_checks());
+      if (pwd_edit_->text().isEmpty()) {
+        set_status(QStringLiteral("批准前请输入配对密码"), true);
+        return;
+      }
+      const QString err = try_approve(pwd_edit_->text(), grant_checks());
       if (!err.isEmpty()) set_status(err, true);
       return;
     }
@@ -389,6 +531,7 @@ void AssistDialog::build_ui() {
   });
   connect(sessions_, &QListWidget::itemClicked, this, [this](QListWidgetItem*) {
     set_status(QStringLiteral("选中 %1").arg(short_id(selected_session())));
+    sel_lbl_->setText(QStringLiteral("选中 %1").arg(short_id(selected_session())));
   });
 
   // 轮询：台账保鲜＋受控侧推帧＋发起侧拉帧＋受控侧拉输入
@@ -399,19 +542,26 @@ void AssistDialog::build_ui() {
     if (sharing_) {
       const QString share_id = active_id_as_target();
       if (!share_id.isEmpty()) {
-        auto* scr = QGuiApplication::primaryScreen();
-        if (scr != nullptr) {
-          const QPixmap pm = scr->grabWindow(0);
-          if (!pm.isNull()) {
-            QByteArray bytes;
-            QBuffer buf(&bytes);
-            buf.open(QIODevice::WriteOnly);
-            pm.toImage()
-                .scaled(1280, 720, Qt::KeepAspectRatio,
-                        Qt::SmoothTransformation)
-                .save(&buf, "JPEG", 50);
-            client_->push_assist_frame(share_id, frame_seq_ + 1,
-                                       QString::fromUtf8(bytes.toBase64()));
+        // 测试注帧优先（离屏抓屏为垃圾帧——push_frame_once 的绕行口径）；
+        // 生产路径无注入，恒走真抓屏
+        if (!injected_frame_b64_.isEmpty()) {
+          client_->push_assist_frame(share_id, frame_seq_ + 1,
+                                     injected_frame_b64_);
+        } else {
+          auto* scr = QGuiApplication::primaryScreen();
+          if (scr != nullptr) {
+            const QPixmap pm = scr->grabWindow(0);
+            if (!pm.isNull()) {
+              QByteArray bytes;
+              QBuffer buf(&bytes);
+              buf.open(QIODevice::WriteOnly);
+              pm.toImage()
+                  .scaled(1280, 720, Qt::KeepAspectRatio,
+                          Qt::SmoothTransformation)
+                  .save(&buf, "JPEG", 50);
+              client_->push_assist_frame(share_id, frame_seq_ + 1,
+                                         QString::fromUtf8(bytes.toBase64()));
+            }
           }
         }
       }
@@ -424,6 +574,20 @@ void AssistDialog::build_ui() {
 }
 
 bool AssistDialog::eventFilter(QObject* watched, QEvent* ev) {
+  // 画面框尺寸变化（含隐藏期首帧后 show 首次布局）→按新框重缩放原图，
+  // 目标尺寸未变则跳过（setPixmap 会再触发布局，守卫防回环）
+  if (watched == frame_ && ev->type() == QEvent::Resize) {
+    const auto* re = static_cast<const QResizeEvent*>(ev);
+    if (!frame_src_.isNull()) {
+      const QSize target = frame_src_.size().scaled(re->size(),
+                                                    Qt::KeepAspectRatio);
+      const QPixmap cur = frame_->pixmap();
+      if (cur.isNull() || cur.size() != target) {
+        frame_->setPixmap(frame_src_.scaled(
+            target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+      }
+    }
+  }
   if (watched == frame_ && ev->type() == QEvent::MouseButtonPress) {
     const auto* me = static_cast<QMouseEvent*>(ev);
     const QString view_id = active_id_as_requester();
@@ -533,6 +697,7 @@ void AssistDialog::stop_sharing() {
 }
 
 void AssistDialog::push_frame_once(const QString& jpeg_b64) {
+  injected_frame_b64_ = jpeg_b64; // 后续轮询推帧同源（离屏抓屏垃圾帧口径）
   const QString share_id = active_id_as_target();
   if (share_id.isEmpty()) {
     set_status(QStringLiteral("没有进行中的协助会话可推帧"), true);
