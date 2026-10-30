@@ -71,6 +71,10 @@ class GroupCiDialog : public QDialog {
   QLineEdit* cred_value_;
   QLabel* cred_state_;
   QLabel* status_;
+  // 原型 desktop-group-ci conn-row 右上「已连接」徽章＋「群号 N」位
+  // （过渡消息仍走底部状态行）
+  QLabel* conn_badge_{nullptr};
+  QLabel* gid_tag_{nullptr};
   QListWidget* pipelines_;
   QListWidget* runs_;
   QPushButton* btn_connect_;

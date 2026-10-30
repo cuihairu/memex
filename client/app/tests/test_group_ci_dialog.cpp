@@ -4,6 +4,7 @@
 // 授权（白名单开放后成员可触发可读）。结果卡片回群与权限矩阵（非成员
 // 403/幽灵流水线 404/审计管理面）走 test_files_api 服务端腿，不在此重复。
 #include <QApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QLineEdit>
 #include <QListWidget>
@@ -15,6 +16,7 @@
 #include <functional>
 
 #include <app/group_ci_dialog.hpp>
+#include <app/theme.hpp>
 #include <core/local_store.hpp>
 #include <engine/collab/collab_engine.hpp>
 
@@ -260,6 +262,30 @@ int main(int argc, char** argv) {
            member.runs_list()->item(0)->text().contains(
                QStringLiteral("成功"));
   }, 8000));
+
+  // 文档站实况抓图（test_live_shots grab_pair 同式——亮暗各一、抓完显式
+  // 回亮）。owner 面：红灯流水线（成员 bob 触发翻绿前抓 owner 侧=最近失败
+  // 仍红）＋run 历史两条（alice 成功/失败可追溯）＋凭据卡掩码态。
+  {
+    const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+    CHECK(QDir().mkpath(dir));
+    owner.show();
+    QApplication::processEvents();
+    auto& tm = memex::client::ThemeManager::instance();
+    tm.apply(qApp);
+    QThread::msleep(120);
+    QApplication::processEvents();
+    CHECK(owner.grab().save(
+        dir + QStringLiteral("/live-group-ci-light.png")));
+    tm.set_mode(QStringLiteral("dark"));
+    QThread::msleep(120);
+    QApplication::processEvents();
+    CHECK(owner.grab().save(
+        dir + QStringLiteral("/live-group-ci-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents();
+  }
 
   server.terminate();
   server.waitForFinished(3000);

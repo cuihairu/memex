@@ -4,6 +4,8 @@
 
 #include <QColor>
 #include <QDateTime>
+#include <QFont>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -36,7 +38,7 @@ QString status_label(const QString& status) {
 
 GroupCiDialog::GroupCiDialog(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("群 CI/CD"));
-  resize(620, 600);
+  resize(1000, 640);
   client_ = new FilesClient(this);
   build_ui();
 
@@ -44,6 +46,10 @@ GroupCiDialog::GroupCiDialog(QWidget* parent) : QDialog(parent) {
     set_status(QStringLiteral("已连接：%1@%2:%3")
                    .arg(client_->account(), host_->text(), port_->text()),
                false);
+    conn_badge_->setText(QStringLiteral("已连接"));
+    conn_badge_->setStyleSheet(
+        QStringLiteral("color:%1;font-weight:600;")
+            .arg(QColor(Qt::green).name()));
     btn_connect_->setEnabled(false);
     for (QLineEdit* e : {host_, port_, account_, password_}) {
       e->setEnabled(false);
@@ -52,6 +58,8 @@ GroupCiDialog::GroupCiDialog(QWidget* parent) : QDialog(parent) {
   });
   connect(client_, &FilesClient::login_failed, this, [this](const QString& r) {
     set_status(QStringLiteral("连接失败：%1").arg(r), true);
+    conn_badge_->setText(QStringLiteral("未连接"));
+    conn_badge_->setStyleSheet(QString());
     btn_connect_->setEnabled(true);
   });
   // 红绿灯列表：●绿=最近成功、●红=最近失败、●灰=未跑过
@@ -188,8 +196,11 @@ GroupCiDialog::GroupCiDialog(QWidget* parent) : QDialog(parent) {
 
 void GroupCiDialog::build_ui() {
   auto* root = new QVBoxLayout(this);
+  root->setContentsMargins(12, 12, 12, 12);
+  root->setSpacing(8);
 
-  // —— 连接区（登录成功后整体停用）——
+  // —— 连接区（登录成功后整体停用；原型 conn-row 右上「已连接」徽章＋
+  //    「群号 N」位）——
   QSettings settings(QStringLiteral("memex"), QStringLiteral("collab"));
   auto* conn_row = new QHBoxLayout;
   host_ = new QLineEdit(
@@ -208,6 +219,9 @@ void GroupCiDialog::build_ui() {
   password_->setEchoMode(QLineEdit::Password);
   password_->setMaximumWidth(140);
   btn_connect_ = new QPushButton(QStringLiteral("连接"), this);
+  gid_tag_ = new QLabel(this);
+  conn_badge_ = new QLabel(QStringLiteral("未连接"), this);
+  conn_badge_->setObjectName(QStringLiteral("ci_conn_badge"));
   conn_row->addWidget(new QLabel(QStringLiteral("服务器"), this));
   conn_row->addWidget(host_);
   conn_row->addWidget(new QLabel(QStringLiteral("文件面端口"), this));
@@ -217,71 +231,161 @@ void GroupCiDialog::build_ui() {
   conn_row->addWidget(new QLabel(QStringLiteral("口令"), this));
   conn_row->addWidget(password_);
   conn_row->addWidget(btn_connect_);
+  conn_row->addWidget(gid_tag_);
+  conn_row->addStretch(1);
+  conn_row->addWidget(conn_badge_);
   root->addLayout(conn_row);
 
+  // —— 双栏 split（原型 .split）：左流水线列＋右运行历史/凭据列 ——
+  auto* split = new QHBoxLayout;
+  split->setSpacing(8);
+  auto* left = new QWidget(this);
+  auto* left_lay = new QVBoxLayout(left);
+  left_lay->setContentsMargins(0, 0, 0, 0);
+  left_lay->setSpacing(8);
+
+  // —— 流水线 sec-head（原型 .sec-h：粗题＋灰副题）——
+  auto* pl_head = new QHBoxLayout;
+  {
+    auto* t = new QLabel(QStringLiteral("流水线（红绿灯）"), left);
+    QFont f = t->font();
+    f.setBold(true);
+    t->setFont(f);
+    pl_head->addWidget(t);
+    auto* s = new QLabel(QStringLiteral("未跑过＝灰 · 最近成功绿 / 失败红"),
+                         left);
+    pl_head->addWidget(s);
+  }
+  pl_head->addStretch(1);
+  left_lay->addLayout(pl_head);
+
   // —— 流水线红绿灯列表 ——
-  pipelines_ = new QListWidget(this);
+  pipelines_ = new QListWidget(left);
   pipelines_->setAlternatingRowColors(true);
   pipelines_->setWordWrap(true);
-  root->addWidget(pipelines_, 2);
+  left_lay->addWidget(pipelines_, 1);
 
-  // —— 触发行（参数 JSON 可选；触发可回溯到人＝服务端留痕）——
+  // —— 触发行（原型 .rowbox：参数 JSON 可选；触发可回溯到人＝服务端留痕）——
   auto* trig_row = new QHBoxLayout;
-  params_ = new QLineEdit(this);
+  params_ = new QLineEdit(left);
   params_->setPlaceholderText(
       QStringLiteral("参数 JSON（可选；{\"fail\":true} 演练失败——stub 执行器）"));
-  btn_trigger_ = new QPushButton(QStringLiteral("触发构建"), this);
+  btn_trigger_ = new QPushButton(QStringLiteral("触发构建"), left);
   btn_trigger_->setEnabled(false);
   trig_row->addWidget(params_, 1);
   trig_row->addWidget(btn_trigger_);
-  root->addLayout(trig_row);
+  trig_row->addWidget(new QLabel(
+      QStringLiteral("点触发=留痕到群日志，可追溯到人"), left));
+  left_lay->addLayout(trig_row);
 
-  // —— run 历史（谁触发可回溯）——
-  runs_ = new QListWidget(this);
-  runs_->setAlternatingRowColors(true);
-  runs_->setWordWrap(true);
-  root->addWidget(runs_, 2);
-
-  // —— 管理行（增删/开白名单=群主/管理员，服务端裁决；越权由状态行明示）——
-  auto* mgr_row = new QHBoxLayout;
-  pl_name_ = new QLineEdit(this);
+  // —— 管理区（原型第二 .rowbox 的 flex-wrap≈两行：增删/开白名单=群主/
+  //    管理员，服务端裁决；越权由状态行明示）——
+  auto* mgr = new QVBoxLayout;
+  mgr->setSpacing(4);
+  auto* mgr_row1 = new QHBoxLayout;
+  pl_name_ = new QLineEdit(left);
   pl_name_->setPlaceholderText(QStringLiteral("流水线名"));
-  pl_name_->setMaximumWidth(160);
-  pl_desc_ = new QLineEdit(this);
+  pl_name_->setMaximumWidth(140);
+  pl_desc_ = new QLineEdit(left);
   pl_desc_->setPlaceholderText(QStringLiteral("描述（可选）"));
-  btn_add_ = new QPushButton(QStringLiteral("新建/更新"), this);
-  btn_delete_ = new QPushButton(QStringLiteral("删除"), this);
-  btn_open_ = new QPushButton(QStringLiteral("开放成员触发"), this);
+  btn_add_ = new QPushButton(QStringLiteral("新建/更新"), left);
+  mgr_row1->addWidget(new QLabel(QStringLiteral("流水线名"), left));
+  mgr_row1->addWidget(pl_name_);
+  mgr_row1->addWidget(pl_desc_, 1);
+  mgr_row1->addWidget(btn_add_);
+  mgr->addLayout(mgr_row1);
+  auto* mgr_row2 = new QHBoxLayout;
+  btn_delete_ = new QPushButton(QStringLiteral("删除"), left);
+  btn_open_ = new QPushButton(QStringLiteral("开放成员触发"), left);
   btn_open_->setToolTip(
       QStringLiteral("把 ci/trigger 写进本群工具白名单（默认关闭；"
                      "开放后全体成员可触发——入群即授权"));
-  btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
-  mgr_row->addWidget(pl_name_);
-  mgr_row->addWidget(pl_desc_, 1);
-  mgr_row->addWidget(btn_add_);
-  mgr_row->addWidget(btn_delete_);
-  mgr_row->addWidget(btn_open_);
-  mgr_row->addWidget(btn_refresh_);
-  root->addLayout(mgr_row);
+  btn_refresh_ = new QPushButton(QStringLiteral("刷新"), left);
+  mgr_row2->addWidget(btn_delete_);
+  mgr_row2->addWidget(btn_open_);
+  mgr_row2->addWidget(btn_refresh_);
+  mgr_row2->addStretch(1);
+  mgr->addLayout(mgr_row2);
+  left_lay->addLayout(mgr);
+  split->addWidget(left, 1);
 
-  // —— 凭据行（R25-4：值只此一次发往服务端；界面永只显示掩码状态）——
+  // —— 右列（原型 .col-r：运行历史卡＋凭据卡＋两枚说明条）——
+  auto* right = new QWidget(this);
+  auto* right_lay = new QVBoxLayout(right);
+  right_lay->setContentsMargins(0, 0, 0, 0);
+  right_lay->setSpacing(8);
+
+  // —— 运行历史卡 ——
+  auto* runs_box = new QGroupBox(right);
+  auto* runs_lay = new QVBoxLayout(runs_box);
+  runs_lay->setSpacing(4);
+  {
+    auto* h = new QHBoxLayout;
+    auto* t = new QLabel(QStringLiteral("运行历史（谁触发可追溯）"), runs_box);
+    QFont f = t->font();
+    f.setBold(true);
+    t->setFont(f);
+    h->addWidget(t);
+    h->addStretch(1);
+    h->addWidget(new QLabel(QStringLiteral("actor · 参数 · 结果 · 留痕"),
+                            runs_box));
+    runs_lay->addLayout(h);
+  }
+  runs_ = new QListWidget(runs_box);
+  runs_->setAlternatingRowColors(true);
+  runs_->setWordWrap(true);
+  runs_lay->addWidget(runs_);
+  right_lay->addWidget(runs_box, 1);
+
+  // —— 凭据卡（R25-4：值只此一次发往服务端；界面永只显示掩码状态）——
+  auto* cred_box =
+      new QGroupBox(QStringLiteral("工具凭据（仅服务端保存）"), right);
+  auto* cred_lay = new QVBoxLayout(cred_box);
+  cred_lay->setSpacing(4);
+  {
+    auto* h = new QHBoxLayout;
+    h->addWidget(new QLabel(QStringLiteral("客户端零凭据"), cred_box));
+    h->addStretch(1);
+    cred_lay->addLayout(h);
+  }
   auto* cred_row = new QHBoxLayout;
-  cred_value_ = new QLineEdit(this);
+  cred_value_ = new QLineEdit(cred_box);
   cred_value_->setEchoMode(QLineEdit::Password);
   cred_value_->setPlaceholderText(
       QStringLiteral("ci 工具凭据值（仅设置时发送一次；界面不回显）"));
-  cred_state_ = new QLabel(QStringLiteral("ci 凭据：未配置"), this);
-  btn_cred_set_ = new QPushButton(QStringLiteral("设置凭据"), this);
-  btn_cred_del_ = new QPushButton(QStringLiteral("删除凭据"), this);
+  cred_state_ = new QLabel(QStringLiteral("ci 凭据：未配置"), cred_box);
+  btn_cred_set_ = new QPushButton(QStringLiteral("设置凭据"), cred_box);
+  btn_cred_del_ = new QPushButton(QStringLiteral("删除凭据"), cred_box);
   btn_cred_set_->setToolTip(QStringLiteral(
       "把凭据加密保存到服务端（仅群主/管理员；代理调用时服务端内存内"
       "解密，客户端永不取回）"));
   btn_cred_del_->setToolTip(QStringLiteral("删除本群 ci 工具凭据"));
   cred_row->addWidget(cred_value_, 1);
-  cred_row->addWidget(cred_state_);
   cred_row->addWidget(btn_cred_set_);
   cred_row->addWidget(btn_cred_del_);
-  root->addLayout(cred_row);
+  cred_lay->addLayout(cred_row);
+  cred_lay->addWidget(cred_state_);
+  cred_lay->addWidget(new QLabel(
+      QStringLiteral("外部 token 只存服务端；复用 R24 保险柜加密面"),
+      cred_box));
+  right_lay->addWidget(cred_box);
+
+  // —— 说明条（原型 .note lock / .note warn）——
+  auto* note_lock = new QLabel(
+      QStringLiteral("动作语义：点按钮 → 服务端代理外呼 → 结果回群（消息卡"
+                     " + 本面板状态刷新）。白名单动作制：工具只暴露声明过的"
+                     "动作，参数服务端校验。"),
+      right);
+  note_lock->setWordWrap(true);
+  right_lay->addWidget(note_lock);
+  auto* note_warn = new QLabel(
+      QStringLiteral("危险动作（取消构建 / 删除产物）可配二次确认；取消已取"
+                     "消的运行不重复留痕。"),
+      right);
+  note_warn->setWordWrap(true);
+  right_lay->addWidget(note_warn);
+  split->addWidget(right, 1);
+  root->addLayout(split, 1);
 
   // —— 状态行 ——
   status_ = new QLabel(QStringLiteral("未连接（与协作面同源账号；文件面端口独立）"),
@@ -362,6 +466,9 @@ bool GroupCiDialog::is_connected() const { return client_->is_logged_in(); }
 void GroupCiDialog::set_group(quint64 gid, const QString& group_name) {
   gid_ = gid;
   setWindowTitle(QStringLiteral("群 CI/CD — %1").arg(group_name));
+  gid_tag_->setText(gid_ > 0
+                        ? QStringLiteral("群号 %1").arg(QString::number(gid_))
+                        : QString());
   pipelines_->clear();
   runs_->clear();
   if (gid_ > 0 && client_->is_logged_in()) refresh();
