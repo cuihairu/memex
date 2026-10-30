@@ -66,6 +66,8 @@ qt_add_executable(memex_client
   app/brand_kit.hpp
   app/brand_settings_page.cpp
   app/shortcut_settings.cpp
+  app/settings_window.cpp
+  app/settings_window.hpp
   app/lock_screen.cpp
   app/net_guard.cpp
   app/net_remote_settings.cpp
@@ -726,6 +728,70 @@ if(MEMEX_BUILD_TESTS)
     MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
   add_test(NAME window_layout COMMAND test_window_layout)
   set_tests_properties(window_layout PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 90)
+
+  # 二期·统一设置窗口冒烟（settings-general）：无服务端真 MainWindow 独立
+  # 构造（同 test_window_layout）——五页导航堆叠＋通用页真实接线（主题→
+  # ThemeManager、快捷键→主窗口径、开机启动→freedesktop 文件隔离、下载
+  # 位置只读）＋四页诚实占位；win 空＝行置灰；亮暗实况抓图入 docs。
+  add_executable(test_settings_window
+    app/tests/test_settings_window.cpp
+    app/settings_window.cpp
+    app/shortcut_settings.cpp
+    app/lock_screen.cpp
+    app/net_guard.cpp
+    app/net_remote_settings.cpp
+    app/away_settings.cpp
+    app/brand_kit.cpp
+    app/main_window.cpp
+    app/archive_console.cpp
+    app/message_search_dialog.cpp
+    app/rail_nav.cpp
+    app/avatar_store.cpp
+    app/crop_dialog.cpp
+    app/emoji_pack_dialog.cpp
+    app/file_assistant.cpp
+    app/task_dialog.cpp
+    app/task_provider_store.cpp
+    app/task_provider_settings.cpp
+    app/task_template_settings.cpp
+    app/approval_dialog.cpp
+    app/report_dialog.cpp
+    app/group_tools_dialog.cpp
+    app/audit_dialog.cpp
+    app/office_map_dialog.cpp
+    app/assist_dialog.cpp
+    engine/task/task_provider.cpp
+    engine/task/task_http.cpp
+    engine/task/github_provider.cpp
+    engine/task/dingtalk_provider.cpp
+    engine/task/feishu_provider.cpp
+    app/group_memo_dialog.cpp
+    app/group_vault_crypto.cpp
+    app/group_vault_dialog.cpp
+    app/group_ci_dialog.cpp
+    app/group_pack_dialog.cpp
+    app/group_server_dialog.cpp
+    app/notify_center.cpp
+    app/notify_prefs.cpp
+    app/screenshot_tool.cpp
+    app/icons/icons.qrc
+    app/icons/avatars/avatars.qrc
+    app/theme.cpp
+    app/theme_pack.cpp
+    app/theme_settings_page.cpp
+    app/brand_settings_page.cpp)
+  target_include_directories(test_settings_window PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
+  target_link_libraries(test_settings_window PRIVATE
+    memex_engine_direct memex_engine_collab Qt6::Widgets Qt6::Sql
+    OpenSSL::Crypto)
+  target_compile_definitions(test_settings_window PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>"
+    MEMEX_DOCS_SHOT_DIR="${CMAKE_SOURCE_DIR}/docs/src/public/screenshots")
+  add_test(NAME settings_window COMMAND test_settings_window)
+  set_tests_properties(settings_window PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 90)
 

@@ -58,6 +58,7 @@
 #include "group_tools_dialog.hpp"
 #include "brand_settings_page.hpp"
 #include "shortcut_settings.hpp"
+#include "settings_window.hpp"
 #include "away_settings.hpp"
 #include "net_remote_settings.hpp"
 #include "net_guard.hpp"
@@ -6426,7 +6427,9 @@ void MainWindow::rail_clicked(const QString& id) {
     return;
   }
   if (id == QStringLiteral("settings")) {
-    if (opt_menu_) opt_menu_->popup(QCursor::pos());
+    // 二期·统一设置窗口（原型 settings-general.html 统一设置面）：
+    // 侧栏 220px 导航（通用/账号/消息/隐私/高级）＋按页堆叠内容。
+    show_settings_window();
     return;
   }
   if (id == QStringLiteral("profile") || id == QStringLiteral("avatar")) {
@@ -6443,6 +6446,16 @@ void MainWindow::show_file_assistant() {
   file_assistant_->show();
   file_assistant_->raise();
   file_assistant_->activateWindow();
+}
+
+void MainWindow::show_settings_window() {
+  if (!settings_window_) {
+    settings_window_ = new SettingsWindow(this);
+    settings_window_->setAttribute(Qt::WA_DeleteOnClose);
+  }
+  settings_window_->show();
+  settings_window_->raise();
+  settings_window_->activateWindow();
 }
 
 // 侧栏头随形态切换（原型：直连「局域网设备 · N 台在线」／协作「消息」／

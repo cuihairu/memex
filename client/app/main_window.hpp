@@ -58,6 +58,7 @@ class MessageSearchDialog;
 class ShortcutSettingsDialog;
 class AwayLockSettingsDialog;
 class NetRemoteSettingsDialog;
+class SettingsWindow;
 class FilesClient;
 
 class MainWindow : public QMainWindow {
@@ -281,6 +282,7 @@ private:
   void rail_clicked(const QString& id);
   void update_side_head();      // 侧栏头/搜索占位/推广卡/计数随态切换
   void show_file_assistant();   // 菜单与 rail 共用的文件助手入口
+  void show_settings_window();  // rail 齿轮与「设置 → …」共用的统一设置窗口
   void open_peer(const QString& device_id);
   void open_chat(const QString& kind, const QString& id);
   // 关会话回列表态（布局令：无对话＝「左菜单+好友列表」长方形面板，
@@ -639,6 +641,7 @@ private:
   QPointer<GroupToolsDialog> group_tools_dialog_; // 二期·群工具三件窗口（懒建）
   QPointer<BrandSettingsDialog> brand_settings_dialog_; // 二期·品牌物料设置页（懒建）
   QPointer<ShortcutSettingsDialog> shortcut_dialog_; // 二期·快捷键设置页（懒建）
+  QPointer<SettingsWindow> settings_window_; // 二期·统一设置窗口（懒建）
   QPointer<AwayLockSettingsDialog> away_dialog_; // 二期·离开锁屏设置页（懒建）
   QPointer<NetRemoteSettingsDialog> net_dialog_; // 二期·网络与远程设置页（懒建）
   QPointer<MessageSearchDialog> message_search_; // 聊天记录模糊搜索窗（懒建）
