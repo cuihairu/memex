@@ -11,6 +11,7 @@ Each screen can be viewed in its dark variant by appending `?theme=dark`; the bu
 | Not-logged-in direct mode | Zero configuration: UDP broadcast automatically discovers terminals on the same segment; sessions are labeled「仅存本机 · 不入归档」; no conversation = a rectangular panel in list state (no chat panel placed), clicking a friend expands the conversation |
 | Friend list | A pure friend list in collaboration mode (list state per the layout decree): organizational-structure directory groups, search by friend / employee ID, online counts; clicking a friend expands the conversation, clicking the current friend again or ✕ closes back to list state |
 | Logged-in collaboration mode | Long-connection online, full archiving; when the server is unreachable the status badge shows an explicit fallback notice |
+| Logged-in empty state | Zero sessions = a two-line sidebar hint（「还没有会话」）; the main-area welcome page copy renders latent per the layout decree |
 | 1:1 chat | Archive start point「归档自 X 时刻」, the cross-state session label「未归档」cannot be dismissed, recall affects only the display layer (original text retained) |
 | Group chat | Announcements, @mentions, member management; group messages are likewise fully archived |
 | Organizational structure | Department tree, member cards, reporting chains, direct superiors, visibility policy hints |
@@ -41,6 +42,12 @@ Mockups: one light and one dark (collaboration-mode friend-list design drafts, k
 ### Logged-in collaboration mode
 
 Live screenshots: two collaboration-mode clients exchanging text in a 1:1 chat — the「最近联系」group carries online badges and last-message times, row headers read「协作 · 已归档」, and the delivery receipt「已送达对方 ✓」lands in the status bar (retaken after the 2026-10-10 rail-panel walkthrough, light/dark paired).
+
+
+
+### Logged-in empty state (prototype main-empty.html)
+
+Live screenshots (2026-10-30 main-empty alignment, captured programmatically by the `test_mode_switch` empty-state leg, light/dark paired): logged in with zero sessions = a「left menu + empty list」list state — the sidebar carries the two-line hint「还没有会话／从通讯录选择联系人，开始聊天」(muted 12px, verbatim from the prototype's `.empty-list`; withdrawn the moment a session row exists or on logout). The main-area welcome page (prototype `.first-guide`: the ✦ mark,「欢迎使用 Memex」, the subline, 打开通讯录／查找局域网设备, four link cards) renders latent per the layout decree (2026-10-08: list state collapses to 320px with the panel hidden) — the copy is in place first, replacing the discovery guidance whose「请登录协作态」wording misled already-logged-in users; close_chat and refresh_devices share one empty-state exit. Honest approximations: the ✦ glyph is replaced by ● (unproven glyph in the capture environment — tofu discipline); the action buttons and link cards are prototype interactives that QTextEdit rich text cannot make clickable — no fake controls, they render as descriptive copy (the left rail holds the real buttons); the hint sits as the list's first row rather than vertically centered in the panel; the prototype's side-nav tabs（全部/未读/群聊）are superseded by the collaboration-mode sections (pinned / recent); the titlebar「已登录」badge is the native titlebar (platform appearance).
 
 
 
