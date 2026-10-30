@@ -316,6 +316,12 @@ private:
   void append_chip_line(const QString& text);
   void show_guidance();
   void render_guidance();  // 空态引导正文（颜色走令牌，主题切换可重渲）
+  // 登录后零会话欢迎页（原型 main-empty.html .first-guide；潜伏态文案先行）
+  void show_welcome_guide();
+  void render_welcome_guide();
+  // 未选中会话时的主区空态统一出口（欢迎页/发现引导/先选择提示行）：
+  // refresh_devices 与 close_chat 共用，口径只有一份
+  void render_empty_state();
   // —— T4.9 主题（R19）——
   // 控件样式统一出口：所有颜色只从 ThemeTokens 取，切换后重刷即生效。
   void apply_theme_styles();

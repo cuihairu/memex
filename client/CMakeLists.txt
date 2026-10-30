@@ -915,7 +915,9 @@ if(MEMEX_BUILD_TESTS)
   add_test(NAME mode_switch COMMAND test_mode_switch)
   set_tests_properties(mode_switch PROPERTIES
     ENVIRONMENT "${MEMEX_TEST_ENV}"
-    TIMEOUT 90)
+    # 无载实测 ~15s；高载（load 30，异项目进程打满）实测 90s 顶死＝假红，
+    # 预算按无载 6 倍留（main-empty 轮加空态腿后仍在余量内）
+    TIMEOUT 240)
 
   # 实况截图重摄腿（2026-10-10 原型走查 rail 面落地后）：五屏浅深配平
   # ——live-direct／live-chat／live-collab／live-group／live-files，真实服务端

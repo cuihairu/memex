@@ -144,6 +144,61 @@ int main(int argc, char** argv) {
     return QString::fromUtf8(p.readAllStandardOutput());
   };
 
+  // —— 空态引导（原型 main-empty.html）：登录后零行侧栏摆「还没有会话」
+  //    两行 hint、主区欢迎页文案就位（潜伏态：布局令列表态窗口坍缩
+  //    320px、面板隐藏，文案先行）；有会话行即撤、登出即撤。须在直连
+  //    双实例起场前验收——dev-A2/B2 一旦宣告列表非零行，hint 依口径不摆
+  //    （有会话不冒充空态）。独立 app 名隔离 QSettings/本地库，不染主窗腿
+  {
+    QCoreApplication::setApplicationName(QStringLiteral("w0-empty-test"));
+    MainWindow w0;
+    w0.show();
+    w0.login_collab(QStringLiteral("127.0.0.1"), port,
+                    QStringLiteral("alice"), QStringLiteral("pass-a"));
+    CHECK(wait_until([&] { return w0.collab_logged_in(); }, 8000));
+    CHECK(w0.findChild<QListWidget*>(QStringLiteral("device_list")) != nullptr);
+    // 两行高度守卫：QSS 行 padding 会把行内控件矩形压扁（修复前 15px
+    // 只剩半行），此处守住「两行可读」的下限
+    if (auto* hint = w0.findChild<QLabel*>(QStringLiteral("empty_list_hint")))
+      CHECK(hint->height() >= 28);
+    CHECK(w0.chat_html().contains(QStringLiteral("欢迎使用 Memex")));
+    CHECK(w0.chat_html().contains(
+              QStringLiteral("先从通讯录找到同事"))); // 副题同落主区
+    CHECK(!w0.chat_html().contains(
+              QStringLiteral("还没有会话"))); // hint 在侧栏，不串主区
+    // 空态实况进 docs 截图目录（浅＋深；随拍随回亮色基线——还原显式回
+    // light：system 档判暗兜底会回读已染暗的调色板再落回深色）
+    {
+      const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+      CHECK(QDir().mkpath(dir));
+      CHECK(w0.grab().save(dir + QStringLiteral("/layout-empty-light.png")));
+      auto& tm = memex::client::ThemeManager::instance();
+      tm.apply(qApp);
+      tm.set_mode(QStringLiteral("dark"));
+      CHECK(w0.grab().save(dir + QStringLiteral("/layout-empty-dark.png")));
+      tm.set_mode(QStringLiteral("light"));
+    }
+    // 有会话行即撤：开一个协作会话 → hint 退场（collab_peers_ 内存驻留，
+    // 关回列表态会话行仍在，持续不摆——有会话不冒充空态）。列表重建走
+    // deleteLater，须排干 DeferredDelete 再查树（否则死指针假在场）
+    w0.open_collab_peer(QStringLiteral("bob"));
+    CHECK(wait_until([&] {
+      QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+      return w0.findChild<QLabel*>(QStringLiteral("empty_list_hint")) ==
+             nullptr;
+    }, 3000));
+    w0.logout_collab();
+    CHECK(wait_until([&] { return !w0.collab_logged_in(); }, 5000));
+    // 登出即撤：hint 只属协作态零行（登出不清 current_peer_，聊天面留着
+    // 已开会话，但列表已重建为直连口径——零行也不再摆协作空态 hint）
+    CHECK(wait_until([&] {
+      QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+      return w0.findChild<QLabel*>(QStringLiteral("empty_list_hint")) ==
+             nullptr;
+    }, 3000));
+    QCoreApplication::setApplicationName(QStringLiteral("mode-switch-test"));
+  }
+
   // 直连双实例（独立于主窗，验证直连子系统与协作服务端完全无关）
   DirectEngine da("dev-A2", tmp.filePath(QStringLiteral("a.db")));
   DirectEngine db("dev-B2", tmp.filePath(QStringLiteral("b.db")));
@@ -314,6 +369,31 @@ int main(int argc, char** argv) {
   // —— T3.1：登录后可拉取组织架构（ORG_QUERY→ORG_DATA 下发生效）——
   window.request_org();
   CHECK(wait_until([&] { return window.org_json().contains("bob"); }, 8000));
+
+  // —— main-empty 主区欢迎页（登录态、无选中会话）：先关掉截图腿留下的
+  //    dev-B2 会话（再点当前项＝关回列表态）再验：登录后空选态渲染欢迎
+  //    页；侧栏因直连双实例在场（dev-A2/B2 行）非零行——空态 hint 依口
+  //    径不摆。验完重开 dev-B2 还原后续截图腿的窗口几何
+  {
+    auto* mlist =
+        window.findChild<QListWidget*>(QStringLiteral("device_list"));
+    CHECK(mlist != nullptr);
+    if (mlist) {
+      for (int i = 0; i < mlist->count(); ++i) {
+        if (mlist->item(i)->data(Qt::UserRole).toString() ==
+            QStringLiteral("dev-B2")) {
+          emit mlist->itemClicked(mlist->item(i)); // 当前会话项＝关回列表态
+          break;
+        }
+      }
+    }
+    CHECK(!window.chat_panel_visible());
+    CHECK(window.chat_html().contains(QStringLiteral("欢迎使用 Memex")));
+    CHECK(window.findChild<QLabel*>(QStringLiteral("empty_list_hint")) ==
+          nullptr);
+    window.open_direct_peer(QStringLiteral("dev-B2")); // 还原截图腿几何
+    CHECK(window.chat_panel_visible());
+  }
 
   // —— 好友视图（原型 desktop-friends.html）：rail「好友」切侧栏 IA——
   //    通讯录行（org 成员 bob）以 collab 会话行入场＋部门分组头；切回

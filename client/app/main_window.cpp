@@ -6752,6 +6752,26 @@ void MainWindow::refresh_devices() {
     }
   }
   device_list_->blockSignals(false);
+  // 空会话空态（原型 main-empty.html .empty-list）：协作态已登录而列表
+  // 零行——居中两行引导（muted 12px）。直连零行不摆（发现面的在线设备
+  // hint/「未发现设备」计数已覆盖，desktop-direct 口径）
+  if (collab_engine_.is_logged_in() && device_list_->count() == 0) {
+    auto* item = new QListWidgetItem(device_list_);
+    auto* empty = new QLabel(
+        QStringLiteral("还没有会话\n从通讯录选择联系人，开始聊天"),
+        device_list_);
+    empty->setObjectName(QStringLiteral("empty_list_hint"));
+    empty->setAlignment(Qt::AlignCenter);
+    empty->setStyleSheet(
+        QStringLiteral("color:%1; font-size:12px;")
+            .arg(tk().text_muted.name()));
+    item->setFlags(Qt::NoItemFlags);
+    // QSS「item { padding:8px }」会把行内控件矩形上下各吃 8px：不补
+    // 则两行 label 被压成 15px 只剩半行（实拍验证）。宽度由列宽接管
+    item->setSizeHint(QSize(empty->sizeHint().width(),
+                            empty->sizeHint().height() + 16));
+    device_list_->setItemWidget(item, empty);
+  }
   // 原型 device-count：success 绿点＋muted 计数；空表如实「未发现设备」
   device_count_->setText(
       peers.isEmpty()
@@ -6770,17 +6790,29 @@ void MainWindow::refresh_devices() {
     }
   }
 
-  // 未选中会话时的空态：无设备显示发现引导；有设备提示先选择
-  if (selected.isEmpty()) {
-    if (peers.isEmpty()) {
-      show_guidance();
-    } else if (chat_showing_guidance_) {
-      chat_showing_guidance_ = false;
-      chat_view_->clear();
-      chat_rows_.clear();
-      append_system_line(QStringLiteral("从左侧选择设备，开始点对点会话"));
-    }
+  // 未选中会话时的空态：协作态已登录走 main-empty 欢迎页（主区文案就位；
+  // 列表态窗口按布局令坍缩 320px，面板隐藏呈潜伏态）；直连态无设备显示
+  // 发现引导；有设备提示先选择
+  if (selected.isEmpty()) render_empty_state();
+}
+
+// 未选中会话时的主区空态（refresh_devices 与 close_chat 共用同口径）：
+// 协作态已登录＝main-empty 欢迎页；直连零设备＝发现引导；有设备＝
+// 「先选择」提示行（幂等：已在提示态不重复追加）
+void MainWindow::render_empty_state() {
+  if (collab_engine_.is_logged_in()) {
+    show_welcome_guide();
+    return;
   }
+  if (direct_engine_.peers().isEmpty()) {
+    show_guidance();
+    return;
+  }
+  if (!chat_showing_guidance_ && !chat_rows_.isEmpty()) return; // 已在提示态
+  chat_showing_guidance_ = false;
+  chat_view_->clear();
+  chat_rows_.clear();
+  append_system_line(QStringLiteral("从左侧选择设备，开始点对点会话"));
 }
 
 void MainWindow::open_peer(const QString& device_id) {
@@ -6813,6 +6845,9 @@ void MainWindow::close_chat() {
   side_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
   apply_state_minimum();
   if (!isMaximized() && width() > 400) resize(320, height());
+  // 关会话即空选态：主区空态先行就位（面板已隐藏，潜伏态；下一次
+  // refresh_devices 同口径重渲）
+  render_empty_state();
   // 列表态收紧窗口右缘上限＝左侧列内容宽（rail 60＋会话列 260）：拖窗口右缘
   // 不再把列表与右框之间撑出死空间（2026-10-11 用户报——列表态拉宽窗口，
   // 对话面板已收起，右侧空档与列表视觉分离）。拉长只应发生在会话态（右窗
@@ -7431,6 +7466,42 @@ void MainWindow::render_guidance() {
                          .arg(t.text.name(), t.text_muted.name()));
 }
 
+// 登录后零会话欢迎页（原型 main-empty.html .first-guide）。与发现引导
+// 分开：已登录用户看到「请登录协作态」是误导文案，替换为原型欢迎口径。
+// 布局令（2026-10-08）：列表态窗口坍缩 320px、主区隐藏——本页呈潜伏态，
+// 文案先行就位（台账近似项见 prototype-conformance.md main-empty 行）。
+void MainWindow::show_welcome_guide() {
+  chat_showing_guidance_ = true;
+  chat_rows_.clear();
+  chat_view_->clear();
+  render_welcome_guide();
+}
+
+void MainWindow::render_welcome_guide() {
+  const ThemeTokens& t = tk();
+  // 原型 .guide-mark ✦ 字形未在抓图环境验证，以 ● 代（豆腐块纪律）；
+  // 动作钮「打开通讯录/查找局域网设备」与四张链接卡为原型交互件，QTextEdit
+  // 富文本不可点——不造假控件，链接卡以说明文案呈现（左侧 rail 均有真钮）
+  chat_view_->append(QStringLiteral(
+      "<div align=\"center\" style=\"margin-top:56px;\">"
+      "<table align=\"center\" cellspacing=\"0\" cellpadding=\"6\">"
+      "<tr><td width=\"40\" align=\"center\" style=\"background:%1;"
+      " color:%2; font-size:20px;\"><b>●</b></td></tr></table>"
+      "<span style=\"font-size:20px; font-weight:600; color:%3;\">"
+      "欢迎使用 Memex</span><br><br>"
+      "<span style=\"color:%4; font-size:13px;\">"
+      "你的会话会显示在这里。先从通讯录找到同事，"
+      "或打开文件传输，开始使用 Memex。</span><br><br>"
+      "<span style=\"color:%5; font-size:12px; line-height:1.8;\">"
+      "通讯录 · 查找组织成员与联系人<br>"
+      "收藏 · 保存常用消息与内容<br>"
+      "文件 · 查看文件收发与传输记录<br>"
+      "设置 · 调整主题、通知与快捷键</span></div>")
+                         .arg(t.brand_wash.name(), t.brand_text.name(),
+                              t.text.name(), t.text_muted.name(),
+                              t.text_muted.name()));
+}
+
 // 控件样式统一出口：所有颜色只从令牌取（R19 · T4.9）。主题切换后
 // ThemeManager::theme_changed 触发重刷，无需重启界面。
 void MainWindow::apply_theme_styles() {
@@ -7643,7 +7714,12 @@ void MainWindow::rerender_chat() {
   if (!chat_view_) return;
   if (chat_showing_guidance_) {
     chat_view_->clear();
-    render_guidance();
+    // 引导页随登录态重推导（与 refresh_devices 空态分支同口径）
+    if (collab_engine_.is_logged_in()) {
+      render_welcome_guide();
+    } else {
+      render_guidance();
+    }
     return;
   }
   const bool at_bottom =
