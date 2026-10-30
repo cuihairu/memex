@@ -82,6 +82,9 @@ class GroupToolsDialog : public QDialog {
   QLineEdit* password_;
   QLineEdit* gid_box_;
   QLabel* status_;
+  // 原型 desktop-group-tools conn-row 右上「已连接」徽章（过渡消息仍走
+  // 底部状态行）
+  QLabel* conn_badge_{nullptr};
   QTabWidget* tabs_;
   QListWidget* poll_list_;
   QListWidget* chain_list_;

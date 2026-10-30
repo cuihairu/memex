@@ -6,6 +6,7 @@
 #include <QCheckBox>
 #include <QDateTime>
 #include <QDateTimeEdit>
+#include <QFont>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -76,7 +77,7 @@ int chain_segment_count(const QString& s) {
 
 GroupToolsDialog::GroupToolsDialog(QWidget* parent) : QDialog(parent) {
   setWindowTitle(QStringLiteral("群工具"));
-  resize(680, 520);
+  resize(1080, 720);
   client_ = new FilesClient(this);
   build_ui();
 
@@ -84,6 +85,12 @@ GroupToolsDialog::GroupToolsDialog(QWidget* parent) : QDialog(parent) {
     set_status(QStringLiteral("已连接（") + client_->account() +
                QStringLiteral(" · 群 ") + gid_box_->text() +
                QStringLiteral("）"));
+    conn_badge_->setText(
+        QStringLiteral("已连接（30s 轮询 · 截止到期提醒只发负责人/发起人）"));
+    conn_badge_->setStyleSheet(
+        QStringLiteral("color:%1;font-weight:600;")
+            .arg(QColor(Qt::green).name()));
+    setWindowTitle(QStringLiteral("群工具 — 群 %1").arg(gid_box_->text()));
     refresh();
     // 群任务到点轮询（30s）：开窗期提醒经通知中心（关窗即停——
     // 开窗期口径，同 R27-1 初版；findChild 守卫防重连重入）
@@ -100,6 +107,8 @@ GroupToolsDialog::GroupToolsDialog(QWidget* parent) : QDialog(parent) {
   connect(client_, &FilesClient::login_failed, this,
           [this](const QString& r) {
             set_status(QStringLiteral("连接失败：") + r, true);
+            conn_badge_->setText(QStringLiteral("未连接"));
+            conn_badge_->setStyleSheet(QString());
             btn_connect_->setEnabled(true);
           });
   connect(client_, &FilesClient::polls_listed, this,
@@ -172,6 +181,8 @@ GroupToolsDialog::GroupToolsDialog(QWidget* parent) : QDialog(parent) {
 
 void GroupToolsDialog::build_ui() {
   auto* layout = new QVBoxLayout(this);
+  layout->setContentsMargins(12, 12, 12, 12);
+  layout->setSpacing(8);
 
   // 连接区（与审批窗口同构＋群号——三页共享的群域操作对象）
   auto* conn = new QHBoxLayout;
@@ -190,109 +201,138 @@ void GroupToolsDialog::build_ui() {
   gid_box_->setPlaceholderText(QStringLiteral("群号"));
   gid_box_->setMaximumWidth(80);
   btn_connect_ = new QPushButton(QStringLiteral("连接"), this);
+  conn_badge_ = new QLabel(QStringLiteral("未连接"), this);
+  conn_badge_->setObjectName(QStringLiteral("gt_conn_badge"));
   conn->addWidget(host_);
   conn->addWidget(port_);
   conn->addWidget(account_box_);
   conn->addWidget(password_);
   conn->addWidget(gid_box_);
   conn->addWidget(btn_connect_);
+  conn->addStretch(1);
+  conn->addWidget(conn_badge_);
   layout->addLayout(conn);
 
   // 三页签：投票 / 接龙 / 群任务
   tabs_ = new QTabWidget(this);
   layout->addWidget(tabs_, 1);
 
+  // ts-head 规则行（原型 .ts-head：页名＋口径副题）——三页共用构造
+  auto mk_sec_head = [](QWidget* page, const QString& title,
+                        const QString& sub) {
+    auto* head = new QHBoxLayout;
+    auto* t = new QLabel(title, page);
+    QFont f = t->font();
+    f.setBold(true);
+    t->setFont(f);
+    head->addWidget(t);
+    head->addWidget(new QLabel(sub, page));
+    head->addStretch(1);
+    return head;
+  };
+
   // —— 投票页 ——
   auto* poll_page = new QWidget(this);
   auto* poll_layout = new QVBoxLayout(poll_page);
+  poll_layout->addLayout(mk_sec_head(
+      poll_page, QStringLiteral("投票"),
+      QStringLiteral("具名/匿名 × 单选/多选 · 改票=覆盖 · 发起人或群主/"
+                     "管理员可截止 · 到截止惰性判闭（不回写）")));
   poll_list_ = new QListWidget(poll_page);
   poll_list_->setAlternatingRowColors(true);
   poll_layout->addWidget(poll_list_, 1);
+  // 发起区（原型 .create 单行：录入字段吸收余宽、操作钮随之贴右）
   auto* poll_form = new QHBoxLayout;
   poll_topic_ = new QLineEdit(poll_page);
-  poll_topic_->setPlaceholderText(QStringLiteral("主题"));
+  poll_topic_->setPlaceholderText(QStringLiteral("主题（如：周五团建地点）"));
+  poll_topic_->setMinimumWidth(150);
   poll_options_ = new QLineEdit(poll_page);
   poll_options_->setPlaceholderText(QStringLiteral("选项（逗号分隔，2~10 个）"));
-  poll_form->addWidget(poll_topic_);
-  poll_form->addWidget(poll_options_, 1);
-  poll_layout->addLayout(poll_form);
+  poll_options_->setMinimumWidth(200);
   // 截止时间（勾选才生效；不勾=不限期。到点判定在服务端，此处只是输入）
-  auto* poll_deadline_row = new QHBoxLayout;
   poll_deadline_on_ = new QCheckBox(QStringLiteral("设截止"), poll_page);
-  poll_deadline_ = new QDateTimeEdit(QDateTime::currentDateTime().addSecs(3600),
-                                     poll_page);
+  poll_deadline_ = new QDateTimeEdit(
+      QDateTime::currentDateTime().addSecs(3600), poll_page);
   poll_deadline_->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm"));
   poll_deadline_->setEnabled(false);
   connect(poll_deadline_on_, &QCheckBox::toggled, poll_deadline_,
           &QDateTimeEdit::setEnabled);
   poll_anon_ = new QCheckBox(QStringLiteral("匿名"), poll_page);
   poll_multi_ = new QCheckBox(QStringLiteral("多选"), poll_page);
-  poll_deadline_row->addWidget(poll_deadline_on_);
-  poll_deadline_row->addWidget(poll_deadline_);
-  poll_deadline_row->addWidget(poll_anon_);
-  poll_deadline_row->addWidget(poll_multi_);
-  poll_deadline_row->addStretch(1);
-  poll_layout->addLayout(poll_deadline_row);
-  auto* poll_ops = new QHBoxLayout;
   btn_poll_add_ = new QPushButton(QStringLiteral("发起投票"), poll_page);
   poll_choice_ = new QLineEdit(poll_page);
   poll_choice_->setPlaceholderText(QStringLiteral("选项号（多选可 1,3）"));
   poll_choice_->setMaximumWidth(130);
-  btn_poll_vote_ = new QPushButton(QStringLiteral("投票/改票"), poll_page);
+  btn_poll_vote_ = new QPushButton(QStringLiteral("投票 / 改票"), poll_page);
   btn_poll_close_ = new QPushButton(QStringLiteral("截止投票"), poll_page);
-  poll_ops->addWidget(btn_poll_add_);
-  poll_ops->addWidget(new QLabel(QStringLiteral("投→"), poll_page));
-  poll_ops->addWidget(poll_choice_);
-  poll_ops->addWidget(btn_poll_vote_);
-  poll_ops->addWidget(btn_poll_close_);
-  poll_ops->addStretch(1);
-  poll_layout->addLayout(poll_ops);
+  poll_form->addWidget(poll_topic_, 1);
+  poll_form->addWidget(poll_options_, 2);
+  poll_form->addWidget(poll_deadline_on_);
+  poll_form->addWidget(poll_deadline_);
+  poll_form->addWidget(poll_anon_);
+  poll_form->addWidget(poll_multi_);
+  poll_form->addWidget(btn_poll_add_);
+  poll_form->addWidget(new QLabel(QStringLiteral("投→"), poll_page));
+  poll_form->addWidget(poll_choice_);
+  poll_form->addWidget(btn_poll_vote_);
+  poll_form->addWidget(btn_poll_close_);
+  poll_layout->addLayout(poll_form);
   tabs_->addTab(poll_page, QStringLiteral("投票"));
 
   // —— 接龙页 ——
   auto* chain_page = new QWidget(this);
   auto* chain_layout = new QVBoxLayout(chain_page);
+  chain_layout->addLayout(mk_sec_head(
+      chain_page, QStringLiteral("接龙"),
+      QStringLiteral("一人一条 upsert（重复提交=更新自己那条）· 顺序=提交"
+                     "时间序 · 含「+」的格式提示做分段校验")));
   chain_list_ = new QListWidget(chain_page);
   chain_list_->setAlternatingRowColors(true);
   chain_layout->addWidget(chain_list_, 1);
+  // 发起区（原型 .create 单行）
   auto* chain_form = new QHBoxLayout;
   chain_title_ = new QLineEdit(chain_page);
-  chain_title_->setPlaceholderText(QStringLiteral("主题"));
+  chain_title_->setPlaceholderText(QStringLiteral("主题（如：晚餐接龙）"));
+  chain_title_->setMinimumWidth(150);
   chain_hint_ = new QLineEdit(chain_page);
-  chain_hint_->setPlaceholderText(QStringLiteral("格式提示（可空）"));
-  chain_form->addWidget(chain_title_);
-  chain_form->addWidget(chain_hint_, 1);
-  chain_layout->addLayout(chain_form);
-  auto* chain_ops = new QHBoxLayout;
+  chain_hint_->setPlaceholderText(
+      QStringLiteral("格式提示（可空，如：姓名+菜品）"));
+  chain_hint_->setMinimumWidth(150);
   btn_chain_add_ = new QPushButton(QStringLiteral("发起接龙"), chain_page);
   chain_content_ = new QLineEdit(chain_page);
-  chain_content_->setPlaceholderText(QStringLiteral("接龙内容（一人一条，重复提交=更新）"));
+  chain_content_->setPlaceholderText(
+      QStringLiteral("接龙内容（一人一条，重复提交=更新）"));
+  chain_content_->setMinimumWidth(200);
   btn_chain_join_ = new QPushButton(QStringLiteral("接龙"), chain_page);
   btn_chain_close_ = new QPushButton(QStringLiteral("截止接龙"), chain_page);
-  chain_ops->addWidget(btn_chain_add_);
-  chain_ops->addWidget(chain_content_, 1);
-  chain_ops->addWidget(btn_chain_join_);
-  chain_ops->addWidget(btn_chain_close_);
-  chain_layout->addLayout(chain_ops);
+  chain_form->addWidget(chain_title_, 1);
+  chain_form->addWidget(chain_hint_, 1);
+  chain_form->addWidget(btn_chain_add_);
+  chain_form->addWidget(chain_content_, 2);
+  chain_form->addWidget(btn_chain_join_);
+  chain_form->addWidget(btn_chain_close_);
+  chain_layout->addLayout(chain_form);
   tabs_->addTab(chain_page, QStringLiteral("接龙"));
 
   // —— 群任务页 ——
   auto* task_page = new QWidget(this);
   auto* task_layout = new QVBoxLayout(task_page);
+  task_layout->addLayout(mk_sec_head(
+      task_page, QStringLiteral("群任务"),
+      QStringLiteral("认领制（空=待认领）· 完成=负责人/创建人/群主或管理"
+                     "员 · 完成为终态留痕，行不删、不可重开")));
   task_list_ = new QListWidget(task_page);
   task_list_->setAlternatingRowColors(true);
   task_layout->addWidget(task_list_, 1);
+  // 发起区（原型 .create 单行）。截止勾选才生效（不勾=不限期，同投票；
+  // 到点提醒在客户端轮询侧，服务端只存 due_ms）
   auto* task_form = new QHBoxLayout;
   task_title_ = new QLineEdit(task_page);
   task_title_->setPlaceholderText(QStringLiteral("任务标题"));
+  task_title_->setMinimumWidth(150);
   task_assignee_ = new QLineEdit(task_page);
   task_assignee_->setPlaceholderText(QStringLiteral("负责人（空=待认领）"));
-  task_form->addWidget(task_title_);
-  task_form->addWidget(task_assignee_, 1);
-  task_layout->addLayout(task_form);
-  // 截止时间（勾选才生效；不勾=不限期，同投票截止行；到点提醒在客户端
-  // 轮询侧，服务端只存 due_ms）
-  auto* task_due_row = new QHBoxLayout;
+  task_assignee_->setMinimumWidth(140);
   task_deadline_on_ = new QCheckBox(QStringLiteral("设截止"), task_page);
   task_deadline_on_->setObjectName(QStringLiteral("task_deadline_on"));
   task_deadline_ = new QDateTimeEdit(
@@ -302,26 +342,32 @@ void GroupToolsDialog::build_ui() {
   task_deadline_->setEnabled(false);
   connect(task_deadline_on_, &QCheckBox::toggled, task_deadline_,
           &QDateTimeEdit::setEnabled);
-  task_due_row->addWidget(task_deadline_on_);
-  task_due_row->addWidget(task_deadline_);
-  task_due_row->addStretch(1);
-  task_layout->addLayout(task_due_row);
-  auto* task_ops = new QHBoxLayout;
   btn_task_add_ = new QPushButton(QStringLiteral("建任务"), task_page);
   btn_task_claim_ = new QPushButton(QStringLiteral("认领"), task_page);
   btn_task_done_ = new QPushButton(QStringLiteral("完成"), task_page);
-  task_ops->addWidget(btn_task_add_);
-  task_ops->addWidget(btn_task_claim_);
-  task_ops->addWidget(btn_task_done_);
-  task_ops->addStretch(1);
-  task_layout->addLayout(task_ops);
+  task_form->addWidget(task_title_, 2);
+  task_form->addWidget(task_assignee_, 1);
+  task_form->addWidget(task_deadline_on_);
+  task_form->addWidget(task_deadline_);
+  task_form->addWidget(btn_task_add_);
+  task_form->addWidget(btn_task_claim_);
+  task_form->addWidget(btn_task_done_);
+  task_layout->addLayout(task_form);
   tabs_->addTab(task_page, QStringLiteral("群任务"));
 
-  // 刷新＋状态行
+  // 脚行（原型 .foot：刷新＋判权口径说明＋结果卡回群说明）＋状态行
   auto* foot = new QHBoxLayout;
   btn_refresh_ = new QPushButton(QStringLiteral("刷新"), this);
   foot->addWidget(btn_refresh_);
+  foot->addWidget(new QLabel(
+      QStringLiteral("权限＝群成员即可读写（入群即授、退群即失）；截止=发起"
+                     "人本人或群主/管理员；幽灵 gid 统一 403 不泄露存在性"),
+      this));
   foot->addStretch(1);
+  foot->addWidget(new QLabel(
+      QStringLiteral("显式截止后结果卡以普通 TEXT 消息回群（到点惰性截止"
+                     "不补发卡）"),
+      this));
   layout->addLayout(foot);
   status_ = new QLabel(this);
   layout->addWidget(status_);
