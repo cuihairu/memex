@@ -4,6 +4,7 @@
 :root {
   --brand: #e16531;
   --brand-deep: #bc4c1f;      /* 亮底上的品牌文字（AA） */
+  --brand-fill: #b4471b;      /* 可执行品牌面（白字文字对比 5.44:1，AA） */
   --brand-soft: rgba(225, 101, 49, 0.12);
   --brand-softer: rgba(225, 101, 49, 0.07);
   --bg: #f4f1ed;
@@ -28,6 +29,7 @@
 body.dark {
   --brand: #e16531;
   --brand-deep: #f0854f;      /* 暗底上的品牌文字 */
+  --brand-fill: #c9501f;      /* 暗底可执行品牌面（白字文字对比 4.52:1，AA） */
   --brand-soft: rgba(225, 101, 49, 0.2);
   --brand-softer: rgba(225, 101, 49, 0.11);
   --bg: #171310;
@@ -182,7 +184,7 @@ input, textarea { font: inherit; color: inherit; }
 .row .r-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
 .n-count {
   min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px;
-  background: var(--brand); color: #fff; font-size: 10.5px; font-weight: 700;
+  background: var(--brand-fill); color: #fff; font-size: 10.5px; font-weight: 700;
   display: inline-flex; align-items: center; justify-content: center;
 }
 .muted-badge { color: var(--text-3); font-size: 11px; }
@@ -339,7 +341,7 @@ input, textarea { font: inherit; color: inherit; }
 }
 .send-btn {
   margin-left: auto; padding: 7px 22px; border-radius: 8px;
-  background: var(--brand); color: #fff; font-weight: 700; font-size: 13px;
+  background: var(--brand-fill); color: #fff; font-weight: 700; font-size: 13px;
 }
 .send-btn.disabled { background: var(--brand-soft); color: var(--text-3); }
 .kbd {
@@ -414,7 +416,7 @@ input, textarea { font: inherit; color: inherit; }
   font-size: 12.5px; font-weight: 600;
   border: 1px solid var(--line-strong); color: var(--text-2);
 }
-.btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+.btn.primary { background: var(--brand-fill); border-color: var(--brand-fill); color: #fff; }
 .btn.ghost-brand { border-color: rgba(225,101,49,.5); color: var(--brand-deep); }
 
 /* ---------- 文件传输 ---------- */
@@ -470,7 +472,7 @@ input, textarea { font: inherit; color: inherit; }
 .filter input { border: none; outline: none; background: none; color: var(--text-1); width: 130px; }
 .filter.wide { flex: 1; }
 .btn-search {
-  padding: 8px 26px; border-radius: 8px; background: var(--brand); color: #fff;
+  padding: 8px 26px; border-radius: 8px; background: var(--brand-fill); color: #fff;
   font-weight: 700; font-size: 13px;
 }
 .result-table { margin: 14px 20px 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -568,7 +570,7 @@ input, textarea { font: inherit; color: inherit; }
   border-radius: 10px; padding: 9px 12px; font-size: 13.5px; color: var(--text-3);
 }
 .m-input .m-send {
-  width: 38px; height: 38px; border-radius: 12px; background: var(--brand);
+  width: 38px; height: 38px; border-radius: 12px; background: var(--brand-fill);
   display: flex; align-items: center; justify-content: center; color: #fff;
 }
 
@@ -600,7 +602,7 @@ input, textarea { font: inherit; color: inherit; }
 }
 .w-btn {
   margin-top: auto; padding: 13px 0; border-radius: 12px;
-  background: var(--brand); color: #fff; font-size: 15px; font-weight: 800; text-align: center;
+  background: var(--brand-fill); color: #fff; font-size: 15px; font-weight: 800; text-align: center;
 }
 .w-btn.disabled { background: var(--brand-soft); color: var(--text-3); }
 .w-skip-note { text-align: center; font-size: 11px; color: var(--text-3); margin-top: 12px; }
