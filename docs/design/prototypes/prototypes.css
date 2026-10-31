@@ -270,7 +270,7 @@ input, textarea { font: inherit; color: inherit; }
   white-space: pre-wrap; word-break: break-word;
 }
 .msg.mine .bubble {
-  background: var(--brand); color: #fff;
+  background: var(--brand-fill); color: #fff;
   border: none; border-top-left-radius: 12px; border-top-right-radius: 4px;
 }
 .bubble .quote {
