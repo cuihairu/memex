@@ -357,11 +357,11 @@ input, textarea { font: inherit; color: inherit; }
   background: var(--brand);
 }
 .avatar.v2 { background: #7c5cbf; }
-.avatar.v3 { background: #2e8b8b; }
-.avatar.v4 { background: #b7791f; }
-.avatar.v5 { background: #5b7fbf; }
-.avatar.v6 { background: #bf5b82; }
-.avatar.v7 { background: #4f8a4a; }
+.avatar.v3 { background: #237373; }
+.avatar.v4 { background: #965c11; }
+.avatar.v5 { background: #4d6fa8; }
+.avatar.v6 { background: #a84a6c; }
+.avatar.v7 { background: #3f7439; }
 .avatar.v8 { background: #8a6d4f; }
 .avatar.v9 { background: #5f6b7a; }
 .avatar.sm { width: 28px; height: 28px; font-size: 12px; border-radius: 8px; }
