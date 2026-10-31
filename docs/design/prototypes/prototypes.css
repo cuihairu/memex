@@ -611,3 +611,16 @@ input, textarea { font: inherit; color: inherit; }
 .empty-guide { margin: auto; text-align: center; color: var(--text-3); max-width: 320px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
 .empty-guide .eg-icon { width: 54px; height: 54px; border-radius: 16px; background: var(--panel-2); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 22px; }
 .pill-outline { font-size: 10.5px; color: var(--text-2); border: 1px solid var(--line-strong); padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+
+/* ---------- 键盘可达性 ----------
+   搜索/筛选/输入区/向导输入框均为 outline:none，键盘焦点不可见；
+   以 focus-visible 恢复可见焦点（仅键盘触发，不干扰鼠标点击形态）。 */
+.search input:focus-visible,
+.filter input:focus-visible,
+.input-area textarea:focus-visible,
+.w-input input:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.rail .rail-item:focus-visible { outline: 2px solid var(--brand); border-radius: var(--r-md); }
+.rail .rail-item:focus-visible .tip { display: block; }
