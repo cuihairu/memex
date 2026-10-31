@@ -59,8 +59,8 @@ body {
   font-size: 13.5px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
-  display: flex; align-items: center; justify-content: center;
-  overflow: hidden;
+  display: flex;
+  overflow: auto;
 }
 svg { display: block; }
 button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
@@ -69,6 +69,7 @@ input, textarea { font: inherit; color: inherit; }
 /* ---------- 窗口 ---------- */
 .window {
   width: 1280px; height: 800px;
+  margin: auto;   /* 视口不足时滚动画布而非裁切 */
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -508,6 +509,7 @@ input, textarea { font: inherit; color: inherit; }
 /* ---------- 移动端 ---------- */
 .phone {
   width: 390px; height: 800px;
+  margin: auto;   /* 视口不足时滚动画布而非裁切 */
   background: var(--bg);
   border: 1px solid var(--line-strong);
   border-radius: 40px;
