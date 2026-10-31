@@ -16,10 +16,10 @@
   --text-3: #736a61;
   --line: rgba(43, 39, 36, 0.1);
   --line-strong: rgba(43, 39, 36, 0.16);
-  --ok: #2e8b57;
-  --ok-soft: rgba(46, 139, 87, 0.12);
-  --warn: #b7791f;
-  --warn-soft: rgba(183, 121, 31, 0.12);
+  --ok: #237347;
+  --ok-soft: rgba(35, 115, 71, 0.12);
+  --warn: #965c11;
+  --warn-soft: rgba(150, 92, 17, 0.12);
   --bubble-other: #ffffff;
   --bubble-other-text: #2b2724;
   --shadow: 0 10px 30px -18px rgba(43, 39, 36, 0.35);
