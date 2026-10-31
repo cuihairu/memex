@@ -621,6 +621,7 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
+    app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -657,6 +658,7 @@ if(MEMEX_BUILD_TESTS)
     app/theme.cpp
     app/theme_pack.cpp
     app/theme_settings_page.cpp)
+    target_compile_definitions(test_brand_settings PRIVATE MEMEX_VERSION=\"${PROJECT_VERSION}\")
   target_include_directories(test_brand_settings PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_brand_settings PRIVATE
@@ -682,6 +684,7 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/brand_kit.cpp
     app/main_window.cpp
+    app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -719,6 +722,7 @@ if(MEMEX_BUILD_TESTS)
     app/theme_pack.cpp
     app/theme_settings_page.cpp
     app/brand_settings_page.cpp)
+    target_compile_definitions(test_window_layout PRIVATE MEMEX_VERSION=\"${PROJECT_VERSION}\")
   target_include_directories(test_window_layout PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_window_layout PRIVATE
@@ -936,6 +940,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
     app/main_window.cpp
+    app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -984,6 +989,7 @@ if(MEMEX_BUILD_TESTS)
     app/theme.cpp
     app/theme_pack.cpp
     app/theme_settings_page.cpp)
+    target_compile_definitions(test_mode_switch PRIVATE MEMEX_VERSION=\"${PROJECT_VERSION}\")
   target_include_directories(test_mode_switch PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_mode_switch PRIVATE
@@ -1006,6 +1012,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_live_shots
     tests/test_live_shots.cpp
     app/main_window.cpp
+    app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1050,6 +1057,7 @@ if(MEMEX_BUILD_TESTS)
     app/theme.cpp
     app/theme_pack.cpp
     app/theme_settings_page.cpp)
+    target_compile_definitions(test_live_shots PRIVATE MEMEX_VERSION=\"${PROJECT_VERSION}\")
   target_include_directories(test_live_shots PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_live_shots PRIVATE
@@ -1069,6 +1077,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_tray
     tests/test_tray.cpp
     app/main_window.cpp
+    app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1117,6 +1126,7 @@ if(MEMEX_BUILD_TESTS)
     app/theme.cpp
     app/theme_pack.cpp
     app/theme_settings_page.cpp)
+    target_compile_definitions(test_tray PRIVATE MEMEX_VERSION=\"${PROJECT_VERSION}\")
   target_include_directories(test_tray PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_tray PRIVATE
@@ -1133,6 +1143,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_screenshot
     tests/test_screenshot.cpp
     app/main_window.cpp
+    app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1181,6 +1192,7 @@ if(MEMEX_BUILD_TESTS)
     app/theme.cpp
     app/theme_pack.cpp
     app/theme_settings_page.cpp)
+    target_compile_definitions(test_screenshot PRIVATE MEMEX_VERSION=\"${PROJECT_VERSION}\")
   target_include_directories(test_screenshot PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_screenshot PRIVATE
@@ -1219,6 +1231,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_icon
     tests/test_icon.cpp
     app/main_window.cpp
+    app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1267,6 +1280,7 @@ if(MEMEX_BUILD_TESTS)
     app/theme.cpp
     app/theme_pack.cpp
     app/theme_settings_page.cpp)
+    target_compile_definitions(test_icon PRIVATE MEMEX_VERSION=\"${PROJECT_VERSION}\")
   target_include_directories(test_icon PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_icon PRIVATE
@@ -1284,6 +1298,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_theme
     tests/test_theme.cpp
     app/main_window.cpp
+    app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1332,6 +1347,7 @@ if(MEMEX_BUILD_TESTS)
     app/theme.cpp
     app/theme_pack.cpp
     app/theme_settings_page.cpp)
+    target_compile_definitions(test_theme PRIVATE MEMEX_VERSION=\"${PROJECT_VERSION}\")
   target_include_directories(test_theme PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_theme PRIVATE
@@ -1347,6 +1363,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_chat_actions
     tests/test_chat_actions.cpp
     app/main_window.cpp
+    app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1395,6 +1412,7 @@ if(MEMEX_BUILD_TESTS)
     app/theme.cpp
     app/theme_pack.cpp
     app/theme_settings_page.cpp)
+    target_compile_definitions(test_chat_actions PRIVATE MEMEX_VERSION=\"${PROJECT_VERSION}\")
   target_include_directories(test_chat_actions PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_chat_actions PRIVATE
@@ -1415,6 +1433,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_watch_reminder
     tests/test_watch_reminder.cpp
     app/main_window.cpp
+    app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1459,6 +1478,7 @@ if(MEMEX_BUILD_TESTS)
     app/theme.cpp
     app/theme_pack.cpp
     app/theme_settings_page.cpp)
+    target_compile_definitions(test_watch_reminder PRIVATE MEMEX_VERSION=\"${PROJECT_VERSION}\")
   target_include_directories(test_watch_reminder PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_watch_reminder PRIVATE
@@ -1489,6 +1509,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_flash_alert
     tests/test_flash_alert.cpp
     app/main_window.cpp
+    app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1537,6 +1558,7 @@ if(MEMEX_BUILD_TESTS)
     app/theme.cpp
     app/theme_pack.cpp
     app/theme_settings_page.cpp)
+    target_compile_definitions(test_flash_alert PRIVATE MEMEX_VERSION=\"${PROJECT_VERSION}\")
   target_include_directories(test_flash_alert PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/app)
   target_link_libraries(test_flash_alert PRIVATE
