@@ -23,12 +23,12 @@
 | 5 | 中 | 品牌深橙 `--brand-deep` #bc4c1f 压 brand-soft = 4.35:1 —— 协作徽标/角色标签擦线 | `prototypes.css` `--brand-deep`(亮) | **已修**(#b4471b:4.73) |
 | 6 | 中 | 搜索/筛选/输入区/向导输入框 `outline:none`,键盘焦点不可见(WCAG 2.4.7) | `prototypes.css` `.search input`/`.filter input`/`.input-area textarea`/`.w-input input` | **已修**(`:focus-visible` 恢复 2px 品牌描边) |
 | 7 | 低 | rail 图标 tooltip 仅 `:hover` 展示,键盘不可达 | `prototypes.css` `.rail .rail-item .tip` | **已修**(`:focus-visible` 同步展示) |
-| 8 | 低 | 头像初始字白字对比 3.64–4.17:1(v3/v4/v5/v6/v7)不达 AA | `prototypes.css` `.avatar.vN` | todo(判定为装饰性——姓名必在邻位;为保留多彩身份色板未改) |
-| 9 | 低 | 非文本组件对比临界:进度条/向导步进/rail 激活条(brand 压 panel-2 ≈2.9:1);office-map 座位标记 #E88A2A/#2A82E8 | `prototypes.css` `.tx-bar i`/`.w-steps i.on`/`.rail-item.active::before`;`desktop-office-map.html` | todo |
+| 8 | 低 | 头像初始字白字对比 3.64–4.17:1(v3/v4/v5/v6/v7)不达 AA | `prototypes.css` `.avatar.vN` | **已修**(dac1ec0;v3 #237373 / v4 #965c11 / v5 #4d6fa8 / v6 #a84a6c / v7 #3f7439,均 ≥5.05:1) |
+| 9 | 低 | 非文本组件对比临界:进度条/向导步进/rail 激活条(brand 压 panel-2 ≈2.9:1);office-map 座位标记 #E88A2A/#2A82E8 | `prototypes.css` `.tx-bar i`/`.w-steps i.on`/`.rail-item.active::before`;`desktop-office-map.html` | **已修**(de39843;座位 #E88A2A→#c9741f 3.20:1;进度条/步进/rail 条实测 3.24:1 亮 / 4.69:1 暗,过 3:1) |
 | 10 | 信息 | 无 DESIGN.md / PRODUCT.md(原型 CSS 即事实设计系统;台账承担规格→实现映射) | 仓库根 | 记录缺失 |
 | 11 | 信息 | impeccable 检测器 warning:`side-tab` 品牌左边条(3px,rgba .55)于 `.bubble .quote` | `prototypes.css:277` | 判定为引用块刻意指示,不改(非坏损) |
-| 12 | 信息 | `body{overflow:hidden}` + 固定 `.window` 1280×800:视口 <1280px 时裁切(main-empty 已用 `min()` 缩放) | `prototypes.css` `body`/`.window` | todo(加小视口缩放,便于审阅) |
-| 13 | 信息 | 令牌变更会拉开原型与已对齐 C++/Kotlin 实现的颜色偏差 | `docs/design/prototype-conformance.md` | 台账侧待同步(本审计改的是设计基准,非实现) |
+| 12 | 信息 | `body{overflow:hidden}` + 固定 `.window` 1280×800:视口 <1280px 时裁切(main-empty 已用 `min()` 缩放) | `prototypes.css` `body`/`.window` | **已修**(2c9d668;`body` 改 `display:flex;overflow:auto`,`margin:auto`,小视口滚动不裁切) |
+| 13 | 信息 | 令牌变更会拉开原型与已对齐 C++/Kotlin 实现的颜色偏差 | `docs/design/prototype-conformance.md` | **待用户**(台账侧同步,需实现侧配合;本审计改的是设计基准,非实现) |
 
 ## 截图(前后对比)
 
@@ -72,3 +72,14 @@
 - `fix(ui): raise warn and ok text contrast for wcag`(#3,#4)
 - `fix(ui): restore keyboard focus visibility on inputs`(#6)
 - `fix(ui): meet wcag aa on outgoing message bubble`(#1 补充)
+- `fix(ui): raise avatar initial contrast for wcag aa`(#8)
+- `fix(ui): darken occupied seat markers for wcag non-text contrast`(#9)
+- `fix(ui): scroll instead of clipping frames on small viewports`(#12)
+
+## 修复后复验
+
+改动后真实浏览器复验(Playwright,桌面 1440×900 与 1000×640):头像 v3–v7 全部压暗到位;office-map 座位与图例一致加深;1000×640 小视口下页面滚动、无裁切。双主题(亮/暗)对比度实测见上表。
+
+## 测试门禁(复验)
+
+原型为纯静态设计基准,无单测、无构建;改动仅 `prototypes.css` 令牌/布局与 `desktop-office-map.html` 十六进制色值,无逻辑变更,CI 无针对 `docs/design/prototypes/` 的断言。
