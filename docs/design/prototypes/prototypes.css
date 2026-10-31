@@ -3,7 +3,7 @@
 
 :root {
   --brand: #e16531;
-  --brand-deep: #bc4c1f;      /* 亮底上的品牌文字（AA） */
+  --brand-deep: #b4471b;      /* 亮底上的品牌文字（AA） */
   --brand-fill: #b4471b;      /* 可执行品牌面（白字文字对比 5.44:1，AA） */
   --brand-soft: rgba(225, 101, 49, 0.12);
   --brand-softer: rgba(225, 101, 49, 0.07);
@@ -13,7 +13,7 @@
   --elev: #ffffff;
   --text-1: #2b2724;
   --text-2: #6d645b;
-  --text-3: #9b9187;
+  --text-3: #736a61;
   --line: rgba(43, 39, 36, 0.1);
   --line-strong: rgba(43, 39, 36, 0.16);
   --ok: #2e8b57;
@@ -38,7 +38,7 @@ body.dark {
   --elev: #2b241d;
   --text-1: #f1ebe5;
   --text-2: #b3a89d;
-  --text-3: #857a6f;
+  --text-3: #948a7f;
   --line: rgba(241, 235, 229, 0.1);
   --line-strong: rgba(241, 235, 229, 0.17);
   --ok: #6fbf8f;
