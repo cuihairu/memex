@@ -592,4 +592,140 @@ class FilesClientTest {
             assertEquals(0, e.status)
         }
     }
+
+    // ---------- 邮箱（统一收件箱：告警/通知/公告三类同箱） ----------
+
+    @Test
+    fun `邮箱列表解析三类条目与四路计数（默认体三键恒发）`() {
+        loginFirst()
+        fake.handler = {
+            200 to """
+                {"ok":true,"items":[
+                  {"id":11,"kind":"warning","title":"磁盘将满","sub":"/data 91%",
+                   "source":"colinus","ref":"","time":1700000000000,"state":0,
+                   "handledBy":"","handledMs":0,"confirmedMs":0,
+                   "confirmTotal":0,"confirmCount":0},
+                  {"id":12,"kind":"announce","title":"停机维护","sub":"周六 02:00-04:00",
+                   "source":"it-notice","ref":"","time":1700000001000,"state":0,
+                   "handledBy":"","handledMs":0,"confirmedMs":0,
+                   "confirmTotal":6,"confirmCount":2},
+                  {"id":13,"kind":"notice","title":"新同事入职","sub":"欢迎王工",
+                   "source":"hr","ref":"","time":1700000002000,"state":1,
+                   "handledBy":"","handledMs":0,"confirmedMs":0,
+                   "confirmTotal":0,"confirmCount":0}],
+                 "counts":{"all":4,"warning":2,"notice":15,"announce":6}}
+            """.trimIndent()
+        }
+        val result = client.listMailbox()
+        val req = fake.requests.last()
+        assertEquals("POST", req.method)
+        assertEquals("/files/mailbox/list", req.path)
+        assertEquals("Bearer tok-abc", req.headers["Authorization"])
+        // 默认体三键恒发（服务端容空串/假）
+        val sent = org.json.JSONObject(String(req.body, Charsets.UTF_8))
+        assertEquals("", sent.getString("type"))
+        assertEquals(false, sent.getBoolean("unread"))
+        assertEquals("", sent.getString("q"))
+        assertEquals(3, result.items.size)
+        val warn = result.items[0]
+        assertEquals(11L, warn.id)
+        assertEquals("warning", warn.kind)
+        assertEquals(1700000000000L, warn.timeMs)
+        assertTrue(warn.unread)
+        val ann = result.items[1]
+        assertEquals(6, ann.confirmTotal)
+        assertEquals(2, ann.confirmCount)
+        assertTrue(!result.items[2].unread) // state=1 已读
+        assertEquals(4, result.counts.all)
+        assertEquals(2, result.counts.warning)
+        assertEquals(15, result.counts.notice)
+        assertEquals(6, result.counts.announce)
+    }
+
+    @Test
+    fun `邮箱列表过滤条件透传（type 与 unread）`() {
+        loginFirst()
+        fake.handler = { 200 to """{"ok":true,"items":[],"counts":{"all":0,"warning":0,"notice":0,"announce":0}}""" }
+        client.listMailbox(type = "warning", unreadOnly = true, q = "磁盘")
+        val sent = org.json.JSONObject(String(fake.requests.last().body, Charsets.UTF_8))
+        assertEquals("warning", sent.getString("type"))
+        assertEquals(true, sent.getBoolean("unread"))
+        assertEquals("磁盘", sent.getString("q"))
+    }
+
+    @Test
+    fun `未读计数轻量面`() {
+        loginFirst()
+        fake.handler = { 200 to """{"ok":true,"counts":{"all":23,"warning":2,"notice":15,"announce":6}}""" }
+        val counts = client.mailboxUnread()
+        assertEquals("/files/mailbox/unread", fake.requests.last().path)
+        assertEquals(23, counts.all)
+        assertEquals(6, counts.announce)
+    }
+
+    @Test
+    fun `标记已读单条与全部（marked 回读）`() {
+        loginFirst()
+        fake.handler = { 200 to """{"ok":true,"marked":1}""" }
+        assertTrue(client.markMailboxRead(11))
+        var sent = org.json.JSONObject(String(fake.requests.last().body, Charsets.UTF_8))
+        assertEquals(11L, sent.getLong("id"))
+        assertTrue(!sent.has("all"))
+
+        fake.handler = { 200 to """{"ok":true,"marked":4}""" }
+        assertEquals(4, client.markMailboxAllRead())
+        sent = org.json.JSONObject(String(fake.requests.last().body, Charsets.UTF_8))
+        assertTrue(sent.getBoolean("all"))
+    }
+
+    @Test
+    fun `告警标记已处理 409 转异常带服务端文案`() {
+        loginFirst()
+        fake.handler = { 409 to """{"ok":false,"error":"仅告警条目可标记已处理（或已处理过）"}""" }
+        try {
+            client.markMailboxHandled(13)
+            fail("应抛 ApiException")
+        } catch (e: FilesClient.ApiException) {
+            assertEquals("mailbox.handle", e.op)
+            assertEquals(409, e.status)
+            assertEquals("仅告警条目可标记已处理（或已处理过）", e.error)
+        }
+    }
+
+    @Test
+    fun `公告确认与确认台账（rows 解析＋403 语义）`() {
+        loginFirst()
+        fake.handler = { 200 to """{"ok":true}""" }
+        client.confirmMailbox(12)
+        var sent = org.json.JSONObject(String(fake.requests.last().body, Charsets.UTF_8))
+        assertEquals(12L, sent.getLong("id"))
+        assertEquals("/files/mailbox/confirm", fake.requests.last().path)
+
+        fake.handler = {
+            200 to """
+                {"ok":true,"rows":[
+                  {"account":"alice","confirmedMs":1700000100000},
+                  {"account":"bob","confirmedMs":0},
+                  {"account":"carol","confirmedMs":1700000200000}]}
+            """.trimIndent()
+        }
+        val rows = client.mailboxConfirmations(12)
+        assertEquals("/files/mailbox/confirmations", fake.requests.last().path)
+        sent = org.json.JSONObject(String(fake.requests.last().body, Charsets.UTF_8))
+        assertEquals(12L, sent.getLong("id"))
+        assertEquals(3, rows.size)
+        assertTrue(rows[0].confirmed)
+        assertTrue(!rows[1].confirmed)
+        assertEquals(1700000200000L, rows[2].confirmedMs)
+
+        // 仅公告收件人可查：403 明示
+        fake.handler = { 403 to """{"ok":false,"error":"仅公告收件人可查确认台账"}""" }
+        try {
+            client.mailboxConfirmations(99)
+            fail("应抛 ApiException")
+        } catch (e: FilesClient.ApiException) {
+            assertEquals("mailbox.confirmations", e.op)
+            assertEquals(403, e.status)
+        }
+    }
 }

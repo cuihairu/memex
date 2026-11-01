@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 未读徽章（原型 .badge-n）：品牌底白字胶囊 -->
+    <solid android:color="@color/brand_orange" />
+    <corners android:radius="99dp" />
+</shape>

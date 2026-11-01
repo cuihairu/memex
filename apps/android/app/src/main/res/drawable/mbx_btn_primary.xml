@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 行内主钮（原型 .acts button.p）：品牌底 -->
+    <solid android:color="@color/brand_orange" />
+    <corners android:radius="8dp" />
+</shape>

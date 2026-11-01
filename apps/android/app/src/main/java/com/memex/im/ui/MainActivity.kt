@@ -77,6 +77,11 @@ class MainActivity : AppCompatActivity(), ChatManager.Listener {
             startActivity(Intent(this, FileAssistantActivity::class.java))
         }
 
+        // 邮箱（统一收件箱：告警/通知/公告同箱）
+        findViewById<Button>(R.id.btn_mailbox).setOnClickListener {
+            startActivity(Intent(this, MailboxActivity::class.java))
+        }
+
         // 任务清单（R27-6）：列表/看板双视图，端点同桌面 TaskDialog
         findViewById<Button>(R.id.btn_tasks).setOnClickListener {
             startActivity(Intent(this, TasksActivity::class.java))

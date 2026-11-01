@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  邮箱条目详情·底部抽屉（原型 mobile-mailbox .sheet）：抓手＋头行（图标格
+  ＋标题＋类目胶囊）＋meta 行＋正文（panel-2 底）＋公告已读确认台账（头像
+  首字＋账号＋已确认/未确认）＋动作行（确认已读主钮）＋硬边界注。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/mbx_sheet_bg"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="14dp">
+
+    <View
+        android:layout_width="36dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="9dp"
+        android:background="@color/line_strong" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/mbx_sheet_icon"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:gravity="center"
+            android:textSize="14sp"
+            android:background="@drawable/mbx_icon_notice" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginStart="8dp">
+
+            <TextView
+                android:id="@+id/mbx_sheet_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/mbx_sheet_meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:textColor="@color/text_tertiary"
+                android:textSize="10.5sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/mbx_sheet_kind"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:paddingStart="7dp"
+            android:paddingEnd="7dp"
+            android:paddingTop="1dp"
+            android:paddingBottom="1dp"
+            android:textSize="9.5sp"
+            android:textStyle="bold"
+            android:background="@drawable/mbx_tag_notice"
+            android:textColor="@color/text_secondary" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/mbx_sheet_body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="9dp"
+        android:paddingStart="11dp"
+        android:paddingEnd="11dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="9dp"
+        android:background="#f4f1ed"
+        android:lineSpacingMultiplier="1.4"
+        android:textColor="@color/text_secondary"
+        android:textSize="12.5sp" />
+
+    <TextView
+        android:id="@+id/mbx_sheet_trace"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:textColor="@color/text_secondary"
+        android:textSize="11.5sp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/mbx_sheet_ledger_head"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:textColor="@color/text_tertiary"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/mbx_sheet_ledger"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="4dp"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/mbx_sheet_confirm"
+        style="?android:attr/borderlessButtonStyle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="11dp"
+        android:minHeight="0dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="9dp"
+        android:background="@drawable/mbx_btn_primary"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:paddingStart="9dp"
+        android:paddingEnd="9dp"
+        android:paddingTop="7dp"
+        android:paddingBottom="7dp"
+        android:background="#f4f1ed"
+        android:lineSpacingMultiplier="1.5"
+        android:text="@string/mbx_note"
+        android:textColor="@color/text_tertiary"
+        android:textSize="10sp" />
+</LinearLayout>

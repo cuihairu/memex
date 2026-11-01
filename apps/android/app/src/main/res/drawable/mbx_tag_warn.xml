@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 告警类目胶囊（原型 .tag-k）：warn 底 -->
+    <solid android:color="@color/warn_soft" />
+    <corners android:radius="99dp" />
+</shape>

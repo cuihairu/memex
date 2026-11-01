@@ -137,6 +137,7 @@
     <string name="files_err_read">读取所选文件失败</string>
     <string name="files_err_prefix">操作失败（HTTP %1$d）：%2$s</string>
     <string name="main_file_assistant">文件助手</string>
+    <string name="main_mailbox">邮箱</string>
 
     <!-- 任务清单（R27-6）：列表/看板双视图，类型清单从服务端拉取 -->
     <string name="main_tasks">任务清单</string>
@@ -169,6 +170,37 @@
     <string name="tasks_notify_title">任务提醒</string>
     <string name="tasks_notify_start">任务已到开始时间：%1$s</string>
     <string name="tasks_notify_due">任务已到期待办：%1$s</string>
+
+    <!-- 邮箱·统一收件箱（原型 mobile-mailbox；对齐桌面 MailboxView 口径） -->
+    <string name="mbx_title">邮箱</string>
+    <string name="mbx_tabbar_tasks">任务</string>
+    <string name="mbx_tab_all">全部</string>
+    <string name="mbx_tab_warning">告警</string>
+    <string name="mbx_tab_notice">通知</string>
+    <string name="mbx_tab_announce">公告</string>
+    <string name="mbx_unread_only">只看未读</string>
+    <string name="mbx_kind_warning">告警</string>
+    <string name="mbx_kind_notice">通知</string>
+    <string name="mbx_kind_announce">公告</string>
+    <string name="mbx_state_unread">未读</string>
+    <string name="mbx_state_pending">待确认</string>
+    <string name="mbx_state_confirmed">已确认</string>
+    <string name="mbx_state_handled">已处理</string>
+    <string name="mbx_act_handle">去处理</string>
+    <string name="mbx_act_confirm">确认已读</string>
+    <string name="mbx_act_detail">详情</string>
+    <string name="mbx_empty">暂无条目，连接后拉取</string>
+    <string name="mbx_ledger_head">已读确认台账（%1$d 人 · %2$d 已确认 / %3$d 未确认）</string>
+    <string name="mbx_ledger_confirmed">已确认</string>
+    <string name="mbx_ledger_pending">未确认</string>
+    <string name="mbx_note">确认已读只改邮箱已读态，不动公告归档行；清空/标记已读一概不触碰归档。</string>
+    <string name="mbx_handled_by">处理人 %1$s · %2$s</string>
+    <string name="mbx_meta">%1$s · 来源 %2$s · %3$s</string>
+    <string name="mbx_confirm_done">已确认</string>
+    <string name="mbx_mark_done">已标记</string>
+    <string name="mbx_handle_done">已标记处理</string>
+    <string name="mbx_sheet_close">关闭</string>
+    <string name="mbx_conn_hint">邮箱经文件面（端口独立，缺省 24561）；账号口令与协作登录同源</string>
 
     <!-- 校验失败原因（与 core 探测结果一一对应） -->
     <string name="err_addr_empty">服务器地址不能为空</string>

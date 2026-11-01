@@ -49,10 +49,10 @@
 | `desktop-office-map.html` | `client/app/office_map_dialog.cpp` | 已对齐 | 工具行（楼层标签「楼层 3F（N 个工位）· 编辑中（拖拽定位，松手即存）」＋搜索输入「账号或工位号（命中高亮）」＋搜索/刷新钮＋「默认本层 · org-admin 可跨层」注）＋管理行（「管理（az office:manage）：」前缀＋楼层 64px／工位号 70px／占用者账号 110px 定宽输入＋新增工位/删除选中/绑定/解绑）＋自绘画布（奶油底 10×10 参考线网格；图例四态——占用橙／空座灰／选中蓝／命中白底+橙描边；标签「工位号·账号」，占用/选中加粗着色；未分配工位＝「（未分配工位——无楼层可看）」）＋图例行（四态点＋「一人一座：绑定即占；工位号同层唯一；未分配工位时显示「（未分配工位——无楼层可看）」」注）＋连接行右上「已连接（account）」徽章；窗 960×660。近似项：连接区可编辑兼连接入口（原型只读徽章）；画布为抽象平面自绘（连续归一化坐标，原型以 10 列 62px 网格近似——真机拖拽落位为任意连续位）；「默认本层 · org-admin 可跨层」注落工具行右端（原生标题栏无徽章位，原型置标题栏）；底部状态行（原型无——测试契约口径）；单实例抓图只呈现 org-admin 管理面（未分配工位态与空座灰由 member1 侧不同帧呈现） |
 | `desktop-audit.html` | `client/app/audit_dialog.cpp` | 有偏差 | 检索与查阅日志均须 auditor 角色 |
 | `desktop-file-assistant.html` | `client/app/file_assistant.cpp` | 有偏差 | 同内容秒传去重；外部只读 token 下载 403 |
-| `mobile-mailbox.html` | ——（`apps/android/` 下无 MailboxActivity） | **未实现** | 移动端邮箱面，与桌面邮箱同设计 |
+| `mobile-mailbox.html` | `apps/android/.../ui/MailboxActivity.kt` + `res/layout/activity_mailbox.xml`（条目卡 `item_mailbox.xml`；详情抽屉 `view_mailbox_sheet.xml`；数据面 `core/FilesClient.kt` mailbox 段） | 已对齐 | 2026-11-01 逐屏落地，与桌面邮箱同设计同边界（邮箱＝视图＋已读状态，不是新通道；清空/标记已读永不触归档行；未读数以服务端 counts 为唯一来源）。屏①列表：appbar「邮箱」＋未读徽章（counts.all）、chips 全部/告警/通知/公告（互斥＋计数，回包 counts 驱动）＋只看未读 toggle（右贴）、条目卡（未读＝brand-soft 底＋品牌描边、26dp 图标格按类目、标题＋时间、预览行＝类目胶囊＋状态胶囊（公告待确认/已确认/告警已处理）＋预览文、动作行按类目给真钮——告警=去处理（markHandled）＋确认已读、公告=详情＋确认已读（confirm）、通知=无）、tabbar 会话/邮箱(active)/任务/我。屏②底部抽屉：grab 条、头行（图标格＋标题＋meta「类目 · 来源 X · 时间」）、正文面板、公告已读确认台账（「N 人 · X 已确认 / Y 未确认」头＋who 行＝首字圆头像＋账号＋已确认/未确认着色，`/files/mailbox/confirmations`）、告警处理留痕（处理人＋时间）、确认已读主钮、note2 边界文案照原型原文。全链走真后端六端点（list/unread/read/handle/confirm/confirmations），`FilesClientTest` 邮箱腿（默认体三键恒发/条件透传/计数/单条与全部已读/409/403/台账解析）绿。近似项：连接面板为原型外补（文件面端口独立 24561，与文件助手同模板；原型假定已登录）；「转发到群」如实不摆（移动端无群选择器，不造假控件）；抽屉为布局内底部面板＋dim scrim（无 material 依赖，非 BottomSheetDialog）；图标格/头像用字形（!、i、公、账号首字）非 SVG；tabbar 为纯文本行（原型图标＋文字）；时间格式 MM-dd HH:mm |
 | `mobile-tasks.html` | `apps/android/.../ui/TasksActivity.kt` + `res/layout/activity_tasks.xml` | 有偏差 | 列表 + 横滑看板（列宽 160dp，<600dp 自动降级） |
 
-**统计**：原型 36 张（桌面 23 / 移动 4 / 设置 5 / 空态参考 1 / 管理台 1）；已对齐 29、有偏差 6、未实现 1（mobile-mailbox）。
+**统计**：原型 36 张（桌面 23 / 移动 4 / 设置 5 / 空态参考 1 / 管理台 1）；已对齐 30、有偏差 6、未实现 0。
 
 ## 留痕铁律（所有涉及归档的界面统一适用）
 

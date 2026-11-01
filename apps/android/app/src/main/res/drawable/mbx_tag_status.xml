@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 状态胶囊底（ok/warn 前景色由文字色给出；原型 .tag-s） -->
+    <solid android:color="@color/ok_soft" />
+    <corners android:radius="99dp" />
+</shape>

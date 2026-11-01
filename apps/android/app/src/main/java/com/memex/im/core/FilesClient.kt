@@ -381,6 +381,147 @@ class FilesClient {
             )
         }
 
+    // —— 邮箱·统一收件箱（mailbox.md；对齐桌面 MailboxView × FileServer）——
+    //
+    //  - 邮箱＝视图＋已读状态，不是新通道：条目只拉不动源（公告行/告警
+    //    台账行/消息归档行一概不动，清空/标记已读只改邮箱态）。
+    //  - state：0=未读、1=已读/已确认、2=告警已处理（handledBy/handledMs
+    //    留痕）；未读数以服务端为唯一来源（counts 同源同数）。
+    //  - kind：warning|notice|announce；ref＝跳转锚（group:N/tasks/
+    //    approvals），正文留在各自来源。
+
+    /** 邮箱条目（mailbox_row_json 全字段直映） */
+    data class MailboxItem(
+        val id: Long,
+        val kind: String,
+        val title: String,
+        val sub: String,
+        val source: String,
+        val ref: String,
+        val timeMs: Long,
+        val state: Int,
+        val handledBy: String,
+        val handledMs: Long,
+        val confirmedMs: Long,
+        val confirmTotal: Int,
+        val confirmCount: Int,
+    ) {
+        val unread: Boolean get() = state == 0
+    }
+
+    /** 四路未读计数（all/warning/notice/announce；页签与徽章同源） */
+    data class MailboxCounts(val all: Int, val warning: Int, val notice: Int, val announce: Int)
+
+    data class MailboxList(val items: List<MailboxItem>, val counts: MailboxCounts)
+
+    /** 公告已读确认台账行（confirmedMs=0＝未确认，排序已确认在前） */
+    data class MailboxConfirmation(val account: String, val confirmedMs: Long) {
+        val confirmed: Boolean get() = confirmedMs > 0
+    }
+
+    /** 条目列表（type 空=全部；unreadOnly=只看未读；q=标题/来源子串） */
+    @Throws(ApiException::class)
+    fun listMailbox(
+        type: String = "",
+        unreadOnly: Boolean = false,
+        q: String = "",
+    ): MailboxList {
+        val json = request(
+            "mailbox.list", "POST", "/files/mailbox/list",
+            JSONObject()
+                .put("type", type)
+                .put("unread", unreadOnly)
+                .put("q", q)
+                .toString(),
+        )
+        val arr = json.optJSONArray("items") ?: JSONArray()
+        val items = (0 until arr.length()).mapNotNull { i ->
+            arr.optJSONObject(i)?.let { o ->
+                MailboxItem(
+                    id = o.optLong("id"),
+                    kind = o.optString("kind"),
+                    title = o.optString("title"),
+                    sub = o.optString("sub"),
+                    source = o.optString("source"),
+                    ref = o.optString("ref"),
+                    timeMs = o.optLong("time"),
+                    state = o.optInt("state"),
+                    handledBy = o.optString("handledBy"),
+                    handledMs = o.optLong("handledMs"),
+                    confirmedMs = o.optLong("confirmedMs"),
+                    confirmTotal = o.optInt("confirmTotal"),
+                    confirmCount = o.optInt("confirmCount"),
+                )
+            }
+        }
+        return MailboxList(items, parseMailboxCounts(json.optJSONObject("counts")))
+    }
+
+    /** 轻量面：只拉未读计数（徽章刷新用，不动条目表） */
+    @Throws(ApiException::class)
+    fun mailboxUnread(): MailboxCounts =
+        parseMailboxCounts(
+            request("mailbox.unread", "POST", "/files/mailbox/unread", "{}")
+                .optJSONObject("counts"),
+        )
+
+    /** 单条标记已读（返回 false＝本就已读/无此条；不碰归档行） */
+    @Throws(ApiException::class)
+    fun markMailboxRead(id: Long): Boolean =
+        request(
+            "mailbox.read", "POST", "/files/mailbox/read",
+            JSONObject().put("id", id).toString(),
+        ).optInt("marked") == 1
+
+    /** 全部标记已读（返回标记条数） */
+    @Throws(ApiException::class)
+    fun markMailboxAllRead(): Int =
+        request(
+            "mailbox.readAll", "POST", "/files/mailbox/read",
+            JSONObject().put("all", true).toString(),
+        ).optInt("marked")
+
+    /** 告警标记已处理（state=2＋处理人留痕；仅告警且未处理过，否则 409） */
+    @Throws(ApiException::class)
+    fun markMailboxHandled(id: Long) {
+        request(
+            "mailbox.handle", "POST", "/files/mailbox/handle",
+            JSONObject().put("id", id).toString(),
+        )
+    }
+
+    /** 公告确认已读（state=1＋confirmedMs；仅公告且未确认过，否则 409） */
+    @Throws(ApiException::class)
+    fun confirmMailbox(id: Long) {
+        request(
+            "mailbox.confirm", "POST", "/files/mailbox/confirm",
+            JSONObject().put("id", id).toString(),
+        )
+    }
+
+    /** 公告已读确认台账（仅公告收件人可查，否则 403；谁/何时可查） */
+    @Throws(ApiException::class)
+    fun mailboxConfirmations(id: Long): List<MailboxConfirmation> {
+        val json = request(
+            "mailbox.confirmations", "POST", "/files/mailbox/confirmations",
+            JSONObject().put("id", id).toString(),
+        )
+        val arr = json.optJSONArray("rows") ?: JSONArray()
+        return (0 until arr.length()).mapNotNull { i ->
+            arr.optJSONObject(i)?.let {
+                MailboxConfirmation(it.optString("account"), it.optLong("confirmedMs"))
+            }
+        }
+    }
+
+    private fun parseMailboxCounts(obj: JSONObject?): MailboxCounts =
+        MailboxCounts(
+            all = obj?.optInt("all") ?: 0,
+            warning = obj?.optInt("warning") ?: 0,
+            notice = obj?.optInt("notice") ?: 0,
+            announce = obj?.optInt("announce") ?: 0,
+        )
+
     // —— 内部 ——
 
     private fun open(path: String, method: String): HttpURLConnection {

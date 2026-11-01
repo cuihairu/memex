@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 选中筛选胶囊（原型 .chip.on）：品牌底 -->
+    <solid android:color="@color/brand_orange" />
+    <corners android:radius="99dp" />
+</shape>
