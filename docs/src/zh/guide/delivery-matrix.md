@@ -4,7 +4,7 @@
 > 到哪一档就写哪一档。本页把「平台 × 通信模式 × 账号状态 × 网络状态 × 权限角色」
 > 的组合如实分档，报告引用平台能力时以本页为准，不得混写。
 > 核验日期：2026-10-13。证据只取仓库内：CI 工作流定义（`.github/workflows/`）、
-> ctest 测试名（83 项，ctest 名去重）、各端 README/BUGS 记录、带日期的实跑页
+> ctest 测试名（88 项，ctest 名去重）、各端 README/BUGS 记录、带日期的实跑页
 > （`platform-adapter.md`、`wan-drill.md` 均为 2026-10-03 记录）。
 
 ## 分档定义
@@ -31,7 +31,7 @@ deb/rpm 只是同架构产物，未在目标系统安装过；**Windows** 只有
 | 移动端 App 可构建 | — | — | — | — | — | 🔧 ¹ | ⬛ ² | 🔧 ³ |
 | 安装包产物 | 🔧 tar+deb/rpm | 🔧 zip+setup.exe | 🔧 ⁴ | 🔧 ⁴ | 🔧 dmg×2 | 🔧 apk(debug) | ⬛ | — |
 | 安装后自检冒烟（--self-test 仅服务端；客户端＝--version/--smoke） | 🔧 nightly | 🔧 nightly | ⬛ | ⬛ | 🔧 nightly | — | — | — |
-| 全量自动化测试（ctest 83 项） | ✅ ci.yml | ⬛ | ⬛ | ⬛ | ⬛ | — | — | — |
+| 全量自动化测试（ctest 88 项） | ✅ ci.yml | ⬛ | ⬛ | ⬛ | ⬛ | — | — | — |
 
 ¹ `assembleDebug` 本地产物（BUGS.md 记录在案）；无 CI 作业。release 变体单测偶发红＝BUG-005，2026-10-10 已修（定性后修测试面断言，双变体 84/84×2 全绿收口）。
 ² ArkTS HAP 编译腿无 OHOS runner——harmony.yml 明示「不在此伪造编译通过」；纯逻辑层有 CI（见下表）。
@@ -51,7 +51,7 @@ deb/rpm 只是同架构产物，未在目标系统安装过；**Windows** 只有
 | 三级通知（普通/重要/紧急确认收悉） | ✅ notify（桌面） | ⬛ | ⬛ | ⬛ | ⬛ | ✅ ⁶ | ✅ ⁷ | ⬛ |
 
 ⁵ R18：直连态／免登录能力仅存在于桌面端，移动端全部为协作态——设计排除，非验证档。
-⁶ Android：实测层级＝JVM 单测 95 项（真 socket 假服务端；debug 变体），**非真机 UI 端到端**；聊天文件直传为桌面端专属能力（Android README 口径），文件面走 FilesClientTest。
+⁶ Android：实测层级＝JVM 单测 101 项（真 socket 假服务端；debug 变体），**非真机 UI 端到端**；聊天文件直传为桌面端专属能力（Android README 口径），文件面走 FilesClientTest。
 ⁷ 鸿蒙：实测层级＝纯 TS 逻辑层 Node 22 单测（harmony.yml CI 全绿，wire 与桌面端字节级交叉验证）；**HAP 内真实运行未验证**（无 OHOS runner）。
 ⁸ iOS：实测层级＝MemexKit core 单测 53 项（真 socket 假服务端，ios.yml macos-26）；应用 UI 未验证。
 

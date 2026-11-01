@@ -1,6 +1,6 @@
 # UI Prototypes and Preview
 
-The prototype mockups are a deliverable, covering ten desktop screens and four mobile screens. The style matches the product's temperament: brand orange `#e16531` (taken from the logo) as the primary color, warm neutral backgrounds, and both light and dark themes. The source files (HTML + the shared design system `prototypes.css`) are in the repository under `docs/design/prototypes/`, and the screenshots are in `docs/src/public/screenshots/`.
+The prototype mockups are a deliverable: the original set covered ten desktop screens and four mobile screens, and it has since grown to 25 desktop screens (24 `desktop-*.html` plus `main-empty.html`) and 6 mobile screens. The style matches the product's temperament: brand orange `#e16531` (taken from the logo) as the primary color, warm neutral backgrounds, and both light and dark themes. The source files (HTML + the shared design system `prototypes.css`) are in the repository under `docs/design/prototypes/`, and the screenshots are in `docs/src/public/screenshots/`.
 
 Each screen can be viewed in its dark variant by appending `?theme=dark`; the button in the top-right corner of the homepage carousel switches the screenshot theme.
 

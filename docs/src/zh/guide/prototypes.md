@@ -1,6 +1,6 @@
 # 界面原型与预览
 
-原型设计稿是交付物，覆盖桌面端十屏与手机端四屏。风格与产品气质一致：品牌橙 `#e16531`（取自 logo）主色、暖中性底色、亮暗双主题。源文件（HTML＋共享设计系统 `prototypes.css`）在仓库 `docs/design/prototypes/`，截图在 `docs/src/public/screenshots/`。
+原型设计稿是交付物：初版覆盖桌面端十屏与手机端四屏，现扩至桌面端 25 屏（`desktop-*.html` 24 张＋`main-empty.html`）与手机端 6 屏。风格与产品气质一致：品牌橙 `#e16531`（取自 logo）主色、暖中性底色、亮暗双主题。源文件（HTML＋共享设计系统 `prototypes.css`）在仓库 `docs/design/prototypes/`，截图在 `docs/src/public/screenshots/`。
 
 每屏均可加 `?theme=dark` 参数查看深色版；首页轮播的右上角按钮可切换截图主题。
 

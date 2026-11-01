@@ -1,14 +1,16 @@
 [English](README.md) | [中文](README.zh.md)
 
 <p align="center">
-  <img src="docs/src/public/logo.svg" alt="Memex" width="64" height="64" /> <a href="https://cuihairu.github.io/memex/zh//"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue" alt="docs"></a>
+  <img src="docs/src/public/logo.svg" alt="Memex" width="64" height="64" />
 </p>
 
 <h1 align="center">Memex · 内网办公即时通讯系统</h1>
 
 <p align="center">
+  <a href="https://cuihairu.github.io/memex/zh/"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue" alt="docs" /></a>
   <a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov 覆盖率" /></a>
+  <a href="https://github.com/cuihairu/memex/releases"><img src="https://img.shields.io/badge/status-in%20development-orange" alt="Status: in development" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iOS%20%7C%20HarmonyOS-e16531" alt="平台支持" />
   <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
@@ -18,11 +20,11 @@
 
 ## 文档
 
-- 文档站（GitHub Pages）：<https://cuihairu.github.io/memex/> ——界面预览、快速预览、架构与合规；源码在 `docs/`（VitePress，构建 `pnpm docs:build`）
-- 产品定位一页纸：<https://cuihairu.github.io/memex/guide/product> · 源 [docs/src/guide/product.md](docs/src/guide/product.md)
-- 评审组决策清单（十五项 + 一项可选）：<https://cuihairu.github.io/memex/guide/decisions> · 源 [docs/src/guide/decisions.md](docs/src/guide/decisions.md)
-- 界面预览（实况截图；桌面 8 屏 + 移动 4 屏）：<https://cuihairu.github.io/memex/guide/prototypes> · 原型源 docs/design/prototypes/
-- 产品定义与分期依据：[docs/建设方案评审报告-V10.0.md](docs/建设方案评审报告-V10.0.md)
+- 文档站（GitHub Pages，中文）：<https://cuihairu.github.io/memex/zh/> ——界面预览、快速预览、架构与合规；源码在 `docs/`（VitePress，构建 `pnpm docs:build`）
+- 产品定位一页纸（中文）：<https://cuihairu.github.io/memex/zh/guide/product> · 源 [docs/src/zh/guide/product.md](docs/src/zh/guide/product.md)
+- 评审组决策清单（中文；十五项 + 一项可选）：<https://cuihairu.github.io/memex/zh/guide/decisions> · 源 [docs/src/zh/guide/decisions.md](docs/src/zh/guide/decisions.md)
+- 界面预览（中文；实况截图，亮暗成对）：<https://cuihairu.github.io/memex/zh/guide/prototypes> · 原型源 docs/design/prototypes/
+- 产品定义与分期依据：[docs/zh/建设方案评审报告-V10.0.md](docs/zh/建设方案评审报告-V10.0.md)（英文摘要版 [docs/plan-review-report-v10.0.md](docs/plan-review-report-v10.0.md)）
 - 需求与任务清单（R1–R19 主线、R23–R27 追加批次、四期拆解、验收口径）：[todo.md](todo.md)
 
 ## 产品形态
@@ -65,7 +67,7 @@ memex/
 │                         #   序列化、公共工具
 ├── apps/                 # 手机端客户端
 │   ├── android/          # Android（Kotlin，T6.3 已落地：R17/R18 + 会话列表收发
-│   │                     #   + 三级推送横幅震动；39/39 单测＋真机走查，无 CI 腿）
+│   │                     #   + 三级推送横幅震动；101 项 JVM 单测＋真机走查，无 CI 腿）
 │   ├── ios/              # iOS（Swift/SwiftUI，T6.4 代码-only＋CI 验证）
 │   ├── harmony/          # 鸿蒙 NEXT（ArkTS，T6.6 代码-only＋CI 逻辑验证，
 │   │                     #   编译腿待 OHOS 工具链）
@@ -90,8 +92,6 @@ memex/
 
 ```bash
 # 1. 指向与 vcpkg.json builtin-baseline 匹配的 vcpkg checkout
-
-<p align="center">[![Status](https://img.shields.io/badge/status-in%20development-orange)](https://github.com/cuihairu/memex/releases)</p>
 export VCPKG_ROOT=/path/to/vcpkg
 # 可选：明确使用本地文件二进制缓存；Linux 默认缓存通常已是 ~/.cache/vcpkg/archives
 export VCPKG_BINARY_SOURCES="clear;files,$HOME/.cache/vcpkg/archives,readwrite"

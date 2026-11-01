@@ -6,7 +6,7 @@
 > 权限角色」 honestly, and any report that cites platform capability takes this page as
 > authoritative — tiers must not be mixed.
 > Verification date: 2026-10-13. Evidence is taken only from inside the repo: CI workflow
-> definitions (`.github/workflows/`), ctest test names (83 items, ctest names deduplicated),
+> definitions (`.github/workflows/`), ctest test names (88 items, ctest names deduplicated),
 > each end's README/BUGS records, and the dated live-run pages (`platform-adapter.md` and
 > `wan-drill.md`, both recorded 2026-10-03).
 
@@ -36,7 +36,7 @@ review's five-platform list).
 | Mobile app buildable | — | — | — | — | — | 🔧 ¹ | ⬛ ² | 🔧 ³ |
 | Installer artifacts | 🔧 tar+deb/rpm | 🔧 zip+setup.exe | 🔧 ⁴ | 🔧 ⁴ | 🔧 dmg×2 | 🔧 apk(debug) | ⬛ | — |
 | Post-install self-check smoke (`--self-test` server only; client = `--version`/`--smoke`) | 🔧 nightly | 🔧 nightly | ⬛ | ⬛ | 🔧 nightly | — | — | — |
-| Full automated test suite (83 ctest items) | ✅ ci.yml | ⬛ | ⬛ | ⬛ | ⬛ | — | — | — |
+| Full automated test suite (88 ctest items) | ✅ ci.yml | ⬛ | ⬛ | ⬛ | ⬛ | — | — | — |
 
 ¹ Local `assembleDebug` artifact (on the record in BUGS.md); no CI job. The occasional red
 release-variant unit test = BUG-005, fixed 2026-10-10 (after triage, the test-side assertion
@@ -62,7 +62,7 @@ been installed on real UOS/Kylin machines — on-hardware acceptance is the on-s
 
 ⁵ R18: direct mode / no-login capability exists only on the desktop; mobile is entirely in
 collaboration mode — excluded by design, not a verification tier.
-⁶ Android: the live-test level is 95 JVM unit tests (real socket against a fake server; debug
+⁶ Android: the live-test level is 101 JVM unit tests (real socket against a fake server; debug
 variant), **not real-device UI end-to-end**; chat file direct transfer is a desktop-only
 capability (per the Android README), and the file plane is covered by FilesClientTest.
 ⁷ HarmonyOS: the live-test level is pure-TS logic-layer unit tests on Node 22 (harmony.yml CI

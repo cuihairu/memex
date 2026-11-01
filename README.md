@@ -1,14 +1,16 @@
 [English](README.md) | [中文](README.zh.md)
 
 <p align="center">
-  <img src="docs/src/public/logo.svg" alt="Memex" width="64" height="64" /> <a href="https://cuihairu.github.io/memex//"><img src="https://img.shields.io/badge/docs-blue" alt="docs"></a>
+  <img src="docs/src/public/logo.svg" alt="Memex" width="64" height="64" />
 </p>
 
 <h1 align="center">Memex · Intranet Office Instant Messaging System</h1>
 
 <p align="center">
+  <a href="https://cuihairu.github.io/memex/"><img src="https://img.shields.io/badge/docs-blue" alt="docs" /></a>
   <a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov coverage" /></a>
+  <a href="https://github.com/cuihairu/memex/releases"><img src="https://img.shields.io/badge/status-in%20development-orange" alt="Status: in development" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iOS%20%7C%20HarmonyOS-e16531" alt="Platform support" />
   <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" />
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a>
@@ -21,8 +23,8 @@ An office instant messaging system for physically isolated intranet environments
 - Documentation site (GitHub Pages): <https://cuihairu.github.io/memex/> — UI previews, quick tour, architecture and compliance; source under `docs/` (VitePress, build with `pnpm docs:build`)
 - Product positioning: <https://cuihairu.github.io/memex/guide/product> · source [docs/src/guide/product.md](docs/src/guide/product.md)
 - Review panel decision list (fifteen items + one optional): <https://cuihairu.github.io/memex/guide/decisions> · source [docs/src/guide/decisions.md](docs/src/guide/decisions.md)
-- UI previews (live screenshots; 8 desktop screens + 4 mobile screens): <https://cuihairu.github.io/memex/guide/prototypes> · prototype sources docs/design/prototypes/
-- Product definition and phase basis: [product plan review report](docs/建设方案评审报告-V10.0.md)
+- UI previews (live screenshots, light/dark paired): <https://cuihairu.github.io/memex/guide/prototypes> · prototype sources docs/design/prototypes/
+- Product definition and phase basis: [product plan review report](docs/plan-review-report-v10.0.md)
 - Requirements and task list (R1–R19 mainline, R23–R27 additional batches, four-phase breakdown, acceptance criteria): [todo.md](todo.md)
 
 ## Product Form
@@ -71,7 +73,7 @@ memex/
 ├── apps/                 # Mobile clients
 │   ├── android/          # Android (Kotlin, shipped in T6.3: R17/R18 + conversation list
 │   │                     #   send/receive + three-level push banner and vibration;
-│   │                     #   39/39 unit tests + on-device walkthrough, no CI leg)
+│   │                     #   101 JVM unit tests + on-device walkthrough, no CI leg)
 │   ├── ios/              # iOS (Swift/SwiftUI, T6.4 code-only with CI verification)
 │   ├── harmony/          # HarmonyOS NEXT (ArkTS, T6.6 code-only with CI logic verification,
 │   │                     #   compile leg pending the OHOS toolchain)
@@ -100,8 +102,6 @@ Dependencies (asio / protobuf / nlohmann-json / sqlite3 / openssl / aws-sdk-cpp:
 
 ```bash
 # 1. Set up vcpkg (once; adding VCPKG_ROOT to your shell profile is recommended)
-
-<p align="center">[![Status](https://img.shields.io/badge/status-in%20development-orange)](https://github.com/cuihairu/memex/releases)</p>
 git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
 ~/vcpkg/bootstrap-vcpkg.sh
 export VCPKG_ROOT="$HOME/vcpkg"
