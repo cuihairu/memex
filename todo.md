@@ -660,3 +660,9 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] 与 prototypes/mobile-tasks.html 逐屏比对一致(控件/布局/文案/间距)（18a72cf 任务清单逐屏重排：屏①列表＝appbar「任务清单」＋连接行（描边圆角输入框＋brand 钮）＋「新增任务」录入区（标题/类型/分配给＋截止·开始勾选行＋双提醒开关）＋acts 行（添加任务主钮/看板/刷新＋ok 色状态「已连接（清单已刷新（N 项））」）＋任务卡（16dp 勾选框可点切换完成＋13sp 粗体两行标题完成删除线＋meta 胶囊 逾期/7 天内到期/截止/已完成·日期＋自建/由 X 分配＋（进行中）尾注＋动作行 完成/开始·暂停）；屏②看板＝appbar「任务看板」＋横滑三列 160dp（列头 panel-2 上圆角＋计数；卡逾期 warn 描边、完成 0.62 透明删除线）＋deg 虚线降级注；<600dp 窄屏看板入口隐藏降级回列表；看板态收起录入区回列表恢复；tabbar 会话/邮箱/任务(active)/我；「跳外部」如实不摆（/files/tasks 协议无详情 URL，外部行＝只读镜像胶囊）记台账；FilesClient 任务行补 done_ms/created_ms 解析＋测试腿断言；assembleDebug＋testDebugUnitTest＋docs:build 绿）
 
 - [ ] **UI-AUDIT · P2 · 界面审核(impeccable 流程)**:原生桌面界面此前不在 web 界面审核范围,补审——按 impeccable 审计(层级/排版/对比度 a11y/布局/边界态),报告+截图入 docs/review/,坏损当场修。
+
+- [ ] **DOC-GIF · P2 · 文档 · 配置开关效果动态图(每个开关 off→on 对比+GIF)**
+  - 交付:枚举本仓全部「开启后有效果」的开关/配置项;自动流水线生成证据——GUI 类用 @vscode/test-electron 或应用截图(off 一张/on 一张+切换过程录屏),CLI 类用终端录屏(asciinema→GIF 或 ffmpeg);ffmpeg 缝合动态 GIF。
+  - 文档:docs「配置效果」页(双语)逐开关嵌入:说明+off 图+on 图+GIF。
+  - 验收:清单内每个开关都有 off/on+GIF;流水线可重跑(配置变更随时再生成);兼作配置效果回归测试。
+  - 参考:kode todo C-24 同款流水线模式(2026-11-01 用户令全舰队推广)。
