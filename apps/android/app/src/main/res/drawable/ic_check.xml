@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="13dp"
+    android:height="13dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 成功对勾（ok 色，同原型 ok-pill / w-hint.ok 图标） -->
+    <path
+        android:pathData="M5,13 l4,4 L19,6"
+        android:strokeColor="@color/ok"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+</vector>

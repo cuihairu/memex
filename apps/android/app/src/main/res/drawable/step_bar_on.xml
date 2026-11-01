@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 步骤条：当前步品牌填充（同原型 .w-steps span.on = brand-fill） -->
+    <solid android:color="#B4471B" />
+    <corners android:radius="2dp" />
+</shape>

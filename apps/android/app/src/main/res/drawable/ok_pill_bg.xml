@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 「已连通」药丸：ok 浅底圆角（同原型 .w-field .ok-pill = ok-soft 底 / ok 字） -->
+    <solid android:color="#e5eee9" />
+    <corners android:radius="999dp" />
+</shape>

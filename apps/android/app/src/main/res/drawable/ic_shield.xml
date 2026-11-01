@@ -1,0 +1,20 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="16dp"
+    android:height="16dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 必填警示盾形（warn 描边，同原型 .w-required 图标） -->
+    <path
+        android:pathData="M12,3 L4,6 v6 c0,5 3.4,8.4 8,9 c4.6,-0.6 8,-4 8,-9 V6 Z"
+        android:strokeColor="@color/warn"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M12,8 v4 M12,15 h0.01"
+        android:strokeColor="@color/warn"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000" />
+</vector>

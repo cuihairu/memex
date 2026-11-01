@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 步骤条：未来步浅灰（同原型 .w-steps span 未激活） -->
+    <solid android:color="#E3E0DC" />
+    <corners android:radius="2dp" />
+</shape>

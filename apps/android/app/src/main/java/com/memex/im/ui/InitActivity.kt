@@ -2,6 +2,8 @@ package com.memex.im.ui
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
@@ -21,8 +23,9 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 /**
- * 初始化向导（R17）：首次启动强制进入的服务器地址设置页。
- * 无跳过路径——「校验并保存」必须拿到 PONG 才落盘并放行去登录页。
+ * 初始化向导（R17，对齐 mobile-init.html）：首次启动强制进入的服务器地址设置页。
+ * 无跳过路径——「下一步 · 登录账号」必须拿到 PONG 才落盘并放行去登录页。
+ * 校验通过时短暂展示「已连通」药丸与真实延迟提示，再改道登录。
  */
 class InitActivity : AppCompatActivity() {
 
@@ -32,6 +35,8 @@ class InitActivity : AppCompatActivity() {
 
     private lateinit var etAddress: EditText
     private lateinit var tvError: TextView
+    private lateinit var tvOkPill: TextView
+    private lateinit var tvProbeHint: TextView
     private lateinit var pbBusy: ProgressBar
     private lateinit var btnProbe: Button
 
@@ -54,6 +59,8 @@ class InitActivity : AppCompatActivity() {
         setContentView(R.layout.activity_init)
         etAddress = findViewById(R.id.et_server_address)
         tvError = findViewById(R.id.tv_init_error)
+        tvOkPill = findViewById(R.id.tv_ok_pill)
+        tvProbeHint = findViewById(R.id.tv_probe_hint)
         pbBusy = findViewById(R.id.pb_init)
         btnProbe = findViewById(R.id.btn_probe)
 
@@ -62,6 +69,8 @@ class InitActivity : AppCompatActivity() {
 
     private fun onProbeClicked() {
         tvError.visibility = View.GONE
+        tvOkPill.visibility = View.GONE
+        tvProbeHint.visibility = View.GONE
         when (val parsed = ServerAddress.parse(etAddress.text.toString())) {
             is ServerAddress.Parsed.Err -> showAddressError(parsed.reason)
             is ServerAddress.Parsed.Ok -> {
@@ -77,11 +86,17 @@ class InitActivity : AppCompatActivity() {
     private fun renderProbe(result: ProbeResult, address: ServerAddress) {
         when (result) {
             is ProbeResult.Ok -> {
+                // 展示「已连通」药丸与成功提示（仅用真实数据：延迟毫秒数）
+                tvOkPill.visibility = View.VISIBLE
+                tvProbeHint.text = getString(R.string.init_ok_hint, result.rttMs)
+                tvProbeHint.visibility = View.VISIBLE
                 store.markInitialized(address)
                 Toast.makeText(this, R.string.init_ok_toast, Toast.LENGTH_SHORT).show()
-                // 校验通过后的唯一去向：登录页（R18：登录后才可用）
-                startActivity(Intent(this, LoginActivity::class.java))
-                finish()
+                // 短暂停留让成功态可感知，再走唯一去向：登录页（R18：登录后才可用）
+                Handler(Looper.getMainLooper()).postDelayed({
+                    startActivity(Intent(this, LoginActivity::class.java))
+                    finish()
+                }, 650L)
             }
             is ProbeResult.Unreachable -> showError(getString(R.string.err_unreachable))
             is ProbeResult.Timeout -> showError(getString(R.string.err_timeout))

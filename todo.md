@@ -654,7 +654,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 ### 移动端
 
 - [x] 与 prototypes/mobile-chat.html 逐屏比对一致(控件/布局/文案/间距)（c75bb34 `ChatActivity.kt`；会话头（返回＋头像＋名称＋更多）＋左右气泡（对方白泡／己方 brand-fill #b4471b AA 白字）＋输入区（归档注＋发送消息…＋品牌发送钮）＋底部四页导航（会话/通讯录/文件/我）；通讯录置灰「暂未提供」（无对应 Activity），己方不列发送者/无已读回执（移动端无该数据）；assembleDebug＋testDebugUnitTest 绿）
-- [ ] 与 prototypes/mobile-init.html 逐屏比对一致(控件/布局/文案/间距)（`InitActivity.kt` / `LoginActivity.kt`）
+- [x] 与 prototypes/mobile-init.html 逐屏比对一致(控件/布局/文案/间距)（`InitActivity.kt`；Logo(品牌橙气泡)＋欢迎语＋三步步骤条(第1步亮)＋服务器地址域(必填*＋品牌描边输入框＋「已连通」药丸)＋说明＋必填警示框＋品牌主钮「下一步 · 登录账号」＋脚注；偏离两处如实记录：①不加 https:// 固定前缀(服务为明文 http，固定前缀误导协议，且地址支持完整粘贴解析)②原型「不提供免登录使用」措辞与本仓 R18 结构性守卫(禁免登录/匿名入口字样)冲突，按同义改述「需先连接企业协作服务」；成功态用真实数据「连接成功 · 延迟 N ms」(探测仅回 RTT，不编造版本/组织)；assembleDebug＋testDebugUnitTest 绿）
 - [ ] 与 prototypes/mobile-me.html 逐屏比对一致(控件/布局/文案/间距)（`MeActivity.kt`）
 - [ ] 与 prototypes/mobile-sessions.html 逐屏比对一致(控件/布局/文案/间距)（`MainActivity.kt`）
 - [ ] 与 prototypes/mobile-tasks.html 逐屏比对一致(控件/布局/文案/间距)（`TasksActivity.kt`，看板 <600dp 自动降级回列表）
