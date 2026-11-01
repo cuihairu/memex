@@ -217,11 +217,11 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] T6.2 鸿蒙（HarmonyOS NEXT）客户端（桌面矩阵项，代码-only·待真机验证）：OHOS SDK 交叉编译链（arm64-v8a）、HAP 打包、真机验收（待 DevEco/签名证书/真机解锁）。
   证据：294b886（vcpkg server feature）＋92eebc0（crashpad 闸）＋63a66ab（ohos preset/HAP 集成）；scripts/ohos/build-client-hap.sh＋packaging/ohos/README.md；CI 终态全绿 c9c5e51。
 - [x] T6.3 Android 手机端：登录（R17/R18）/会话列表/单聊群聊收发/三级推送横幅震动/移动端适配。
-  证据：apps/android（骨架登录→会话收发→通知推送三块）；单测 39→53→57 绿；走查 apps/android/docs/walkthrough-01~21。
+  证据：apps/android（骨架登录→会话收发→通知推送三块）；单测续补至 101 项绿；走查 apps/android/docs/walkthrough-01~21。
 - [x] T6.4 iOS 手机端（代码-only＋CI 验证）：登录、会话列表、单聊群聊收发、APNs 三级推送、移动端适配。
-  证据：apps/ios（SwiftPM MemexKit＋SwiftUI 壳）；.github/workflows/ios.yml（swift test 38 用例＋xcodebuild 全绿）。
-- [x] T6.6 鸿蒙手机版（「其他手机端」首项，ArkTS 代码-only＋CI 逻辑验证；2026-10-04 用户令）：排在 Android／iOS 之后；只写代码不本地验证，验证走 CI 可用平台。注：早前「手机端只做 Android、iOS 不做」口径已被后两道令与同日鸿蒙后置令（卷首注）覆盖——最终口径＝Android 排前、iOS 进行中（代码-only＋CI）、鸿蒙排到队列末尾、只写代码不做测试验证（编译过即可，CI 逻辑腿照跑），提交注明待真机验证。编号空缺如实保留：T6.5 无任何文档引用，不虚设条目。
-  进展（2026-10-04 鸿蒙手机版·两块全量代码-only）：`apps/harmony` 从零（ArkTS，HarmonyOS NEXT，stage 模型）——第一块 core 纯 TS 逻辑层（hvigor har @memex/core，Node 可测）：wire.ts 手写 protobuf 编解码（canonical proto3：零值标量/空串不上线、oneof presence 空 message 照写；与 protobufjs 加载 common/proto/memex.proto 单一事实源**双向字节交叉**背书）、frame_codec.ts 镜像 client/core frame.cpp（4 字节大端前缀/ZERO_LENGTH/TOO_LARGE 同口径）、address/route/chat_store/format 移植 Android 同语义、session/client/wire_channel 长连接会话与探测登录（互踢/ACK(seq) 受理/ACK(msg_id) 去重/群=group:N 归会话/KICK 断开/NOTICE 分级）；Node 单测 89 用例全绿（tsc strict＋node:test；wire 双向交叉、假服务端真 socket 全链路：登录/被拒/收发线格式/ACK/去重/群/KICK/三级通知/probe 四态；断言前一律有界轮询消读侧竞态；含 files_client 15）；CI `.github/workflows/harmony.yml`（ubuntu＋Node 22 npm test）绿。交叉验证揪出并修掉两处真实编码器缺陷（body 零值标量与 login_result ok=false 被无条件上线——被 protobufjs fromObject 非 canonical 行为掩盖成假匹配，canonical 对照后暴露）。第二块 ArkTS 壳（entry HAP，依赖 @memex/core file:../core）：HarmonyTransport（@ohos.net.socket 实现 core Transport）、AppState（preferences 初始化态＋内存登录态＋ChatHolder/ChatManager 合并桥）、五页（Index 守卫/InitPage R17 向导 PING→PONG 才落盘/LoginPage R18 attach 一次建连防互踢/MainPage 会话列表未读角标/ChatPage 气泡自动滚底清未读长按复制）、NoticeManager 三级推送（普通=仅站内；重要=横幅+震动不看前后台；紧急=前台确认弹窗排队/后台 isOngoing 常驻+震动，确认收悉撤销）、INTERNET/VIBRATE 权限。**验证边界（如实）**：本机与 CI 均无 OHOS 工具链（hvigor/ohpm/hdc NOT FOUND），Node 逻辑层 CI 全绿；ArkTS 编译腿（hvigor→HAP）待 OHOS runner＋SDK 可用后补，CI 与 apps/harmony/README.md 已如实注记，不造假绿。收口（2026-10-15）：最后一块代码项补齐——后台紧急横幅 wantAgent 动作按钮路径：NoticeManager publishUrgent 构建两个 wantAgent（横幅本体＝拉起应用；「确认收悉」按钮＝confirm_urgent＋msg_id 参数，isOngoing 常驻横幅；wantAgent 异步构建失败回退无按钮常驻横幅不丢提醒本体），EntryAbility onCreate/onNewWant dispatchWant 解参直走 confirmUrgent（撤横幅＋弹队列下一条；冷启动＝新实例通知 id 稳定映射照撤，队列留空即静默）；want 参数键以导出常量共用防字符串漂移。npm test 89/89 绿（逻辑层回归）。遗留＝环境门两项，非代码项：ArkTS 编译腿（本机与 CI 均无 OHOS 工具链）、真机走查（无设备）——apps/harmony/README.md 验证口径表已如实注记（新增 ArkTS 壳运行时 ⛔ 待真机行），不造假绿。
+  证据：apps/ios（SwiftPM MemexKit＋SwiftUI 壳）；.github/workflows/ios.yml（swift test 续补至 53 用例＋xcodebuild 全绿）。
+- [x] T6.6 鸿蒙手机版：ArkTS 代码-only＋CI 逻辑验证（2026-10-04 鸿蒙后置令：只写代码不本地验证，提交注明待真机验证）；T6.5 无任何文档引用，编号空缺如实保留。
+  证据：f279507（core 逻辑层 73 用例）→7898ad8（ArkTS 壳）→1fcd788（文件面 88/88）→8e31ff9（紧急横幅确认路径，89/89）；CI .github/workflows/harmony.yml 绿。验证边界如实：本机与 CI 均无 OHOS 工具链，ArkTS 编译腿与真机走查待环境（apps/harmony/README.md 注记，不造假绿）。
 
 ## 三、第二期（单独立项后细化）
 
@@ -591,12 +591,12 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ## 待办
 
-- [x] docs 根目录双语配对（2026-10-16 完成）：`docs/审计-文档一致性.md` 已补英文对应件 `docs/audit-doc-consistency.md`（183 行逐条真译，表格/代码引用/专有名词原样保留），双方首行切换器互链；`docs/建设方案评审报告-V10.0.md`（1204 行 >1000 阈值）按红线只做摘要级英文版 `docs/plan-review-report-v10.0.md`（保留全部标题层级/R1–R16 需求编号/26 张表/决策项等事实，段落压缩不逐段硬译，顶部如实标注摘要级＋中文原文为准），双方首行切换器互链。
+- [x] docs 根目录双语配对（2026-10-16）：审计报告补英文对应件 docs/audit-doc-consistency.md（逐条真译互链）；评审报告（1204 行）按红线出摘要级英文版 docs/plan-review-report-v10.0.md（顶部标注摘要级＋中文原文为准，互链）。
 - [x] 文档英文化缺口（2026-10-16 登记，同日完成）：下列中文文档全部补上英文版＋双向语言切换器——
   - 设计稿 `docs/design/` 23 篇：`IP与办公位置显示.md`、`OIDC身份认证接入设计.md`、`一级菜单管理.md`、`个人任务清单与外部工具接入.md`、`信箱.md`、`办公室位置图.md`、`品牌物料.md`、`基础平台化改造计划（身份-组织-授权-归档）.md`、`审批与日报周报.md`、`建群主题与群记录导出.md`、`文件存储与外网单向传输.md`、`机器人平台.md`、`权限模型.md`、`模型网关.md`、`消息标识与归档去重.md`、`群内智能助手.md`、`群工具三件.md`、`群工具框架.md`、`群服务器工具.md`、`群组知识共享.md`、`远程协助.md`、`group-remote-access.md`（英文文件名但正文为中文）、`settings-consolidation.md`（英文文件名但正文为中文）
   - 文档站 `docs/src/`：首页 `index.md` ＋ 指南 19 篇（`product`／`prototypes`／`requirements`／`roadmap`／`decisions`／`report`／`compliance`／`authorization`／`feiq-compat`／`file-storage`／`backup-restore`／`wan-drill`／`notify`／`settings`／`crash-reporting`／`platform-adapter`／`delivery-matrix`／`av-collab`／`development`）；`.vitepress/config.mts` 仅 `lang: 'zh-CN'`，无 `locales` 配置
   - 完成说明：设计稿 23 篇各补英文对应件（21 个新英文文件名；`group-remote-access.en.md`／`settings-consolidation.en.md` 按 `.en.md` 约定），指南 19 篇各补 `.en.md`，首页补 `index.en.md`；43 对文件首行切换器互链（脚本校验零断链）；`pnpm docs:build`（pnpm 10，CI 钉版）通过。登记下轮的两项缺口（`locales` 双语路由配置、英文版内部链接指向中文原文件）已于下条条目完成。
-- [x] 文档站双语路由 `locales`（2026-10-16 登记下轮，同日完成）：`docs/src/.vitepress/config.mts` 加 `locales`（root=简体中文 `zh-CN` ／ en=English `link:'/en/'`），英文页由 `*.en.md` 平移进平行 `src/en/` 树（首页＋指南 19 篇，`git mv` 保留改名追踪）；中英各一套 nav/sidebar/主题文案（`outline`/`docFooter`/`lastUpdatedText`/明暗切换/footer 中英分列，侧边栏标签取各页 H1 原文）；40 页首行切换器由相对 `X.en.md` 改写为绝对 `/en/...`↔`/guide/...`（顺带修掉首页切换器重复两行的旧 bug），英文正文内链一律指向英文对应页（`/guide/x`→`/en/guide/x`，`/screenshots/*` 属公共资源不加前缀）。
+- [x] 文档站双语路由 `locales`（2026-10-16 首版 root=中文／en=`/en/`；后 7fe568f 反转为 root=英文／zh=`/zh/`，中文页平移 `src/zh/` 树）：中英各一套 nav/sidebar/主题文案，页首切换器绝对路径互链。
   - 证据：`vitepress build src`（vitepress 1.6.4，`docs/package.json` 钉版，等价 CI `pnpm docs:build`；本机无 pnpm 故直接调 `docs/node_modules/.bin/vitepress`）build complete in 15.73s，产出英文页 20 张于 `/memex/en/**` ＋中文页 20 张＋`404.html`，旧 `*.en.html` 残留 0；**零死链**（`ignoreDeadLinks` 默认开启，断链即 build 失败）＝内链改写全量校验通过；`<html lang>` 分别为 `zh-CN`／`en`，translations 切换菜单已渲染；20 对双语互链脚本校验 20/20 一致且目标文件全部命中。
 
 ## 2026-10-19 深度源码审核第一批（A0）
@@ -610,54 +610,54 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ### 桌面 · 主窗口与列表面
 
-- [x] 与 prototypes/desktop-chat.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/main_window.cpp` 群聊页）（✅ 2026-10-29 afa99fd：头像列/胶囊系统行/文件卡片/日期分割线/输入区说明条/未归档徽标全量补齐＋warning_wash 令牌；门禁 84/84 绿）
-- [x] 与 prototypes/desktop-collab.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/main_window.cpp` 协作态会话列表）（✅ 2026-10-30 cceec84：会话行工厂（40px 头像+在线点/姓名 600/时间 11px/预览 12px/未读胶囊 min-17）＋置顶/最近联系分区（群聊并入，头部「群聊·服务端归档」块撤）＋side-head「+」发起单聊钮（账号菜单=组织架构成员）＋主题切换行控件重建；门禁 84/84 绿。近似项见台账）
-- [x] 与 prototypes/desktop-direct.html 逐屏比对一致(控件/布局/文案/间距)（未登录直连列表态）（✅ 2026-10-30 d52bfc2：直连行控件化（头像/在线点/「账号·设备」名/时间/末条预览/未读胶囊）＋「在线设备」分区＋侧栏头「自动发现 x.x.x.0/24 · UDP 2425」注脚＋计数绿点＋搜索占位改「搜索设备 / IP」（检索字段不变）；门禁 84/84 绿。近似项见台账）
-- [x] 与 prototypes/desktop-direct-chat.html 逐屏比对一致(控件/布局/文案/间距)（直连会话展开态）（✅ 2026-10-30 128c3ec：会话头 28px 头像＋「账号·设备名」标题＋icon-btn 化动作位（文件/更多菜单＝既有真实操作）＋系统胶囊行对齐「已通过 UDP 广播发现对方 · 本对话不归档」＋输入区「直连 · 无归档」描边胶囊（随形态换字）；门禁 84/84 绿。近似项见台账）
-- [x] 与 prototypes/desktop-friends.html 逐屏比对一致(控件/布局/文案/间距)（好友列表）（✅ 2026-10-30 d94d616：rail 增「好友」钮切真·好友视图（协作态侧栏只摆通讯录：星标好友＋部门分组头「路径 · N 人」）＋行控件复用会话行工厂（40px 头像/在线点/「人名 · 部门末级」名/时间/末条预览/未读胶囊）＋side-head「好友」/「搜索好友 / 工号」/「来自组织架构通讯录」注脚/「N / M 在线」绿点计数＋tooltip 账号·部门；`layout-friends[-light|-dark]` 改存好友视图实况、原列表态实况迁 `layout-messages-*`；门禁 84/84 绿。近似项见台账）
-- [x] 与 prototypes/desktop-group.html 逐屏比对一致(控件/布局/文案/间距)（群聊基础面）（✅ 2026-10-30 0148ddc：群右栏 infopanel（群成员·N＋28px 头像行＋群主胶囊＋「查看全部 N 人」开群资料＋群文件≤3＋归档说明虚线卡）＋会话头 meta「N 人 · 群主：X · 全量归档」（群号挪标题悬浮）＋头部 📢群公告/🗂群文件(切右栏)/👥成员(brand)钮＋横幅公告口径（群公告(群主：X)：…，brand 底）＋气泡 meta 群主标签（10px 品牌色）＋「@ 唤起成员选择」提示与占位「输入消息，@ 成员可加提醒…」＋「群消息全量归档」描边胶囊＋群行副行「N 人 · 群公告已更新」＋临群行控件化（opacity .7＋「免服务端 · 仅本网段 · 不归档」＋「未归档」徽标）；live-group 实况重摄含右栏（像素核验），门禁 84/84 绿。近似项见台账）
-- [x] 与 prototypes/desktop-files.html 逐屏比对一致(控件/布局/文案/间距)（文件传输面）（✅ 2026-10-30 937ba5d：rail「文件传输」钮切真·传输管理面——220px 传输通道侧栏（点对点直传 active 行/共享空间置灰/旁路设计虚线卡/已发现伙伴品牌卡）＋头部 meta「正在传输 N · 今日完成 N · 累计 X」（真实台账聚合）＋↑发送文件钮＋全部/传输中/已完成/已暂停标签行＋传输卡（36px 图标/「目录名/（文件夹 · N 个文件）」名/副行/状态胶囊/6px 进度条/「✓ 接收方已确认·SHA-256 已校验」行/取消/打开目录/所在会话钮）＋页脚授权留痕说明卡；台账会话内存级（同 id 覆盖＋进度差分速度）；live-files 实况重摄为管理面（像素核验），门禁 84/84 绿。近似项见台账）
-- [x] 与 prototypes/desktop-org.html 逐屏比对一致(控件/布局/文案/间距)（组织架构与汇报关系）（✅ 2026-10-30 6ef8efb：rail「组织架构」钮切三栏整屏——240px 左栏（「搜索部门 / 成员」过滤＋QTreeWidget 部门树带右对齐子树计数列＋「全部成员」根＋通讯录可见性虚线卡）＋中栏（「部门 · N 人」头＋部门负责人胶囊（结构推导）＋成员卡网格：44px 头像/姓名/部门·职务副行/在线点、「（我）」卡品牌底）＋右栏档案面板（64px 头像/在线徽标/汇报链路沿 manager 上溯（环防御）/kv 直属上级·部门·职务·在线时长/「发消息」「设为常用联系人」钮/数据口径注脚）；rebuild 只在进图/ORG_DATA/主题三入口（apply_view_mode 只管显隐——show_org_profile 尾部回调成无限递归实录 SEGFAULT 已防）；test_mode_switch org 腿：CLI 造部门树＋汇报链→树计数/卡片/档案链路断言→live-org 实况重摄（浅＋深，像素核验）→还原空档案（后续文件腿授权裁决依赖空部门路径相等）；门禁 84/84 绿。近似项见台账）
-- [x] 与 prototypes/desktop-search.html 逐屏比对一致(控件/布局/文案/间距)（归档检索与导出）（✅ 2026-10-30：管理台菜单「归档检索台…」整窗 ArchiveConsole（auditor 专属，判权全在服务端）——条件行（人员账号/时间窗勾选＋起止/关键词/「精确匹配」语义说明胶囊/检索 brand 钮）＋五列命中表（关键词品牌色高亮（服务端同款分词）/会话对端「甲 ⇄ 乙（单聊）· →（群）」/归档时间/「已撤回 · 原文留存」warning 胶囊/查看上下文·撤回事件平钮）＋页脚命中计数＋「导出留证」证据包回显＋查阅日志台账（检索/上下文/撤回事件/导出各落一条 audit_reads 行）；新面全真实后端：`/files/audit/` 三路（context span5/recall-event/export）＋store 两法（context_around/last_recall_event），撤回原文保留可检可导；theme_changed 重染＋命中行随缓存回包重建；test_archive_console 冒烟（无角色 403→授 auditor→命中两行→上下文窗口前后行在→撤回人 member1→未撤回如实呈现→证据文件头注/行/计数→四类留痕行）；live-search[-light|-dark] 由 CLI 终端输出改摄控制台实况（像素核验）；门禁 85/85 绿（bot/ldap 各一次满载假红、隔离复跑绿后全量再跑收口）。近似项见台账）
-- [x] 与 prototypes/main-empty.html 逐屏比对一致(控件/布局/文案/间距)（联系人空态）（✅ 2026-10-30 c738619：登录后零会话列表态——侧栏两行引导「还没有会话／从通讯录选择联系人，开始聊天」（muted 12px 与原型 .empty-list 逐字一致；QSS item padding 8px 会把行内控件矩形压成 15px 半行，sizeHint 补 16px 修复）；主区欢迎页（.first-guide：标记＋「欢迎使用 Memex」＋副题＋四链接卡文案）按布局令（列表态坍缩 320px 面板隐藏）潜伏渲染就位，close_chat/refresh_devices 共用 render_empty_state 出口（替换对已登录用户误导的「请登录协作态」发现引导；rerender_chat 随登录态重推导）；test_mode_switch 空态腿：独立 app 名 w0 隔离 QSettings/本地库，登录→hint 在场＋欢迎文案入主区→layout-empty[-light|-dark] 实况（像素核验两行文本在场）→开会话行即撤→登出即撤；deferred delete 排干后再查树（死指针假在场坑）；mode_switch ctest 超时 90→240s（高载 load30+ 顶死假红）。门禁 85/85 绿（task_dialog/collab_resend 满载假红、隔离复跑绿、全量第三跑收口）。近似项：✦→●、动作钮/链接卡以说明文案呈现不造假控件、hint 落首行非整栏居中、side-nav 页签由协作态分区取代——见台账）
+- [x] 与 prototypes/desktop-chat.html 逐屏比对一致(控件/布局/文案/间距)（afa99fd，84/84）
+- [x] 与 prototypes/desktop-collab.html 逐屏比对一致(控件/布局/文案/间距)（cceec84，84/84）
+- [x] 与 prototypes/desktop-direct.html 逐屏比对一致(控件/布局/文案/间距)（未登录直连列表态）（d52bfc2，84/84）
+- [x] 与 prototypes/desktop-direct-chat.html 逐屏比对一致(控件/布局/文案/间距)（直连会话展开态）（128c3ec，84/84）
+- [x] 与 prototypes/desktop-friends.html 逐屏比对一致(控件/布局/文案/间距)（d94d616，84/84）
+- [x] 与 prototypes/desktop-group.html 逐屏比对一致(控件/布局/文案/间距)（0148ddc，84/84）
+- [x] 与 prototypes/desktop-files.html 逐屏比对一致(控件/布局/文案/间距)（937ba5d，84/84）
+- [x] 与 prototypes/desktop-org.html 逐屏比对一致(控件/布局/文案/间距)（6ef8efb，84/84）
+- [x] 与 prototypes/desktop-search.html 逐屏比对一致(控件/布局/文案/间距)（34944f9，85/85）
+- [x] 与 prototypes/main-empty.html 逐屏比对一致(控件/布局/文案/间距)（c738619，85/85）
 
 ### 桌面 · 对话框（已实现面，按原型收口偏差）
 
-- [x] 与 prototypes/desktop-tasks.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/task_dialog.cpp`）✅ 2026-10-30 e0b397e（双栏 body-split 重排：298px 录入列月历/录入区/外部登记/脚注＋视图列 sec-head 计数与「只看未完成」/列表↔看板互斥/领导视角/状态行；连接区已连接徽章、拉取行并入工具行右侧；近似项见 prototype-conformance 台账。门禁 85/85 绿（task_dialog 连接握手 wait 8000→15000 放宽，套件高载 load37 实测超 8s＝环境载压非回归）；实况浅深重摄像素核验）
-- [x] 与 prototypes/desktop-approval.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/approval_dialog.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
-- [x] 与 prototypes/desktop-report.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/report_dialog.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
-- [x] 与 prototypes/desktop-group-tools.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_tools_dialog.cpp`）✅ 2026-10-30 c2825a4（三页 Tab 每页 ts-head 规则副题；发起区并单行；连接区「已连接」徽章；脚行判权/结果卡说明；窗题带群号、1080×720。近似项见 prototype-conformance 台账。门禁 85/85 绿一次过；实况浅深重摄像素核验）
-- [x] 与 prototypes/desktop-group-memo.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_memo_dialog.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
-- [x] 与 prototypes/desktop-group-vault.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_vault_dialog.cpp`）✅ 2026-10-30 280c27b（双栏 split 重排：400px 条目列解锁行/掩码列表/条目动作行/箱管理区「群主/管理员：」＋四钮＋右注独占一行（≈原型 flex-wrap）＋详情列「条目详情 · 查看/复制均为显式动作，服务端全留痕」卡与 ⚠ 硬性分离告警；连接区已连接徽章；窗 1000×660；近似项见 prototype-conformance 台账。门禁 85/85 绿两轮（重排轮＋抓图腿轮）；`test_group_vault_dialog` 新增抓图腿，实况浅深首摄像素核验）
-- [x] 与 prototypes/desktop-group-ci.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_ci_dialog.cpp`）✅ 2026-10-30 8ed9265（双栏 split 重排：左流水线列 sec-head 红绿灯副题＋列表＋触发行留痕注＋管理区两行；右列运行历史卡＋工具凭据卡＋动作语义/危险动作说明条；连接区已连接徽章与「群号 N」位；窗 1000×640；近似项见 prototype-conformance 台账。门禁 85/85 绿一次过；`test_group_ci_dialog` 新增抓图腿，实况浅深首摄像素核验）
-- [x] 与 prototypes/desktop-group-pack.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_pack_dialog.cpp`）✅ 2026-10-30 184bae2（双栏 split 重排：左出产物列 sec-head 留痕副题＋台账＋白名单说明条＋打包行＋动作行（删除选中/开放成员打包/刷新＋危险动作注）；右列快照导出面（脱敏副题＋只读 JSON＋导出/另存为＋同源留痕说明条）；连接区已连接徽章与「群号 N」位；窗 1000×640；「另存为文件…」新增；近似项见 prototype-conformance 台账。门禁 85/85 绿一次过；`test_group_pack_dialog` 新增抓图腿，实况浅深首摄像素核验）
-- [x] 与 prototypes/desktop-group-servers.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/group_server_dialog.cpp`）✅ 2026-10-30 1962b41（双栏 split 重排：左服务器列 sec-head 红绿灯副题＋台账＋登记行＋令牌一次性框＋查看/连接范围说明条；右列远程会话卡＋发起会话卡＋服务器凭据卡；连接区已连接徽章（agent 心跳口径）与「群号 N」位；窗 1000×640；近似项——服务器行三行文本、无粘贴短票框（选中直发＝短票永不出框）、原型「远程命令」卡无协议未实现——见 prototype-conformance 台账。门禁 85/85 绿一次过；`test_group_server_dialog` 新增抓图腿，实况浅深首摄像素核验）
-- [x] 与 prototypes/desktop-group-record.html 逐屏比对一致(控件/布局/文案/间距)（`MainWindow::group_record_export_dialog`）→ 32b439d：导出窗重排双栏 980×620（左 360px 表单列：导出区间日历选点起止＋AI 总结勾选＋可中断续传进度区＋开始导出/保存为 Markdown…/关闭＋「导出完成态」卡＋权限/审计说明条；右参考列：三段固定产物结构头＋只读产物面（完成后载真实 md，非示意文）＋「与群配置快照的区别」卡）。该窗内嵌主窗无测试驱动腿，按台账静态验收口径收口：代码级比对＋编译进 memex_client＋全量门禁 85/85 绿（build-dev ctest -j1）。台账近似项如实标注（无连接区/文字页码进度/产物面初始占位）＋走查步骤已录。无实况截图（无独立冒烟腿，不造假）。
-- [x] 与 prototypes/desktop-assist.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/assist_dialog.cpp`）✅ 2026-10-30 d10c565（双栏 split 1080×700 重排：左列「我发起协助」卡（账号＋查看/鼠标/键盘＋consent 注脚）＋会话台账五态行「过程持续可见」＋动作行（启动选中/结束选中/看审计链/刷新＋选中短 id 提示）＋远端画面（点画面回发鼠标事件，帧号入状态行；Resize 按画面框重缩放）＋「审计链（状态迁移留痕）」sec-h＋笔数副题；右列「待我批（consent 只属受控方）」卡（待批列表＋批准勾选项＋实批 ⊆ 申请集注＋配对密码内联框＋批准/拒绝）＋红描边共享横幅＋开始/结束共享（撤权）行＋「对方操作（取走即清）」卡＋五态固定说明条；连接区右上「已连接（500ms 轮询 · 屏幕永不落盘）」徽章。近似项——连接区可编辑兼连接入口（原型只读徽章）、台账/审计/输入日志单行文本（原型列布局/等宽行）、原型两组批准/实批勾选并为单组实批勾选、单实例抓图只呈现发起方侧（受控侧横幅/待批/输入日志属对侧实例）——见 prototype-conformance 台账。门禁 85/85 绿一次过；`test_assist_dialog` 新增抓图腿，实况浅深首摄像素核验）
-- [x] 与 prototypes/desktop-office-map.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/office_map_dialog.cpp`）✅ 2026-10-30 5fc5dd2（窗 960×660；工具行：楼层标签「楼层 3F（N 个工位）· 编辑中（拖拽定位，松手即存）」＋搜索输入＋搜索/刷新钮＋「默认本层 · org-admin 可跨层」注；管理行：「管理（az office:manage）：」前缀＋楼层 64/工位号 70/占用者账号 110 定宽输入＋新增工位/删除选中/绑定/解绑；自绘画布图例四态对齐——占用橙/空座灰/选中蓝/命中白底+橙描边（旧画笔把「命中」与「占用」混为一谈、占用未命中渲染灰，本轮按图例重排；选中/命中标签加粗着色）；图例行四态点＋「一人一座：绑定即占；工位号同层唯一」注；连接行右上「已连接（account）」徽章。近似项——连接区可编辑兼连接入口（原型只读徽章）、画布抽象平面自绘（原型以 10 列网格近似，真机拖拽为任意连续位）、层范围注落工具行右端（原生标题栏无徽章位）、底部状态行（原型无，测试契约口径）、单实例抓图只呈现管理面（未分配工位态与空座灰属 member1 侧不同帧）——见 prototype-conformance 台账。门禁 85/85 绿一次过；`test_office_map_dialog` 新增抓图腿（选中/命中须 show 后点——隐藏期画布未布局归一化坐标错位），实况浅深首摄像素核验）
-- [x] 与 prototypes/desktop-audit.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/audit_dialog.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
-- [x] 与 prototypes/desktop-file-assistant.html 逐屏比对一致(控件/布局/文案/间距)（`client/app/file_assistant.cpp`）✅ 2026-10-29 ea50732（含走查步骤见 prototype-conformance 台账）
+- [x] 与 prototypes/desktop-tasks.html 逐屏比对一致(控件/布局/文案/间距)（e0b397e，85/85）
+- [x] 与 prototypes/desktop-approval.html 逐屏比对一致(控件/布局/文案/间距)（ea50732；走查步骤见 prototype-conformance 台账）
+- [x] 与 prototypes/desktop-report.html 逐屏比对一致(控件/布局/文案/间距)（ea50732；走查步骤见 prototype-conformance 台账）
+- [x] 与 prototypes/desktop-group-tools.html 逐屏比对一致(控件/布局/文案/间距)（c2825a4，85/85）
+- [x] 与 prototypes/desktop-group-memo.html 逐屏比对一致(控件/布局/文案/间距)（ea50732；走查步骤见 prototype-conformance 台账）
+- [x] 与 prototypes/desktop-group-vault.html 逐屏比对一致(控件/布局/文案/间距)（280c27b，85/85）
+- [x] 与 prototypes/desktop-group-ci.html 逐屏比对一致(控件/布局/文案/间距)（8ed9265，85/85）
+- [x] 与 prototypes/desktop-group-pack.html 逐屏比对一致(控件/布局/文案/间距)（184bae2，85/85）
+- [x] 与 prototypes/desktop-group-servers.html 逐屏比对一致(控件/布局/文案/间距)（1962b41，85/85）
+- [x] 与 prototypes/desktop-group-record.html 逐屏比对一致(控件/布局/文案/间距)（32b439d，85/85；导出窗内嵌主窗无测试驱动腿，静态验收口径收口，无实况截图）
+- [x] 与 prototypes/desktop-assist.html 逐屏比对一致(控件/布局/文案/间距)（d10c565，85/85）
+- [x] 与 prototypes/desktop-office-map.html 逐屏比对一致(控件/布局/文案/间距)（5fc5dd2，85/85）
+- [x] 与 prototypes/desktop-audit.html 逐屏比对一致(控件/布局/文案/间距)（ea50732；走查步骤见 prototype-conformance 台账）
+- [x] 与 prototypes/desktop-file-assistant.html 逐屏比对一致(控件/布局/文案/间距)（ea50732；走查步骤见 prototype-conformance 台账）
 
 ### 桌面 · 设置页
 
-- [x] 与 prototypes/settings-general.html 逐屏比对一致(控件/布局/文案/间距)（主题/主题包/品牌）（803a188 统一设置窗口·通用页：侧栏五项导航＋通用页外观/偏好分组逐行对齐——主题→ThemeManager、快捷键→快捷键设置对话框、登录后自动启动→freedesktop 自启动项、下载位置只读真实目录；界面字号/语言/更改置灰＋未提供注；账号/消息/隐私/高级占位页待 643-646；test_settings_window 86/86 绿）
-- [x] 与 prototypes/settings-account.html 逐屏比对一致(控件/布局/文案/间距)（账号与设备）（7881b64 统一设置窗口·账号页：个人资料（头像 42px 圆角＋更换头像→change_avatar、昵称只读＋编辑资料→show_profile_dialog）＋安全与设备（账号安全/设备管理置灰未提供）＋登录状态（退出登录→logout_collab 回直连态即时回填）；头像/昵称/登录态随真实登录状态回填，未登录诚实态；test_settings_window 86/86 绿）
-- [x] 与 prototypes/settings-message.html 逐屏比对一致(控件/布局/文案/间距)（表情/截图偏好）（611545f 统一设置窗口·消息页：通知方式四开关＋提示音三档走 NotifyPrefs load→改→save（只动本页字段，分级/全屏/传输完成/声音子位原值保留）、免打扰 dnd＋22:00–08:00 时段、已读回执→receipts/send_read 全局键、迁移备份置灰「暂未提供」；默认态＝原型展示态；test_settings_window 86/86 绿）
-- [x] 与 prototypes/settings-privacy.html 逐屏比对一致(控件/布局/文案/间距)（f2d01cb 统一设置窗口·隐私页：三组逐行对齐——黑名单「管理网络黑名单」→主窗共用入口 show_net_dialog＋行内标签「当前提供网段黑名单」、本机锁屏「离开与锁屏…」→共用入口 show_away_dialog、本机消息数据「查看存储说明」→非模态框列真实存储语义＋真实本机数据目录（AppDataLocation：avatars/brand/emoji/sent-shots/crashes）、在线状态静态标签「自动」、加好友验证置灰「暂未提供」（无好友申请流程，原型同口径）；test_settings_window 86/86 绿）
-- [x] 与 prototypes/settings-advanced.html 逐屏比对一致(控件/布局/文案/间距)（网络与远程/快捷键/连接）（557ee98 统一设置窗口·高级页：三组逐行对齐——网络组代理置灰「暂未提供」/域名解析覆盖「连接设置…」→主窗共用入口 show_conn_settings_dialog/网段黑名单 QCheckBox 直写 net_blacklist 真实键（与网络与远程设置对话框同键，切页回读同步）；诊断组开发者选项/运行日志置灰「暂未提供」（运行日志注脚指向隐私·存储崩溃转储说明）；关于组版本描边标签列真实 MEMEX_VERSION＋「关于 Memex…」→show_about。test_settings_window 86/86 绿）
+- [x] 与 prototypes/settings-general.html 逐屏比对一致(控件/布局/文案/间距)（803a188，86/86）
+- [x] 与 prototypes/settings-account.html 逐屏比对一致(控件/布局/文案/间距)（7881b64，86/86）
+- [x] 与 prototypes/settings-message.html 逐屏比对一致(控件/布局/文案/间距)（611545f，86/86）
+- [x] 与 prototypes/settings-privacy.html 逐屏比对一致(控件/布局/文案/间距)（f2d01cb，86/86）
+- [x] 与 prototypes/settings-advanced.html 逐屏比对一致(控件/布局/文案/间距)（557ee98，86/86）
 
 ### 邮箱（未实现面，先建后比）
 
-- [x] 与 prototypes/desktop-mailbox.html 逐屏比对一致(控件/布局/文案/间距)（0428641 邮箱统一收件箱：rail 信封钮（未读徽章＝服务端 counts 唯一来源）切整屏——console 四页签计数/只看未读/搜索（标题/来源＝服务端 q）/全部标记已读/五列条目表（前四列按原型 flex 2.4/1.2/1/1 分宽；告警=标记已处理·留痕、通知=去会话/去任务/去审批/去群、公告=确认已读·台账）/脚注三面同源/边界①②＋infopanel 详情/已读确认台账（谁/何时）/处理留痕；四类真实事件源入箱（群公告（不含设置者）/@我/任务到期/连续错口令仅 admin）；server+client 双测试绿，实况 live-mailbox[-light|-dark] 入 docs）
-- [x] 与 prototypes/mobile-mailbox.html 逐屏比对一致(控件/布局/文案/间距)（bb07805 移动端邮箱：MailboxActivity——屏①列表（appbar「邮箱」＋未读徽章＝服务端 counts 唯一来源、chips 全部/告警/通知/公告计数互斥＋只看未读、条目卡未读＝brand-soft 底＋品牌描边＋状态胶囊、动作行按类目给真钮：告警=去处理(markHandled)+确认已读、公告=详情+确认已读(confirm)、通知=无）＋屏②底部抽屉（公告已读确认台账 who 行（首字头像+账号+已确认/未确认）＋告警处理留痕＋边界注照原型原文）；FilesClient 新增 mailbox 六端点（list/unread/read/handle/confirm/confirmations）；FilesClientTest 邮箱六腿（默认体三键恒发/条件透传/计数/单条与全部已读/409/403+台账解析）28/28 绿＋assembleDebug 绿；近似项（连接面板为原型外补、「转发到群」不摆、布局内抽屉非 BottomSheetDialog、字形图标）记台账；未做模拟器走查暂无实况截图）
+- [x] 与 prototypes/desktop-mailbox.html 逐屏比对一致(控件/布局/文案/间距)（0428641）
+- [x] 与 prototypes/mobile-mailbox.html 逐屏比对一致(控件/布局/文案/间距)（bb07805）
 
 ### 移动端
 
-- [x] 与 prototypes/mobile-chat.html 逐屏比对一致(控件/布局/文案/间距)（c75bb34 `ChatActivity.kt`；会话头（返回＋头像＋名称＋更多）＋左右气泡（对方白泡／己方 brand-fill #b4471b AA 白字）＋输入区（归档注＋发送消息…＋品牌发送钮）＋底部四页导航（会话/通讯录/文件/我）；通讯录置灰「暂未提供」（无对应 Activity），己方不列发送者/无已读回执（移动端无该数据）；assembleDebug＋testDebugUnitTest 绿）
-- [x] 与 prototypes/mobile-init.html 逐屏比对一致(控件/布局/文案/间距)（`InitActivity.kt`；Logo(品牌橙气泡)＋欢迎语＋三步步骤条(第1步亮)＋服务器地址域(必填*＋品牌描边输入框＋「已连通」药丸)＋说明＋必填警示框＋品牌主钮「下一步 · 登录账号」＋脚注；偏离两处如实记录：①不加 https:// 固定前缀(服务为明文 http，固定前缀误导协议，且地址支持完整粘贴解析)②原型「不提供免登录使用」措辞与本仓 R18 结构性守卫(禁免登录/匿名入口字样)冲突，按同义改述「需先连接企业协作服务」；成功态用真实数据「连接成功 · 延迟 N ms」(探测仅回 RTT，不编造版本/组织)；assembleDebug＋testDebugUnitTest 绿）
-- [x] 与 prototypes/mobile-me.html 逐屏比对一致(控件/布局/文案/间距)（d77bd08 「我」屏逐屏复核重排：appbar「我」＋账号卡（56dp 圆角首字头像＋姓名＋部门·工号＋协作态徽章 ●brand-soft 胶囊）＋区块卡「账号与设备」（登录设备管理/登录记录/留存策略——30dp 图标格三色＋右值加粗＋›＋子注行缩进 57dp）＋「通用」（缓存清理/通知与提醒/关于=真实 vN(code)）＋无题「切换服务器 / 退出登录」区块＋brand-soft 提示条＋四页 tabbar（我 active，通讯录 toast 同 ChatActivity）；未接入项值列如实「未接入」；R18 守卫措辞改述维持（提示条不含禁用字样）；图标格字形近似非 SVG、无二维码方块（无该功能）记台账；assembleDebug＋testDebugUnitTest 绿（R18SurfaceTest 4/4））
-- [x] 与 prototypes/mobile-sessions.html 逐屏比对一致(控件/布局/文案/间距)（1016292 会话列表逐屏重排：appbar「会话」＋副行「协作态 · host · 消息全量归档」＋「＋」发起钮（对话框输入对端账号）；搜索框＝本会话列表真实过滤（显示名/预览子串，hint 如实「搜索会话」）；会话行＝40dp 圆角头像（首字＋账号哈希取原型 v2–v8 七色盘）＋名称/时间（HH:mm/昨天/MM-dd 三段）＋预览＋未读角标品牌橙胶囊；tabbar 两代原型分歧按最新组（mailbox/tasks）裁决＝会话/邮箱/任务/我——文件助手入口留 Chat 屏「文件」tab、退出登录唯一入口「我」屏、通讯录无实现不摆；无在线状态点/已读徽标（无该数据）记台账；assembleDebug＋testDebugUnitTest 绿）
-- [x] 与 prototypes/mobile-tasks.html 逐屏比对一致(控件/布局/文案/间距)（18a72cf 任务清单逐屏重排：屏①列表＝appbar「任务清单」＋连接行（描边圆角输入框＋brand 钮）＋「新增任务」录入区（标题/类型/分配给＋截止·开始勾选行＋双提醒开关）＋acts 行（添加任务主钮/看板/刷新＋ok 色状态「已连接（清单已刷新（N 项））」）＋任务卡（16dp 勾选框可点切换完成＋13sp 粗体两行标题完成删除线＋meta 胶囊 逾期/7 天内到期/截止/已完成·日期＋自建/由 X 分配＋（进行中）尾注＋动作行 完成/开始·暂停）；屏②看板＝appbar「任务看板」＋横滑三列 160dp（列头 panel-2 上圆角＋计数；卡逾期 warn 描边、完成 0.62 透明删除线）＋deg 虚线降级注；<600dp 窄屏看板入口隐藏降级回列表；看板态收起录入区回列表恢复；tabbar 会话/邮箱/任务(active)/我；「跳外部」如实不摆（/files/tasks 协议无详情 URL，外部行＝只读镜像胶囊）记台账；FilesClient 任务行补 done_ms/created_ms 解析＋测试腿断言；assembleDebug＋testDebugUnitTest＋docs:build 绿）
+- [x] 与 prototypes/mobile-chat.html 逐屏比对一致(控件/布局/文案/间距)（c75bb34）
+- [x] 与 prototypes/mobile-init.html 逐屏比对一致(控件/布局/文案/间距)（9fa96d6；两处偏离如实记录：地址不加 https:// 前缀、R18 守卫同义改述）
+- [x] 与 prototypes/mobile-me.html 逐屏比对一致(控件/布局/文案/间距)（d77bd08，4/4）
+- [x] 与 prototypes/mobile-sessions.html 逐屏比对一致(控件/布局/文案/间距)（1016292）
+- [x] 与 prototypes/mobile-tasks.html 逐屏比对一致(控件/布局/文案/间距)（18a72cf）
 
 - [ ] **UI-AUDIT · P2 · 界面审核(impeccable 流程)**:原生桌面界面此前不在 web 界面审核范围,补审——按 impeccable 审计(层级/排版/对比度 a11y/布局/边界态),报告+截图入 docs/review/,坏损当场修。
 
