@@ -33,12 +33,16 @@ struct NoticeDelivery {
 // 数值（1 普通／2 重要／3 紧急）。目标不存在 http_status=404。
 // sender=归档/信封 from（缺省=系统通知；bot 平台传 "bot:<name>" 即得 bot
 // 身份归档——msg_id 派生、归档、常用联系人全链随 sender）。
+// mailbox_kind 非空=同步入邮箱收件箱（mailbox.md：邮箱=视图+已读状态，
+// 非新通道——入箱只是给既有 NOTICE 投递补一行状态，kind 取
+// warning|notice|announce；空=不入箱）。
 NoticeDelivery deliver_notice(CollabServer& server, const std::string& target,
                               const std::string& title,
                               const std::string& content, int urgency,
                               const std::string& jump_url,
                               const std::string& sender =
-                                  std::string(memex::protocol::kNoticeSender));
+                                  std::string(memex::protocol::kNoticeSender),
+                              const std::string& mailbox_kind = "");
 
 // 以普通 TEXT 群消息投递一段文本（R26 群工具结果卡片回群）：复用消息
 // 发送面（群会话气泡点开可见全文、离线入队、全量归档、在线扇出、常用

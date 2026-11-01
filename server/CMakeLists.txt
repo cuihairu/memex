@@ -260,4 +260,12 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_task_pull PRIVATE memex_server_core)
   add_test(NAME task_pull COMMAND test_task_pull)
   set_tests_properties(task_pull PROPERTIES TIMEOUT 120)
+
+  # 邮箱统一收件箱验收（mailbox.md 先建后比）：公告/@我/任务到期/审批结果
+  # /备忘录/webhook/磁盘阈值/登录异常八个事件源真链入箱 + 已读/处理/确认
+  # 台账 + 三硬边界（不动归档行/kind 闸 409/dedup 幂等）+ 重开库持久
+  add_executable(test_mailbox tests/test_mailbox.cpp)
+  target_link_libraries(test_mailbox PRIVATE memex_server_core)
+  add_test(NAME mailbox COMMAND test_mailbox)
+  set_tests_properties(mailbox PROPERTIES TIMEOUT 120)
 endif()

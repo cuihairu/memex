@@ -902,6 +902,27 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (path_ == "/files/task-sources" && method_ == "DELETE") {
       return route_task_source_delete();
     }
+    // 邮箱·统一收件箱（mailbox.md：三类条目状态面——列表/未读计数/
+    // 标记已读/告警处理留痕/公告确认台账；边界②任何操作只动邮箱两表，
+    // 归档行一概不触）
+    if (path_ == "/files/mailbox/list" && method_ == "POST") {
+      return route_mailbox_list(body);
+    }
+    if (path_ == "/files/mailbox/unread" && method_ == "POST") {
+      return route_mailbox_unread();
+    }
+    if (path_ == "/files/mailbox/read" && method_ == "POST") {
+      return route_mailbox_read(body);
+    }
+    if (path_ == "/files/mailbox/handle" && method_ == "POST") {
+      return route_mailbox_handle(body);
+    }
+    if (path_ == "/files/mailbox/confirm" && method_ == "POST") {
+      return route_mailbox_confirm(body);
+    }
+    if (path_ == "/files/mailbox/confirmations" && method_ == "POST") {
+      return route_mailbox_confirmations(body);
+    }
     // 二期·审批（请假起步）：申请/双列表/决定/撤回；判权 az
     // approval-decide（直属上级现查或无上级 org-admin 兜底）
     if (path_ == "/files/approvals" && method_ == "POST") {
@@ -1734,6 +1755,15 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     } else {
       impl_.store.task_mark_reminded(id, now_ms());
     }
+    // 邮箱·通知入箱（mailbox.md §I：任务到期归通知类——提醒回执与服务
+    // 端提醒时刻同源（客户端 30s 轮询判到期后回执一次），dedup 按
+    // 任务+提醒位幂等，重复回执不重复入箱；不走新推送链）
+    (void)impl_.store.mailbox_add(
+        "notice", "任务「" + row->title + "」" +
+                      (start_kind ? "开始时间已到" : "已到截止时间"),
+        "任务到期 · 通知中心三级分层 IMPORTANT 强提醒", "任务到期", "tasks",
+        (start_kind ? "task-start:" : "task-remind:") + std::to_string(id),
+        {row->owner}, now_ms());
     respond_json(200, {{"ok", true}});
   }
 
@@ -2077,7 +2107,189 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
               << " result=" << (j["approved"].get<bool>() ? "approved"
                                                           : "rejected")
               << std::endl;
+    // 邮箱·通知入箱（mailbox.md §I：审批结果归通知类——落定才提醒申请
+    // 人；状态行入箱即回执，正文仍在 approvals 台账，不走新推送链）
+    {
+      const auto dec = impl_.store.find_account(account);
+      (void)impl_.store.mailbox_add(
+          "notice",
+          "你的「" + row->type + "」申请已" +
+              (j["approved"].get<bool>() ? "通过" : "被驳回") + "（审批人 " +
+              (dec ? dec->display_name : account) + "）",
+          "审批结果 · 落定才提醒申请人", "审批结果", "approvals",
+          "approval:" + std::to_string(id), {row->applicant}, now_ms());
+    }
     respond_json(200, {{"ok", true}});
+  }
+
+  // —— 邮箱·统一收件箱（mailbox.md）：条目正文留在各自来源，本面只管
+  // 入箱/未读/已读/已处理/确认台账（按登录账号·按条目）；未读数以本面
+  // 为唯一来源（rail 徽章与收件箱页签同源同数）——
+  static json mailbox_row_json(const ServerStore::MailboxRow& r) {
+    return json{{"id", r.id},
+                {"kind", r.kind},
+                {"title", r.title},
+                {"sub", r.sub},
+                {"source", r.source},
+                {"ref", r.ref},
+                {"time", r.created_ms},
+                {"state", r.state},
+                {"handledBy", r.handled_by},
+                {"handledMs", r.handled_ms},
+                {"confirmedMs", r.confirmed_ms},
+                {"confirmTotal", r.confirm_total},
+                {"confirmCount", r.confirm_count}};
+  }
+
+  void route_mailbox_list(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    std::string kind;
+    bool unread_only = false;
+    std::string q;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      j = json::object(); // 空体=无条件全量（与任务列表同宽口径）
+    }
+    if (j.is_object()) {
+      if (j.contains("type") && j["type"].is_string())
+        kind = j["type"].get<std::string>();
+      if (j.contains("unread") && j["unread"].is_boolean())
+        unread_only = j["unread"].get<bool>();
+      if (j.contains("q") && j["q"].is_string()) q = j["q"].get<std::string>();
+    }
+    if (!kind.empty() && kind != "warning" && kind != "notice" &&
+        kind != "announce") {
+      respond_json(400, {{"ok", false}, {"error", "type 须为空或 warning|notice|announce"}});
+      return;
+    }
+    const auto rows = impl_.store.mailbox_of(account, kind, unread_only, q);
+    const auto c = impl_.store.mailbox_counts(account);
+    json items = json::array();
+    for (const auto& r : rows) items.push_back(mailbox_row_json(r));
+    respond_json(200,
+                 {{"ok", true},
+                  {"items", std::move(items)},
+                  {"counts", {{"all", c.all},
+                              {"warning", c.warning},
+                              {"notice", c.notice},
+                              {"announce", c.announce}}}});
+  }
+
+  void route_mailbox_unread() {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    const auto c = impl_.store.mailbox_counts(account);
+    respond_json(200, {{"ok", true},
+                       {"counts", {{"all", c.all},
+                                   {"warning", c.warning},
+                                   {"notice", c.notice},
+                                   {"announce", c.announce}}}});
+  }
+
+  void route_mailbox_read(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      j = json::object();
+    }
+    const bool all = j.is_object() && j.contains("all") &&
+                     j["all"].is_boolean() && j["all"].get<bool>();
+    if (all) {
+      const int marked = impl_.store.mailbox_mark_all_read(account);
+      respond_json(200, {{"ok", true}, {"marked", marked}});
+      return;
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number_integer()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：id（或 all=true）"}});
+      return;
+    }
+    const std::int64_t id = j["id"].get<std::int64_t>();
+    const bool marked = impl_.store.mailbox_mark_read(id, account);
+    respond_json(200, {{"ok", true}, {"marked", marked ? 1 : 0}});
+  }
+
+  void route_mailbox_handle(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      j = json::object();
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number_integer()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：id"}});
+      return;
+    }
+    const std::int64_t id = j["id"].get<std::int64_t>();
+    if (!impl_.store.mailbox_mark_handled(id, account, now_ms())) {
+      respond_json(409, {{"ok", false},
+                         {"error", "仅告警条目可标记已处理（或已处理过）"}});
+      return;
+    }
+    std::cout << "[MEMEX] mailbox handle account=" << account << " id=" << id
+              << std::endl;
+    respond_json(200, {{"ok", true}});
+  }
+
+  void route_mailbox_confirm(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      j = json::object();
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number_integer()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：id"}});
+      return;
+    }
+    const std::int64_t id = j["id"].get<std::int64_t>();
+    if (!impl_.store.mailbox_confirm(id, account, now_ms())) {
+      respond_json(409, {{"ok", false},
+                         {"error", "仅公告条目可确认（或已确认过）"}});
+      return;
+    }
+    std::cout << "[MEMEX] mailbox confirm account=" << account << " id=" << id
+              << std::endl;
+    respond_json(200, {{"ok", true}});
+  }
+
+  void route_mailbox_confirmations(const std::string& body) {
+    const std::string account = account_or_respond();
+    if (account.empty()) return;
+    json j;
+    try {
+      j = json::parse(body);
+    } catch (const std::exception&) {
+      j = json::object();
+    }
+    if (!j.is_object() || !j.contains("id") || !j["id"].is_number_integer()) {
+      respond_json(400, {{"ok", false}, {"error", "缺少字段：id"}});
+      return;
+    }
+    const std::int64_t id = j["id"].get<std::int64_t>();
+    // 台账只对本条目收件人开放（公告确认面＝收件人互见；判权=状态行在场）
+    const auto rows = impl_.store.mailbox_of(account, "announce", false, "");
+    const bool visible =
+        std::any_of(rows.begin(), rows.end(),
+                    [id](const ServerStore::MailboxRow& r) { return r.id == id; });
+    if (!visible) {
+      respond_json(403, {{"ok", false}, {"error", "仅公告收件人可查确认台账"}});
+      return;
+    }
+    json out = json::array();
+    for (const auto& r : impl_.store.mailbox_confirmations(id)) {
+      out.push_back({{"account", r.account}, {"confirmedMs", r.confirmed_ms}});
+    }
+    respond_json(200, {{"ok", true}, {"rows", std::move(out)}});
   }
 
   void route_approval_withdraw(const std::string& body) {
@@ -4103,6 +4315,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
       }
       std::cout << "[MEMEX] files group-memo update account=" << account
                 << " gid=" << gid << " id=" << id << std::endl;
+      mailbox_note_memo_change(gid, id, title, content, account, false);
       respond_json(200, {{"ok", true}, {"id", id}});
       return;
     }
@@ -4119,7 +4332,31 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     std::cout << "[MEMEX] files group-memo create account=" << account
               << " gid=" << gid << " id=" << id << std::endl;
+    mailbox_note_memo_change(gid, id, title, content, account, true);
     respond_json(200, {{"ok", true}, {"id", id}});
+  }
+
+  // 邮箱·通知入箱（mailbox.md §I：共享变更归通知类——备忘录新建/编辑
+  // 通知群成员（不含编辑者，镜像群消息扇出语义）；正文在群知识共享，
+  // 邮箱只承载状态。dedup=群+条目+内容摘要：同内容重复保存不重复入箱）
+  void mailbox_note_memo_change(std::uint64_t gid, std::int64_t memo_id,
+                                const std::string& title,
+                                const std::string& content,
+                                const std::string& editor, bool created) {
+    const auto info = impl_.store.group_info(gid);
+    if (!info.has_value()) return;
+    std::vector<std::string> recipients;
+    for (const auto& m : impl_.store.group_members(gid)) {
+      if (m != editor) recipients.push_back(m);
+    }
+    (void)impl_.store.mailbox_add(
+        "notice", "群「" + info->name + "」备忘录「" + title + "」" +
+                      (created ? "已创建" : "有变更"),
+        "共享变更 · 正文在群知识共享，邮箱只承载状态", "群知识共享",
+        "group:" + std::to_string(gid),
+        "memo:" + std::to_string(gid) + ":" + std::to_string(memo_id) + ":" +
+            sha256_hex(content),
+        std::move(recipients), now_ms());
   }
 
   void route_group_memo_delete(const std::string& body) {
@@ -6426,6 +6663,21 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
         j["mem_used_mb"].get<double>(), j["mem_total_mb"].get<double>(),
         j["disk_used_mb"].get<double>(), j["disk_total_mb"].get<double>(),
         j["load1"].get<double>(), now_ms());
+    // 邮箱·告警入箱（mailbox.md §I/P3：admin 事件源——agent 心跳磁盘
+    // 超 85% 阈值入告警；受众=admin 账号集（§Ⅵ-2 默认：非管理员不看
+    // 系统详情）；dedup=服务器位：持续超阈值不重复报，全员处理后复发
+    // 可再报（store 层告警再入语义））
+    const double disk_total = j["disk_total_mb"].get<double>();
+    const double disk_pct =
+        disk_total > 0 ? j["disk_used_mb"].get<double>() * 100.0 / disk_total
+                       : 0.0;
+    if (disk_pct >= 85.0) {
+      (void)impl_.store.mailbox_add(
+          "warning", "磁盘使用率超过 85%（" + srv->name + "）",
+          "健康检查 · 持续未处理，红点不消失", "admin 事件源", "",
+          "disk:" + std::to_string(srv->id), impl_.store.admin_accounts(),
+          now_ms());
+    }
     respond_json(200, {{"ok", true},
                        {"id", srv->id},
                        {"gid", srv->group_id},

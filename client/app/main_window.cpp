@@ -1,6 +1,7 @@
 #include "main_window.hpp"
 
 #include "rail_nav.hpp"
+#include "mailbox_view.hpp"
 #include "collab_defaults.hpp"
 
 #include <QAction>
@@ -1572,6 +1573,45 @@ void MainWindow::build_ui() {
   layout->addWidget(org_side_);
   layout->addWidget(org_page_, 100);
   layout->addWidget(org_profile_);
+
+  // —— 邮箱·统一收件箱面（原型 desktop-mailbox.html 整屏）：rail「邮箱」
+  //     切视图——console（五列表＋计数页签）＋infopanel（详情/台账/留痕）。
+  //     条目只经 FilesClient 拉取（不新增推送链），未读徽章以服务端计数
+  //     为唯一来源；客户端在 files_client() 里注入（懒建同源）。——
+  mailbox_page_ = new MailboxView(central);
+  mailbox_page_->setObjectName(QStringLiteral("mailbox_page"));
+  mailbox_page_->hide();
+  connect(mailbox_page_, &MailboxView::unread_changed, this,
+          [this](int total) { rail_->set_badge(QStringLiteral("mailbox"), total); });
+  connect(mailbox_page_, &MailboxView::jump_requested, this,
+          [this](const QString& ref) {
+            // 正文留在各自来源：去群＝开群会话；去任务/去审批＝开对应窗口；
+            // 其余（admin 事件源告警等）无桌面落位面，如实提示
+            if (ref.startsWith(QStringLiteral("group:"))) {
+              leave_mailbox_view();
+              open_group(ref);
+              return;
+            }
+            if (ref == QStringLiteral("tasks")) {
+              if (!task_dialog_) task_dialog_ = new TaskDialog(this);
+              task_dialog_->show();
+              task_dialog_->raise();
+              task_dialog_->activateWindow();
+              return;
+            }
+            if (ref == QStringLiteral("approvals")) {
+              if (!approval_dialog_) {
+                approval_dialog_ = new ApprovalDialog(this);
+                approval_dialog_->setAttribute(Qt::WA_DeleteOnClose);
+              }
+              approval_dialog_->show();
+              approval_dialog_->raise();
+              approval_dialog_->activateWindow();
+              return;
+            }
+            show_status(QStringLiteral("该条目正文在服务端事件源，桌面无跳转面"));
+          });
+  layout->addWidget(mailbox_page_, 100);
   setCentralWidget(central);
 
   // 主题：控件样式统一在这里刷（构造时先按当前令牌落一次，之后跟随
@@ -2171,6 +2211,13 @@ void MainWindow::wire_collab() {
   // （普通＝仅站内消息已渲染；重要＝托盘强提醒；紧急＝置顶确认弹窗）——
   connect(&collab_engine_, &CollabEngine::notice_received,
           &NotificationCenter::instance(), &NotificationCenter::on_notice);
+  // 邮箱（mailbox.md）：NOTICE 推达＝「有新事」信号，仅触发未读计数轻拉
+  // （条目只拉不推——不新增推送链；未登录文件面时静默跳过）
+  connect(&collab_engine_, &CollabEngine::notice_received, this,
+          [this](const QString&, const QString&, const QString&, int,
+                 const QString&, qint64, const QString&) {
+            refresh_mailbox_badge();
+          });
   connect(&NotificationCenter::instance(),
           &NotificationCenter::want_tray_notify, this,
           [this](const QString& title, const QString& text) {
@@ -3482,6 +3529,51 @@ void MainWindow::leave_org_view() {
   }
 }
 
+// —— 邮箱·统一收件箱面（原型 desktop-mailbox.html 整屏）——
+// 进入：协作登录守卫→文件面登录（懒建客户端，异步）→切视图＋拉条目。
+// 未读徽章三面同源：files 登录成功、邮箱动作回执、NOTICE 推达各拉一次
+// 计数（条目本身只拉不推——不新增推送链）。
+void MainWindow::enter_mailbox_view() {
+  if (!collab_engine_.is_logged_in()) {
+    show_status(QStringLiteral("邮箱需登录协作态后查看（未读数以服务端为准）"));
+    return;
+  }
+  const bool entering = sidebar_mode_ != QStringLiteral("mailbox");
+  sidebar_mode_ = QStringLiteral("mailbox");
+  if (entering) {
+    setMaximumWidth(QWIDGETSIZE_MAX); // 释放列表态右缘上限（同传输面）
+    if (!isMaximized() && width() < 700) resize(980, qMax(height(), 600));
+  }
+  if (rail_) rail_->set_active(QStringLiteral("mailbox"));
+  if (mailbox_page_ && files_ensure_login()) mailbox_page_->refresh();
+  apply_view_mode();
+}
+
+bool MainWindow::mailbox_view_active() const {
+  return mailbox_page_ && !mailbox_page_->isHidden();
+}
+
+// 离开：回会话态（有会话＝复展开聊天面板，无会话＝回列表态）。
+void MainWindow::leave_mailbox_view() {
+  if (sidebar_mode_ != QStringLiteral("mailbox")) return;
+  sidebar_mode_ = QStringLiteral("sessions");
+  if (rail_) rail_->set_active(QStringLiteral("messages"));
+  apply_view_mode();
+  if (!current_peer_.isEmpty() && chat_open_) {
+    side_->setFixedWidth(260);
+    chat_panel_->show();
+    update_group_panel();
+  } else {
+    close_chat();
+  }
+}
+
+// rail 邮箱徽章轻量刷新：只拉未读计数（不打扰条目表）
+void MainWindow::refresh_mailbox_badge() {
+  if (mailbox_page_ && files_client_ && files_client_->is_logged_in())
+    mailbox_page_->refresh_unread();
+}
+
 // 部门子树成员计数（path 空=全量；子树=本路径或以「路径/」开头）。
 int MainWindow::org_dept_member_count(const QString& path) const {
   int n = 0;
@@ -4161,11 +4253,13 @@ void MainWindow::show_org_profile(const QString& account) {
 void MainWindow::apply_view_mode() {
   const bool tx = sidebar_mode_ == QStringLiteral("transfers");
   const bool org = sidebar_mode_ == QStringLiteral("org");
-  if (side_) side_->setVisible(!tx && !org);
+  const bool mbx = sidebar_mode_ == QStringLiteral("mailbox");
+  if (side_) side_->setVisible(!tx && !org && !mbx);
   if (transfer_side_) transfer_side_->setVisible(tx);
   if (transfer_page_) transfer_page_->setVisible(tx);
   if (org_side_) org_side_->setVisible(org);
   if (org_page_) org_page_->setVisible(org);
+  if (mailbox_page_) mailbox_page_->setVisible(mbx);
   // 档案栏随选中态（原型 .profile-side：选中成员即在；未选中不占位）
   if (org_profile_)
     org_profile_->setVisible(org && !org_selected_member_.isEmpty());
@@ -6363,6 +6457,13 @@ void MainWindow::rebuild_rail() {
     share.icon = RailNav::Icon::Share;
     share.disabled = true;
     items.append(share);
+    // 邮箱入口（原型 desktop-mailbox.html：会话/通讯录/文件/搜索/邮箱）；
+    // 未读徽章随服务端计数（set_badge；共享空间后＝协作组末位）
+    RailNav::Item mailbox;
+    mailbox.id = QStringLiteral("mailbox");
+    mailbox.tip = QStringLiteral("邮箱");
+    mailbox.icon = RailNav::Icon::Mail;
+    items.append(mailbox);
   } else {
     RailNav::Item devices;
     devices.id = QStringLiteral("devices");
@@ -6412,6 +6513,7 @@ void MainWindow::rail_clicked(const QString& id) {
   if (id == QStringLiteral("messages") || id == QStringLiteral("devices")) {
     leave_transfers_view(); // 传输面 → 会话/列表态（几何随态收口）
     leave_org_view();       // 组织架构面 → 会话/列表态
+    leave_mailbox_view();   // 邮箱面 → 会话/列表态
     if (sidebar_mode_ != QStringLiteral("sessions")) {
       sidebar_mode_ = QStringLiteral("sessions");
       update_side_head();
@@ -6424,6 +6526,7 @@ void MainWindow::rail_clicked(const QString& id) {
   if (id == QStringLiteral("friends")) {
     leave_transfers_view();
     leave_org_view();
+    leave_mailbox_view();
     if (sidebar_mode_ != QStringLiteral("friends")) {
       sidebar_mode_ = QStringLiteral("friends");
       update_side_head();
@@ -6442,6 +6545,11 @@ void MainWindow::rail_clicked(const QString& id) {
   if (id == QStringLiteral("org")) {
     // 组织架构整屏三栏（原型 desktop-org.html）
     enter_org_view();
+    return;
+  }
+  if (id == QStringLiteral("mailbox")) {
+    // 邮箱整屏收件箱（原型 desktop-mailbox.html）
+    enter_mailbox_view();
     return;
   }
   if (id == QStringLiteral("search")) {
@@ -8013,6 +8121,7 @@ QString MainWindow::own_signature() const {
 FilesClient* MainWindow::files_client() {
   if (files_client_) return files_client_;
   files_client_ = new FilesClient(this);
+  if (mailbox_page_) mailbox_page_->set_client(files_client_); // 邮箱面同源
   connect(files_client_, &FilesClient::logged_in, this, [this] {
     // 冲账：登录前挂起的头像下载
     for (const QString& a : std::as_const(avatar_pending_accounts_)) {
@@ -8024,6 +8133,8 @@ FilesClient* MainWindow::files_client() {
       avatar_pick_pending_ = false;
       pick_and_upload_avatar();
     }
+    // 邮箱未读徽章首拉（服务端计数为唯一来源）
+    refresh_mailbox_badge();
   });
   connect(files_client_, &FilesClient::avatar_fetched, this,
           [this](const QString& account, int size, const QByteArray& bytes) {

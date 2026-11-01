@@ -335,6 +335,23 @@ class FilesClient : public QObject {
   // 删除本人头像（各档全清，回落默认头像）
   void avatar_delete();
 
+  // —— 邮箱·统一收件箱（mailbox.md：视图+已读状态，非新通道；条目
+  //     只拉不推，未读数以服务端为唯一来源——rail 徽章与页签同源同数）——
+  // 条目列表（type 空=全部|warning|notice|announce；unread=true 只看
+  // 未读；q=标题/来源子串）；回包带四路未读计数
+  void mailbox_list(const QString& type = QString(), bool unread = false,
+                    const QString& q = QString());
+  // 只拉未读计数（rail 徽章与页签的轻量刷新面）
+  void mailbox_unread();
+  // 标记已读（id>0 单条；all=true 全部，id 忽略）
+  void mailbox_mark_read(qint64 id, bool all = false);
+  // 告警标记已处理（服务端留处理人+时刻；仅 kind=warning，否则 409）
+  void mailbox_mark_handled(qint64 id);
+  // 公告确认已读（进确认台账；仅 kind=announce，否则 409）
+  void mailbox_confirm(qint64 id);
+  // 公告确认台账（已确认在前；仅公告收件人可查）
+  void mailbox_confirmations(qint64 id);
+
  signals:
   void logged_in();
   void login_failed(const QString& reason);
@@ -458,6 +475,13 @@ class FilesClient : public QObject {
   void avatar_uploaded(int size, qint64 ver); // 服务端最新版本戳
   void avatar_fetched(const QString& account, int size, const QByteArray& bytes);
   void avatar_deleted();
+  // —— 邮箱·统一收件箱（counts={all,warning,notice,announce}）——
+  void mailbox_listed(const QJsonArray& items, const QJsonObject& counts);
+  void mailbox_unread_loaded(const QJsonObject& counts);
+  void mailbox_read_marked(qint64 id, int marked); // id=0 表示全部标记
+  void mailbox_handled(qint64 id);
+  void mailbox_confirmed(qint64 id);
+  void mailbox_confirmations_listed(qint64 id, const QJsonArray& rows);
   // 统一失败通道：op=操作名（"memo.create"/"inbox.upload"/…）、
   // status=HTTP 状态码（0=网络层失败）、error=服务端 error 字段或网络串
   void request_failed(const QString& op, int status, const QString& error);

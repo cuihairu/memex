@@ -51,6 +51,26 @@ void RailNav::set_avatar_text(const QString& text) {
   update();
 }
 
+void RailNav::set_badge(const QString& id, int count) {
+  for (Item& it : items_) {
+    if (it.id == id) {
+      const int v = count > 0 ? count : -1; // 清零＝摘徽章
+      if (it.badge != v) {
+        it.badge = v;
+        update();
+      }
+      return;
+    }
+  }
+}
+
+int RailNav::badge_count(const QString& id) const {
+  for (const Item& it : items_) {
+    if (it.id == id) return it.badge;
+  }
+  return -1;
+}
+
 void RailNav::set_presence(bool show, bool online) {
   presence_show_ = show;
   presence_online_ = online;
@@ -151,7 +171,29 @@ void RailNav::paintEvent(QPaintEvent*) {
       icon_col.setAlpha(100); // 占位项置灰：无功能体不冒充可用入口
     }
     paint_icon(p, items_[i].icon, QRectF(r), icon_col);
+    if (items_[i].badge > 0) paint_badge(p, r, items_[i].badge);
   }
+}
+
+// 原型 .rail .n-count：17px 高、min-width 17（padding 0 5）品牌底白字
+// 胶囊，方位 right:2 top:2（desktop-mailbox 邮箱钮未读数）
+void RailNav::paint_badge(QPainter& p, const QRect& r, int count) {
+  const QString text = count > 99 ? QStringLiteral("99+") : QString::number(count);
+  QFont f = font();
+  f.setPixelSize(10);
+  f.setBold(true);
+  p.save();
+  p.setFont(f);
+  p.setPen(Qt::NoPen);
+  p.setBrush(has_tokens_ ? t_.brand : palette().color(QPalette::Highlight));
+  QFontMetrics fm(f);
+  const int text_w = fm.horizontalAdvance(text);
+  const qreal w = qMax<qreal>(17, text_w + 10);
+  const QRectF pill(r.right() - w - 1, r.top() + 1, w, 16);
+  p.drawRoundedRect(pill, 8, 8);
+  p.setPen(has_tokens_ ? t_.on_brand : QColor(Qt::white));
+  p.drawText(pill, Qt::AlignCenter, text);
+  p.restore();
 }
 
 void RailNav::paint_icon(QPainter& p, Icon icon, const QRectF& box,
@@ -242,6 +284,15 @@ void RailNav::paint_icon(QPainter& p, Icon icon, const QRectF& box,
         p.drawLine(c + QPointF(6.2 * std::cos(a), 6.2 * std::sin(a)),
                    c + QPointF(8.2 * std::cos(a), 8.2 * std::sin(a)));
       }
+      break;
+    }
+    case Icon::Mail: {
+      // 信封（原型 desktop-mailbox rail 邮箱钮：rect 3,5,18,14 rx2＋V 型封口）
+      p.drawRoundedRect(QRectF(3, 5, 18, 14), 2, 2);
+      path.moveTo(3, 7.5);
+      path.lineTo(12, 13.5);
+      path.lineTo(21, 7.5);
+      p.drawPath(path);
       break;
     }
   }

@@ -61,6 +61,7 @@ class AwayLockSettingsDialog;
 class NetRemoteSettingsDialog;
 class SettingsWindow;
 class FilesClient;
+class MailboxView;
 
 class MainWindow : public QMainWindow {
   // 二期·设置窗口需触发主窗私设入口（更换头像／编辑资料签名框）
@@ -117,6 +118,13 @@ public:
   // 再次进入即刷新，离开走 rail 消息/好友或档案栏「发消息」。
   void enter_org_view();
   bool org_view_active() const; // 验收面：三栏是否在屏
+
+  // —— 邮箱·统一收件箱（原型 desktop-mailbox.html，验收面）——
+  // rail「邮箱」切整屏收件箱（告警/通知/公告三类条目；条目只拉不推，
+  // 未读数以服务端为唯一来源——rail 徽章与页签同源同数）；
+  // 未登录协作态提示；离开走 rail 消息/好友。
+  void enter_mailbox_view();
+  bool mailbox_view_active() const; // 验收面：收件箱是否在屏
 
   // —— T4.4 截图与标注 ——
   // 截图工具（区域选择→标注→确认即发送；测试缝见 ScreenshotTool 注释）。
@@ -520,6 +528,10 @@ private:
   void leave_org_view();
   // 全量重建（org 数据到达/进入视图/主题切换）：树＋网格＋档案一起刷
   void rebuild_org_view();
+  // —— 邮箱面内部 ——
+  void leave_mailbox_view();
+  // rail 邮箱徽章重刷（files 登录后/邮箱动作回执/NOTICE 到达时拉计数）
+  void refresh_mailbox_badge();
   // 中栏成员网格（按当前部门；全量重建，含「我」卡高亮与在线点）
   void refresh_org_members();
   // 右栏档案（汇报链路沿 manager 指针上溯；无选中即清空隐藏）
@@ -709,6 +721,10 @@ private:
   QWidget* org_side_{nullptr};        // 左栏部门树（240px，与会话侧栏互斥）
   QWidget* org_page_{nullptr};        // 中栏成员网格面（与聊天面板互斥）
   QWidget* org_profile_{nullptr};     // 右栏成员档案（260px；无选中即隐藏）
+  // —— 邮箱·统一收件箱面（原型 desktop-mailbox.html）：rail「邮箱」切
+  //    整屏（console 五列表＋infopanel 详情/台账/留痕）；条目只经
+  //    FilesClient 拉取，未读徽章以服务端计数为唯一来源 ——
+  MailboxView* mailbox_page_{nullptr};
   QLineEdit* org_search_{nullptr};    // 「搜索部门 / 成员」
   QTreeWidget* org_tree_{nullptr};    // 部门树（节点带子树成员计数）
   QLabel* org_note_{nullptr};         // 可见性策略虚线卡（常驻复用）

@@ -686,6 +686,33 @@ bool ServerStore::ensure_schema() {
       "  sealed_hex TEXT NOT NULL,"
       "  updated_by TEXT NOT NULL,"
       "  updated_ms INTEGER NOT NULL);"
+      // —— 邮箱·统一收件箱（设计稿 docs/design/mailbox.md）：条目由
+      // 各既有事件源落行（告警=webhook 上报/磁盘阈值/登录异常，通知=
+      // @我/任务到期/审批结果/共享变更，公告=R24 群公告），状态按账号·
+      // 按条目独立（未读/已读/已处理/确认时刻）；边界②：任何邮箱操作
+      // 不触 messages/group_announcement_log/告警台账行——
+      "CREATE TABLE IF NOT EXISTS mailbox_items ("
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+      "  kind TEXT NOT NULL,"        // warning|notice|announce
+      "  title TEXT NOT NULL,"
+      "  sub TEXT NOT NULL DEFAULT '',"
+      "  source TEXT NOT NULL DEFAULT '',"
+      "  ref TEXT NOT NULL DEFAULT ''," // 正文/跳转位置（group:N 等）
+      // 幂等键（同源同事件不重复入箱；NULL=不判重——SQLite UNIQUE 对
+      // NULL 各行互不冲突，空键天然多行）
+      "  dedup TEXT,"
+      "  created_ms INTEGER NOT NULL,"
+      "  UNIQUE(dedup));"
+      "CREATE TABLE IF NOT EXISTS mailbox_status ("
+      "  item_id INTEGER NOT NULL,"
+      "  account TEXT NOT NULL,"
+      "  state INTEGER NOT NULL DEFAULT 0," // 0=未读 1=已读 2=已处理
+      "  handled_by TEXT NOT NULL DEFAULT '',"
+      "  handled_ms INTEGER NOT NULL DEFAULT 0,"
+      "  confirmed_ms INTEGER NOT NULL DEFAULT 0,"
+      "  PRIMARY KEY(item_id, account));"
+      "CREATE INDEX IF NOT EXISTS idx_mailbox_status_account"
+      " ON mailbox_status(account, item_id);"
       // —— 二期群工具三件（原生互动，不走 R25 外部工具代理）：投票
       // （记名单选，改票=覆盖；匿名=展示不回 voter、多选=choice 存位集）
       // ＋接龙（一人一条 upsert）＋群任务（认领制，done 终态留痕不删行）——
@@ -4858,6 +4885,272 @@ std::vector<std::string> ServerStore::direct_reports(
   sqlite3_stmt* st = nullptr;
   if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return out;
   sqlite3_bind_text(st, 1, manager.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    out.emplace_back(
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 0)));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+// —— 邮箱·统一收件箱（mailbox.md；条目行+按账号状态行两表，操作面
+// 只动这两张表——边界②归档行一概不碰）——
+
+std::int64_t ServerStore::mailbox_add(
+    const std::string& kind, const std::string& title, const std::string& sub,
+    const std::string& source, const std::string& ref,
+    const std::string& dedup, const std::vector<std::string>& recipients,
+    std::int64_t ts_ms) {
+  if (recipients.empty()) return 0; // 无受众不入箱（如群只有设置者自己）
+  // 幂等：同 dedup 已有条目即不再入。告警例外——须全部收件人已处理
+  //（state=2）才允许复发再报（磁盘超阈值修复后复发的场景）。
+  if (!dedup.empty()) {
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_,
+                           "SELECT i.id, (SELECT MIN(s.state) FROM"
+                           " mailbox_status s WHERE s.item_id = i.id)"
+                           " FROM mailbox_items i WHERE i.dedup = ?;",
+                           -1, &st, nullptr) == SQLITE_OK) {
+      sqlite3_bind_text(st, 1, dedup.c_str(), -1, SQLITE_TRANSIENT);
+      const bool exists = sqlite3_step(st) == SQLITE_ROW;
+      const std::int64_t existing = exists ? sqlite3_column_int64(st, 0) : 0;
+      const int min_state = exists ? sqlite3_column_int(st, 1) : -1;
+      sqlite3_finalize(st);
+      if (exists) {
+        const bool warning_rearm = kind == "warning" && min_state >= 2;
+        if (!warning_rearm) return existing; // 幂等回既有条目（不再入箱）
+        // 告警复发（旧条目已全员处理）：旧条目让出幂等键，新条目再入箱
+        sqlite3_stmt* u = nullptr;
+        if (sqlite3_prepare_v2(db_,
+                               "UPDATE mailbox_items SET dedup = NULL"
+                               " WHERE id = ?;",
+                               -1, &u, nullptr) == SQLITE_OK) {
+          sqlite3_bind_int64(u, 1, existing);
+          sqlite3_step(u);
+          sqlite3_finalize(u);
+        }
+      }
+    }
+  }
+  const char* sql =
+      "INSERT INTO mailbox_items(kind, title, sub, source, ref, dedup,"
+      " created_ms) VALUES(?, ?, ?, ?, ?, ?, ?);";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return 0;
+  sqlite3_bind_text(st, 1, kind.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 2, title.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 3, sub.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 4, source.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_text(st, 5, ref.c_str(), -1, SQLITE_TRANSIENT);
+  if (dedup.empty()) sqlite3_bind_null(st, 6);
+  else sqlite3_bind_text(st, 6, dedup.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 7, ts_ms);
+  const bool ok = sqlite3_step(st) == SQLITE_DONE;
+  sqlite3_finalize(st);
+  if (!ok) return 0;
+  const std::int64_t id = sqlite3_last_insert_rowid(db_);
+  // 收件人逐人建未读状态行（重复收件人去重；INSERT OR IGNORE 幂等）
+  sqlite3_stmt* s2 = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "INSERT OR IGNORE INTO mailbox_status(item_id,"
+                         " account, state) VALUES(?, ?, 0);",
+                         -1, &s2, nullptr) != SQLITE_OK) return id;
+  for (const auto& a : recipients) {
+    sqlite3_reset(s2);
+    sqlite3_clear_bindings(s2);
+    sqlite3_bind_int64(s2, 1, id);
+    sqlite3_bind_text(s2, 2, a.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(s2);
+  }
+  sqlite3_finalize(s2);
+  return id;
+}
+
+std::vector<ServerStore::MailboxRow> ServerStore::mailbox_of(
+    const std::string& account, const std::string& kind, bool unread_only,
+    const std::string& q) {
+  std::vector<MailboxRow> out;
+  std::string sql =
+      "SELECT i.id, i.kind, i.title, i.sub, i.source, i.ref, i.created_ms,"
+      " s.state, s.handled_by, s.handled_ms, s.confirmed_ms,"
+      " (SELECT COUNT(*) FROM mailbox_status t WHERE t.item_id = i.id),"
+      " (SELECT COUNT(*) FROM mailbox_status t WHERE t.item_id = i.id"
+      "  AND t.confirmed_ms > 0)"
+      " FROM mailbox_items i JOIN mailbox_status s ON s.item_id = i.id"
+      " WHERE s.account = ?";
+  if (!kind.empty()) sql += " AND i.kind = ?";
+  if (unread_only) sql += " AND s.state = 0";
+  if (!q.empty()) sql += " AND (instr(lower(i.title), lower(?)) > 0 OR"
+                         " instr(lower(i.source), lower(?)) > 0)";
+  sql += " ORDER BY i.id DESC LIMIT 200;";
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK)
+    return out;
+  int col = 1;
+  sqlite3_bind_text(st, col++, account.c_str(), -1, SQLITE_TRANSIENT);
+  if (!kind.empty())
+    sqlite3_bind_text(st, col++, kind.c_str(), -1, SQLITE_TRANSIENT);
+  if (!q.empty()) {
+    sqlite3_bind_text(st, col++, q.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, col++, q.c_str(), -1, SQLITE_TRANSIENT);
+  }
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    MailboxRow r;
+    r.id = sqlite3_column_int64(st, 0);
+    r.kind = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+    r.title = reinterpret_cast<const char*>(sqlite3_column_text(st, 2));
+    r.sub = reinterpret_cast<const char*>(sqlite3_column_text(st, 3));
+    r.source = reinterpret_cast<const char*>(sqlite3_column_text(st, 4));
+    r.ref = reinterpret_cast<const char*>(sqlite3_column_text(st, 5));
+    r.created_ms = sqlite3_column_int64(st, 6);
+    r.state = sqlite3_column_int(st, 7);
+    r.handled_by = sqlite3_column_type(st, 8) == SQLITE_TEXT
+                       ? reinterpret_cast<const char*>(
+                             sqlite3_column_text(st, 8))
+                       : "";
+    r.handled_ms = sqlite3_column_int64(st, 9);
+    r.confirmed_ms = sqlite3_column_int64(st, 10);
+    r.confirm_total = sqlite3_column_int(st, 11);
+    r.confirm_count = sqlite3_column_int(st, 12);
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+ServerStore::MailboxCounts ServerStore::mailbox_counts(
+    const std::string& account) {
+  MailboxCounts c;
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT i.kind, COUNT(*) FROM mailbox_items i"
+                         " JOIN mailbox_status s ON s.item_id = i.id"
+                         " WHERE s.account = ? AND s.state = 0"
+                         " GROUP BY i.kind;",
+                         -1, &st, nullptr) != SQLITE_OK)
+    return c;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    const std::string k =
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    const int n = sqlite3_column_int(st, 1);
+    if (k == "warning") c.warning = n;
+    else if (k == "notice") c.notice = n;
+    else if (k == "announce") c.announce = n;
+    c.all += n;
+  }
+  sqlite3_finalize(st);
+  return c;
+}
+
+bool ServerStore::mailbox_mark_read(std::int64_t id,
+                                    const std::string& account) {
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "UPDATE mailbox_status SET state = 1"
+                         " WHERE item_id = ? AND account = ? AND state = 0;",
+                         -1, &st, nullptr) != SQLITE_OK)
+    return false;
+  sqlite3_bind_int64(st, 1, id);
+  sqlite3_bind_text(st, 2, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_step(st);
+  const bool changed = sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return changed;
+}
+
+int ServerStore::mailbox_mark_all_read(const std::string& account) {
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "UPDATE mailbox_status SET state = 1"
+                         " WHERE account = ? AND state = 0;",
+                         -1, &st, nullptr) != SQLITE_OK)
+    return 0;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_step(st);
+  const int changed = sqlite3_changes(db_);
+  sqlite3_finalize(st);
+  return changed;
+}
+
+bool ServerStore::mailbox_mark_handled(std::int64_t id,
+                                       const std::string& account,
+                                       std::int64_t ts_ms) {
+  // 仅告警条目可标记已处理（kind 闸在 UPDATE 子查询里；处理人+时间留痕）
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "UPDATE mailbox_status SET state = 2, handled_by = ?,"
+                         " handled_ms = ? WHERE item_id = ? AND account = ?"
+                         " AND state != 2"
+                         " AND (SELECT kind FROM mailbox_items"
+                         "      WHERE id = ?) = 'warning';",
+                         -1, &st, nullptr) != SQLITE_OK)
+    return false;
+  sqlite3_bind_text(st, 1, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 2, ts_ms);
+  sqlite3_bind_int64(st, 3, id);
+  sqlite3_bind_text(st, 4, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 5, id);
+  sqlite3_step(st);
+  const bool changed = sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return changed;
+}
+
+bool ServerStore::mailbox_confirm(std::int64_t id,
+                                  const std::string& account,
+                                  std::int64_t ts_ms) {
+  // 仅公告条目可确认（kind 闸同上；确认时刻留痕=已读位同置）
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "UPDATE mailbox_status SET confirmed_ms = ?,"
+                         " state = 1 WHERE item_id = ? AND account = ?"
+                         " AND confirmed_ms = 0"
+                         " AND (SELECT kind FROM mailbox_items"
+                         "      WHERE id = ?) = 'announce';",
+                         -1, &st, nullptr) != SQLITE_OK)
+    return false;
+  sqlite3_bind_int64(st, 1, ts_ms);
+  sqlite3_bind_int64(st, 2, id);
+  sqlite3_bind_text(st, 3, account.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int64(st, 4, id);
+  sqlite3_step(st);
+  const bool changed = sqlite3_changes(db_) > 0;
+  sqlite3_finalize(st);
+  return changed;
+}
+
+std::vector<ServerStore::MailboxConfirmRow>
+ServerStore::mailbox_confirmations(std::int64_t id) {
+  std::vector<MailboxConfirmRow> out;
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT account, confirmed_ms FROM mailbox_status"
+                         " WHERE item_id = ?"
+                         " ORDER BY confirmed_ms = 0, confirmed_ms DESC,"
+                         " account;",
+                         -1, &st, nullptr) != SQLITE_OK)
+    return out;
+  sqlite3_bind_int64(st, 1, id);
+  while (sqlite3_step(st) == SQLITE_ROW) {
+    MailboxConfirmRow r;
+    r.account =
+        reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+    r.confirmed_ms = sqlite3_column_int64(st, 1);
+    out.push_back(std::move(r));
+  }
+  sqlite3_finalize(st);
+  return out;
+}
+
+std::vector<std::string> ServerStore::admin_accounts() {
+  std::vector<std::string> out;
+  sqlite3_stmt* st = nullptr;
+  if (sqlite3_prepare_v2(db_,
+                         "SELECT account FROM accounts WHERE role = 'admin'"
+                         " ORDER BY account;",
+                         -1, &st, nullptr) != SQLITE_OK)
+    return out;
   while (sqlite3_step(st) == SQLITE_ROW) {
     out.emplace_back(
         reinterpret_cast<const char*>(sqlite3_column_text(st, 0)));

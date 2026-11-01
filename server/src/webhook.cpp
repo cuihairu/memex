@@ -285,8 +285,11 @@ private:
     }
 
     // —— 投递（目标校验／入队／归档／扇出在 deliver_notice 内）——
+    // 邮箱·告警入箱（mailbox.md §I/P3：webhook bot 异常上报归告警类——
+    // NOTICE 投递照旧，入箱补状态行；dedup=msg_id 天然一次）
     const NoticeDelivery d =
-        deliver_notice(server_, target, title, content, urgency, jump);
+        deliver_notice(server_, target, title, content, urgency, jump,
+                       std::string(memex::protocol::kNoticeSender), "warning");
     std::cout << "[MEMEX] webhook " << d.http_status << " target=" << target
               << " urgency=" << urgency
               << (d.ok ? " msg_id=" + d.msg_id : " error=" + d.error)
@@ -507,7 +510,8 @@ NoticeDelivery deliver_notice(CollabServer& server, const std::string& target,
                               const std::string& title,
                               const std::string& content, int urgency,
                               const std::string& jump_url,
-                              const std::string& sender) {
+                              const std::string& sender,
+                              const std::string& mailbox_kind) {
   using Message = memex::protocol::Message;
   NoticeDelivery r;
 
@@ -598,6 +602,13 @@ NoticeDelivery deliver_notice(CollabServer& server, const std::string& target,
     }
   }
 
+  // 邮箱入箱（mailbox.md：非新通道——NOTICE 投递照旧，入箱只是按
+  // 调用方声明的 kind 给收件人补一行状态；正文即本条 NOTICE 归档行）
+  if (!mailbox_kind.empty()) {
+    (void)store.mailbox_add(
+        mailbox_kind, title, "webhook 上报 · 处理后由处理人标记已处理并留痕",
+        "webhook", jump_url, "webhook:" + msg_id, recipients, ts);
+  }
   r.ok = true;
   r.http_status = 200;
   r.msg_id = msg_id;

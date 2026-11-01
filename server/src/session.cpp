@@ -332,6 +332,53 @@ void Session::handle_message(const memex::protocol::Message& msg) {
     };
     push_favs(msg.from());
     for (const auto& to : recipients) push_favs(to);
+    // 邮箱·通知入箱（mailbox.md §I：@我归通知类——正文即本条群消息
+    //（已全量归档），邮箱只承载状态，不走新推送链；提及匹配 @账号/
+    // @显示名（客户端 @ 选择器插显示名），边界判定防 @abc 误中 @ab）
+    if (is_group) {
+      const std::string& mention_text = msg.text().text();
+      auto contains_mention = [&mention_text](const std::string& name) {
+        if (name.empty()) return false;
+        const std::string needle = "@" + name;
+        std::size_t pos = mention_text.find(needle);
+        while (pos != std::string::npos) {
+          const std::size_t end = pos + needle.size();
+          if (end >= mention_text.size()) return true;
+          const unsigned char next =
+              static_cast<unsigned char>(mention_text[end]);
+          const bool cont = (next >= 'a' && next <= 'z') ||
+                            (next >= 'A' && next <= 'Z') ||
+                            (next >= '0' && next <= '9') || next == '_' ||
+                            next == '.' || next == '-' || next >= 0x80;
+          if (!cont) return true;
+          pos = mention_text.find(needle, end);
+        }
+        return false;
+      };
+      const auto sender_acct = server_.store().find_account(account_);
+      const std::string sender_name =
+          sender_acct ? sender_acct->display_name : account_;
+      const auto ginfo = server_.store().group_info(
+          static_cast<std::uint64_t>(
+              std::strtoull(msg.to().c_str() + 6, nullptr, 10)));
+      if (ginfo.has_value()) {
+        std::vector<std::string> mentioned;
+        for (const auto& to : recipients) {
+          const auto prof = server_.store().find_account(to);
+          if (contains_mention(to) ||
+              (prof && contains_mention(prof->display_name))) {
+            mentioned.push_back(to);
+          }
+        }
+        if (!mentioned.empty()) {
+          (void)server_.store().mailbox_add(
+              "notice",
+              sender_name + " 在群「" + ginfo->name + "」中 @ 了你",
+              "@我 · 回执只提醒一次，重复刷新不重复弹", "@我", msg.to(),
+              "mention:" + *msg_id, std::move(mentioned), now_ms());
+        }
+      }
+    }
     break;
   }
   case v1::GROUP_CMD: {
@@ -403,6 +450,23 @@ void Session::handle_message(const memex::protocol::Message& msg) {
           deliver_notice(server_, target,
                          "群公告：" + info->name, cmd.announcement(),
                          static_cast<int>(v1::Notice::IMPORTANT), target);
+          // 邮箱·公告入箱（mailbox.md §I/§IV-P2：公告归公告类——弱提醒
+          //＋已读确认留痕（谁/何时可查）；收件人=群成员不含设置者（镜像
+          // NOTICE 扇出语义）；dedup=群+内容摘要：同内容重设不重复入箱）
+          std::vector<std::string> recipients;
+          for (const auto& m : server_.store().group_members(cmd.group_id())) {
+            if (m != account_) recipients.push_back(m);
+          }
+          std::string first_line = cmd.announcement();
+          const auto nl = first_line.find('\n');
+          if (nl != std::string::npos) first_line.resize(nl);
+          if (first_line.size() > 60) first_line = first_line.substr(0, 60) + "…";
+          (void)server_.store().mailbox_add(
+              "announce", first_line, "弱提醒 · 已读确认台账可查", info->name,
+              target,
+              "announce:" + std::to_string(cmd.group_id()) + ":" +
+                  sha256_hex(cmd.announcement()),
+              std::move(recipients), now_ms());
         }
       }
     } else if (cmd.op() == "announce_history") {
@@ -921,6 +985,22 @@ void Session::handle_login(const memex::protocol::Message& msg) {
     }
   }
   server_.store().add_login_record(rec);
+  // 邮箱·告警入箱（mailbox.md §I/P3：登录异常——连续 3 次口令不符入
+  // 告警（受众=admin 账号集，§Ⅵ-2 默认口径）；恰在第 3 次入箱一次，
+  // 第 4/5 次不重复，成功登录即断 streak，下次连败再报）
+  if (rec.result == "bad_password") {
+    int streak = 0;
+    for (const auto& r : server_.store().login_records(account_, "", 10)) {
+      if (r.result != "bad_password") break;
+      ++streak;
+    }
+    if (streak == 3) {
+      (void)server_.store().mailbox_add(
+          "warning", "登录异常：账号 " + account_ + " 连续 3 次口令不符",
+          "服务器事件 · 修复后由处理人标记已处理并留痕", "admin 事件源",
+          "", "", server_.store().admin_accounts(), now_ms());
+    }
+  }
 
   memex::protocol::Message result;
   result.set_type(v1::LOGIN_RESULT);

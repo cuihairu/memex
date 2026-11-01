@@ -1751,4 +1751,79 @@ void FilesClient::avatar_delete() {
             });
 }
 
+// —— 邮箱·统一收件箱（mailbox.md：视图+已读状态，非新通道；只拉不推）——
+
+void FilesClient::mailbox_list(const QString& type, bool unread,
+                               const QString& q) {
+  QJsonObject body;
+  if (!type.isEmpty()) body.insert(QStringLiteral("type"), type);
+  if (unread) body.insert(QStringLiteral("unread"), true);
+  if (!q.isEmpty()) body.insert(QStringLiteral("q"), q);
+  send_json(QStringLiteral("mailbox.list"), QStringLiteral("POST"),
+            QStringLiteral("/files/mailbox/list"), body,
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit mailbox_listed(resp.value(QStringLiteral("items")).toArray(),
+                                  resp.value(QStringLiteral("counts")).toObject());
+            });
+}
+
+void FilesClient::mailbox_unread() {
+  send_json(QStringLiteral("mailbox.unread"), QStringLiteral("POST"),
+            QStringLiteral("/files/mailbox/unread"), {},
+            [this](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit mailbox_unread_loaded(
+                  resp.value(QStringLiteral("counts")).toObject());
+            });
+}
+
+void FilesClient::mailbox_mark_read(qint64 id, bool all) {
+  QJsonObject body;
+  if (all) {
+    body.insert(QStringLiteral("all"), true);
+  } else {
+    body.insert(QStringLiteral("id"), static_cast<double>(id));
+  }
+  send_json(QStringLiteral("mailbox.read"), QStringLiteral("POST"),
+            QStringLiteral("/files/mailbox/read"), body,
+            [this, id](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit mailbox_read_marked(
+                  id, static_cast<int>(
+                          resp.value(QStringLiteral("marked")).toDouble()));
+            });
+}
+
+void FilesClient::mailbox_mark_handled(qint64 id) {
+  send_json(QStringLiteral("mailbox.handle"), QStringLiteral("POST"),
+            QStringLiteral("/files/mailbox/handle"),
+            {{QStringLiteral("id"), static_cast<double>(id)}},
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (!ok) return;
+              emit mailbox_handled(id);
+            });
+}
+
+void FilesClient::mailbox_confirm(qint64 id) {
+  send_json(QStringLiteral("mailbox.confirm"), QStringLiteral("POST"),
+            QStringLiteral("/files/mailbox/confirm"),
+            {{QStringLiteral("id"), static_cast<double>(id)}},
+            [this, id](bool ok, int, const QJsonObject&, const QString&) {
+              if (!ok) return;
+              emit mailbox_confirmed(id);
+            });
+}
+
+void FilesClient::mailbox_confirmations(qint64 id) {
+  send_json(QStringLiteral("mailbox.confirmations"), QStringLiteral("POST"),
+            QStringLiteral("/files/mailbox/confirmations"),
+            {{QStringLiteral("id"), static_cast<double>(id)}},
+            [this, id](bool ok, int, const QJsonObject& resp, const QString&) {
+              if (!ok) return;
+              emit mailbox_confirmations_listed(
+                  id, resp.value(QStringLiteral("rows")).toArray());
+            });
+}
+
 } // namespace memex::client
