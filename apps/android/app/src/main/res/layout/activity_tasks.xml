@@ -1,298 +1,624 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  任务清单（R27-6）：连接面板＋列表视图／看板视图（同一批任务数据的
-  另一视图，可切换）＋录入区（标题/类型/开始/截止/分配给）＋提醒开关行。
+  任务清单（R27-6，原型 mobile-tasks）：appbar（列表/看板两态标题）＋
+  连接行＋新增任务录入区（标题/类型/分配给＋截止/开始＋双提醒开关）＋
+  acts 行＋任务卡列表；看板＝同一批任务数据的另一视图（横滑三列 160dp，
+  窄屏 <600dp 自动降级回列表）；底部 tabbar 会话/邮箱/任务/我。
   端点/语义对齐桌面 TaskDialog；布局沿用传统 View 体系。
 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:fitsSystemWindows="true">
+    android:background="#f7f5f2">
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="16dp"
-        android:text="@string/tasks_title"
-        android:textSize="18sp"
-        android:textStyle="bold" />
-
-    <!-- 连接面板：文件面端口独立（缺省 24561 同文件助手） -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp">
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:fitsSystemWindows="true">
 
-        <EditText
-            android:id="@+id/et_tasks_account"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="@string/files_account_hint"
-            android:inputType="text"
-            android:maxLines="1" />
-
-        <EditText
-            android:id="@+id/et_tasks_password"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="@string/files_password_hint"
-            android:inputType="textPassword"
-            android:maxLines="1" />
-
-        <EditText
-            android:id="@+id/et_tasks_port"
-            android:layout_width="80dp"
-            android:layout_height="wrap_content"
-            android:hint="@string/files_port_hint"
-            android:inputType="number"
-            android:maxLines="1" />
-
-        <Button
-            android:id="@+id/btn_tasks_connect"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/files_connect" />
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/tv_tasks_error"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp"
-        android:textColor="@color/error_text"
-        android:visibility="gone" />
-
-    <!-- 录入区：标题＋类型＋分配给 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp">
-
-        <EditText
-            android:id="@+id/et_task_title"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="@string/tasks_title_hint"
-            android:inputType="text"
-            android:maxLines="1" />
-
-        <Spinner
-            android:id="@+id/sp_task_type"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="96dp" />
-
-        <EditText
-            android:id="@+id/et_task_assignee"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:hint="@string/tasks_assignee_hint"
-            android:inputType="text"
-            android:maxLines="1"
-            android:minWidth="96dp" />
-    </LinearLayout>
-
-    <!-- 截止（deadline）＋开始（勾选才生效，0=未设） -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp">
-
+        <!-- appbar：标题随视图切换（任务清单/任务看板） -->
         <TextView
-            android:layout_width="wrap_content"
+            android:id="@+id/tsk_title"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_vertical"
-            android:text="@string/tasks_deadline_label" />
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="10dp"
+            android:text="@string/tasks_title"
+            android:textColor="@color/text_primary"
+            android:textSize="17sp"
+            android:textStyle="bold" />
 
-        <EditText
-            android:id="@+id/et_task_due"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:hint="@string/tasks_ms_hint"
-            android:inputType="number"
-            android:maxLines="1" />
-
-        <CheckBox
-            android:id="@+id/cb_task_start_on"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/tasks_start_label" />
-
-        <EditText
-            android:id="@+id/et_task_start"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:enabled="false"
-            android:hint="@string/tasks_ms_hint"
-            android:inputType="number"
-            android:maxLines="1" />
-    </LinearLayout>
-
-    <!-- 提醒开关（同一处）：开始到点提醒＋截止到期提醒，默认开 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp">
-
-        <CheckBox
-            android:id="@+id/cb_task_remind_start"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:text="@string/tasks_remind_start" />
-
-        <CheckBox
-            android:id="@+id/cb_task_remind_due"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:text="@string/tasks_remind_due" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp">
-
-        <Button
-            android:id="@+id/btn_task_add"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:enabled="false"
-            android:text="@string/tasks_add" />
-
-        <Button
-            android:id="@+id/btn_task_board"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/tasks_board" />
-
-        <Button
-            android:id="@+id/btn_tasks_refresh"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/files_refresh" />
-
-        <TextView
-            android:id="@+id/tv_tasks_state"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_vertical"
-            android:layout_weight="1"
-            android:paddingStart="12dp"
-            android:text="@string/files_state_off" />
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/tv_tasks_empty"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="24dp"
-        android:text="@string/tasks_empty"
-        android:textSize="14sp"
-        android:visibility="gone" />
-
-    <!-- 列表视图（默认；窄屏看板自动降级回此视图） -->
-    <ListView
-        android:id="@+id/lv_tasks"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
-
-    <!-- 看板（R27-6）：同一批任务数据的另一视图，横滑三列（待办/进行中/
-         完成），默认隐藏 -->
-    <HorizontalScrollView
-        android:id="@+id/hs_tasks_board"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:visibility="gone">
-
+        <!-- 连接行（原型 .con）：文件面端口独立（缺省 24561 同文件助手） -->
         <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:orientation="horizontal">
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="4dp">
 
+            <EditText
+                android:id="@+id/et_tasks_account"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/tsk_in_bg"
+                android:hint="@string/files_account_hint"
+                android:inputType="text"
+                android:maxLines="1"
+                android:paddingStart="9dp"
+                android:paddingEnd="9dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/et_tasks_password"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/tsk_in_bg"
+                android:hint="@string/files_password_hint"
+                android:inputType="textPassword"
+                android:maxLines="1"
+                android:paddingStart="9dp"
+                android:paddingEnd="9dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
+                android:textSize="12sp" />
+
+            <EditText
+                android:id="@+id/et_tasks_port"
+                android:layout_width="58dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/tsk_in_bg"
+                android:gravity="center"
+                android:hint="@string/files_port_hint"
+                android:inputType="number"
+                android:maxLines="1"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btn_tasks_connect"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/mbx_btn_primary"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="11dp"
+                android:paddingEnd="11dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:text="@string/files_connect"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_tasks_error"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:textColor="@color/error_text"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <!-- 新增任务录入区（看板视图下整体隐藏，回列表即恢复不丢输入） -->
+        <LinearLayout
+            android:id="@+id/tsk_entry"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="4dp"
+                android:text="@string/tsk_section_new"
+                android:textColor="@color/text_tertiary"
+                android:textSize="10.5sp"
+                android:textStyle="bold" />
+
+            <!-- 录入行：标题＋类型＋分配给 -->
             <LinearLayout
-                android:layout_width="160dp"
-                android:layout_height="match_parent"
-                android:orientation="vertical">
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="6dp">
 
-                <TextView
-                    android:layout_width="match_parent"
+                <EditText
+                    android:id="@+id/et_task_title"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:padding="8dp"
-                    android:text="@string/tasks_col_todo"
-                    android:textStyle="bold" />
+                    android:layout_weight="1"
+                    android:background="@drawable/tsk_in_bg"
+                    android:hint="@string/tasks_title_hint"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp"
+                    android:textSize="12sp" />
 
-                <ListView
-                    android:id="@+id/lv_board_todo"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1" />
+                <Spinner
+                    android:id="@+id/sp_task_type"
+                    android:layout_width="82dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="6dp" />
+
+                <EditText
+                    android:id="@+id/et_task_assignee"
+                    android:layout_width="96dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/tsk_in_bg"
+                    android:hint="@string/tasks_assignee_hint"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:paddingTop="7dp"
+                    android:paddingBottom="7dp"
+                    android:textSize="12sp" />
             </LinearLayout>
 
+            <!-- 截止（deadline）＋开始（勾选才生效，0=未设） -->
             <LinearLayout
-                android:layout_width="160dp"
-                android:layout_height="match_parent"
-                android:orientation="vertical">
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="4dp">
 
                 <TextView
-                    android:layout_width="match_parent"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:padding="8dp"
-                    android:text="@string/tasks_col_doing"
-                    android:textStyle="bold" />
+                    android:layout_marginEnd="6dp"
+                    android:text="@string/tasks_deadline_label"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11.5sp" />
 
-                <ListView
-                    android:id="@+id/lv_board_doing"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1" />
+                <EditText
+                    android:id="@+id/et_task_due"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@drawable/tsk_in_bg"
+                    android:hint="@string/tasks_ms_hint"
+                    android:inputType="number"
+                    android:maxLines="1"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:textSize="11.5sp" />
+
+                <CheckBox
+                    android:id="@+id/cb_task_start_on"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="@string/tasks_start_label"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11.5sp" />
+
+                <EditText
+                    android:id="@+id/et_task_start"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:background="@drawable/tsk_in_bg"
+                    android:enabled="false"
+                    android:hint="@string/tasks_ms_hint"
+                    android:inputType="number"
+                    android:maxLines="1"
+                    android:paddingStart="9dp"
+                    android:paddingEnd="9dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="6dp"
+                    android:textSize="11.5sp" />
             </LinearLayout>
 
+            <!-- 提醒开关（同一处）：开始到点提醒＋截止到期提醒，默认开 -->
             <LinearLayout
-                android:layout_width="160dp"
-                android:layout_height="match_parent"
-                android:orientation="vertical">
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingBottom="4dp">
 
-                <TextView
-                    android:layout_width="match_parent"
+                <CheckBox
+                    android:id="@+id/cb_task_remind_start"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:padding="8dp"
-                    android:text="@string/tasks_col_done"
-                    android:textStyle="bold" />
+                    android:checked="true"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="@string/tasks_remind_start"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11.5sp" />
 
-                <ListView
-                    android:id="@+id/lv_board_done"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1" />
+                <CheckBox
+                    android:id="@+id/cb_task_remind_due"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:checked="true"
+                    android:minWidth="0dp"
+                    android:minHeight="0dp"
+                    android:text="@string/tasks_remind_due"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="11.5sp" />
             </LinearLayout>
         </LinearLayout>
-    </HorizontalScrollView>
 
-    <ProgressBar
-        android:id="@+id/pb_tasks"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center_horizontal"
-        android:visibility="gone" />
-</LinearLayout>
+        <!-- acts 行：添加任务（主钮，未连接禁用）/看板↔列表/刷新＋右侧状态 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="10dp">
+
+            <Button
+                android:id="@+id/btn_task_add"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/mbx_btn_primary"
+                android:enabled="false"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
+                android:text="@string/tasks_add"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btn_task_board"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/mbx_btn_flat"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
+                android:text="@string/tasks_board"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <Button
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:id="@+id/btn_tasks_refresh"
+                android:background="@drawable/mbx_btn_flat"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
+                android:text="@string/files_refresh"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tv_tasks_state"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="end"
+                android:paddingStart="8dp"
+                android:text="@string/files_state_off"
+                android:textColor="@color/text_tertiary"
+                android:textSize="10.5sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tv_tasks_empty"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:padding="24dp"
+            android:text="@string/tasks_empty"
+            android:textColor="@color/text_tertiary"
+            android:textSize="12.5sp"
+            android:visibility="gone" />
+
+        <!-- 列表视图（默认；窄屏看板自动降级回此视图） -->
+        <ListView
+            android:id="@+id/lv_tasks"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:divider="@null"
+            android:dividerHeight="0dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp"
+            android:scrollbars="none" />
+
+        <!-- 看板（R27-6）：同一批任务数据的另一视图，横滑三列（待办/进行中/
+             完成），默认隐藏 -->
+        <HorizontalScrollView
+            android:id="@+id/hs_tasks_board"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:scrollbars="none"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="6dp">
+
+                <LinearLayout
+                    android:layout_width="160dp"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:background="@drawable/tsk_col_h_bg"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:paddingTop="7dp"
+                        android:paddingBottom="7dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/tasks_col_todo"
+                            android:textColor="@color/text_primary"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tsk_n_todo"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/text_tertiary"
+                            android:textSize="10sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <ListView
+                        android:id="@+id/lv_board_todo"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/tsk_col_b_bg"
+                        android:clipToPadding="false"
+                        android:divider="@null"
+                        android:dividerHeight="0dp"
+                        android:padding="6dp"
+                        android:scrollbars="none" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="160dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="8dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:background="@drawable/tsk_col_h_bg"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:paddingTop="7dp"
+                        android:paddingBottom="7dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/tasks_col_doing"
+                            android:textColor="@color/text_primary"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tsk_n_doing"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/text_tertiary"
+                            android:textSize="10sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <ListView
+                        android:id="@+id/lv_board_doing"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/tsk_col_b_bg"
+                        android:clipToPadding="false"
+                        android:divider="@null"
+                        android:dividerHeight="0dp"
+                        android:padding="6dp"
+                        android:scrollbars="none" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="160dp"
+                    android:layout_height="match_parent"
+                    android:layout_marginStart="8dp"
+                    android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:background="@drawable/tsk_col_h_bg"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp"
+                        android:paddingTop="7dp"
+                        android:paddingBottom="7dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/tasks_col_done"
+                            android:textColor="@color/text_primary"
+                            android:textSize="11.5sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tsk_n_done"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/text_tertiary"
+                            android:textSize="10sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <ListView
+                        android:id="@+id/lv_board_done"
+                        android:layout_width="match_parent"
+                        android:layout_height="0dp"
+                        android:layout_weight="1"
+                        android:background="@drawable/tsk_col_b_bg"
+                        android:clipToPadding="false"
+                        android:divider="@null"
+                        android:dividerHeight="0dp"
+                        android:padding="6dp"
+                        android:scrollbars="none" />
+                </LinearLayout>
+            </LinearLayout>
+        </HorizontalScrollView>
+
+        <!-- 窄屏降级注（原型 .deg；看板视图下显示） -->
+        <TextView
+            android:id="@+id/tsk_deg"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="12dp"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="4dp"
+            android:background="@drawable/tsk_deg_bg"
+            android:lineSpacingMultiplier="1.5"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
+            android:text="@string/tsk_deg_note"
+            android:textColor="@color/text_tertiary"
+            android:textSize="10.5sp"
+            android:visibility="gone" />
+
+        <ProgressBar
+            android:id="@+id/pb_tasks"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:visibility="gone" />
+
+        <!-- tabbar（会话/邮箱/任务/我，任务高亮） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:background="#FFFFFF"
+            android:paddingTop="7dp"
+            android:paddingBottom="7dp">
+
+            <TextView
+                android:id="@+id/tsk_tab_sessions"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:padding="5dp"
+                android:text="@string/nav_sessions"
+                android:textColor="@color/text_tertiary"
+                android:textSize="11.5sp" />
+
+            <TextView
+                android:id="@+id/tsk_tab_mailbox"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:padding="5dp"
+                android:text="@string/mbx_title"
+                android:textColor="@color/text_tertiary"
+                android:textSize="11.5sp" />
+
+            <TextView
+                android:id="@+id/tsk_tab_tasks"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:padding="5dp"
+                android:text="@string/mbx_tabbar_tasks"
+                android:textColor="@color/brand_orange"
+                android:textSize="11.5sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tsk_tab_me"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:padding="5dp"
+                android:text="@string/nav_me"
+                android:textColor="@color/text_tertiary"
+                android:textSize="11.5sp" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  任务卡（原型 .titem）：勾选框＋粗体标题（2 行截断）＋meta 胶囊（逾期/
+  7 天内到期/截止/已完成/自建/由 X 分配/只读镜像）＋动作行（完成＋开始/
+  暂停；外部只读与已完成卡无动作行）。胶囊底/字色由代码按态切换。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingBottom="7dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="@drawable/tsk_card_bg"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <CheckBox
+                android:id="@+id/tsk_box"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:layout_marginTop="2dp"
+                android:layout_marginEnd="8dp"
+                android:background="@drawable/tsk_box"
+                android:button="@null"
+                android:gravity="center"
+                android:textColor="#FFFFFF"
+                android:textSize="9sp" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tsk_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:lineSpacingMultiplier="1.15"
+                    android:maxLines="2"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="5dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/tsk_tag1"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:paddingStart="7dp"
+                        android:paddingEnd="7dp"
+                        android:paddingTop="1dp"
+                        android:paddingBottom="1dp"
+                        android:textSize="9.5sp"
+                        android:textStyle="bold"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/tsk_tag2"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:paddingStart="7dp"
+                        android:paddingEnd="7dp"
+                        android:paddingTop="1dp"
+                        android:paddingBottom="1dp"
+                        android:textSize="9.5sp"
+                        android:textStyle="bold"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/tsk_doing"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:text="@string/tasks_doing"
+                        android:textColor="@color/text_tertiary"
+                        android:textSize="10sp"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/tsk_btns"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/tsk_btn_done"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/mbx_btn_flat"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="@string/tasks_action_done_toggle"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+
+            <Button
+                android:id="@+id/tsk_btn_toggle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/mbx_btn_flat"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="@string/tasks_action_start_pause"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

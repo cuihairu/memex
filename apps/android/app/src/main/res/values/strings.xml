@@ -161,7 +161,7 @@
     <string name="tasks_list">列表</string>
     <string name="tasks_empty">暂无任务，连接后添加</string>
     <string name="tasks_state_on">已连接</string>
-    <string name="tasks_state_count">清单已刷新（%1$d 项）</string>
+    <string name="tasks_state_count">已连接（清单已刷新（%1$d 项））</string>
     <string name="tasks_err_need_title">标题不能为空</string>
     <string name="tasks_col_todo">待办</string>
     <string name="tasks_col_doing">进行中</string>
@@ -176,6 +176,16 @@
     <string name="tasks_notify_title">任务提醒</string>
     <string name="tasks_notify_start">任务已到开始时间：%1$s</string>
     <string name="tasks_notify_due">任务已到期待办：%1$s</string>
+    <string name="tsk_section_new">新增任务</string>
+    <string name="tsk_board_title">任务看板</string>
+    <string name="tsk_tag_late">逾期</string>
+    <string name="tsk_tag_late_due">逾期 · 截止 %1$s</string>
+    <string name="tsk_tag_soon">7 天内到期 · %1$s</string>
+    <string name="tsk_tag_due">截止 %1$s</string>
+    <string name="tsk_tag_done">已完成</string>
+    <string name="tsk_tag_done_at">已完成 · %1$s</string>
+    <string name="tsk_tag_read">只读镜像 · 外部来源</string>
+    <string name="tsk_deg_note">看板为同一批任务数据的另一视图（横滑三列，列宽 160dp）；窗口宽度 &lt; 600dp 时自动降级回列表视图，不丢数据。</string>
 
     <!-- 邮箱·统一收件箱（原型 mobile-mailbox；对齐桌面 MailboxView 口径） -->
     <string name="mbx_title">邮箱</string>

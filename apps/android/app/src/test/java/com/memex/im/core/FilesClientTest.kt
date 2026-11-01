@@ -497,6 +497,8 @@ class FilesClientTest {
         assertEquals("需求", t.type)
         assertEquals("待办", t.status)
         assertEquals(1700001000000L, t.startMs)
+        assertEquals(1L, t.createdMs)
+        assertEquals(0L, t.doneMs)
         assertEquals(1, board.assignedByMe.size)
         assertEquals("进行中", board.assignedByMe[0].status)
         assertEquals("派出乙", board.assignedByMe[0].title)
