@@ -649,7 +649,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 ### 邮箱（未实现面，先建后比）
 
 - [x] 与 prototypes/desktop-mailbox.html 逐屏比对一致(控件/布局/文案/间距)（0428641 邮箱统一收件箱：rail 信封钮（未读徽章＝服务端 counts 唯一来源）切整屏——console 四页签计数/只看未读/搜索（标题/来源＝服务端 q）/全部标记已读/五列条目表（前四列按原型 flex 2.4/1.2/1/1 分宽；告警=标记已处理·留痕、通知=去会话/去任务/去审批/去群、公告=确认已读·台账）/脚注三面同源/边界①②＋infopanel 详情/已读确认台账（谁/何时）/处理留痕；四类真实事件源入箱（群公告（不含设置者）/@我/任务到期/连续错口令仅 admin）；server+client 双测试绿，实况 live-mailbox[-light|-dark] 入 docs）
-- [ ] 与 prototypes/mobile-mailbox.html 逐屏比对一致(控件/布局/文案/间距)（移动端邮箱；尚无 MailboxActivity）
+- [x] 与 prototypes/mobile-mailbox.html 逐屏比对一致(控件/布局/文案/间距)（bb07805 移动端邮箱：MailboxActivity——屏①列表（appbar「邮箱」＋未读徽章＝服务端 counts 唯一来源、chips 全部/告警/通知/公告计数互斥＋只看未读、条目卡未读＝brand-soft 底＋品牌描边＋状态胶囊、动作行按类目给真钮：告警=去处理(markHandled)+确认已读、公告=详情+确认已读(confirm)、通知=无）＋屏②底部抽屉（公告已读确认台账 who 行（首字头像+账号+已确认/未确认）＋告警处理留痕＋边界注照原型原文）；FilesClient 新增 mailbox 六端点（list/unread/read/handle/confirm/confirmations）；FilesClientTest 邮箱六腿（默认体三键恒发/条件透传/计数/单条与全部已读/409/403+台账解析）28/28 绿＋assembleDebug 绿；近似项（连接面板为原型外补、「转发到群」不摆、布局内抽屉非 BottomSheetDialog、字形图标）记台账；未做模拟器走查暂无实况截图）
 
 ### 移动端
 
