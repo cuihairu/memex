@@ -184,3 +184,43 @@ Audit baseline: HEAD `1dbd1f5`. Four independent forensics batches (README/About
 - **Incidental fix (found outside the audit)**: the README.md "local testing conventions" section had been embedded inside a Build code block (introduced by 4251810) — moved out into its own section, with README.zh.md getting the same section; the zh deployment chain gained a sentence about compose pulling memex-admin on upgrade (aligning with EN:290).
 - **C1–C23 (README/About)**: fix receipts are in their respective commits; C20/C21 (GitHub About description/topics) are judged by the `gh repo edit` result (see receipts).
 - **todo.md ledger tidy**: 564 → 526 lines (312KB → 69KB); all 121 checkboxes kept (120 [x] + 1 [~]), 37 headings intact, the iron rules and R-entry table verbatim; each completed item is one line of requirement + one line of evidence.
+
+## Round 5 (2026-11-01 · README public face: badges / links / language routing / live counts)
+
+Scope: both READMEs (badge row, every link incl. github.io and cuihairu.site, logo assets), repo About face (`gh repo view`), and every drift-prone live count in README / apps/android/README / guide pages. Standard: same three buckets + six steps (~/workspaces/standards/文档与源码一致性审计规范.md).
+
+| ID | Doc page | Claim | Source evidence (file:line) | Category | Severity | Fix |
+|---|---|---|---|---|---|---|
+| D1 | README.md:4 / README.zh.md:4 | docs badge link `https://cuihairu.github.io/memex//` (zh: `…/memex/zh//`), badge img on the logo line | Both double-slash URLs still return 200 (GitHub Pages normalizes) — hygiene, not breakage | Mismatch | P2 | Single slash; docs badge moved into the single centered badge row, logo on its own line |
+| D2 | README.md:25 | "product plan review report" → docs/建设方案评审报告-V10.0.md | Path does not exist in the repo (English digest at docs/plan-review-report-v10.0.md, zh original at docs/zh/建设方案评审报告-V10.0.md); the rendered GitHub link 404s (curl-verified) | Mismatch (dead link) | **P0** | Retargeted to docs/plan-review-report-v10.0.md (200) |
+| D3 | README.zh.md:25 | Same dead path on the zh side | Same missing path; correct zh original verified live (docs/zh/建设方案评审报告-V10.0.md, 3×200 after one transient 000) | Mismatch (dead link) | **P0** | Retargeted to docs/zh/…; English digest linked alongside |
+| D4 | README.zh.md:21-24 | zh README's four doc links point to the English site root (memex/, /guide/product, /guide/decisions, /guide/prototypes) | docs/src/.vitepress/config.mts — zh locale at link '/zh/' (lang zh-CN); /zh/, /zh/guide/{product,decisions,prototypes} all 200 with lang="zh-CN" | Mismatch (wrong-language link) | P1 | All four retargeted to /zh/ variants; source links to docs/src/zh/… |
+| D5 | README.md:104 / README.zh.md:94 | Status badge embedded inside the bash code block | A stray `<p align="center">[![Status]…]</p>` line inside the ```bash fence (both files) — renders as literal text, duplicates the status message | Mismatch | **P0** | Removed from the code block; status badge merged into the single centered badge row |
+| D6 | README.md:74 / README.zh.md:68 | "39/39 unit tests" (Android) | `grep -c '@Test' apps/android/app/src/test` → 101 across 10 files | Code ahead of doc | P1 | 39/39 → 101 (both READMEs) |
+| D7 | apps/android/README.md:12-13,37 | "单测 95 项" / "95 用例" | Same 101 @Test evidence | Code ahead of doc | P1 | 95 → 101 (both spots); test-scope note gains 文件面 |
+| D8 | docs/src/guide/delivery-matrix.md:65 / zh:54 | "95 JVM unit tests" / "JVM 单测 95 项" | Same 101 @Test evidence | Code ahead of doc | P1 | 95 → 101 |
+| D9 | docs/src/guide/delivery-matrix.md:9,39 / zh:7,34 | "83 ctest items" / "ctest 83 项" | `ctest -N` on the current build tree → Total Tests: 88 | Code ahead of doc | P1 | 83 → 88 (four spots) |
+| D10 | docs/src/guide/prototypes.md:3 / zh:3 | Opening: mockups "cover ten desktop screens and four mobile screens" | ls docs/design/prototypes → 24 `desktop-*.html` + `main-empty.html` + 6 `mobile-*.html` = 25 desktop + 6 mobile; the page's own sections below document the larger set | Code ahead of doc | P2 | Opening states the initial ten+four set and the current 25+6 |
+| D11 | README.md:24 / README.zh.md:24 | UI previews "(live screenshots; 8 desktop screens + 4 mobile screens)" | guide/prototypes now carries 12 desktop sections + 6 mobile sections with live shots | Code ahead of doc | P2 | Hardcoded count dropped ("live screenshots, light/dark paired") |
+| D12 | todo.md:220,222 | Evidence lines: Android "39→53→57", iOS "swift test 38 用例" | Android 101 @Test (D6); iOS `grep 'func test' apps/ios/Tests/MemexKitTests` → 53 | Code ahead of doc | P2 | Rewritten to current counts (至 101 / 续补至 53) |
+| D13 | Sweep row (verified-consistent) | README badge targets, logo asset, repo About face, docs-site routing, ports/presets/baseline/compose | docs/src/public/logo.svg exists (1358 B); CI / Codecov / releases badge targets 200; `gh repo view` description matches current vocabulary (dual-engine, Drogon admin), homepageUrl = docs root, 13 topics; 9 github.io routes 200 with correct lang (root lang="en", /zh/ lang="zh-CN"; base '/memex/' + cleanUrls per config.mts); ports 24360/24361/24362-default-off/24561/2425/8089 vs main.cpp:43-71 & docker-compose.yml:64-67 (8088:24360); 9 presets + vcpkg builtin-baseline vs CMakePresets.json / vcpkg.json | Consistent | — | No fix needed |
+
+### Round-5 distribution of the three classes
+
+- **Ahead (doc ahead of code)**: 0.
+- **Behind (code ahead of doc, stale counts/sets)**: 7 (D6–D12).
+- **Mismatch**: 5 (D1–D5).
+
+### Round-5 P0 list
+
+- **D2/D3**: dead review-report links in both README headline sections (curl-verified 404).
+- **D5**: status badge swallowed by a code block in both READMEs (invisible as a badge).
+
+### Verification boundary (recorded, not a defect)
+
+cuihairu.site tunnels: this seat's DNS sits behind a fake-ip proxy (even `dig @1.1.1.1` returns 198.18.x), so public reachability cannot be authoritatively verified from here. admin.memex answers GET / with 404 (plausibly real — the console API is POST-only) and server.memex is a raw TCP tunnel, not HTTP-probeable by design.
+
+### Round-5 fix receipts (2026-11-01)
+
+- D1–D12 all fixed this round (README.md, README.zh.md, apps/android/README.md, delivery-matrix en/zh, prototypes en/zh, todo.md); receipts in the round's `docs:` commits. Single centered badge row per README (docs / CI / Codecov / Status / platform / C++17-Qt6 / License).
+- todo.md tidy (user order, one requirement per line, one evidence line per done item): 668 lines / 116,288 B → 668 lines / 91,260 B (−21.5%); 164 [x] + 2 [ ] + 46 headings unchanged vs HEAD; lines >200 chars 58 → 24; no ✅-date/hash infixes or pseudo-counts (HTTP codes) left in evidence parens.
