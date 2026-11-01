@@ -76,6 +76,23 @@
 - `fix(ui): darken occupied seat markers for wcag non-text contrast`(#9)
 - `fix(ui): scroll instead of clipping frames on small viewports`(#12)
 
+## 修复前后对照(四联)
+
+同视图 before/after 成对截图,存 `docs/review/shots-after/`,文件名对齐问题编号(亮主题为基准;暗主题实测值见上表)。
+
+| # | 问题 | before | after | commit |
+|---|---|---|---|---|
+| 1 | 主行动面白字压品牌橙 3.44:1 | ![#1 before](shots-after/issue-1-before.png) | ![#1 after](shots-after/issue-1-after.png) | `83e61e6`(+`a6d93cc` 气泡) |
+| 2 | 三级灰 `--text-3` 2.75–3.09:1 | ![#2 before](shots-after/issue-2-before.png) | ![#2 after](shots-after/issue-2-after.png) | `f8cfac3` |
+| 3 | 警示 `--warn` 3.64:1 | ![#3 before](shots-after/issue-3-before.png) | ![#3 after](shots-after/issue-3-after.png) | `7f18e18` |
+| 4 | 成功 `--ok` 4.25:1 | ![#4 before](shots-after/issue-4-before.png) | ![#4 after](shots-after/issue-4-after.png) | `7f18e18` |
+| 5 | 品牌深橙 `--brand-deep` 4.35:1 | ![#5 before](shots-after/issue-5-before.png) | ![#5 after](shots-after/issue-5-after.png) | `f8cfac3` |
+| 6 | 输入框 `outline:none` 焦点不可见 | ![#6 before](shots-after/issue-6-before.png) | ![#6 after](shots-after/issue-6-after.png) | `8495d28` |
+| 7 | rail tooltip 仅 hover,键盘不可达 | ![#7 before](shots-after/issue-7-before.png) | ![#7 after](shots-after/issue-7-after.png) | `8495d28` |
+| 8 | 头像初始字 3.64–4.17:1 | ![#8 before](shots-after/issue-8-before.png) | ![#8 after](shots-after/issue-8-after.png) | `dac1ec0` |
+| 9 | office-map 座位 `#E88A2A` 2.37:1 | ![#9 before](shots-after/issue-9-before.png) | ![#9 after](shots-after/issue-9-after.png) | `de39843` |
+| 12 | 小视口 `<1280px` 裁切不可滚 | ![#12 before](shots-after/issue-12-before.png) | ![#12 after](shots-after/issue-12-after.png) | `2c9d668` |
+
 ## 修复后复验
 
 改动后真实浏览器复验(Playwright,桌面 1440×900 与 1000×640):头像 v3–v7 全部压暗到位;office-map 座位与图例一致加深;1000×640 小视口下页面滚动、无裁切。双主题(亮/暗)对比度实测见上表。
