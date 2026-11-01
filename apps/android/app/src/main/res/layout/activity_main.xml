@@ -1,97 +1,153 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 主界面＝会话列表（T6.3）。仅初始化且登录后可达（RouteGuard）。 -->
+<!--
+  主界面＝会话列表（T6.3，原型 mobile-sessions）。仅初始化且登录后可达
+  （RouteGuard）。appbar（标题＋协作态副行＋发起钮）＋搜索框（本会话列表
+  过滤）＋列表＋四页 tabbar（会话 active；邮箱/任务/我真跳转）。
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
+    android:background="#f7f5f2"
     android:fitsSystemWindows="true">
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="16dp"
-        android:text="@string/main_title"
-        android:textSize="18sp"
-        android:textStyle="bold" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp">
+        android:gravity="center_vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="14dp"
+        android:paddingBottom="10dp">
 
-        <EditText
-            android:id="@+id/et_peer"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:hint="@string/main_peer_hint"
-            android:inputType="text"
-            android:maxLines="1" />
+            android:orientation="vertical">
 
-        <Button
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/main_title"
+                android:textColor="@color/text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/main_state_sub"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:textColor="@color/text_tertiary"
+                android:textSize="10.5sp" />
+        </LinearLayout>
+
+        <TextView
             android:id="@+id/btn_new_chat"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/main_new_chat" />
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginStart="10dp"
+            android:background="@drawable/ses_icon_btn"
+            android:gravity="center"
+            android:text="@string/main_new_chat_icon"
+            android:textColor="@color/text_secondary"
+            android:textSize="18sp" />
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/tv_empty"
+    <EditText
+        android:id="@+id/et_search"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="24dp"
-        android:text="@string/main_empty"
-        android:textSize="14sp"
-        android:visibility="gone" />
+        android:layout_marginStart="16dp"
+        android:layout_marginEnd="16dp"
+        android:layout_marginBottom="6dp"
+        android:background="@drawable/ses_search_bg"
+        android:hint="@string/main_search_hint"
+        android:inputType="text"
+        android:maxLines="1"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="9dp"
+        android:paddingBottom="9dp"
+        android:textColorHint="@color/text_tertiary"
+        android:textSize="12.5sp" />
 
     <ListView
         android:id="@+id/lv_conversations"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1"
+        android:divider="@null"
+        android:dividerHeight="0dp"
+        android:scrollbars="none" />
 
+    <TextView
+        android:id="@+id/tv_empty"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:padding="24dp"
+        android:text="@string/main_empty"
+        android:textColor="@color/text_tertiary"
+        android:textSize="12.5sp"
+        android:visibility="gone" />
+
+    <!-- 四页导航：按最新原型组（mobile-mailbox/mobile-tasks）统一为
+         会话/邮箱/任务/我；会话 active -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:paddingStart="12dp"
-        android:paddingEnd="12dp">
+        android:background="#FFFFFF"
+        android:paddingTop="7dp"
+        android:paddingBottom="7dp">
 
-        <Button
-            android:id="@+id/btn_file_assistant"
+        <TextView
+            android:id="@+id/tab_sessions_active"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="@string/main_file_assistant" />
+            android:gravity="center"
+            android:padding="5dp"
+            android:text="@string/nav_sessions"
+            android:textColor="@color/brand_orange"
+            android:textSize="11.5sp"
+            android:textStyle="bold" />
 
-        <Button
-            android:id="@+id/btn_mailbox"
+        <TextView
+            android:id="@+id/tab_mailbox"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="@string/main_mailbox" />
+            android:gravity="center"
+            android:padding="5dp"
+            android:text="@string/mbx_title"
+            android:textColor="@color/text_tertiary"
+            android:textSize="11.5sp" />
 
-        <Button
-            android:id="@+id/btn_tasks"
+        <TextView
+            android:id="@+id/tab_tasks"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="@string/main_tasks" />
+            android:gravity="center"
+            android:padding="5dp"
+            android:text="@string/mbx_tabbar_tasks"
+            android:textColor="@color/text_tertiary"
+            android:textSize="11.5sp" />
 
-        <Button
-            android:id="@+id/btn_me"
+        <TextView
+            android:id="@+id/tab_me"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="@string/main_me" />
-
-        <Button
-            android:id="@+id/btn_logout"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="@string/main_logout" />
+            android:gravity="center"
+            android:padding="5dp"
+            android:text="@string/nav_me"
+            android:textColor="@color/text_tertiary"
+            android:textSize="11.5sp" />
     </LinearLayout>
 </LinearLayout>

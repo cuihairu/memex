@@ -33,6 +33,11 @@
 
     <!-- 主界面＝会话列表（T6.3） -->
     <string name="main_title">会话</string>
+    <string name="main_state_sub">协作态 · %1$s · 消息全量归档</string>
+    <string name="main_search_hint">搜索会话 / 联系人 / 群聊</string>
+    <string name="main_new_chat_icon">+</string>
+    <string name="main_new_chat_title">发起聊天</string>
+    <string name="main_time_yesterday">昨天</string>
     <string name="main_peer_hint">输入对端账号开始聊天</string>
     <string name="main_new_chat">发起</string>
     <string name="main_empty">暂无会话：在下方输入对端账号发起聊天。</string>

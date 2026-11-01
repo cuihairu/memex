@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  会话列表行（原型 mobile-sessions .row）：40dp 圆角头像（首字，底色按账号
+  哈希取原型 v2–v8 七色盘）＋右主体（名称＋时间、预览行）＋未读角标胶囊。
+  原型的在线状态点/已读徽标无对应数据，如实不摆。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp">
+
+    <TextView
+        android:id="@+id/ses_avatar"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:background="@drawable/ses_avatar_bg"
+        android:gravity="center"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="11dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/ses_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:textColor="@color/text_primary"
+                android:textSize="14.5sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/ses_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:textColor="@color/text_tertiary"
+                android:textSize="11sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/ses_sub"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:textColor="@color/text_secondary"
+            android:textSize="12.5sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/ses_unread"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="8dp"
+        android:minWidth="18dp"
+        android:gravity="center"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
+        android:paddingTop="1dp"
+        android:paddingBottom="1dp"
+        android:background="@drawable/ses_unread_bg"
+        android:textColor="#FFFFFF"
+        android:textSize="10.5sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+</LinearLayout>

@@ -25,7 +25,7 @@ import com.memex.im.core.Session
 
 /**
  * 「我」屏（原型 docs/design/prototypes/mobile-me.html）：账号卡＋账号与设备＋
- * 通用＋切换服务器/退出登录。入口在主界面（btn_me），不新造 tab 结构。
+ * 通用＋切换服务器/退出登录。入口在主界面 tabbar「我」（退出登录唯一入口在本屏）。
  *
  * 数据口径（如实边界）：
  * - 账号卡姓名/部门/职务：ORG_QUERY/ORG_DATA（服务端已有能力，T3.1）；
