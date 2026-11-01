@@ -1,0 +1,9 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 己方气泡：品牌填充圆角（白字 AA 5.44:1，同原型 .msg.mine .bubble = brand-fill #b4471b） -->
+    <solid android:color="#B4471B" />
+    <corners
+        android:topLeftRadius="16dp"
+        android:topRightRadius="6dp"
+        android:bottomLeftRadius="16dp"
+        android:bottomRightRadius="16dp" />
+</shape>

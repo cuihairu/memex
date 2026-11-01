@@ -5,6 +5,27 @@
     <color name="brand_orange_dark">#c04f20</color>
     <color name="ic_launcher_background">@color/brand_orange</color>
 
+    <!-- 设计基准令牌（prototypes.css 的 brand-fill 值，白字对比 5.44:1 过 AA；气泡/发送钮等可执行品牌面） -->
+    <color name="brand_fill">#b4471b</color>
+    <color name="brand_soft">#fBECE6</color>
+    <color name="brand_deep_text">#b4471b</color>
+
+    <!-- 文字三级（prototypes.css 的 text-1/2/3） -->
+    <color name="text_primary">#2b2724</color>
+    <color name="text_secondary">#6d645b</color>
+    <color name="text_tertiary">#736a61</color>
+    <!-- 会话底与分隔（panel-2 / line） -->
+    <color name="chat_bg">#faf8f5</color>
+    <color name="line_soft">#1a2b2724</color>
+
+    <!-- 头像身份色板（prototypes.css .avatar.v2–v7，AA 压暗值） -->
+    <color name="avatar_v2">#7c5cbf</color>
+    <color name="avatar_v3">#237373</color>
+    <color name="avatar_v4">#965c11</color>
+    <color name="avatar_v5">#4d6fa8</color>
+    <color name="avatar_v6">#a84a6c</color>
+    <color name="avatar_v7">#3f7439</color>
+
     <!-- 错误提示文字（文件助手失败明示行等） -->
     <color name="error_text">#c62828</color>
 </resources>

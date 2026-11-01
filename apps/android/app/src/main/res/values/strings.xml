@@ -62,13 +62,23 @@
     <string name="me_action_logout">退出登录</string>
     <string name="me_hint">移动端全部功能基于登录账号运行：桌面端才有「本网段临时使用」的未登录形态，移动端不提供。</string>
 
-    <!-- 聊天窗（T6.3） -->
+    <!-- 聊天窗（T6.3），对齐 prototypes/mobile-chat.html 文案 -->
     <string name="chat_send">发送</string>
-    <string name="chat_input_hint">输入消息…</string>
+    <string name="chat_input_hint">发送消息…</string>
     <string name="chat_me">我</string>
     <string name="chat_recalled">（已撤回）</string>
     <string name="chat_not_connected">未连接，请重新登录</string>
     <string name="chat_copied">已复制</string>
+    <string name="chat_back">返回</string>
+    <string name="chat_more">更多</string>
+    <string name="chat_archive_note">协作态 · 本会话消息将进入服务端归档</string>
+
+    <!-- 移动端底部导航（.tabbar，四页） -->
+    <string name="nav_sessions">会话</string>
+    <string name="nav_contacts">通讯录</string>
+    <string name="nav_files">文件</string>
+    <string name="nav_me">我</string>
+    <string name="nav_contacts_not_impl">通讯录暂未提供</string>
 
     <!-- 消息推送（T6.3 第三块：通知渠道与紧急确认，对齐桌面 T4.10 三级） -->
     <string name="channel_message">聊天消息</string>

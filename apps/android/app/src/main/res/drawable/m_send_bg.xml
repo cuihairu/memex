@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 发送钮：品牌填充圆角方（38dp，同原型 .m-send = brand-fill） -->
+    <solid android:color="#B4471B" />
+    <corners android:radius="12dp" />
+</shape>

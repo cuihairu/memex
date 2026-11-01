@@ -653,7 +653,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ### 移动端
 
-- [ ] 与 prototypes/mobile-chat.html 逐屏比对一致(控件/布局/文案/间距)（`ChatActivity.kt`）
+- [x] 与 prototypes/mobile-chat.html 逐屏比对一致(控件/布局/文案/间距)（c75bb34 `ChatActivity.kt`；会话头（返回＋头像＋名称＋更多）＋左右气泡（对方白泡／己方 brand-fill #b4471b AA 白字）＋输入区（归档注＋发送消息…＋品牌发送钮）＋底部四页导航（会话/通讯录/文件/我）；通讯录置灰「暂未提供」（无对应 Activity），己方不列发送者/无已读回执（移动端无该数据）；assembleDebug＋testDebugUnitTest 绿）
 - [ ] 与 prototypes/mobile-init.html 逐屏比对一致(控件/布局/文案/间距)（`InitActivity.kt` / `LoginActivity.kt`）
 - [ ] 与 prototypes/mobile-me.html 逐屏比对一致(控件/布局/文案/间距)（`MeActivity.kt`）
 - [ ] 与 prototypes/mobile-sessions.html 逐屏比对一致(控件/布局/文案/间距)（`MainActivity.kt`）

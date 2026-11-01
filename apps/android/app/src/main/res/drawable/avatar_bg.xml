@@ -1,0 +1,4 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <!-- 头像圆底：运行时用 backgroundTint 着身份色（v2–v7，AA 值） -->
+    <solid android:color="#4D6FA8" />
+</shape>

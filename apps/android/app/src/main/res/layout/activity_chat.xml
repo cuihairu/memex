@@ -1,39 +1,190 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 单聊/群聊消息窗（T6.3）。消息列表 + 底部输入发送。 -->
+<!-- 单聊/群聊消息窗（T6.3），对齐 prototypes/mobile-chat.html：
+     会话头（返回＋头像＋名称＋状态＋更多）→ 消息列表 → 输入区（归档注＋输入＋发送钮）→ 底部导航。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
+    android:background="@color/chat_bg"
     android:fitsSystemWindows="true">
 
+    <!-- .m-chat-head -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="10dp">
+
+        <ImageButton
+            android:id="@+id/btn_back"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/chat_back"
+            android:src="@drawable/ic_back" />
+
+        <TextView
+            android:id="@+id/tv_peer_avatar"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:layout_marginStart="8dp"
+            android:background="@drawable/avatar_bg"
+            android:gravity="center"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:importantForAccessibility="no" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tv_peer_name"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/text_primary"
+                android:textSize="15.5sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_peer_sub"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/text_secondary"
+                android:textSize="10.5sp" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btn_more"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:layout_marginStart="10dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/chat_more"
+            android:src="@drawable/ic_more" />
+    </LinearLayout>
+
+    <!-- .m-chat-scroll -->
     <ListView
         android:id="@+id/lv_messages"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:divider="@null"
-        android:dividerHeight="0dp" />
+        android:dividerHeight="0dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="6dp"
+        android:clipToPadding="false" />
 
+    <!-- .m-input -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="8dp">
+
+        <TextView
+            android:id="@+id/tv_archive_note"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="2dp"
+            android:paddingBottom="6dp"
+            android:text="@string/chat_archive_note"
+            android:textColor="#965C11"
+            android:textSize="10.5sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <EditText
+                android:id="@+id/et_input"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/bubble_in"
+                android:hint="@string/chat_input_hint"
+                android:inputType="textMultiLine"
+                android:maxLines="4"
+                android:minLines="1"
+                android:paddingHorizontal="12dp"
+                android:paddingVertical="10dp"
+                android:textSize="14sp" />
+
+            <ImageButton
+                android:id="@+id/btn_send"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:layout_marginStart="8dp"
+                android:background="@drawable/m_send_bg"
+                android:contentDescription="@string/chat_send"
+                android:src="@drawable/ic_send" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- .tabbar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp">
+        android:background="#FFFFFF">
 
-        <EditText
-            android:id="@+id/et_input"
+        <TextView
+            android:id="@+id/tab_sessions"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:hint="@string/chat_input_hint"
-            android:inputType="textMultiLine"
-            android:maxLines="4"
-            android:minLines="1" />
+            android:gravity="center"
+            android:paddingVertical="8dp"
+            android:text="@string/nav_sessions"
+            android:textColor="@color/brand_deep_text"
+            android:textSize="11sp"
+            android:textStyle="bold" />
 
-        <Button
-            android:id="@+id/btn_send"
-            android:layout_width="wrap_content"
+        <TextView
+            android:id="@+id/tab_contacts"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="@string/chat_send" />
+            android:layout_weight="1"
+            android:gravity="center"
+            android:paddingVertical="8dp"
+            android:text="@string/nav_contacts"
+            android:textColor="@color/text_tertiary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/tab_files"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:paddingVertical="8dp"
+            android:text="@string/nav_files"
+            android:textColor="@color/text_tertiary"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/tab_me"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:paddingVertical="8dp"
+            android:text="@string/nav_me"
+            android:textColor="@color/text_tertiary"
+            android:textSize="11sp" />
     </LinearLayout>
 </LinearLayout>
