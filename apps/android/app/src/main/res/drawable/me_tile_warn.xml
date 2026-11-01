@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 单元图标格·警示（原型 .c-ic 内联 warn 色）：warn-soft 底 -->
+    <solid android:color="@color/warn_soft" />
+    <corners android:radius="9dp" />
+</shape>

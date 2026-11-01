@@ -71,7 +71,8 @@ class MeActivity : AppCompatActivity(), ChatManager.Listener {
         val address = store.serverAddress()
         tvName.text = Session.instance.displayName ?: account
         tvDept.text = getString(R.string.me_org_loading)
-        tvState.text = getString(
+        // 协作态徽章带状态点（原型 .state-badge .dot）
+        tvState.text = "● " + getString(
             R.string.me_state_collab,
             if (address == null) "?" else shownHost(address),
         )
@@ -86,10 +87,28 @@ class MeActivity : AppCompatActivity(), ChatManager.Listener {
         findViewById<TextView>(R.id.tv_me_avatar).text =
             (Session.instance.displayName ?: account).take(1).ifEmpty { "?" }
 
+        // 图标格字形（原型为 SVG 线稿；本仓用字形近似，色随格底）
+        findViewById<TextView>(R.id.tile_me_devices).text = "机"
+        findViewById<TextView>(R.id.tile_me_logins).text = "录"
+        findViewById<TextView>(R.id.tile_me_retention).text = "存"
+        findViewById<TextView>(R.id.tile_me_cache).text = "清"
+        findViewById<TextView>(R.id.tile_me_notify).text = "知"
+        findViewById<TextView>(R.id.tile_me_about).text = "i"
+        findViewById<TextView>(R.id.tile_me_actions).text = "切"
+
         findViewById<View>(R.id.row_me_cache).setOnClickListener { confirmClearCache() }
         findViewById<View>(R.id.row_me_notify).setOnClickListener { openNotifySettings() }
         findViewById<View>(R.id.row_me_about).setOnClickListener { showAbout() }
         findViewById<View>(R.id.row_me_actions).setOnClickListener { showSwitchOrLogout() }
+
+        // 四页导航（我 active；与 ChatActivity tabbar 同式）
+        findViewById<View>(R.id.tab_sessions).setOnClickListener { finish() }
+        findViewById<View>(R.id.tab_contacts).setOnClickListener {
+            Toast.makeText(this, R.string.nav_contacts_not_impl, Toast.LENGTH_SHORT).show()
+        }
+        findViewById<View>(R.id.tab_files).setOnClickListener {
+            startActivity(Intent(this, FileAssistantActivity::class.java))
+        }
     }
 
     override fun onResume() {

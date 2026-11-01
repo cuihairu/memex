@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 单元图标格·成功（原型 .c-ic.g）：ok-soft 底 -->
+    <solid android:color="@color/ok_soft" />
+    <corners android:radius="9dp" />
+</shape>

@@ -43,6 +43,7 @@
 
     <!-- 「我」屏（移动端设置与账号信息，对齐原型 mobile-me.html） -->
     <string name="me_title">我</string>
+    <string name="me_chevron">›</string>
     <string name="me_state_collab">协作态 · %1$s</string>
     <string name="me_org_loading">组织资料加载中…</string>
     <string name="me_sec_account">账号与设备</string>

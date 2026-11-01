@@ -1,0 +1,5 @@
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <!-- 单元图标格·品牌（原型 .c-ic 默认）：brand-soft 底 9dp 圆角 -->
+    <solid android:color="@color/brand_soft" />
+    <corners android:radius="9dp" />
+</shape>
