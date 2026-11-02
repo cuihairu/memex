@@ -661,11 +661,12 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 - [ ] **UI-AUDIT · P2 · 界面审核(impeccable 流程)**:原生桌面界面此前不在 web 界面审核范围,补审——按 impeccable 审计(层级/排版/对比度 a11y/布局/边界态),报告+截图入 docs/review/,坏损当场修。
 
-- [ ] **DOC-GIF · P2 · 文档 · 配置开关效果动态图(每个开关 off→on 对比+GIF)**
+- [x] **DOC-GIF · P2 · 文档 · 配置开关效果动态图(每个开关 off→on 对比+GIF)**
   - 交付:枚举本仓全部「开启后有效果」的开关/配置项;自动流水线生成证据——GUI 类用 @vscode/test-electron 或应用截图(off 一张/on 一张+切换过程录屏),CLI 类用终端录屏(asciinema→GIF 或 ffmpeg);ffmpeg 缝合动态 GIF。
   - 文档:docs「配置效果」页(双语)逐开关嵌入:说明+off 图+on 图+GIF。
   - 验收:清单内每个开关都有 off/on+GIF;流水线可重跑(配置变更随时再生成);兼作配置效果回归测试。
   - 参考:kode todo C-24 同款流水线模式(2026-11-01 用户令全舰队推广)。
+  - 完成=提交 940687a（test_settings_window ⑨ 块产 config-effect-* off/on＋scripts/docs_gif.sh 可重跑流水线）＋7f6774d（docs/guide 双语 config-effects 页＋gifs/*.gif 资产）。清单：主题/新消息通知/提示音/免打扰/网段黑名单（GUI 类，设置窗抓图）＋serve --uplink-port（CLI 类，真实输出渲染）；每开关 off/on 像素差异断言（AE>0）＋ffmpeg xfade GIF；docs build 通过。
 
 ## 2026-11-01 全仓代码深审 backlog（来源=2026-11-01 代码深审；P2/P3 记 todo，P0/P1 无）
 
