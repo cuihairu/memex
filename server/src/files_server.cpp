@@ -1400,14 +1400,8 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     int limit = 200, offset = 0;
     const std::string lim = query_param(query_, "limit");
     const std::string off = query_param(query_, "offset");
-    if (!lim.empty() &&
-        lim.find_first_not_of("0123456789") == std::string::npos) {
-      limit = std::atoi(lim.c_str());
-    }
-    if (!off.empty() &&
-        off.find_first_not_of("0123456789") == std::string::npos) {
-      offset = std::atoi(off.c_str());
-    }
+    limit = safe_int_param(lim, 200, 1000);
+    offset = safe_int_param(off, 0, 999999999);
     const auto rows = impl_.store.list_uplink_files(account, limit, offset);
     json arr = json::array();
     for (const auto& m : rows) {
@@ -2547,10 +2541,8 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     int limit = 100;
     const std::string lim = query_param(query_, "limit");
-    if (!lim.empty()) {
-      const int parsed = std::atoi(lim.c_str());
-      if (parsed > 0) limit = parsed > 500 ? 500 : parsed;
-    }
+    const int parsed = safe_int_param(lim, 0, 500);
+    if (parsed > 0) limit = parsed;
     json arr = json::array();
     for (const auto& r : impl_.store.audit_reads(limit)) {
       arr.push_back({{"id", r.id},
@@ -2596,10 +2588,8 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     int span = 5;
     const std::string span_s = query_param(query_, "span");
-    if (!span_s.empty()) {
-      const int parsed = std::atoi(span_s.c_str());
-      if (parsed > 0) span = parsed;
-    }
+    const int parsed = safe_int_param(span_s, 0, 500);
+    if (parsed > 0) span = parsed;
     const std::string filters = "msg_id=" + msg_id.substr(0, 12);
     if (audit_gate_denied(account, filters)) return;
     const auto rows = impl_.store.context_around(msg_id, span);
@@ -3078,7 +3068,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     }
     const std::string account = me;
     const int size =
-        std::atoi(query_param(query_, "size").c_str());
+        safe_int_param(query_param(query_, "size"), 0, 4096);
     if (size == 0) {
       respond_json(400, {{"ok", false}, {"error", "缺少档位（?size=）"}});
       return;
@@ -3116,7 +3106,7 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     if (me.empty()) return;
     const std::string target = query_param(query_, "account");
     const std::string want = target.empty() ? me : target;
-    const int size = std::atoi(query_param(query_, "size").c_str());
+    const int size = safe_int_param(query_param(query_, "size"), 0, 4096);
     if (!impl_.store.avatar_size_valid(size)) {
       respond_json(400, {{"ok", false},
                          {"error", "档位仅支持 32/64/128/256"}});
@@ -3773,14 +3763,8 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     int limit = 200, offset = 0;
     const std::string lim = query_param(query_, "limit");
     const std::string off = query_param(query_, "offset");
-    if (!lim.empty() && lim.find_first_not_of("0123456789") ==
-                            std::string::npos) {
-      limit = std::atoi(lim.c_str());
-    }
-    if (!off.empty() && off.find_first_not_of("0123456789") ==
-                            std::string::npos) {
-      offset = std::atoi(off.c_str());
-    }
+    limit = safe_int_param(lim, 200, 1000);
+    offset = safe_int_param(off, 0, 999999999);
     if (is_inbox) {
       // 文件助手统一收件箱：备忘录 + 收件箱文件按时间倒序混排，
       // 分页在混排后取窗（memo 取 updated_ms，文件取 upload_ts）。
@@ -4136,14 +4120,8 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     int limit = 200, offset = 0;
     const std::string lim = query_param(query_, "limit");
     const std::string off = query_param(query_, "offset");
-    if (!lim.empty() &&
-        lim.find_first_not_of("0123456789") == std::string::npos) {
-      limit = std::atoi(lim.c_str());
-    }
-    if (!off.empty() &&
-        off.find_first_not_of("0123456789") == std::string::npos) {
-      offset = std::atoi(off.c_str());
-    }
+    limit = safe_int_param(lim, 200, 1000);
+    offset = safe_int_param(off, 0, 999999999);
     const auto rows = impl_.store.list_memos(account, limit, offset);
     json arr = json::array();
     for (const auto& m : rows) {
@@ -4240,14 +4218,8 @@ class FileConn : public std::enable_shared_from_this<FileConn> {
     int limit = 200, offset = 0;
     const std::string lim = query_param(query_, "limit");
     const std::string off = query_param(query_, "offset");
-    if (!lim.empty() &&
-        lim.find_first_not_of("0123456789") == std::string::npos) {
-      limit = std::atoi(lim.c_str());
-    }
-    if (!off.empty() &&
-        off.find_first_not_of("0123456789") == std::string::npos) {
-      offset = std::atoi(off.c_str());
-    }
+    limit = safe_int_param(lim, 200, 1000);
+    offset = safe_int_param(off, 0, 999999999);
     const auto rows = impl_.store.list_group_memos(
         gid, query_param(query_, "q"), limit, offset);
     json arr = json::array();

@@ -44,6 +44,23 @@ int g_failures = 0;
 using memex::server::ServerStore;
 using memex::server::S3Storage;
 
+// CR-2：网络侧整数查询参数溢出防护——≥20 位数字串 atoi 溢出回绕（glibc
+// strtol 饱和 LONG_MAX→int 回绕 -1），绝不能漏成 SQLite LIMIT -1（无限制
+// 整表）或负数进存储层；safe_int_param 必须拒/夹，且不误伤合法值。
+void test_safe_int_param() {
+  using memex::server::safe_int_param;
+  CHECK(safe_int_param("", 200, 1000) == 200);             // 空→默认
+  CHECK(safe_int_param("abc", 200, 1000) == 200);          // 非数字→默认
+  CHECK(safe_int_param("0", 200, 1000) == 0);              // 合法 0 保留
+  CHECK(safe_int_param("3", 200, 1000) == 3);              // 合法小值保留
+  CHECK(safe_int_param("1500", 200, 1000) == 1000);        // 超上限→夹到上限
+  CHECK(safe_int_param("999999999", 200, 1000) == 1000);   // 9 位仍夹
+  CHECK(safe_int_param("1000000000", 200, 1000) == 200);   // 10 位→回退默认
+  CHECK(safe_int_param("99999999999999999999", 200, 1000) == 200);  // CR-2 触发串
+  CHECK(safe_int_param("999999999999999999999999", 0, 1000) == 0);   // 恒非负
+  CHECK(safe_int_param("12345678901234567890", 100, 500) == 100);    // 恒非负
+}
+
 // —— 内存对象存储 Fake：全接口落地，可注入 put 失败 ——
 class FakeS3 final : public S3Storage {
  public:
@@ -199,6 +216,7 @@ std::int64_t uq_used(ServerStore& s, const std::string& uid) {
 } // namespace
 
 int main() {
+  test_safe_int_param();  // CR-2 单元腿：先于 HTTP 面，独立可红
   asio::io_context io;
   ServerStore store;
   CHECK(store.open(":memory:"));
@@ -476,6 +494,17 @@ int main() {
   const auto mls_o = http(port, "GET", "/files/memo", H("owner1"), "");
   CHECK(mls_o.status == 200);
   CHECK(mls_o.body.find("first note") == std::string::npos);
+  // CR-2 回归：≥20 位 limit 不得回绕成 SQLite LIMIT -1（无限制整表）——
+  // 应回退默认 200、200 OK 且仍返回全部条目；10 位/非数字同样回退不报错。
+  const auto ml_huge = http(
+      port, "GET", "/files/memo?limit=99999999999999999999", H("member1"), "");
+  CHECK(ml_huge.status == 200);
+  CHECK(ml_huge.body.find("first note") != std::string::npos &&
+        ml_huge.body.find("second note") != std::string::npos);
+  CHECK(http(port, "GET", "/files/memo?limit=1234567890", H("member1"), "")
+            .status == 200);
+  CHECK(http(port, "GET", "/files/memo?limit=abc", H("member1"), "")
+            .status == 200);
   // 编辑：带 id POST；改后内容回读一致；他人编辑 403
   CHECK(http(port, "POST", "/files/memo", H("member1"),
              "{\"id\":" + std::to_string(mid1) +

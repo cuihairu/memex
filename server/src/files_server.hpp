@@ -16,6 +16,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>  // safe_int_param：std::atol
 #include <functional>
 #include <memory>
 #include <string>
@@ -28,6 +29,18 @@
 #include "store.hpp"
 
 namespace memex::server {
+
+// 整数查询参数安全解析（网络侧，CR-2）：仅全数字串才解析；>9 位（10 位起
+// 可能逼近/超过 int 上限，std::atoi 溢出回绕——SQLite 的 LIMIT -1 意为
+// 无限制，负数/超大值绝不能漏进存储层）一律回退默认值；9 位以内解析后
+// 夹到调用方上限（limit 1000／span 500 等语义上限）。非数字/空同样回退。
+inline int safe_int_param(const std::string& s, int def, int max_val) {
+  if (s.empty() || s.find_first_not_of("0123456789") != std::string::npos)
+    return def;
+  if (s.size() > 9) return def;
+  const long v = std::atol(s.c_str());  // 9 位数字必在 int 范围内
+  return static_cast<int>(v > max_val ? max_val : v);
+}
 
 // R25-2 工具结果卡片回群回调：FileServer 不持 CollabServer（两面各自
 // 独立端口），main 接线 deliver_notice（走 NOTICE 信封＝离线入队＋归档
