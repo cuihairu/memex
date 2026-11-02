@@ -14,6 +14,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QImage>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
@@ -462,6 +463,90 @@ int main(int argc, char** argv) {
     QThread::msleep(120);
     QApplication::processEvents(QEventLoop::AllEvents, 30);
     CHECK(sw.grab().save(dir + QStringLiteral("/live-settings-advanced-dark.png")));
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+  }
+
+  // —— ⑨ 配置开关 off/on 抓图（DOC-GIF 证据源：设置项关/开两态，light 档；
+  //      gifs 由 scripts/docs_gif.sh 以 ffmpeg xfade 合成。本块兼作配置效果
+  //      回归断言：关/开两态都能抓、且两态像素确有差异（开关翻转可见）。
+  //      还原真实控件态，避免串味后续断言。）
+  {
+    const QString dir = QStringLiteral(MEMEX_DOCS_SHOT_DIR);
+    auto& tm = memex::client::ThemeManager::instance();
+    tm.set_mode(QStringLiteral("light"));
+    QThread::msleep(120);
+    QApplication::processEvents(QEventLoop::AllEvents, 30);
+
+    const auto pump = [] {
+      QThread::msleep(120);
+      QApplication::processEvents(QEventLoop::AllEvents, 30);
+    };
+    // 两态像素确有差异（同一控件翻转→可见变化）；同态则开关无效果＝回归红
+    const auto pair_differs = [&](const QString& base) {
+      const QImage a(dir + QStringLiteral("/") + base + QStringLiteral("-off.png"));
+      const QImage b(dir + QStringLiteral("/") + base + QStringLiteral("-on.png"));
+      if (a.isNull() || b.isNull()) return false;
+      return a != b;  // 像素级不等（QImage::operator!=）
+    };
+
+    // 消息页：新消息通知（popup_message）、提示音三档（sound_mode）、免打扰（dnd）
+    if (sw.show_page(QStringLiteral("message"))) {
+      auto* desktop =
+          sw.findChild<QCheckBox*>(QStringLiteral("settings_msg_desktop"));
+      auto* sound = sw.findChild<QComboBox*>(QStringLiteral("settings_msg_sound"));
+      auto* dnd = sw.findChild<QCheckBox*>(QStringLiteral("settings_msg_dnd"));
+      if (desktop && sound && dnd) {
+        const bool orig_desktop = desktop->isChecked();
+        desktop->setChecked(false);
+        pump();
+        CHECK(sw.grab().save(dir + QStringLiteral("/config-effect-notify-off.png")));
+        desktop->setChecked(true);
+        pump();
+        CHECK(sw.grab().save(dir + QStringLiteral("/config-effect-notify-on.png")));
+        desktop->setChecked(orig_desktop);
+        CHECK(pair_differs(QStringLiteral("config-effect-notify")));
+
+        const int orig_sound = sound->currentIndex();
+        sound->setCurrentIndex(0);  // 全部关闭
+        pump();
+        CHECK(sw.grab().save(dir + QStringLiteral("/config-effect-sound-off.png")));
+        sound->setCurrentIndex(2);  // 按事件类型
+        pump();
+        CHECK(sw.grab().save(dir + QStringLiteral("/config-effect-sound-on.png")));
+        sound->setCurrentIndex(orig_sound);
+        CHECK(pair_differs(QStringLiteral("config-effect-sound")));
+
+        const bool orig_dnd = dnd->isChecked();
+        dnd->setChecked(false);
+        pump();
+        CHECK(sw.grab().save(dir + QStringLiteral("/config-effect-dnd-off.png")));
+        dnd->setChecked(true);
+        pump();
+        CHECK(sw.grab().save(dir + QStringLiteral("/config-effect-dnd-on.png")));
+        dnd->setChecked(orig_dnd);
+        CHECK(pair_differs(QStringLiteral("config-effect-dnd")));
+      }
+    }
+
+    // 高级页：网段黑名单（net_blacklist 真实键）
+    if (sw.show_page(QStringLiteral("advanced"))) {
+      auto* blacklist =
+          sw.findChild<QCheckBox*>(QStringLiteral("settings_adv_blacklist"));
+      if (blacklist) {
+        const bool orig = blacklist->isChecked();
+        blacklist->setChecked(false);
+        pump();
+        CHECK(sw.grab().save(dir + QStringLiteral("/config-effect-blacklist-off.png")));
+        blacklist->setChecked(true);
+        pump();
+        CHECK(sw.grab().save(dir + QStringLiteral("/config-effect-blacklist-on.png")));
+        blacklist->setChecked(orig);
+        CHECK(pair_differs(QStringLiteral("config-effect-blacklist")));
+      }
+    }
+
     tm.set_mode(QStringLiteral("light"));
     QThread::msleep(120);
     QApplication::processEvents(QEventLoop::AllEvents, 30);
