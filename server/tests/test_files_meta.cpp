@@ -43,6 +43,45 @@ void test_shell_quote() {
   CHECK(shell_quote("a$(rm -rf /)b") == "'a$(rm -rf /)b'");
   CHECK(shell_quote("`cmd`;|&<>") == "'`cmd`;|&<>'");
 }
+
+// CR-4：出厂默认凭据判定 + 生成时大声警告实际触发（捕获 stderr 断言，
+// 不只测助手本身——警告没打到操作员脸上等于没修）。
+void test_default_credential() {
+  using memex::server::is_default_credential;
+  CHECK(is_default_credential("minioadmin", "minioadmin"));
+  CHECK(is_default_credential("minioadmin", "s3cret"));  // 半默认也算
+  CHECK(is_default_credential("s3cret", "minioadmin"));
+  CHECK(!is_default_credential("AK", "SK"));
+  CHECK(!is_default_credential("", ""));
+
+  // 默认凭据落盘：写成功、内容如实含默认值，且 stderr 警告触发
+  const std::string p = "/tmp/memex_test_rustfs_default_creds.yml";
+  std::ostringstream captured;
+  std::streambuf* old = std::cerr.rdbuf(captured.rdbuf());
+  const bool ok = RustFSCompose::write_compose_file(
+      p, "/data/rustfs", "minioadmin", "minioadmin", 9000, 9001);
+  std::cerr.rdbuf(old);
+  CHECK(ok);
+  CHECK(captured.str().find("[MEMEX][警告]") != std::string::npos);
+  CHECK(captured.str().find("minioadmin") != std::string::npos);
+  std::ifstream ifs(p);
+  std::stringstream ss;
+  ss << ifs.rdbuf();
+  CHECK(ss.str().find("RUSTFS_ACCESS_KEY: \"minioadmin\"") !=
+        std::string::npos);
+  std::remove(p.c_str());
+
+  // 强凭据：不告警（静默放行非默认值）
+  std::ostringstream captured2;
+  std::streambuf* old2 = std::cerr.rdbuf(captured2.rdbuf());
+  const bool ok2 =
+      RustFSCompose::write_compose_file(p, "/data/rustfs", "AKxyz", "SKxyz",
+                                        9000, 9001);
+  std::cerr.rdbuf(old2);
+  CHECK(ok2);
+  CHECK(captured2.str().find("[MEMEX][警告]") == std::string::npos);
+  std::remove(p.c_str());
+}
 using ServerStore = memex::server::ServerStore;
 
 ServerStore::FileMeta mk(const std::string& owner, const std::string& hash,
@@ -66,6 +105,7 @@ ServerStore::FileMeta mk(const std::string& owner, const std::string& hash,
 
 int main() {
   test_shell_quote();  // CR-3 单元腿：先于其余腿，独立可红
+  test_default_credential();  // CR-4 单元腿：默认凭据告警触发
   // —— 元数据表：创建/字段回读/空参拒绝 ——
   {
     ServerStore s;

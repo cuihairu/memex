@@ -341,7 +341,22 @@ bool RustFSCompose::write_compose_file(const std::string& path,
   std::ofstream ofs(path);
   if (!ofs) return false;
   ofs << content;
-  return ofs.good();
+  if (!ofs.good()) return false;
+  // CR-4 默认凭据强制：RustFS 出厂 minioadmin/minioadmin 是公开已知值，
+  // 谁触达 9000 端口都能读写对象。生成时若仍见默认值（任一腿），大声警告
+  // ——部署口令改没改在起容器前就给信号（不静默、不随机生成：serve 路径
+  // 要求显式凭据且 compose/服务端须同值，随机生成有不同步风险）。
+  if (is_default_credential(access_key, secret_key)) {
+    std::cerr << "\n"
+              << "[MEMEX][警告] 对象存储凭据仍为出厂默认 minioadmin！\n"
+              << "  公开已知凭据，任何能触达 " << api_port
+              << " 端口者均可读写对象。生产必须更换：\n"
+              << "  1. 先 memex_server storage down <compose.yml>\n"
+              << "  2. 以 --access-key/--secret-key 指定强随机值重新生成\n"
+              << "  3. server 启动以同名 MEMEX_S3_ACCESS_KEY/MEMEX_S3_SECRET_KEY\n"
+              << "     与 compose 对齐（值不同则连接直接失败，明示不静默）\n";
+  }
+  return true;
 }
 
 bool RustFSCompose::up(const std::string& compose_path) {

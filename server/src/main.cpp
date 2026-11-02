@@ -2964,6 +2964,10 @@ int cmd_storage(int argc, char** argv, const std::string& /*db_path*/) {
               << "注意：rustfs 容器以 uid 10001 运行，起容器前须\n"
               << "  chown 10001:10001 " << data_dir << "\n"
               << "下一步：memex_server storage up " << out << "\n";
+    if (memex::server::is_default_credential(ak, sk)) {
+      std::cout << "改口令：先 storage down，再用 --access-key/--secret-key\n"
+                << "  重新生成（勿对生产用默认凭据；server 端 env 须同名对齐）\n";
+    }
     return 0;
   }
   if (sub == "up" || sub == "down") {

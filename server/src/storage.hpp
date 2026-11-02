@@ -105,6 +105,14 @@ class S3Storage {
   virtual bool delete_objects(const std::vector<std::string>& keys) = 0;
 };
 
+// 出厂默认凭据判定（CR-4）：RustFS 默认 minioadmin/minioadmin 是公开已知
+// 值，任一腿仍是它即视为默认（半个凭据泄露同样不可接受）。命中时 compose
+// 生成与 CLI 须大声警告——不静默放行。
+inline bool is_default_credential(const std::string& access_key,
+                                  const std::string& secret_key) {
+  return access_key == "minioadmin" || secret_key == "minioadmin";
+}
+
 // shell 单引号转义（CR-3）：compose 生成器把 operator 提供的 compose_path /
 // endpoint 拼接进 std::system 命令串——含空格或单引号会破句/注入。单引号内
 // 一切字符按字面，仅需把 ' 换成 '\''（POSIX sh 惯用）。
