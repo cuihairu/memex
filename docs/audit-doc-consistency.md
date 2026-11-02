@@ -224,3 +224,71 @@ cuihairu.site tunnels: this seat's DNS sits behind a fake-ip proxy (even `dig @1
 
 - D1–D12 all fixed this round (README.md, README.zh.md, apps/android/README.md, delivery-matrix en/zh, prototypes en/zh, todo.md); receipts in the round's `docs:` commits. Single centered badge row per README (docs / CI / Codecov / Status / platform / C++17-Qt6 / License).
 - todo.md tidy (user order, one requirement per line, one evidence line per done item): 668 lines / 116,288 B → 668 lines / 91,260 B (−21.5%); 164 [x] + 2 [ ] + 46 headings unchanged vs HEAD; lines >200 chars 58 → 24; no ✅-date/hash infixes or pseudo-counts (HTTP codes) left in evidence parens.
+
+## Round 6 (2026-11-02 · doc-vs-source drift: guide pages, design docs, todo/BUGS evidence paths, third_party registry)
+
+Scope: guide pages (en+zh) drift-prone claims (tables/counts/paths/defaults), the concrete implementable
+claims of the design docs (endpoints, ports, defaults, set sizes), todo.md and BUGS.md evidence paths,
+the third_party registry versions. Standard: same three buckets + the six steps
+(~/workspaces/standards/文档与源码一致性审计规范.md). Fix direction: source-wins.
+
+| ID | Doc page | Claim | Source evidence (file:line) | Category | Severity | Fix |
+|---|---|---|---|---|---|---|
+| E1 | docs/src/guide/authorization.md:63 / zh:82 | "identities table" | The table is `identity_bindings` (server/src/store.cpp:783); no `identities` table exists | Mismatch | P2 | → `identity_bindings` (both pages) |
+| E2 | docs/src/guide/backup-restore.md:11 / zh:18 | Backup key prefix `inbox/{uid}/…` | Object prefixes are only `groups/{gid}/` and `users/{uid}/` (files_server object-key computation); `inbox` is a category of `files.kind`, not a key prefix — the `inbox/{uid}/` prefix does not exist | Mismatch | P2 | Dropped the phantom prefix; stated category = `files.kind` |
+| E3 | docs/src/guide/report.md:3 / zh:3 | Links `docs/建设方案评审报告-V10.0.md` | Path does not exist; the zh original is `docs/zh/建设方案评审报告-V10.0.md`, English digest `docs/plan-review-report-v10.0.md` — the rendered GitHub link 404s | Mismatch (dead link) | **P0** | Retargeted to the real zh path + English digest linked |
+| E4 | docs/src/guide/file-storage.md:4 / zh:7 | Links `docs/design/文件存储与外网单向传输.md` | That Chinese-named path moved to `docs/zh/design/` (7fe568f); the en original is `docs/design/file-storage-and-one-way-outbound-transfer.md` | Mismatch (dead path) | **P0** | Retargeted to the moved zh path + en design doc |
+| E5 | docs/src/guide/prototypes.md:136 / zh:326,335 | Agent heartbeat "15s / 掉线 60s" | Actual: heartbeat 30s (server/src/agent_main.cpp:139 `interval_s = 30`), offline 90s (server/src/files_server.cpp:35 `kAgentOnlineMs = 90 * 1000`); the client badge repeated the stale 15s/60s (client/app/group_server_dialog.cpp:74) | Mismatch (+ client UI bug) | P1 | Doc → 30s/90s (both pages); UI badge → 30s/90s (source-wins, code commit) |
+| E6 | docs/src/guide/crash-reporting.md:109 / zh:92 | "83 tests" | `ctest -N` on the current tree → Total Tests: 88 (D9 already moved delivery-matrix to 88; this page lagged) | Code ahead of doc | P1 | 83 → 88 (both pages) |
+| E7 | README.md:287 / README.zh.md:237 | "All console APIs are POST-only" | 47 `/files/*` GET routes exist; read-only GET = session-only, state-changing POST = session + X-Memex-Admin header (admin surface design); "all POST-only" understates the surface | Mismatch | P2 | Corrected: session required; state-change POST needs the admin header; read GET is session-only |
+| E8 | todo.md:151 | Evidence path `client/tests/test_window_layout.cpp` | The file is at `client/app/tests/test_window_layout.cpp`; `client/tests/` does not contain it | Mismatch | P2 | → `client/app/tests/…` |
+| E9 | todo.md (12 refs: 59,63,81-85,229,264,277,288,335,346,357,360,387,405,541,548,596) | Evidence paths `docs/design/<Chinese>.md` | 23 Chinese-named design files moved to `docs/zh/design/` (7fe568f); only `基础平台化改造计划（身份-组织-授权-归档）.md` remains in `docs/design/` | Mismatch (broad dead-path cluster) | P1 | 12 moved refs → `docs/zh/design/`; the unmigrated file left at the old path |
+| E10 | BUGS.md:91,92 | `docs/design/消息标识与归档去重.md` | Moved to `docs/zh/design/` (same 7fe568f move) | Mismatch | P2 | → `docs/zh/design/…` |
+| E11 | third_party/README.md:45 | Vite 6.4.3 | pnpm overrides pin 6.4.4 (docs/package.json + pnpm-lock) | Code ahead of doc | P3 | 6.4.3 → 6.4.4 |
+| E12 | third_party/README.md:30 | swift-protobuf 1.38.1 | 2026-11-01 resolution 1.39.0 (apps/ios Package.resolved; Package.swift declares from 1.26.0) | Code ahead of doc | P3 | 1.38.1 → 1.39.0 |
+| E13 | todo.md:486 | "90 个 `/files/*` HTTP 路由 + 19 个 CLI 子命令" | 104 distinct `/files/*` path literals (124 route-match legs) + 21 top-level subcommands (server/src/main.cpp:3111-3131); both counts grew past the 2026-10-11 inventory | Code ahead of doc | P2 | → 104 routes + 21 subcommands |
+| E14 | todo.md:596 | "设计稿 `docs/design/` 23 篇" + enumeration | The 23-file zh set moved to `docs/zh/design/`; the enumeration missed `knowledge-deposition-loop.md` and wrongly listed `基础平台化改造计划…` (which never moved, still in `docs/design/`) | Code ahead of doc | P2 | Retargeted to `docs/zh/design/`; enumeration corrected (23 incl. knowledge-deposition-loop; unmigrated file noted in parentheses) |
+| E15 | docs/design/remote-assistance.md:30 | "GET /audit?id=" | Route is `POST /files/assist/audit` (id in the JSON body) — there is no GET audit route on the assist surface | Mismatch | P2 | → POST /files/assist/audit |
+| E16 | docs/design/brand-assets.md:116-117 | Login-window default file port 24362 | `default_files_port()` returns 24561 (client/engine/collab/collab_defaults.hpp:24-26); 24362 is the model-gateway port — a user following the doc configures the wrong port | Mismatch | **P0** | → 24561 |
+| E17 | docs/design/file-storage-and-one-way-outbound-transfer.md:7 | Uplink default dangerous-extension blacklist "24 items" | The `UplinkPolicy` ext_denylist has 23 entries (files_server.hpp:78-81, exe…rpm) | Mismatch | P2 | 24 → 23 |
+
+### Round-6 distribution of the three classes
+
+- **Ahead (doc ahead of code)**: 0 — every "not implemented" design doc is explicitly marked planned; no ghost surface claimed.
+- **Behind (code ahead of doc, stale counts/sets)**: 5 (E6, E11, E12, E13, E14).
+- **Mismatch (description wrong / dead path)**: 12 (E1–E5, E7–E10, E15–E17).
+
+### Round-6 P0 list
+
+- **E3/E4**: dead paths in published guide pages (report.md, file-storage.md) — the rendered site links 404.
+- **E16**: brand-assets design doc tells the reader the login window's default file port is 24362 (it is
+  24561; 24362 is the model gateway) — a user following the doc misconfigures the connection.
+
+### Verification boundary (recorded, not a defect)
+
+- The prototype-conformance ledger's running ctest totals ("84/84 → 85/85 → 86/86", todo.md:613-647) were
+  **verified accurate at their own commits** (`git grep add_test` at afa99fd = 84, 34944f9 = 85,
+  803a188/7881b64/611545f = 86); current tree is 88. These are per-commit snapshots, not drift — left
+  unchanged (the originally-suspected "stale ctest totals" item is excluded as a false positive).
+- README public-face items (badges/links/routing) were re-checked in Round 5 and are unchanged this round.
+
+### Round-6 fix receipts (2026-11-02) — four-segment general ledger
+
+**① Findings & buckets**: 17 findings (3 P0, 3 P1, 9 P2, 2 P3); doc-ahead 0 / code-ahead 5 / mismatch 12.
+
+**② P0 disposition**: all three P0 (E3, E4, E16) fixed this round; none required a code change (source-wins).
+
+**③ Fix receipts** (file:line → change; commits in the round's `docs:` + `fix:` commits):
+- E1 authorization.md / zh:82; E2 backup-restore.md / zh:18; E3 report.md / zh:3; E4 file-storage.md / zh:7;
+  E5 prototypes.md / zh:326,335 **+ client/app/group_server_dialog.cpp:74** (code commit); E6 crash-reporting.md
+  / zh:92; E7 README.md:287 / README.zh.md:237; E8 todo.md:151; E9 todo.md 12 refs; E10 BUGS.md:91,92;
+  E11/E12 third_party/README.md:45,30; E13 todo.md:486; E14 todo.md:596; E15 remote-assistance.md:30;
+  E16 brand-assets.md:116-117; E17 file-storage…md:7.
+
+**④ Gates & commits**: docs build green — local pnpm is 12.10.1 which refuses the legacy `pnpm.overrides`
+in docs/package.json (CI pins pnpm 10), so the gate ran the exact command line `pnpm docs:build` expands
+to (`vitepress build src`, vitepress 1.6.4): **zero dead links, build complete in 8.17s** — and the gate
+earned its keep: the first E3 attempt used a site-relative link to a repo-root file and the build caught
+it (2 dead links, exit 1); fixed to the guide-page convention (absolute GitHub URL) before landing.
+Release build green; ctest 88/88; one commit per batch (badge fix `fix:`, docs drift `docs:`, audit report
+`docs:`); `git pull --rebase` before push; no tags, no force push. Commit list in the round's push.
