@@ -659,7 +659,8 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] 与 prototypes/mobile-sessions.html 逐屏比对一致(控件/布局/文案/间距)（1016292）
 - [x] 与 prototypes/mobile-tasks.html 逐屏比对一致(控件/布局/文案/间距)（18a72cf）
 
-- [ ] **UI-AUDIT · P2 · 界面审核(impeccable 流程)**:原生桌面界面此前不在 web 界面审核范围,补审——按 impeccable 审计(层级/排版/对比度 a11y/布局/边界态),报告+截图入 docs/review/,坏损当场修。
+- [x] **UI-AUDIT · P2 · 界面审核(impeccable 流程)**:原生桌面界面此前不在 web 界面审核范围,补审——按 impeccable 审计(层级/排版/对比度 a11y/布局/边界态),报告+截图入 docs/review/,坏损当场修。
+  完成=2026-11-02。Windows Server 2022 实机(openclaw)跑真实二进制,亮/暗双主题×未发现设备/未登录/320px 窄窗边界态取证,截图 4 张入 `docs/review/ui-audit-native-2026-11-02/`,报告 `docs/review/2026-11-02-ui-audit-native.md`(提交 2900bb6)。层级/排版/布局/边界态无坏损;对比度 a11y 坏损 2 项当场修:亮 text_muted #7d7169→#6e6256(0e4c782,全部承载面 ≥4.76:1,test_theme 断言 3.0→4.5 并新增 brand_tint 腿)、亮 brand_text #a05a26→#9c5220(b286843,选中行 4.24→4.64:1,断言同步收紧);on_brand 3.44:1 达 AA-large/1.4.11 不达正文 AA,品牌决策记录不改;暗色全套令牌实测全过。
 
 - [x] **DOC-GIF · P2 · 文档 · 配置开关效果动态图(每个开关 off→on 对比+GIF)**
   - 交付:枚举本仓全部「开启后有效果」的开关/配置项;自动流水线生成证据——GUI 类用 @vscode/test-electron 或应用截图(off 一张/on 一张+切换过程录屏),CLI 类用终端录屏(asciinema→GIF 或 ffmpeg);ffmpeg 缝合动态 GIF。
