@@ -292,3 +292,28 @@ earned its keep: the first E3 attempt used a site-relative link to a repo-root f
 it (2 dead links, exit 1); fixed to the guide-page convention (absolute GitHub URL) before landing.
 Release build green; ctest 88/88; one commit per batch (badge fix `fix:`, docs drift `docs:`, audit report
 `docs:`); `git pull --rebase` before push; no tags, no force push. Commit list in the round's push.
+
+## Re-audit 2026-11-02 (G3 batch)
+
+Scope: public face (README.md / README.zh.md) re-evidenced against
+docker-compose.yml, CMakePresets.json, server/src/main.cpp, git tags, and
+docs/package.json; AI-flavor sweep over all md surfaces. Prior rounds
+(2026-10-08/10-19) not re-litigated; new findings below — all fixed this round,
+source untouched.
+
+| ID | Doc page | Claim | Source evidence (file:line) | Category | Severity | Fix |
+|----|----------|-------|------------------------------|----------|----------|-----|
+| G1 | README.md:10 / README.zh.md:10 | Badge block | Every badge rendered twice (linked `<a>` + bare `<img>` dup), and a stray outer `<p align="center">` nested around it (invalid HTML) | Mismatch | P1 | Deduped 12→7 badges, single centered line, both READMEs |
+| G2 | README.md Engineering Discipline / README.zh.md 同段 | "no git tags / 不打 git tag" | `git tag` = `nightly` (rolling); repo does carry one tag | Mismatch | P2 | Reworded to "no version tags / 不打版本 tag" |
+| G3 | README.md Documentation / README.zh.md 文档 | "build with `pnpm docs:build`" (from repo root) | No root package.json; the script lives in docs/package.json (`docs:build: vitepress build src`) | Mismatch | P2 | Both READMEs now say run it from `docs/` |
+
+Verified, no action: compose ports 8088→24360 / 24360 / 24361 / 24561 / 8089 match
+docker-compose.yml; presets dev/ci/server-release/client-release(-win/-mac/-ohos)/
+server-release-mac all present in CMakePresets.json; server CLI flags (`--db`,
+`--port`, `--webhook-port`, `--files-port`, `--s3-endpoint`, `--model-port`) and
+`account add … --role` / `org role grant` subcommands present in server/src/main.cpp;
+install.sh / install.ps1 exist; honest in-house + third_party disclosure intact.
+AI-flavor sweep: no actionable hits — 自研/100%/永不 occurrences are decision
+records, coverage figures and design invariants (legal per the copy standard).
+todo.md: already in the compact requirement+evidence format (676 lines, 169
+evidenced done rows); no changes.

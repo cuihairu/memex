@@ -6,15 +6,13 @@
 
 <h1 align="center">Memex · 内网办公即时通讯系统</h1>
 
-<p align="center">
-<p align="center"><a href="https://cuihairu.github.io/memex/zh/"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue" alt="docs" /></a> <img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue" alt="docs" /> <a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a> <img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /> <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov 覆盖率" /></a> <img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov 覆盖率" /> <a href="https://github.com/cuihairu/memex/releases"><img src="https://img.shields.io/badge/status-in%20development-orange" alt="Status: in development" /></a> <img src="https://img.shields.io/badge/status-in%20development-orange" alt="Status: in development" /> <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iOS%20%7C%20HarmonyOS-e16531" alt="平台支持" /> <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" /> <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a> <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></p>
-</p>
+<p align="center"><a href="https://cuihairu.github.io/memex/zh/"><img src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-blue" alt="docs" /></a> <a href="https://github.com/cuihairu/memex/actions/workflows/ci.yml"><img src="https://github.com/cuihairu/memex/actions/workflows/ci.yml/badge.svg" alt="CI" /></a> <a href="https://codecov.io/gh/cuihairu/memex"><img src="https://codecov.io/gh/cuihairu/memex/graph/badge.svg" alt="Codecov 覆盖率" /></a> <a href="https://github.com/cuihairu/memex/releases"><img src="https://img.shields.io/badge/status-in%20development-orange" alt="Status: in development" /></a> <a href="./LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License: Apache-2.0" /></a> <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20iOS%20%7C%20HarmonyOS-e16531" alt="平台支持" /> <img src="https://img.shields.io/badge/C%2B%2B17-Qt%206-e16531" alt="C++17 / Qt 6" /></p>
 
 内网物理隔离环境下的办公即时通讯系统，参照企业微信的功能范围，覆盖沟通、办公、组织与归档检索能力。业务层全部自写，底座采用开源组件：Qt 6、asio、protobuf、SQLite、OpenSSL、AWS SDK（S3 接口，对接 RustFS），清单与许可见 [third_party/](third_party/README.md)；不基于任何开源 IM 二次开发，不集成 AGPL／SSPL 等强传染性许可组件。桌面客户端 C++17 + Qt（Linux 走 CI，Windows／macOS 产物来自每日构建矩阵）；手机端 Android（Kotlin，已落地）／iOS（Swift，代码-only＋CI 验证）／鸿蒙 NEXT（ArkTS，代码-only＋CI 逻辑验证）；服务端 C++17 单进程单库。
 
 ## 文档
 
-- 文档站（GitHub Pages，中文）：<https://cuihairu.github.io/memex/zh/> ——界面预览、快速预览、架构与合规；源码在 `docs/`（VitePress，构建 `pnpm docs:build`）
+- 文档站（GitHub Pages，中文）：<https://cuihairu.github.io/memex/zh/> ——界面预览、快速预览、架构与合规；源码在 `docs/`（VitePress，在 `docs/` 下执行 `pnpm docs:build` 构建）
 - 产品定位一页纸（中文）：<https://cuihairu.github.io/memex/zh/guide/product> · 源 [docs/src/zh/guide/product.md](docs/src/zh/guide/product.md)
 - 评审组决策清单（中文；十五项 + 一项可选）：<https://cuihairu.github.io/memex/zh/guide/decisions> · 源 [docs/src/zh/guide/decisions.md](docs/src/zh/guide/decisions.md)
 - 界面预览（中文；实况截图，亮暗成对）：<https://cuihairu.github.io/memex/zh/guide/prototypes> · 原型源 docs/design/prototypes/
@@ -275,4 +273,4 @@ RustFS 对象存储可用 `./build-server/server/memex_server storage compose`�
 
 ## 工程纪律
 
-全量测试绿才允许 commit／push，push 前先 `git fetch origin && git rebase origin/main`；每个可验收增量一笔提交，不打 git tag、不发正式版本（每日构建滚动二进制是正常交付面——滚动 `nightly` Release＋`sha-`／latest 镜像 tag）、不 force push。许可上不引入 AGPL／SSPL 组件，宽松许可组件登记进 `third_party/` 清单。命名按报告第五章第六节：代号 Memex，服务名 MemexServer，数据库与日志前缀 `memex`。
+全量测试绿才允许 commit／push，push 前先 `git fetch origin && git rebase origin/main`；每个可验收增量一笔提交，不打版本 tag、不发正式版本（每日构建滚动二进制是正常交付面——滚动 `nightly` Release＋`sha-`／latest 镜像 tag）、不 force push。许可上不引入 AGPL／SSPL 组件，宽松许可组件登记进 `third_party/` 清单。命名按报告第五章第六节：代号 Memex，服务名 MemexServer，数据库与日志前缀 `memex`。
