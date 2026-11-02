@@ -4,7 +4,7 @@
 > 生命周期的口径页（2026-10-13 评审五「文件生命周期口径对齐」落地）。
 > 决策背景见 [决策清单 #7](/zh/guide/decisions)（集中部署·存储分卷实装——本页是 #7
 > 存储分卷落在文件面上的子口径，决策清单无独立的文件存储专项条目）；设计全文见仓库内
-> `docs/design/文件存储与外网单向传输.md`。
+> `docs/zh/design/文件存储与外网单向传输.md`（英文版见 `docs/design/file-storage-and-one-way-outbound-transfer.md`）。
 
 ## 两类文件
 

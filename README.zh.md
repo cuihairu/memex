@@ -234,9 +234,9 @@ docker exec -it memex-server memex_server account add admin --role admin   # 确
 docker exec -it memex-server memex_server org role grant admin org-admin
 
 # 域名访问：admin.memex.cuihairu.site → http://192.168.5.5:8089（tunnel／反代映射到
-# 宿主 8089；映射留在终端侧，局域网按既有 memex 域名同一机制解析）。控制台 API 一律
-# POST＋会话 cookie＋自定义 X-Memex-Admin 头（跨站表单防护，如实标注：非完整 CSRF
-# 方案；8089 别裸奔公网，或前置带鉴权的反代）。
+# 宿主 8089；映射留在终端侧，局域网按既有 memex 域名同一机制解析）。控制台 API 需
+# 会话 cookie；改状态的 POST API 另需自定义 X-Memex-Admin 头（跨站表单防护，如实
+# 标注：非完整 CSRF 方案；只读 GET API 仅需会话；8089 别裸奔公网，或前置带鉴权的反代）。
 ```
 
 ### CI 部署链（runner-Docker，192.168.5.5）

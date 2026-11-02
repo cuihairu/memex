@@ -27,7 +27,7 @@
 |---|---|---|---|---|
 | androidx.appcompat | 1.7.0 | Apache-2.0 | Google Maven（implementation，随 APK 链接） | Android 兼容 UI 组件（apps/android） |
 | protobuf-javalite | 4.31.1 | BSD-3-Clause | Google Maven（implementation，随 APK 链接；与 protoc 同版本） | memex.proto 协议运行时（lite 变体适配 Android） |
-| swift-protobuf | 1.38.1 | Apache-2.0 | SwiftPM（Package.swift 声明 from 1.26.0；仓库未提交 Package.resolved，2026-10-09 CI 实解析 1.38.1；随 app 链接） | memex.proto 协议运行时（apps/ios） |
+| swift-protobuf | 1.39.0 | Apache-2.0 | SwiftPM（Package.swift 声明 from 1.26.0；仓库未提交 Package.resolved，2026-11-01 实解析 1.39.0；随 app 链接） | memex.proto 协议运行时（apps/ios） |
 
 ### 构建期工具（不随交付物分发）
 
@@ -42,7 +42,7 @@
 | XcodeGen | 随 brew（CI 不钉版） | MIT | CI `brew install xcodegen`（生成 Memex.xcodeproj） | iOS 工程组装（project.yml → .xcodeproj） |
 | TypeScript（tsc） | 5.9.3 | Apache-2.0 | npm devDependency（声明 ^5.6.0，package-lock 实解析；构建期编译 core TS→JS，交付物为编译产物） | 鸿蒙逻辑层编译（apps/harmony） |
 | VitePress | 1.6.4 | MIT | pnpm devDependency（声明 ^1.6.3，pnpm-lock 实解析；构建期生成静态站，交付物为构建产物） | 文档站框架（docs） |
-| Vite | 6.4.3 | MIT | pnpm devDependency（声明 ^6.4.3，pnpm-lock 实解析；VitePress 底层打包器，pnpm overrides 钉版） | 文档站构建（docs） |
+| Vite | 6.4.4 | MIT | pnpm devDependency（声明 ^6.4.4，pnpm overrides 钉版 6.4.4；VitePress 底层打包器） | 文档站构建（docs） |
 
 ### 仅测试期（不随交付物分发）
 

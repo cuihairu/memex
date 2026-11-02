@@ -284,10 +284,11 @@ docker exec -it memex-server memex_server org role grant admin org-admin
 
 # Domain access: admin.memex.cuihairu.site → http://192.168.5.5:8089 (tunnel/reverse
 # proxy maps to the host's 8089; keep the mapping terminal-side and the LAN resolves
-# through the same mechanism as the existing memex domains). All console APIs are
-# POST-only with a session cookie plus a custom X-Memex-Admin header (cross-site
-# form protection, honestly labeled: not a full CSRF solution; keep 8089 off the
-# public internet or front it with an authenticating proxy).
+# through the same mechanism as the existing memex domains). Console APIs require
+# a session cookie; state-changing (POST) APIs additionally require the custom
+# X-Memex-Admin header (cross-site form protection, honestly labeled: not a full
+# CSRF solution; read-only GET APIs are session-only; keep 8089 off the public
+# internet or front it with an authenticating proxy).
 ```
 
 ### CI deployment chain (runner-Docker, 192.168.5.5)

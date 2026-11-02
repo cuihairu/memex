@@ -79,7 +79,7 @@ todo 544（外部建议三步走第②步；③ OIDC 待明确需求）：可插
 | 密码不明文 | 口令只在 bind 报文走一次：不落盘、不进日志/LoginRecord/审计正文（审计只记谁/何时/方式/成败，LDAP 登录成功记 `ok_ldap`）。TLS 三态恰一：`--ldap-ssl`（ldaps 整连接）/`--ldap-starttls`/`--ldap-allow-plain`（默认拒明文，启动校验违者退出码 2）；自签证书 `--ldap-tls-insecure`（启动警告） |
 | 组→角色显式映射 | `--ldap-group-role 组DN=角色名`（可重复；env `MEMEX_LDAP_GROUP_ROLE` 逗号分隔）。映射表外组一律忽略＝普通成员；表为空＝不做任何自动授权；表不含 admin 就永不授管理员——目录管理员组不隐式提权（显式映射含 admin 时启动警告） |
 | 目录禁用 | 新登录直接拒（服务模式绑定前查禁用三元组＝服务权限口径；AD 停用位 `userAccountControl`+规则 `1.2.840.113556.1.4.803`+值 `2`，属性可配）。存量会话：`--ldap-kick-disabled`（默认 1＝踢）＋`--ldap-recheck-seconds`（默认 60s）复检，affirmative Disabled 才踢——目录不可达不误踢 |
-| 首登身份绑定 | identities 表：issuer=`ldap://<host>`，subject=用户 DN（模板模式为转义后绑定 DN）。默认不自动绑定：`--ldap-auto-bind`（已有账号无绑定→目录认证成功即绑）、`--ldap-auto-provision`（账号不存在→建影子账号，本地口令随机不可知＝仅目录可登）都默认关；关闭时只有 `identity bind` CLI 显式绑定的账号走目录判登 |
+| 首登身份绑定 | `identity_bindings` 表：issuer=`ldap://<host>`，subject=用户 DN（模板模式为转义后绑定 DN）。默认不自动绑定：`--ldap-auto-bind`（已有账号无绑定→目录认证成功即绑）、`--ldap-auto-provision`（账号不存在→建影子账号，本地口令随机不可知＝仅目录可登）都默认关；关闭时只有 `identity bind` CLI 显式绑定的账号走目录判登 |
 | 本地账号常备 | 未绑定 issuer=ldap 的账号走原本地判登（目录零触达，不做任何探测）；目录面故障不影响本地账号与免登录直连 |
 
 绑定路径二选一：模板直绑（`--ldap-bind-dn-template uid={u},ou=...`，OpenLDAP

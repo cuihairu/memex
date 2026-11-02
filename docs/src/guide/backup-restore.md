@@ -8,7 +8,7 @@
 The server's persistent data is a **dual asset**, and neither half is dispensable:
 
 1. **Single database** (default `memex-server.db`, overridable with `--db`): accounts, device registry, login records, message archive, read receipts, recall events, offline redelivery, org structure and address-book visibility, groups and member roles, frequent contacts, cross-mode logs, access audits, policy switches, webhook registry, R23 file **metadata** (files dedup-by-hash / reference counting / pinning, group/personal two-tier quotas, external uplink reservation logs), and sticker/avatar BLOBs (persisted in the database, not occupying the object volume).
-2. **Object volume** (RustFS/S3-compatible bucket, e.g. `memex-files`): R23 file **content bytes**, content-addressed keys `groups/{gid}/{sha256}`, `users/{uid}/{sha256}`, `inbox/{uid}/…`. The client never connects to object storage directly; all bytes go through the file plane.
+2. **Object volume** (RustFS/S3-compatible bucket, e.g. `memex-files`): R23 file **content bytes**, content-addressed keys `groups/{gid}/{sha256}` and `users/{uid}/{sha256}` (inbox and personal uploads share the `users/{uid}/` space; the category is the DB `file_meta.kind`, not a distinct key prefix). The client never connects to object storage directly; all bytes go through the file plane.
 
 Metadata in the database, bytes in the volume — **a database-only backup contains no file content**; backing up only the database = file-plane metadata pointing at an empty bucket. The client's direct mode additionally has a per-machine `memex-local.db` (local history, never reported to the server), which is outside the server's plan.
 

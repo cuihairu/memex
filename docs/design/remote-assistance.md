@@ -27,7 +27,7 @@
 - POST /respond {id, approve, perms}: only the controlled party themselves; the approved set on approve ⊆ the requested set (can narrow, never expand); deny is terminal.
 - POST /start {id} / POST /end {id, reason?}: party of the session; a controlled party's end while active = revocation.
 - GET /sessions: items involving oneself (as requester or controlled), reverse order = continuous visibility of the process + a ledger surface.
-- GET /audit?id=: a party reads the transition chain of their own session.
+- POST /files/assist/audit (id in the JSON body): a party reads the transition chain of their own session.
 - POST /frame {id, jpeg_b64, seq} (controlled party) ／ GET /frame?id= (requester).
 - POST /input {id, kind, x, y, key} (requester) ／ GET /input?id= (controlled party, pull-and-clear).
 

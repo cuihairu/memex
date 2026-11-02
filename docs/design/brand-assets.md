@@ -113,7 +113,7 @@ reason).
   `fetch(host, files_port)` after the login window accepts (GET is auth-free = usable before auth, not
   waiting for logged_in; the difference: the brand can still be fetched when the credentials are wrong,
   which is a natural consequence of the auth-free convention). The file port takes QSettings
-  `collab/files_port` (the login window gains a 「文件口」 row, default 24362, listed separately from
+  `collab/files_port` (the login window gains a 「文件口」 row, default 24561 — aligned with the compose/server deploy and Dockerfile EXPOSE 24561, listed separately from
   the collaboration port); a BrandKit fetch failure does not affect the login flow (silently stays
   as-is).
 

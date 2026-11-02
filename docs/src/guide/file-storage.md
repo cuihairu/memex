@@ -1,7 +1,7 @@
 # File Storage and Lifecycle
 
 > Convention page for the two lifecycles of the R23 file plane (group files / personal files / file assistant / external uplink) and chat files (2026-10-13, landing review five's "file lifecycle convention alignment").
-> Decision background: see [决策清单 #7](/guide/decisions) (centralized deployment · storage volume split implementation — this page is the sub-convention of #7's storage volume split as it lands on the file plane; the decision list has no dedicated file-storage entry); the full design text is in the repo at `docs/design/文件存储与外网单向传输.md`.
+> Decision background: see [决策清单 #7](/guide/decisions) (centralized deployment · storage volume split implementation — this page is the sub-convention of #7's storage volume split as it lands on the file plane; the decision list has no dedicated file-storage entry); the full design text is in the repo at `docs/design/file-storage-and-one-way-outbound-transfer.md` (the Chinese original is `docs/zh/design/文件存储与外网单向传输.md`).
 
 ## Two Kinds of Files
 

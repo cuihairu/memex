@@ -56,11 +56,11 @@
 - 留痕铁律与检索——R3（一期；铁律见§零）
 - 账号设备与同号单端在线踢前一个——R4（一期）
 - 组织架构含汇报关系可见性——R14（一期）
-- 文件共享/断点续传/文件面 S3/导出——R6/R9/R23（一期；R23 设计=docs/design/文件存储与外网单向传输.md）
+- 文件共享/断点续传/文件面 S3/导出——R6/R9/R23（一期；R23 设计=docs/zh/design/文件存储与外网单向传输.md）
 - 群聊＋已读＋撤回＋免打扰＋置顶（一期协作态功能面，T4 系列）
 - 截图标注——R13（一期）
 - 主题切换——R19（一）
-- 任务清单——R27（设计=docs/design/个人任务清单与外部工具接入.md）
+- 任务清单——R27（设计=docs/zh/design/个人任务清单与外部工具接入.md）
 - 多平台（分级如实）——R8（一期，验收口径见 R 表）
 - Docker＋CI＋tunnel 部署（服务器部署批 2026-10-11；README 部署章）
 - webhook 入口（T4.10；服务端 24361 口）
@@ -70,7 +70,7 @@
 ### 二、在做或刚立项
 
 - 聊天记录模糊搜索（2026-10-12 已合入）
-- OIDC 统一身份（设计在写：docs/design/OIDC身份认证接入设计.md）
+- OIDC 统一身份（设计在写：docs/zh/design/OIDC身份认证接入设计.md）
 - LDAP/AD（todo 未完成项，「可靠性与安全边界」节内）
 - admin 网页化（「admin 管理后台」节，2026-10-11 立项）
 - 可靠性与安全边界批（「可靠性与安全边界」节，2026-10-11 立项）
@@ -78,11 +78,11 @@
 
 ### 三、只有设计稿未实现
 
-- 审批与日报周报（设计=docs/design/审批与日报周报.md；最小闭环已闭，流程引擎等余量未做）
-- 机器人平台（现只有 webhook 裸入口；设计=docs/design/机器人平台.md）
-- 群组知识共享 R24（设计=docs/design/群组知识共享.md；公告/备忘录/密码箱已闭，余量未做）
-- 群工具框架 R25（设计=docs/design/群工具框架.md）
-- 群服务器工具 R26（设计=docs/design/群服务器工具.md）
+- 审批与日报周报（设计=docs/zh/design/审批与日报周报.md；最小闭环已闭，流程引擎等余量未做）
+- 机器人平台（现只有 webhook 裸入口；设计=docs/zh/design/机器人平台.md）
+- 群组知识共享 R24（设计=docs/zh/design/群组知识共享.md；公告/备忘录/密码箱已闭，余量未做）
+- 群工具框架 R25（设计=docs/zh/design/群工具框架.md）
+- 群服务器工具 R26（设计=docs/zh/design/群服务器工具.md）
 - 办公室位置图 R15（二期）
 - 群内智能助手与模型网关 R11（三期）
 
@@ -148,7 +148,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] T1.3 直连文件传输：文件与目录传输、进度、断点续传（分块＋偏移协商），哈希一致。
   证据：client/engine/direct/file_transfer.cpp；client/engine/direct/tests/test_direct_file.cpp。
 - [x] T1.4 直连态界面：设备列表（替代联系人）、会话列表、聊天窗、「未归档」本地标记、无设备引导。
-  证据：client/app/main_window.cpp（直连列表与聊天面）；client/tests/test_window_layout.cpp。
+  证据：client/app/main_window.cpp（直连列表与聊天面）；client/app/tests/test_window_layout.cpp。
 
 ### 阶段 2：服务端与协作态（A3–A6、A8、A11、A16）
 
@@ -226,7 +226,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 ## 三、第二期（单独立项后细化）
 
 - [x] 审批（表单＋流程引擎）· 日程与待办 · 公告与日报周报 · 群工具（机器人／投票／接龙／群任务）。
-  证据：2026-10-08~10 七笔收口（审批最小闭环／日报／群工具三件 server／客户端三件 Dialog／审批通知＋周报补写／截止关票／余量三小件 0eaa175＋06bfe1f＋9741e0e）；client/app/tests/test_approval_dialog.cpp＋test_report_dialog.cpp＋test_group_tools_dialog.cpp；ctest 57/57；设计稿 docs/design/审批与日报周报.md＋群工具三件.md。
+  证据：2026-10-08~10 七笔收口（审批最小闭环／日报／群工具三件 server／客户端三件 Dialog／审批通知＋周报补写／截止关票／余量三小件 0eaa175＋06bfe1f＋9741e0e）；client/app/tests/test_approval_dialog.cpp＋test_report_dialog.cpp＋test_group_tools_dialog.cpp；ctest 57/57；设计稿 docs/zh/design/审批与日报周报.md＋群工具三件.md。
 - [x] 会话审计（查阅权限、查阅日志、合规留痕）。
   证据：az 规则 audit-read＋/files/audit/search|reads（被拒尝试亦落 audit.denied）；client/app/audit_dialog.cpp；client/app/tests/test_audit_dialog.cpp；ctest 51/51。
 - [x] 办公室位置图（平面图、拖拽式点位编辑器、搜索定位；默认仅本人楼层可见）。
@@ -261,7 +261,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] 测试夹具换口重试补齐（CI 竞态加固）：free_port 探活与 serve bind 之间文件面端口被抢的夹具加固。
   证据：16 个起文件面的测试夹具补 3 次换口重试（探活窗 8s→15s）；ctest 66/66 绿。
 
-## R23 文件存储与外网单向传输（2026-10-04 用户拍板，设计=docs/design/文件存储与外网单向传输.md）
+## R23 文件存储与外网单向传输（2026-10-04 用户拍板，设计=docs/zh/design/文件存储与外网单向传输.md）
 
 - [x] R23-1 存储抽象层（S3 兼容）＋RustFS compose 集成：元数据表/群人两级配额/秒传（哈希去重）；客户端永不直连对象存储、权限只在元数据层判。
   证据：ceca13e；server/src/storage.hpp（S3Storage）；server/tests/test_files_meta.cpp＋test_s3_e2e.cpp（MEMEX_S3_E2E=1 门控，本机 docker+RustFS 全绿）。
@@ -274,7 +274,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] R23-5 防护：杀毒扫描钩子＋类型/大小白名单＋外网登录二次验证。
   证据：8ad9987；server/src/scan.hpp（UploadScanner＋UplinkPolicy）；server/tests/test_uplink.cpp（31 断言）。
 
-## R24 群组知识共享：公告 / 备忘录 / 密码箱（2026-10-04，设计=docs/design/群组知识共享.md）
+## R24 群组知识共享：公告 / 备忘录 / 密码箱（2026-10-04，设计=docs/zh/design/群组知识共享.md）
 
 - [x] R24-1 群公告：发布/置顶全员可见/编辑历史留痕/联动三级推送（公告=重要强提醒）。
   证据：b9aa8ab＋d0aa28d；group_announcement_log 只附加表；server/tests/test_group.cpp。
@@ -285,7 +285,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] R24-4 UI 边界：备忘录疑似密码提示、密码箱默认掩码、复制密码=显式动作+留痕、导出默认关闭。
   证据：6577c60（looks_like_secret 提示）；掩码/留痕/无导出面随 R24-3 落地；client/app/tests/test_group_vault_dialog.cpp。
 
-## 品牌物料（2026-10-08 用户令：服务器端可配公司品牌，客户端接入后自动换牌；设计=docs/design/品牌物料.md）
+## 品牌物料（2026-10-08 用户令：服务器端可配公司品牌，客户端接入后自动换牌；设计=docs/zh/design/品牌物料.md）
 
 - [x] 全链三批（服务端→客户端接入→设置页），公司品牌客户端自动换牌；实现差异已回填设计稿。
   证据：086c99d（服务端 branding 表＋路由）＋11e39f（素材清除路由）＋03fb60e（BrandKit 接入）＋设置页批；client/app/brand_kit.cpp＋brand_settings_page.cpp；ctest 59/59；docs/src/public/branding/before.png＋after.png。
@@ -332,7 +332,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
     证据：client/app/theme_pack.cpp（stored zip 自实现＋HMAC-SHA256 验签）；test_theme 第⑫节（篡改拒/硬底线十腿/版本比较）。
 - 每件验收截图、分批 commit 写清改动；批次间如有跨件依赖在实现时如实调整排期并注明。
 
-## R25 群工具框架：CI/CD / 打包 / 配置导出（2026-10-04，设计=docs/design/群工具框架.md）
+## R25 群工具框架：CI/CD / 打包 / 配置导出（2026-10-04，设计=docs/zh/design/群工具框架.md）
 
 - [x] R25-1 群工具框架：工具白名单动作配置、入群即授权/退群即失、动作留痕（谁/何时/动作/参数/结果）、服务端代理调用骨架。
   证据：f87c031；group_tools＋group_tool_audit 两表；server/tests/test_files_api.cpp R25-1 段；ctest 37/37。
@@ -343,7 +343,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] R25-4 凭据面：外部凭据只存服务端（R24 密码箱同款加密）、客户端零凭据、破坏性动作二次确认。
   证据：13438f1；group_tool_credentials＋gcm_seal/gcm_open（server/src/cred.cpp）；server/tests/test_files_api.cpp R25-4 段；ctest 39/39。
 
-## R26 群服务器工具：agent + 负载状态 + 远程会话（2026-10-04，设计=docs/design/群服务器工具.md）
+## R26 群服务器工具：agent + 负载状态 + 远程会话（2026-10-04，设计=docs/zh/design/群服务器工具.md）
 
 - [x] R26-1 memex agent：轻量常驻（Linux 起步），注册/心跳/负载上报（CPU/内存/磁盘/负载）；只读采样不开监听口不落盘。
   证据：b8bf382（服务端）＋e26063d（agent）；server/src/agent_main.cpp（201 行实读）；server/tests/test_agent.cpp（真 agent 进程×真 TCP）。
@@ -354,10 +354,10 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] R26-4 凭据面：服务器凭据只存服务端（R24 加密面）、客户端零凭据；memex 只做「看+连」。
   证据：3c81b1d；group_server_credentials；server/tests/test_files_api.cpp R26-4 段；ctest 41/41。
 
-## 权限模型（横切，2026-10-04 用户定调「类似 Linux 账号管理」，设计=docs/design/权限模型.md）
+## 权限模型（横切，2026-10-04 用户定调「类似 Linux 账号管理」，设计=docs/zh/design/权限模型.md）
 
 - [x] 权限模型落地：群=组（入群即继承/退群即失/建群需特权/群能力管理员配全/组织架构可见/全程留痕）、群内角色（群主/管理员/成员）——R23-R26 各面统一按此模型实现。
-  证据：202d626（建群特权＋group_capabilities）；2026-10-08 收口（OrgGroup 下发＋capability_gate 铺五面 37 路由）；2026-10-10 §八作用域维度（87eb0da 补 q() 第 5 参后真绿）；server/tests/test_authz.cpp 作用域矩阵；docs/design/权限模型.md §5。
+  证据：202d626（建群特权＋group_capabilities）；2026-10-08 收口（OrgGroup 下发＋capability_gate 铺五面 37 路由）；2026-10-10 §八作用域维度（87eb0da 补 q() 第 5 参后真绿）；server/tests/test_authz.cpp 作用域矩阵；docs/zh/design/权限模型.md §5。
 
 ## 服务器 agent（R26）现状与缺口（2026-10-12 实读）
 
@@ -384,7 +384,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - 分批建议（建议，非定案）：批1=按组授权最小面（az 加 group-server-* 规则：server:view/server:session 两动作起步，用现有群当组、某群=运维组即可收口）；批2=SSH 流量代理面（memex 做 jump host，流量过服务端才有审计对象）；批3=审计深度（按拍板结果做命令日志或录像）。
 - 待拍板三条：①agent 审计取命令日志还是会话录像（或都要）；②是否新增 group-server-* az 规则（还是沿用入群即授权＋群角色两档）；③用现有「群」当组还是独立角色层。【已代决：按 docs/review/2026-10-30-decisions.md 执行（2026-10-30）】
 
-## R27 个人任务清单与外部工具接入（2026-10-04，调查分析=docs/design/个人任务清单与外部工具接入.md）
+## R27 个人任务清单与外部工具接入（2026-10-04，调查分析=docs/zh/design/个人任务清单与外部工具接入.md）
 
 - [x] R27-1 本地 todolist：自建/完成/提醒＋他人分配（谁能分配按权限模型）；提醒=30s 轮询到点经通知中心（回执只提醒一次）。
   证据：tasks 表＋az task-assign；client/app/task_dialog.cpp；client/app/tests/test_task_dialog.cpp；ctest 44/44（2026-10-10 关窗后台常驻化＋日历视图两笔追加）。
@@ -483,7 +483,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ## admin 管理后台（2026-10-11 用户令：整理现有管理功能面并立项网页化）
 
-> 现状盘点（扫代码非臆造）：`admin/` 仅 README 占位（规划「第一期第四阶段起建设」）；管理能力现散布在 **90 个 `/files/*` HTTP 路由 + 19 个 CLI 子命令**（account/org/policy/audit/messages/retention/webhook/bot/device/group/storage/assist/model/branding…共 40+ 二级命令）里，**全部没有 UI**。本批=把这些能力整理成网页后台的建设范围：
+> 现状盘点（扫代码非臆造）：`admin/` 仅 README 占位（规划「第一期第四阶段起建设」）；管理能力现散布在 **104 个 `/files/*` HTTP 路由 + 21 个 CLI 子命令**（account/org/policy/audit/messages/retention/webhook/bot/device/group/storage/assist/model/branding…共 40+ 二级命令）里，**全部没有 UI**。本批=把这些能力整理成网页后台的建设范围：
 
 - [x] 部署口径（用户已配映射 2026-10-11）：后台对外 admin.memex.cuihairu.site→http://192.168.5.5:8089（HTTP tunnel）；后台容器监听 8089，随 Docker 批交付。
   证据：docker-compose.yml admin 服务（8089:8089）＋admin/Dockerfile＋.github/workflows/docker.yml memex-admin 镜像 job＋README 域名接入/首号 bootstrap 文档。
@@ -538,14 +538,14 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ## 群组两项（2026-10-12 用户令：建群主题/目的＋群记录导出）
 
-> 设计=docs/design/建群主题与群记录导出.md；新节不并入 R24（不拆散既有编号）。
+> 设计=docs/zh/design/建群主题与群记录导出.md；新节不并入 R24（不拆散既有编号）。
 
 - [x] 群组-1 建群询问主题/目的（定案①已拍）：建群弹窗一屏＝主题＋目的，都可留空直接建群（弹窗仍默认弹出）；空主题＝群名下方不显示该行；群主/管理员可后期编辑；桌面/手机/admin 三端同源。
   证据：groups 加 topic/purpose＋create_group/group_set_profile＋GroupInfo 三字段；server/tests/test_group.cpp 扩库级段（含 ALTER 迁移）＋协议级腿；admin/tests/test_admin_api.cpp ㉙ 扩回读；ctest 81/81 全绿。
 - [x] 群组-2 群记录导出（定案②③④已拍）：导出固定三段＝参与人（角色＋加入时间）＋时间范围（含建群时间）＋聊天记录（区间内）；无 AI＝普通文档、有 AI＝加总结章节（R11 未接线必须自动降级注明）；权限定案②＝全员；格式定案④＝Markdown；记录导出行为落 audit_reads。
   证据：GET /files/group-record-export（keyset 游标分页 has_more/truncated、权限 is_group_member 现查 403）；server/tests/test_files_api.cpp 群组-2 段＋test_group.cpp 库级腿；admin/tests/test_admin_api.cpp ㊮ 扩审计可查；ctest 81/81 全绿。
 
-**已定案表（2026-10-12 用户拍板回执，待拍板清单关闭）**——全文见 docs/design/建群主题与群记录导出.md §四：
+**已定案表（2026-10-12 用户拍板回执，待拍板清单关闭）**——全文见 docs/zh/design/建群主题与群记录导出.md §四：
 ① 建群主题可以跳过（弹窗仍默认弹出，主题与目的都可留空直接建群；空主题＝群名下方不显示该行）；
 ② 导出权限全员（群内任何成员可导该群记录；路由层 az，非群成员一律不可导）；
 ③ 记录导出行为（谁/何时/哪个群/区间/条数/是否含 AI 总结，admin 后台可查）；
@@ -593,7 +593,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 - [x] docs 根目录双语配对（2026-10-16）：审计报告补英文对应件 docs/audit-doc-consistency.md（逐条真译互链）；评审报告（1204 行）按红线出摘要级英文版 docs/plan-review-report-v10.0.md（顶部标注摘要级＋中文原文为准，互链）。
 - [x] 文档英文化缺口（2026-10-16 登记，同日完成）：下列中文文档全部补上英文版＋双向语言切换器——
-  - 设计稿 `docs/design/` 23 篇：`IP与办公位置显示.md`、`OIDC身份认证接入设计.md`、`一级菜单管理.md`、`个人任务清单与外部工具接入.md`、`信箱.md`、`办公室位置图.md`、`品牌物料.md`、`基础平台化改造计划（身份-组织-授权-归档）.md`、`审批与日报周报.md`、`建群主题与群记录导出.md`、`文件存储与外网单向传输.md`、`机器人平台.md`、`权限模型.md`、`模型网关.md`、`消息标识与归档去重.md`、`群内智能助手.md`、`群工具三件.md`、`群工具框架.md`、`群服务器工具.md`、`群组知识共享.md`、`远程协助.md`、`group-remote-access.md`（英文文件名但正文为中文）、`settings-consolidation.md`（英文文件名但正文为中文）
+  - 设计稿 `docs/zh/design/` 23 篇：`IP与办公位置显示.md`、`OIDC身份认证接入设计.md`、`一级菜单管理.md`、`个人任务清单与外部工具接入.md`、`信箱.md`、`办公室位置图.md`、`品牌物料.md`、`审批与日报周报.md`、`建群主题与群记录导出.md`、`文件存储与外网单向传输.md`、`机器人平台.md`、`权限模型.md`、`模型网关.md`、`消息标识与归档去重.md`、`群内智能助手.md`、`群工具三件.md`、`群工具框架.md`、`群服务器工具.md`、`群组知识共享.md`、`远程协助.md`、`group-remote-access.md`（英文文件名但正文为中文）、`settings-consolidation.md`（英文文件名但正文为中文）、`knowledge-deposition-loop.md`（英文文件名但正文为中文）（`基础平台化改造计划（身份-组织-授权-归档）.md` 未迁移，仍在 `docs/design/`）
   - 文档站 `docs/src/`：首页 `index.md` ＋ 指南 19 篇（`product`／`prototypes`／`requirements`／`roadmap`／`decisions`／`report`／`compliance`／`authorization`／`feiq-compat`／`file-storage`／`backup-restore`／`wan-drill`／`notify`／`settings`／`crash-reporting`／`platform-adapter`／`delivery-matrix`／`av-collab`／`development`）；`.vitepress/config.mts` 仅 `lang: 'zh-CN'`，无 `locales` 配置
   - 完成说明：设计稿 23 篇各补英文对应件（21 个新英文文件名；`group-remote-access.en.md`／`settings-consolidation.en.md` 按 `.en.md` 约定），指南 19 篇各补 `.en.md`，首页补 `index.en.md`；43 对文件首行切换器互链（脚本校验零断链）；`pnpm docs:build`（pnpm 10，CI 钉版）通过。登记下轮的两项缺口（`locales` 双语路由配置、英文版内部链接指向中文原文件）已于下条条目完成。
 - [x] 文档站双语路由 `locales`（2026-10-16 首版 root=中文／en=`/en/`；后 7fe568f 反转为 root=英文／zh=`/zh/`，中文页平移 `src/zh/` 树）：中英各一套 nav/sidebar/主题文案，页首切换器绝对路径互链。

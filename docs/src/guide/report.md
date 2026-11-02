@@ -1,6 +1,6 @@
 # Review Report Summary
 
-The full text of the《内网办公即时通讯系统建设方案评审报告 V10.0》 is in the repository at [`docs/建设方案评审报告-V10.0.md`](https://github.com/cuihairu/memex/blob/main/docs/建设方案评审报告-V10.0.md) (about 1200 lines). This page extracts the conclusions engineering relies on directly.
+The full text of the《内网办公即时通讯系统建设方案评审报告 V10.0》 is in the repository at [`docs/zh/建设方案评审报告-V10.0.md`](https://github.com/cuihairu/memex/blob/main/docs/zh/建设方案评审报告-V10.0.md) (about 1200 lines; the English digest is [`docs/plan-review-report-v10.0.md`](https://github.com/cuihairu/memex/blob/main/docs/plan-review-report-v10.0.md)). This page extracts the conclusions engineering relies on directly.
 
 ## Key review conclusions
 
