@@ -141,8 +141,12 @@ void test_tokens() {
   // 文本与底色对比度可读（WCAG AA 大字口径 3:1 以上），气泡同理
   CHECK(contrast(light.text, light.surface) > 4.5);
   CHECK(contrast(dark.text, dark.surface) > 4.5);
-  CHECK(contrast(light.text_muted, light.surface_alt) > 3.0);
-  CHECK(contrast(dark.text_muted, dark.surface_alt) > 3.0);
+  // muted 用于正文级说明/次要信息，按 WCAG AA 正文 4.5:1 守住；
+  // surface_alt 与 brand_tint（选中行）是两个最暗承载面，一并断言
+  CHECK(contrast(light.text_muted, light.surface_alt) > 4.5);
+  CHECK(contrast(dark.text_muted, dark.surface_alt) > 4.5);
+  CHECK(contrast(light.text_muted, light.brand_tint) > 4.5);
+  CHECK(contrast(dark.text_muted, dark.brand_tint) > 4.5);
   CHECK(contrast(light.on_brand, light.brand) > 3.0);
   CHECK(contrast(dark.on_brand, dark.brand) > 3.0);
   CHECK(contrast(light.bubble_in_text, light.bubble_in) > 4.5);

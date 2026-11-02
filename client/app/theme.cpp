@@ -70,8 +70,9 @@ ThemeTokens light_tokens() {
   t.divider = QColor(QStringLiteral("#efe8de"));
   t.text = QColor(QStringLiteral("#332b24"));
   // muted 不用旧界面的 #9b8f86——它在浅底上只有 2.75:1，低于可读门槛；
-  // 令牌层按对比度守住（test_theme 断言 ≥3:1）
-  t.text_muted = QColor(QStringLiteral("#7d7169"));
+  // 令牌层按对比度守住（test_theme 断言 ≥4.5:1，WCAG AA 正文）；
+  // #6e6256 在全部浅色面（含 brand_tint 选中行）≥4.76:1
+  t.text_muted = QColor(QStringLiteral("#6e6256"));
   t.brand = QColor(QString::fromUtf8(kBrandOrange));
   t.brand_hover = QColor(QStringLiteral("#c9541f"));
   // brand_text＝浅底上的品牌色文本（描边按钮文字、本机保存徽标）：
