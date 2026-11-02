@@ -31,6 +31,18 @@ int g_failures = 0;
 
 using memex::server::RustFSCompose;
 using memex::server::S3Config;
+
+// CR-3：shell 单引号转义——compose_path/endpoint 含空格/单引号/元字符时
+// std::system 命令串必须仍按字面执行（注入/破句防护）。
+void test_shell_quote() {
+  using memex::server::shell_quote;
+  CHECK(shell_quote("") == "''");
+  CHECK(shell_quote("a") == "'a'");
+  CHECK(shell_quote("my compose.yml") == "'my compose.yml'");
+  CHECK(shell_quote("it's") == "'it'\\''s'");
+  CHECK(shell_quote("a$(rm -rf /)b") == "'a$(rm -rf /)b'");
+  CHECK(shell_quote("`cmd`;|&<>") == "'`cmd`;|&<>'");
+}
 using ServerStore = memex::server::ServerStore;
 
 ServerStore::FileMeta mk(const std::string& owner, const std::string& hash,
@@ -53,6 +65,7 @@ ServerStore::FileMeta mk(const std::string& owner, const std::string& hash,
 } // namespace
 
 int main() {
+  test_shell_quote();  // CR-3 单元腿：先于其余腿，独立可红
   // —— 元数据表：创建/字段回读/空参拒绝 ——
   {
     ServerStore s;

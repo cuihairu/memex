@@ -345,13 +345,13 @@ bool RustFSCompose::write_compose_file(const std::string& path,
 }
 
 bool RustFSCompose::up(const std::string& compose_path) {
-  // 依赖宿主有 docker compose（v2 插件）
-  std::string cmd = "docker compose -f " + compose_path + " up -d";
+  // 依赖宿主有 docker compose（v2 插件）；compose_path 单引号转义（CR-3）
+  std::string cmd = "docker compose -f " + shell_quote(compose_path) + " up -d";
   return std::system(cmd.c_str()) == 0;
 }
 
 bool RustFSCompose::down(const std::string& compose_path) {
-  std::string cmd = "docker compose -f " + compose_path + " down";
+  std::string cmd = "docker compose -f " + shell_quote(compose_path) + " down";
   return std::system(cmd.c_str()) == 0;
 }
 
@@ -359,7 +359,7 @@ bool RustFSCompose::health_check(const std::string& endpoint,
                                  int timeout_seconds) {
   // 简单 HTTP GET /minio/health/live（MinIO 兼容端点）或 HEAD bucket
   // 这里用 curl 重试；生产建议用 SDK HeadBucket
-  std::string cmd = "curl -sf " + endpoint + "/minio/health/live >/dev/null";
+  std::string cmd = "curl -sf " + shell_quote(endpoint + "/minio/health/live") + " >/dev/null";
   for (int i = 0; i < timeout_seconds; ++i) {
     if (std::system(cmd.c_str()) == 0) return true;
     std::this_thread::sleep_for(std::chrono::seconds(1));

@@ -105,6 +105,21 @@ class S3Storage {
   virtual bool delete_objects(const std::vector<std::string>& keys) = 0;
 };
 
+// shell 单引号转义（CR-3）：compose 生成器把 operator 提供的 compose_path /
+// endpoint 拼接进 std::system 命令串——含空格或单引号会破句/注入。单引号内
+// 一切字符按字面，仅需把 ' 换成 '\''（POSIX sh 惯用）。
+inline std::string shell_quote(const std::string& s) {
+  std::string out;
+  out.reserve(s.size() + 2);
+  out += '\'';
+  for (const char c : s) {
+    if (c == '\'') out += "'\\''";
+    else out += c;
+  }
+  out += '\'';
+  return out;
+}
+
 // RustFS compose 编排（R23-1）：
 // - 单节点 RustFS 即可（自托管、零依赖、Rust 单二进制）
 // - 端口 9000（S3 API）、9001（控制台）
