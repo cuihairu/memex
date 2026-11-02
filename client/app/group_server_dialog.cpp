@@ -71,7 +71,7 @@ GroupServerDialog::GroupServerDialog(QWidget* parent) : QDialog(parent) {
                    .arg(client_->account(), host_->text(), port_->text()),
                false);
     conn_badge_->setText(
-        QStringLiteral("已连接（agent 心跳 15s · 掉线 60s 判离线）"));
+        QStringLiteral("已连接（agent 心跳 30s · 掉线 90s 判离线）"));
     conn_badge_->setStyleSheet(
         QStringLiteral("color:%1;font-weight:600;")
             .arg(QColor(Qt::green).name()));
