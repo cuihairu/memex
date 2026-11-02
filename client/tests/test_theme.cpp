@@ -108,7 +108,7 @@ std::set<QString> hex_literals(const QString& qss) {
 // —— 亮暗两套都必须给出的新增令牌（主窗接线用到的语义面）——
 void check_new_token_contrast(const ThemeTokens& t, const QString& label) {
   CHECK(contrast(t.brand_text, t.surface_raised) > 4.5);
-  CHECK(contrast(t.brand_text, t.brand_tint) > 3.0);
+  CHECK(contrast(t.brand_text, t.brand_tint) > 4.5);
   CHECK(contrast(t.success_text, t.success_wash) > 4.5);
   CHECK(contrast(t.brand_wash_text, t.brand_wash) > 4.5);
   CHECK(contrast(t.bubble_out_text, t.bubble_out) > 3.0);

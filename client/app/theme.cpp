@@ -76,8 +76,9 @@ ThemeTokens light_tokens() {
   t.brand = QColor(QString::fromUtf8(kBrandOrange));
   t.brand_hover = QColor(QStringLiteral("#c9541f"));
   // brand_text＝浅底上的品牌色文本（描边按钮文字、本机保存徽标）：
-  // 直接压暗品牌橙到 5.3:1，保住「橙色系文字」观感又守住可读门槛
-  t.brand_text = QColor(QStringLiteral("#a05a26"));
+  // 压暗品牌橙到 #9c5220，最差承载面（brand_tint 选中行）4.64:1，
+  // 保住「橙色系文字」观感又守住 WCAG AA 正文门槛
+  t.brand_text = QColor(QStringLiteral("#9c5220"));
   t.on_brand = QColor(QStringLiteral("#ffffff"));
   t.brand_tint = QColor(QStringLiteral("#f6e3d7"));
   t.brand_wash = QColor(QStringLiteral("#fdeee2"));
@@ -203,7 +204,7 @@ ThemeTokens build_default_theme(const DefaultThemeSpec& spec) {
     // 同一口径），语义色按亮底固定即可守住对比度门槛
     t.brand = QColor(QString::fromUtf8(kBrandOrange));
     t.brand_hover = QColor(QStringLiteral("#c9541f"));
-    t.brand_text = QColor(QStringLiteral("#a05a26"));
+    t.brand_text = QColor(QStringLiteral("#9c5220"));
     t.on_brand = QColor(QStringLiteral("#ffffff"));
     t.brand_tint = QColor(QStringLiteral("#f6e3d7"));
     t.brand_wash = QColor(QStringLiteral("#fdeee2"));
