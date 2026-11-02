@@ -666,3 +666,9 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
   - 文档:docs「配置效果」页(双语)逐开关嵌入:说明+off 图+on 图+GIF。
   - 验收:清单内每个开关都有 off/on+GIF;流水线可重跑(配置变更随时再生成);兼作配置效果回归测试。
   - 参考:kode todo C-24 同款流水线模式(2026-11-01 用户令全舰队推广)。
+
+## 2026-11-01 全仓代码深审 backlog（来源=2026-11-01 代码深审；P2/P3 记 todo，P0/P1 无）
+
+- [ ] **CR-2 · P2 · 服务端分页参数溢出**:`limit`/`offset` 仅做数字门（`find_first_not_of("0123456789")==npos`）未做长度夹取——`std::atoi` 对 ≥20 位数字串是 UB（glibc strtol 饱和到 LONG_MAX，int 回绕为 -1），`LIMIT -1` 在 SQLite 意为**无限制**，分页静默失效并整表物化进 vector。证据：server/src/files_server.cpp:1405/3778/4141/4245（四处分页 handler）→ server/src/store.cpp list_uplink_files(:6956)/list_memos(:7108)/list_group_memos(:7295) 直接 `sqlite3_bind_int(LIMIT/OFFSET)`。影响：仅认证方、限本人/本群作用域；修复方向=数字长度夹取（>9 位拒绝）或 `std::stol` try＋上限（如 ≤1000）。
+- [ ] **CR-3 · P3 · 服务端 compose 生成 `system()` 未引号**:`std::system()` 三处（server/src/storage.cpp:350,355,364）以字符串拼接 compose 命令，`compose_path`/endpoint/bucket 未引号——操作员 CLI 输入（非网络），含空格/元字符会出错；纵深防御项。修复方向=引号/转义或 argv 形式 spawn。
+- [ ] **CR-4 · P3 · 对象存储默认凭据**:compose 生成器默认 `minioadmin/minioadmin`（server/src/storage.hpp:115-116 默认实参、main.cpp:2942 CLI 回退）；storage.hpp:112 注明「部署时须改」且 CLI 提供改口令，但无强制。修复方向=生成时若仍为默认则大声警告／随机生成并一次性打印。
