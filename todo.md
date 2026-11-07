@@ -674,3 +674,43 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] **CR-2 · P2 · 服务端分页参数溢出**:`limit`/`offset` 仅做数字门（`find_first_not_of("0123456789")==npos`）未做长度夹取——`std::atoi` 对 ≥20 位数字串是 UB（glibc strtol 饱和到 LONG_MAX，int 回绕为 -1），`LIMIT -1` 在 SQLite 意为**无限制**，分页静默失效并整表物化进 vector。证据：server/src/files_server.cpp:1405/3778/4141/4245（四处分页 handler）→ server/src/store.cpp list_uplink_files(:6956)/list_memos(:7108)/list_group_memos(:7295) 直接 `sqlite3_bind_int(LIMIT/OFFSET)`。影响：仅认证方、限本人/本群作用域；修复方向=数字长度夹取（>9 位拒绝）或 `std::stol` try＋上限（如 ≤1000）。 完成=提交 3f338ea（safe_int_param 全 8 站替换＋单测＋HTTP 回归腿；串行 ctest 88/88 绿）
 - [x] **CR-3 · P3 · 服务端 compose 生成 `system()` 未引号**:`std::system()` 三处（server/src/storage.cpp:350,355,364）以字符串拼接 compose 命令，`compose_path`/endpoint/bucket 未引号——操作员 CLI 输入（非网络），含空格/元字符会出错；纵深防御项。修复方向=引号/转义或 argv 形式 spawn。 完成=提交 12b9c74（shell_quote 三处 system()；单测 6 例＋真容器 up/down 恶毒路径 PASS——路径含空格/单引号/`$()`/反引号）
 - [x] **CR-4 · P3 · 对象存储默认凭据**:compose 生成器默认 `minioadmin/minioadmin`（server/src/storage.hpp:115-116 默认实参、main.cpp:2942 CLI 回退）；storage.hpp:112 注明「部署时须改」且 CLI 提供改口令，但无强制。修复方向=生成时若仍为默认则大声警告／随机生成并一次性打印。 完成=提交 857b482（write_compose_file＋CLI 大声警告；单测含 stderr 捕获断言警告触发，CLI 实测默认告警/强凭据静默）
+
+## 源码分层分析 2026-11-07
+
+### 抽象层清单
+
+- 协议层：定义跨端共享线契约，类型编号只增不改（`common/proto/memex.proto:1`）。
+- 服务端运行时：解析 CLI/env，装配/关闭可选监听面和后台工作器（`server/src/main.cpp:3093`）。
+- 身份、授权与审计层：分流本地/LDAP 判登，统一 default-deny 授权与查阅留痕（`server/src/authz.hpp:40`）。
+- 协作面：维护 TCP 长连接、会话路由、在线/互踢、离线队列与归档投递（`server/src/session.hpp:17`）。
+- 文件、工具与集成面：承载 HTTP 文件/uplink、对象存储、webhook、模型、助手和任务拉取（`server/src/files_server.hpp:107`）。
+- 管理/运维台：独立 Drogon 控制面直连 ServerStore，只暴露同源 `/api/*` 与 SPA（`admin/src/admin_app.cpp:153`）。
+- 桌面客户端：组合 Qt UI、直连/协作双引擎和共享本地 SQLite（`client/engine/direct/direct_engine.hpp:38`）。
+- 移动客户端：按平台实现仅协作态 transport、路由守卫、UI 壳与偏好存储（`apps/harmony/core/session.ts:63`）。
+
+### 超大文件候选
+
+- [ ] LAY-001 [P1] 拆分 server/src/store.cpp（9253 行）——账号、归档、群、任务、文件、集成和审计访问器集中在单文件（file:line：server/src/store.cpp:78）
+- [ ] LAY-002 [P1] 拆分 client/app/main_window.cpp（8327 行）——主窗、导航、两态连接、托盘和大量对话框入口耦合（file:line：client/app/main_window.cpp:66）
+- [ ] LAY-003 [P1] 拆分 server/src/files_server.cpp（7100 行）——请求解析、鉴权、内网文件、uplink、群工具、任务与凭据路由同文件（file:line：server/src/files_server.cpp:808）
+- [ ] LAY-004 [P1] 拆分 admin/src/admin_app.cpp（3961 行）——路由注册、会话、授权、各管理域和健康代理集中（file:line：admin/src/admin_app.cpp:201）
+- [ ] LAY-005 [P2] 拆分 server/tests/test_files_api.cpp（3428 行）——按内网文件、uplink、任务、凭据和群工具 API 分套（file:line：server/tests/test_files_api.cpp:1）
+- [ ] LAY-006 [P1] 拆分 server/src/main.cpp（3156 行）——CLI 解析、serve 装配、十多个子命令与诊断混杂（file:line：server/src/main.cpp:3093）
+- [ ] LAY-007 [P2] 拆分 client/engine/collab/files_client.cpp（1829 行）——会话、上传、下载、备忘录、任务与群文件客户端混杂（file:line：client/engine/collab/files_client.cpp:1）
+- [ ] LAY-008 [P2] 拆分 admin/www/admin.js（1801 行）——零构建 SPA 的路由、API、表格、表单和文案同文件（file:line：admin/www/admin.js:1）
+- [ ] LAY-009 [P2] 拆分 admin/tests/test_admin_api.cpp（1779 行）——按账号、策略、任务、归档和健康接口分套（file:line：admin/tests/test_admin_api.cpp:1）
+- [ ] LAY-010 [P1] 拆分 server/src/store.hpp（1725 行）——所有领域行类型与 ServerStore 访问器声明集中（file:line：server/src/store.hpp:257）
+- [ ] LAY-011 [P2] 拆分 client/tests/test_theme.cpp（1298 行）——主题、设置持久化、多窗口与可访问性断言集中（file:line：client/tests/test_theme.cpp:1）
+- [ ] LAY-012 [P2] 拆分 client/app/task_dialog.cpp（1286 行）——任务列表、看板、筛选、提醒和创建对话框同文件（file:line：client/app/task_dialog.cpp:54）
+- [ ] LAY-013 [P2] 拆分 client/engine/collab/collab_engine.cpp（1178 行）——连接生命周期、握手、消息、群、组织和文件判权处理集中（file:line：client/engine/collab/collab_engine.cpp:1）
+- [ ] LAY-014 [P2] 拆分 client/tests/test_mode_switch.cpp（1170 行）——直连/协作切换、状态持久化与多窗口回归集中（file:line：client/tests/test_mode_switch.cpp:1）
+- [ ] LAY-015 [P2] 拆分 server/src/session.cpp（1073 行）——帧解析、登录、消息、组织、群、回执和文件判权 handler 同文件（file:line：server/src/session.cpp:154）
+- [ ] LAY-016 [P2] 拆分 client/app/settings_window.cpp（1051 行）——通用、通知、隐私、高级和任务源设置面板集中（file:line：client/app/settings_window.cpp:1）
+- [ ] LAY-017 [P2] 拆分 client/app/group_vault_dialog.cpp（1044 行）——密码箱 UI、解锁生命周期、条目表和加密提示同文件（file:line：client/app/group_vault_dialog.cpp:1）
+
+### 目录/分类问题
+
+- `client/core/storage_interface.hpp:33` 与 `client/core/storage_local.hpp:12` 当前未见生产调用，且 `get_quota` 写入而非查询配额（`client/core/storage_local.hpp:111`），应删除或修正后接线。
+- `common/include/memex/protocol/frame.hpp:1` 注释仍写“JSON 载荷”，而 `common/proto/memex.proto:1` 明确载荷是 protobuf Envelope。
+- `apps/harmony/dist-test/` 是构建产物目录却被纳入源码树，应从版本控制移除。
+- `common/cmake_install.cmake:1` 与 `server/cmake_install.cmake:1` 属生成产物，不应跟踪。

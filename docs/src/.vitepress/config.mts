@@ -19,7 +19,9 @@ const sharedSidebarOrder = [
   'crash-reporting',
   'platform-adapter',
   'delivery-matrix',
-  'av-collab'
+  'av-collab',
+  'architecture',
+  'glossary'
 ] as const
 
 const zhLabels: Record<string, string> = {
@@ -42,6 +44,8 @@ const zhLabels: Record<string, string> = {
   'platform-adapter': '国产系统适配验证',
   'delivery-matrix': '交付验收矩阵',
   'av-collab': '音视频与协同文档底座',
+  architecture: '源码分层架构',
+  glossary: '架构术语表',
   development: '克隆与构建'
 }
 
@@ -65,6 +69,8 @@ const enLabels: Record<string, string> = {
   'platform-adapter': 'Domestic-OS Adaptation Verification',
   'delivery-matrix': 'Delivery Acceptance Matrix',
   'av-collab': 'Audio/Video and Collaborative Document Base',
+  architecture: 'Source Layer Architecture',
+  glossary: 'Architecture Glossary',
   development: 'Clone and Build'
 }
 
