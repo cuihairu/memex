@@ -677,6 +677,11 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ## 源码分层分析 2026-11-07
 
+## 2026-11-08 覆盖率验收（Codecov gcovr 口径）
+
+- 最终复核：全量 CTest **89/89 绿**；`files_client` 在残留端口的一次并发运行中失败，单独重跑通过，与 `server_cli` 组合重跑也通过。最终 Cobertura 为 **85.06%**（51,353 / 60,370 行），生产源码为 **81.00%**（32,441 / 40,049 行）。
+- [ ] **COV-98 · P1 · C++ 行覆盖率 98%**：按 CI 同口径构建并运行全量 CTest（88/88 绿），`gcovr` 排除 `third_party/**`、`vcpkg_installed*/**`、`docs/**`、`build*/**`、`**/tests/**` 后实测 **85.06%**（51,353 / 60,370 行）。排除生成代码后再分母拆分：生产源码 **81.00%**（32,441 / 40,049 行），测试代码 93.07%；Cobertura XML 实际未把 MOC / protobuf / qrc 当作 class 计入，因此“排除生成代码”后的 Codecov 口径仍受 Qt 事件循环 / Qt 对话框 / AWS S3 SDK / 容器集成 / 进程入口等外部 I/O 代码主导。缺口集中在 `client/app/main_window.cpp`（1,808 行未覆盖）、`server/src/main.cpp`（1,133 行）、`server/src/files_server.cpp`（877 行）、`server/src/store.cpp`（409 行）、`client/core/local_store.cpp`（260 行）、`client/app/group_vault_dialog.cpp`（250 行）、`client/app/screenshot_tool.cpp`（226 行）、`client/engine/collab/files_client.cpp`（201 行）、`server/src/storage.cpp`（199 行，AWS S3 客户端封装）。`server/src/storage.cpp` 的真实 S3 全接口往返已由 `test_s3_e2e` 覆盖，但该测试默认跳过（依赖 Docker / RustFS 容器），CI 不把容器化外呼当常跑单元测试；`main.cpp` 的服务装配和 Qt 主窗口的消息/绘图/焦点事件循环也不适合为凑数字启动真实 X11、外部 LDAP/S3 或无限循环。本次新增 `server/tests/test_server_cli.cpp` 覆盖此前库级测试未触达的管理 CLI（身份绑定、常用联系人、跨态会话、坏参数、存储编排），把 `server/src/main.cpp` 从 44.45% 提升到 48.71%，全库从 84.89% 提升到 85.06%。98% 在“不修改生产行为、不写无意义测试、不在 CI 引入真实外部容器”的约束下不可达成；已提高到上述数字并如实记录。
+
 ### 抽象层清单
 
 - 协议层：定义跨端共享线契约，类型编号只增不改（`common/proto/memex.proto:1`）。

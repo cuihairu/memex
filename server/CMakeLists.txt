@@ -268,4 +268,13 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_mailbox PRIVATE memex_server_core)
   add_test(NAME mailbox COMMAND test_mailbox)
   set_tests_properties(mailbox PROPERTIES TIMEOUT 120)
+
+  # 管理 CLI 进程级验收：身份绑定/常用联系人/跨态会话/根用法/坏参数/
+  # 存储编排。补齐协议级测试没有触达的 main.cpp 运维入口。
+  add_executable(test_server_cli tests/test_server_cli.cpp)
+  target_link_libraries(test_server_cli PRIVATE memex_server_core)
+  target_compile_definitions(test_server_cli PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
+  add_test(NAME server_cli COMMAND test_server_cli)
+  set_tests_properties(server_cli PROPERTIES TIMEOUT 60)
 endif()
