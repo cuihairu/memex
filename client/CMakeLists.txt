@@ -1585,6 +1585,20 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 60)
 
+  # 本机库 LocalStore 全 API 验收：持久化核心逐腿打穿（生命周期/去重/
+  # 时间窗/撤回/同步态/回执只升不降/盯订阅/配额双分支/白名单往返/设备
+  # 身份与对端定针）。纯 core 直查不触网不起窗，QSettings 带 pid 隔离
+  add_executable(test_local_store
+    tests/test_local_store.cpp)
+  target_include_directories(test_local_store PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(test_local_store PRIVATE
+    memex_core Qt6::Core Qt6::Sql)
+  add_test(NAME local_store COMMAND test_local_store)
+  set_tests_properties(local_store PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 60)
+
   # 新消息闪烁提醒验收：真直连对端发消息→主窗 alert_count（非激活才闪/
   # 合并窗 2s 内不叠加/开关关了不闪/开关落盘往返）；链接面同 test_chat_actions
   add_executable(test_flash_alert
