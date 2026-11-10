@@ -15,7 +15,27 @@ find_package(Drogon CONFIG REQUIRED)
 add_library(memex_server_core STATIC
   src/server.cpp
   src/session.cpp
-  src/store.cpp
+  # LAY-001 store 按领域拆分（对外 API 仍是 store.hpp，共享小工具在 store/common.hpp）
+  src/store/schema.cpp
+  src/store/account.cpp
+  src/store/archive.cpp
+  src/store/assist.cpp
+  src/store/message.cpp
+  src/store/org.cpp
+  src/store/group.cpp
+  src/store/task.cpp
+  src/store/workflow.cpp
+  src/store/workspace.cpp
+  src/store/personal.cpp
+  src/store/integration.cpp
+  src/store/model.cpp
+  src/store/file.cpp
+  src/store/memo.cpp
+  src/store/vault.cpp
+  src/store/grouptools.cpp
+  src/store/taskpull.cpp
+  src/store/servers.cpp
+  src/store/polls.cpp
   src/authz.cpp
   src/cred.cpp
   src/files_server.cpp
