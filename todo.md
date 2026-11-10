@@ -721,3 +721,8 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - `common/include/memex/protocol/frame.hpp:1` 注释仍写“JSON 载荷”，而 `common/proto/memex.proto:1` 明确载荷是 protobuf Envelope。
 - `apps/harmony/dist-test/` 是构建产物目录却被纳入源码树，应从版本控制移除。
 - `common/cmake_install.cmake:1` 与 `server/cmake_install.cmake:1` 属生成产物，不应跟踪。
+
+## 2026-11-10 本机 E2E 真实起服走查（E2E-LOCAL-001，巡检单）
+
+- [x] E2E-LOCAL-001 [P2] 本机真实起服务器＋客户端协议走查——单测全绿但缺真实启动验证：真起 memex_server 后用最小 Python 协议客户端走通登录/组织架构/在线表/消息往返全链路（file:line：server/tests/e2e_local/memex_e2e_client.py:1）
+  证据：76617d6；server/tests/e2e_local/memex_e2e_client.py（零依赖手写 protobuf wire format，字段全照 common/proto/memex.proto＋common/src/frame.cpp，不编造）。实例：`memex_server serve --db /tmp/memex-e2e/… --port 24370 --webhook-port 0`（24360 被本机生产实例占用＝pid 8206 未动，E2E 换口 24370 起服一次成功）。走查 10 步全过：①TCP 连通 ②PING/PONG ③错口令拒（「口令不符」）④e2e_a 登录成功（展示名回带）⑤ORG_QUERY→ORG_DATA 成员 ['e2e_a','e2e_b'] ⑥e2e_b 登录＋PRESENCE_DATA 在线表全 ⑦A→B 文本（ACK 回带服务端 msg_id=1be08bc3…）⑧B 收同文同 id ⑨B ACK→A 收 DELIVER_NOTICE ⑩B→A 反向往返＋送达回执。服务端交叉验证：`logins` 台账 5 条（2 条 bad_password＋3 条 ok，指纹/来源 IP/版本齐）；`messages` 归档 2 条且 msg_id 与客户端收到值逐字一致。文件面未走查（协作协议不载文件字节——FILE_META 直连旁路不经服务端 memex.proto:17；服务端文件面须 --files-port＋S3 配置 main.cpp:71，属 R23 容器 e2e 覆盖范围）。清理：SIGTERM 停服、/tmp/memex-e2e 已删、24370 已释放。回归用法：起服＋建两号后 `python3 server/tests/e2e_local/memex_e2e_client.py --port <口>`。
