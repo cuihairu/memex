@@ -8,10 +8,12 @@
 // 会话档；⑦旧单键存档迁移归会话态（启动不受影响）；⑧列表列占满右缘无
 // 空白；⑨托盘隐藏态 quit_app→exec 立即返回。最大化态不设上限（受屏幕
 // 几何支配），不在本测内。
+#include <QAction>
 #include <QApplication>
 #include <QListWidget>
 #include <QMainWindow>
 #include <QSettings>
+#include <QShortcut>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -19,6 +21,7 @@
 #include <unistd.h>
 
 #include <app/main_window.hpp>
+#include <app/shortcut_settings.hpp>
 
 namespace {
 
@@ -170,6 +173,38 @@ int main(int argc, char** argv) {
     app.processEvents();
     CHECK(side_col->width() == 260); // 会话态：列表列收回固定宽
     w5.hide();
+  }
+
+  // ⑩ 截图快捷键设置（shortcut_settings 面，原 0% 覆盖）：空键拒／与已有
+  //    QShortcut 冲突拒／与已有 QAction 快捷键冲突拒（均不关窗）／无冲突＝
+  //    存键＋状态行已保存＋关窗。apply_screenshot_shortcut 各分支经真实
+  //    MainWindow 打通（QShortcut/QAction 夹具程序化注入）。
+  {
+    memex::client::ShortcutSettingsDialog dlg(&w);
+    // 空键：立即拒，状态行明示，不关窗
+    dlg.save_sequence(QKeySequence());
+    CHECK(dlg.status_text() == QStringLiteral("键序列为空"));
+    CHECK(dlg.result() != QDialog::Accepted);
+    // 与已有 QShortcut 冲突：拒＋状态行含「冲突」，不关窗
+    auto* sc = new QShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+F9")), &w);
+    dlg.save_sequence(QKeySequence(QStringLiteral("Ctrl+Alt+F9")));
+    CHECK(dlg.status_text().contains(QStringLiteral("冲突")));
+    CHECK(dlg.result() != QDialog::Accepted);
+    // 与已有 QAction 快捷键冲突：拒（菜单快捷键同样占用，不关窗）
+    auto* act = new QAction(&w);
+    act->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+F8")));
+    w.addAction(act);
+    dlg.save_sequence(QKeySequence(QStringLiteral("Ctrl+Alt+F8")));
+    CHECK(dlg.status_text().contains(QStringLiteral("冲突")));
+    CHECK(dlg.result() != QDialog::Accepted);
+    // 无冲突：存键＋状态行已保存＋关窗（accept）
+    dlg.save_sequence(QKeySequence(QStringLiteral("Ctrl+Alt+Shift+Z")));
+    CHECK(dlg.status_text().startsWith(QStringLiteral("已保存")));
+    CHECK(dlg.result() == QDialog::Accepted);
+    CHECK(memex::client::MainWindow::screenshot_shortcut() ==
+          QStringLiteral("Ctrl+Alt+Shift+Z")); // 存键生效（QSettings 往返）
+    delete sc;
+    delete act;
   }
 
   // ⑨ 托盘退出语义（2026-10-11 用户实录：最小化到托盘的隐藏态点退出，
