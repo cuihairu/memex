@@ -2482,6 +2482,104 @@ int main() {
     CHECK(reads.body.find("关键词=审计暗号") != std::string::npos);
   }
 
+  // —— 二期·审计上下文/撤回事件/导出 与 信箱未读（gate 拒＋留痕＋400 分支）——
+  {
+    // 信箱基线：此前各端点（审批/日报/群事件）已给 member1 自动入箱若干条，
+    // 断言一律相对基线（增量口径），不写绝对数
+    const auto mb0 = http(port, "POST", "/files/mailbox/unread", H("member1"), "");
+    CHECK(mb0.status == 200);
+    const std::int64_t base_all = jint(mb0.body, "all");
+    const std::int64_t base_warn = jint(mb0.body, "warning");
+    const std::int64_t base_note = jint(mb0.body, "notice");
+    const std::int64_t base_ann = jint(mb0.body, "announce");
+
+    // 种子：同会话四条协作文本（type=10=text），ctx-2 由 owner1 撤回；
+    // 信箱给 member1 两条未读（warning/notice 各一）——owner1 在上段已授 auditor
+    CHECK(store.store_message("ctx-1", "owner1", "member1", 10, "第一条", 1000));
+    CHECK(store.store_message("ctx-2", "owner1", "member1", 10, "第二条", 2000));
+    CHECK(store.store_message("ctx-3", "owner1", "member1", 10, "第三条", 3000));
+    CHECK(store.store_message("ctx-4", "owner1", "member1", 10, "第四条", 4000));
+    CHECK(store.recall_message("ctx-2", "owner1", 2500));
+    CHECK(store.mailbox_add("warning", "磁盘告警", "空间低于 10%", "ops",
+                            "ref-w", "warn-1", {"member1"}, 5000) > 0);
+    CHECK(store.mailbox_add("notice", "版本提示", "新版本就绪", "updater",
+                            "ref-n", "note-1", {"member1"}, 6000) > 0);
+
+    // —— GET /files/audit/context：窗口命中＋撤回标记＋空 msg_id 400＋门拒 ——
+    CHECK(http(port, "GET", "/files/audit/context?msg_id=", H("owner1"), "")
+              .status == 400);
+    const auto ctx = http(port, "GET",
+                          "/files/audit/context?msg_id=ctx-2&span=1",
+                          H("owner1"), "");
+    CHECK(ctx.status == 200);
+    CHECK(ctx.body.find("\"msg_id\":\"ctx-2\"") != std::string::npos);
+    CHECK(ctx.body.find("\"text\":\"第一条\"") != std::string::npos);
+    CHECK(ctx.body.find("\"text\":\"第二条\"") != std::string::npos);
+    CHECK(ctx.body.find("\"text\":\"第三条\"") != std::string::npos);
+    CHECK(ctx.body.find("\"type\":\"text\"") != std::string::npos);
+    CHECK(ctx.body.find("\"recalled\":true") != std::string::npos); // ctx-2 撤回
+    CHECK(ctx.body.find("第四条") == std::string::npos); // span=1 窗口外
+    CHECK(http(port, "GET", "/files/audit/context?msg_id=ctx-1",
+               H("member1"), "")
+              .status == 403); // 无 auditor 角色拒
+
+    // —— GET /files/audit/recall-event：撤回事件/未撤回/400/门拒 ——
+    CHECK(http(port, "GET", "/files/audit/recall-event?msg_id=", H("owner1"),
+               "")
+              .status == 400);
+    const auto rev = http(port, "GET", "/files/audit/recall-event?msg_id=ctx-2",
+                          H("owner1"), "");
+    CHECK(rev.status == 200);
+    CHECK(rev.body.find("\"exists\":true") != std::string::npos);
+    CHECK(jstr(rev.body, "by_account") == "owner1");
+    CHECK(jint(rev.body, "ts_ms") == 2500);
+    const auto rev_no = http(port, "GET",
+                             "/files/audit/recall-event?msg_id=ctx-3",
+                             H("owner1"), "");
+    CHECK(rev_no.status == 200);
+    CHECK(rev_no.body.find("\"exists\":false") != std::string::npos);
+    CHECK(http(port, "GET", "/files/audit/recall-event?msg_id=ctx-1",
+               H("member1"), "")
+              .status == 403);
+
+    // —— POST /files/audit/export：坏 JSON 400／关键词命中＋operator／门拒 ——
+    CHECK(http(port, "POST", "/files/audit/export", H("owner1"), "not-json")
+              .status == 400);
+    const auto exp = http(port, "POST", "/files/audit/export", H("owner1"),
+                          "{\"account\":\"member1\",\"keyword\":\"二条\","
+                          "\"limit\":5}");
+    CHECK(exp.status == 200);
+    CHECK(jstr(exp.body, "operator") == "owner1");
+    CHECK(exp.body.find("\"msg_id\":\"ctx-2\"") != std::string::npos);
+    CHECK(exp.body.find("\"text\":\"第二条\"") != std::string::npos);
+    CHECK(exp.body.find("exported_ms") != std::string::npos);
+    CHECK(http(port, "POST", "/files/audit/export", H("member1"),
+               "{\"account\":\"owner1\"}")
+              .status == 403);
+
+    // 留痕：context/recall/export 三动作均落 audit_reads（member1 被拒另记 denied）
+    const auto reads2 = http(port, "GET", "/files/audit/reads", H("owner1"), "");
+    CHECK(reads2.status == 200);
+    CHECK(reads2.body.find("audit.message.context") != std::string::npos);
+    CHECK(reads2.body.find("audit.recall.event") != std::string::npos);
+    CHECK(reads2.body.find("audit.message.export") != std::string::npos);
+
+    // —— POST /files/mailbox/unread：增量对齐种子；全部已读后归零 ——
+    const auto mb = http(port, "POST", "/files/mailbox/unread", H("member1"), "");
+    CHECK(mb.status == 200);
+    CHECK(jint(mb.body, "all") == base_all + 2);
+    CHECK(jint(mb.body, "warning") == base_warn + 1);
+    CHECK(jint(mb.body, "notice") == base_note + 1);
+    CHECK(jint(mb.body, "announce") == base_ann);
+    const auto rd = http(port, "POST", "/files/mailbox/read", H("member1"),
+                         "{\"all\":true}");
+    CHECK(rd.status == 200);
+    CHECK(jint(rd.body, "marked") == base_all + 2);
+    const auto mb2 = http(port, "POST", "/files/mailbox/unread", H("member1"), "");
+    CHECK(mb2.status == 200);
+    CHECK(jint(mb2.body, "all") == 0);
+  }
+
   // —— 二期·办公室位置图：自楼层可见（同层互见）/org-admin 编辑/一人
   //     一工位/越界坐标夹回 ——
   {
