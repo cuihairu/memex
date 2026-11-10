@@ -696,7 +696,8 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 ### 超大文件候选
 
-- [ ] LAY-001 [P1] 拆分 server/src/store.cpp（9253 行）——账号、归档、群、任务、文件、集成和审计访问器集中在单文件（file:line：server/src/store.cpp:78）
+- [x] LAY-001 [P1] 拆分 server/src/store.cpp（9253 行）——账号、归档、群、任务、文件、集成和审计访问器集中在单文件（file:line：server/src/store.cpp:78）
+  证据：4caeb0b；server/src/store/ 20 模块＋common.hpp（schema 1064／account 682／archive 657／assist 347／message 436／org 1127／group 477／task 306／workflow 480／workspace 454／personal 243／integration 456／model 181／file 452／memo 373／vault 336／grouptools 471／taskpull 240／servers 395／polls 438，共 9615 行＝基线 +3.9%，每模块 <1200）；对外 API 不变（store.hpp 未动，`store::` 调用方零改动）；纯代码搬移不改 SQL／返回类型／错误文案，共享小工具 now_ms 收进 store/common.hpp；全量构建绿，拆分后首轮全量 ctest 90/90，后两轮全量在宿主外部高负载（loadavg 52–87）下各翻一个不同 Qt 对话框测试（15s wait_until 超时假红、轮流出现），隔离复跑均绿（1.3–3.9s）。
 - [ ] LAY-002 [P1] 拆分 client/app/main_window.cpp（8327 行）——主窗、导航、两态连接、托盘和大量对话框入口耦合（file:line：client/app/main_window.cpp:66）
 - [ ] LAY-003 [P1] 拆分 server/src/files_server.cpp（7100 行）——请求解析、鉴权、内网文件、uplink、群工具、任务与凭据路由同文件（file:line：server/src/files_server.cpp:808）
 - [ ] LAY-004 [P1] 拆分 admin/src/admin_app.cpp（3961 行）——路由注册、会话、授权、各管理域和健康代理集中（file:line：admin/src/admin_app.cpp:201）
