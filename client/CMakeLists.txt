@@ -41,9 +41,30 @@ target_compile_definitions(memex_engine_collab PRIVATE MEMEX_VERSION="${PROJECT_
 # qrc 资源自动处理（A23 图标面：窗口/托盘/关于页共用的 logo 多尺寸资产）
 set(CMAKE_AUTORCC ON)
 
+# LAY-002 main_window 按职责拆分（对外 API 仍是 main_window.hpp，共享小工具
+# 在 main_window/common.hpp；主程序与 13 个测试目标共用同一份模块清单）
+set(MEMEX_MAIN_WINDOW_SRCS
+  app/main_window/common.cpp
+  app/main_window/lifecycle.cpp
+  app/main_window/wire.cpp
+  app/main_window/collab_mode.cpp
+  app/main_window/chat_send.cpp
+  app/main_window/chat_input.cpp
+  app/main_window/chat_render.cpp
+  app/main_window/theme.cpp
+  app/main_window/groups.cpp
+  app/main_window/view_switch.cpp
+  app/main_window/org_view.cpp
+  app/main_window/transfers.cpp
+  app/main_window/watch.cpp
+  app/main_window/integration.cpp
+  app/main_window/dialogs.cpp
+  app/main_window/rail_devices.cpp
+  app/main_window/avatar.cpp)
+
 qt_add_executable(memex_client
   app/main.cpp
-  app/main_window.cpp
+  ${MEMEX_MAIN_WINDOW_SRCS}
   app/rail_nav.cpp
   app/mailbox_view.cpp
   app/rail_nav.hpp
@@ -621,7 +642,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/brand_kit.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
@@ -685,7 +706,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/brand_kit.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
@@ -754,7 +775,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/brand_kit.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -943,7 +964,7 @@ if(MEMEX_BUILD_TESTS)
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
@@ -1016,7 +1037,7 @@ if(MEMEX_BUILD_TESTS)
   # rail_nav）与 MEMEX_SERVER_BIN／MEMEX_DOCS_SHOT_DIR 宏
   add_executable(test_live_shots
     tests/test_live_shots.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
@@ -1085,7 +1106,7 @@ if(MEMEX_BUILD_TESTS)
   # 服务端 API/权限/dedup 全腿在 server/tests/test_mailbox.cpp。
   add_executable(test_mailbox_view
     tests/test_mailbox.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
@@ -1151,7 +1172,7 @@ if(MEMEX_BUILD_TESTS)
   # wire_tray_activation（offscreen 可跑，无 DE 依赖）。
   add_executable(test_tray
     tests/test_tray.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
@@ -1218,7 +1239,7 @@ if(MEMEX_BUILD_TESTS)
   # 主窗发送→对端引擎收到文件）
   add_executable(test_screenshot
     tests/test_screenshot.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
@@ -1307,7 +1328,7 @@ if(MEMEX_BUILD_TESTS)
   # 图标非空、帮助→关于页真弹（logo 标签抓图入库）、开机启动 .desktop Icon
   add_executable(test_icon
     tests/test_icon.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
@@ -1375,7 +1396,7 @@ if(MEMEX_BUILD_TESTS)
   # 链接面与 test_screenshot 一致（含 main_window.cpp/引擎）——否则接线无覆盖
   add_executable(test_theme
     tests/test_theme.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
@@ -1441,7 +1462,7 @@ if(MEMEX_BUILD_TESTS)
   # 表情全链（面板弹出→内置表情落输入框→面板自关）；链接面同 test_theme
   add_executable(test_chat_actions
     tests/test_chat_actions.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
@@ -1512,7 +1533,7 @@ if(MEMEX_BUILD_TESTS)
   #（MainWindow 全量）。
   add_executable(test_watch_reminder
     tests/test_watch_reminder.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
@@ -1603,7 +1624,7 @@ if(MEMEX_BUILD_TESTS)
   # 合并窗 2s 内不叠加/开关关了不闪/开关落盘往返）；链接面同 test_chat_actions
   add_executable(test_flash_alert
     tests/test_flash_alert.cpp
-    app/main_window.cpp
+    ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
     app/message_search_dialog.cpp
