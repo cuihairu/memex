@@ -251,6 +251,14 @@ if(MEMEX_BUILD_TESTS)
   add_test(NAME files_api COMMAND test_files_api)
   set_tests_properties(files_api PROPERTIES TIMEOUT 60)
 
+  # 群互动/群工具/群服务器负路径验收：参数门/权限闸/状态机门——坏 JSON
+  # 400、缺字段 400、非成员 403、幽灵 404、状态冲突 409、一次性短票
+  # 401/409（能力开关 store 层直配；对象层不触 S3）
+  add_executable(test_files_negative tests/test_files_negative.cpp)
+  target_link_libraries(test_files_negative PRIVATE memex_server_core)
+  add_test(NAME files_negative COMMAND test_files_negative)
+  set_tests_properties(files_negative PROPERTIES TIMEOUT 60)
+
   # R26-1 agent 验收：真 agent 进程 × in-process FileServer（真 TCP）——
   # 登记签发令牌→agent --once 一拍心跳 exit 0→列表绿灯＋指标落账＋令牌
   # 不出现；错令牌/连不上一拍即败 exit 1；缺参 exit 2
