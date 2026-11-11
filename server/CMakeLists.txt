@@ -38,7 +38,21 @@ add_library(memex_server_core STATIC
   src/store/polls.cpp
   src/authz.cpp
   src/cred.cpp
-  src/files_server.cpp
+  src/files_server/conn.cpp
+  src/files_server/router.cpp
+  src/files_server/session.cpp
+  src/files_server/tasks.cpp
+  src/files_server/approval.cpp
+  src/files_server/audit.cpp
+  src/files_server/assets.cpp
+  src/files_server/assist.cpp
+  src/files_server/files.cpp
+  src/files_server/memo.cpp
+  src/files_server/vault.cpp
+  src/files_server/tools.cpp
+  src/files_server/interact.cpp
+  src/files_server/servers.cpp
+  src/files_server/server.cpp
   src/webhook.cpp
   src/model_gateway.cpp
   src/group_assistant.cpp
