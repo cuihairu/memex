@@ -57,6 +57,7 @@ add_library(memex_server_core STATIC
   src/model_gateway.cpp
   src/group_assistant.cpp
   src/storage.cpp
+  src/serve_args.cpp
   src/task_pull.cpp
   src/ldap.cpp)
 target_include_directories(memex_server_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -294,6 +295,15 @@ if(MEMEX_BUILD_TESTS)
   target_link_libraries(test_storage_mock PRIVATE memex_server_core)
   add_test(NAME storage_mock COMMAND test_storage_mock)
   set_tests_properties(storage_mock PROPERTIES TIMEOUT 120)
+
+  # serve 面旗标解析验收（main.cpp 抽出的 parse_serve_args 直打）：默认值、
+  # 端口界（0/负/越界→rc2）、uplink 防护参数（黑/白名单整表替换/空表清空/
+  # max-mb 换算与负值拒/二次口令）、S3/LDAP 旗标＋env 兜底（旗标恒赢）、
+  # LDAP 组→角色映射（旗标与 env 逗号分隔多组、坏形态 rc2）
+  add_executable(test_serve_args tests/test_serve_args.cpp)
+  target_link_libraries(test_serve_args PRIVATE memex_server_core)
+  add_test(NAME serve_args COMMAND test_serve_args)
+  set_tests_properties(serve_args PROPERTIES TIMEOUT 60)
 
   # 评审 P0-3 files verify 一致性核对（内存假存储）：全一致/缺对象/大小
   # 不符/孤儿告警不判死/隔离过期行引用面/空 object_key 行跳过
