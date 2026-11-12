@@ -287,6 +287,14 @@ if(MEMEX_BUILD_TESTS)
   add_test(NAME s3_e2e COMMAND test_s3_e2e)
   set_tests_properties(s3_e2e PROPERTIES TIMEOUT 300)
 
+  # S3Storage 全接口验收（本地 mock S3 兼容层）：AWS SDK 真 SigV4/HTTP 路径
+  # 打 127.0.0.1 mock——桶引导幂等/put/get/404/500 腿/列表翻页+截断/分片
+  # 上传四段/HeadObject/批量删/预签名；RustFSCompose 纯逻辑与告警腿
+  add_executable(test_storage_mock tests/test_storage_mock.cpp)
+  target_link_libraries(test_storage_mock PRIVATE memex_server_core)
+  add_test(NAME storage_mock COMMAND test_storage_mock)
+  set_tests_properties(storage_mock PROPERTIES TIMEOUT 120)
+
   # 评审 P0-3 files verify 一致性核对（内存假存储）：全一致/缺对象/大小
   # 不符/孤儿告警不判死/隔离过期行引用面/空 object_key 行跳过
   add_executable(test_files_verify tests/test_files_verify.cpp)
