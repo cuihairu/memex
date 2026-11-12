@@ -1794,6 +1794,20 @@ if(MEMEX_BUILD_TESTS)
     ENVIRONMENT "${MEMEX_TEST_ENV}"
     TIMEOUT 30)
 
+  # R27-3 QtNetwork 传输实现验收（本地真 TCP 桩，不打外网）：GET/POST/PUT/
+  # PATCH 四动词分派（PATCH 走 sendCustomRequest）、自定义头透传、请求体到
+  # 达、200 回调三元组、网络错腿（拒连 status=0 带文案）
+  add_executable(test_task_http
+    engine/task/tests/test_task_http.cpp
+    engine/task/task_http.cpp)
+  target_include_directories(test_task_http PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(test_task_http PRIVATE Qt6::Core Qt6::Network)
+  add_test(NAME task_http COMMAND test_task_http)
+  set_tests_properties(task_http PROPERTIES
+    ENVIRONMENT "${MEMEX_TEST_ENV}"
+    TIMEOUT 30)
+
   # 崩溃采集验收（Crashpad 真链路）：真客户端 MEMEX_CRASH_TEST=1 故意崩溃 →
   # handler 接管 → XDG 隔离目录落 .dmp（dump_syms/minidump_stackwalk 符号化
   # 为开发机侧手工步骤，见 docs/src/guide/crash-reporting.md 实现段）。
