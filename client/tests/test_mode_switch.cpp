@@ -158,9 +158,10 @@ int main(int argc, char** argv) {
     CHECK(wait_until([&] { return w0.collab_logged_in(); }, 8000));
     CHECK(w0.findChild<QListWidget*>(QStringLiteral("device_list")) != nullptr);
     // 两行高度守卫：QSS 行 padding 会把行内控件矩形压扁（修复前 15px
-    // 只剩半行），此处守住「两行可读」的下限
+    // 只剩半行），此处守住「两行可读」的下限——断言不低于两行文本自身
+    // 高度；字体度量平台各异（macOS 偏小，两行未必到 28px），不钉绝对值
     if (auto* hint = w0.findChild<QLabel*>(QStringLiteral("empty_list_hint")))
-      CHECK(hint->height() >= 28);
+      CHECK(hint->height() >= hint->fontMetrics().height() * 2);
     CHECK(w0.chat_html().contains(QStringLiteral("欢迎使用 Memex")));
     CHECK(w0.chat_html().contains(
               QStringLiteral("先从通讯录找到同事"))); // 副题同落主区
