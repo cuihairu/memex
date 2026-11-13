@@ -737,3 +737,31 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 - [x] E2E-LOCAL-001 [P2] 本机真实起服务器＋客户端协议走查——单测全绿但缺真实启动验证：真起 memex_server 后用最小 Python 协议客户端走通登录/组织架构/在线表/消息往返全链路（file:line：server/tests/e2e_local/memex_e2e_client.py:1）
   证据：76617d6；server/tests/e2e_local/memex_e2e_client.py（零依赖手写 protobuf wire format，字段全照 common/proto/memex.proto＋common/src/frame.cpp，不编造）。实例：`memex_server serve --db /tmp/memex-e2e/… --port 24370 --webhook-port 0`（24360 被本机生产实例占用＝pid 8206 未动，E2E 换口 24370 起服一次成功）。走查 10 步全过：①TCP 连通 ②PING/PONG ③错口令拒（「口令不符」）④e2e_a 登录成功（展示名回带）⑤ORG_QUERY→ORG_DATA 成员 ['e2e_a','e2e_b'] ⑥e2e_b 登录＋PRESENCE_DATA 在线表全 ⑦A→B 文本（ACK 回带服务端 msg_id=1be08bc3…）⑧B 收同文同 id ⑨B ACK→A 收 DELIVER_NOTICE ⑩B→A 反向往返＋送达回执。服务端交叉验证：`logins` 台账 5 条（2 条 bad_password＋3 条 ok，指纹/来源 IP/版本齐）；`messages` 归档 2 条且 msg_id 与客户端收到值逐字一致。文件面未走查（协作协议不载文件字节——FILE_META 直连旁路不经服务端 memex.proto:17；服务端文件面须 --files-port＋S3 配置 main.cpp:71，属 R23 容器 e2e 覆盖范围）。清理：SIGTERM 停服、/tmp/memex-e2e 已删、24370 已释放。回归用法：起服＋建两号后 `python3 server/tests/e2e_local/memex_e2e_client.py --port <口>`。
+
+## Codex 深审发现（2026-11-13，luna profile 近5 commit 审核，1C/8M/15m，待修）
+
+- [ ] **COV-98 · P1 · C++ 行覆盖率 98%**：按 CI 同口径构建并运行全量 CTest（88/88 绿），`gcovr` 排除 `third_party/**`、`vcpkg_installed*/**`、`docs/**`、`build*/**`、`**/tests/**` 后实测 **85.06%**（51,353 / 60,370 行）。排除生成代码后再分母拆分：生产源码 **81.00%**（32,441 / 40,049 行），测试代码 93.07%；Cobertura XML 实际未把 MOC / protobuf / qrc 当作 class 计入，因此“排除生成代码”后的 Codecov 口径仍受 Qt 事件循环 / Qt 对话框 / AWS S3 SDK / 容器集成 / 进程入口等外部 I/O 代码主导。缺口集中在 `client/app/main_window.cpp`（1,808 行未覆盖）、`server/src/main.cpp`（1,133 行）、`server/src/files_server.cpp`（877 行）、`server/src/store.cpp`（409 行）、`client/core/local_store.cpp`（260 行）、`client/app/group_vault_dialog.cpp`（250 行）、`client/app/screenshot_tool.cpp`（226 行）、`client/engine/collab/files_client.cpp`（201 行）、`server/src/storage.cpp`（199 行，AWS S3 客户端封装）。`server/src/storage.cpp` 的真实 S3 全接口往返已由 `test_s3_e2e` 覆盖，但该测试默认跳过（依赖 Docker / RustFS 容器），CI 不把容器化外呼当常跑单元测试；`main.cpp` 的服务装配和 Qt 主窗口的消息/绘图/焦点事件循环也不适合为凑数字启动真实 X11、外部 LDAP/S3 或无限循环。本次新增 `server/tests/test_server_cli.cpp` 覆盖此前库级测试未触达的管理 CLI（身份绑定、常用联系人、跨态会话、坏参数、存储编排），把 `server/src/main.cpp` 从 44.45% 提升到 48.71%，全库从 84.89% 提升到 85.06%。98% 在“不修改生产行为、不写无意义测试、不在 CI 引入真实外部容器”的约束下不可达成；已提高到上述数字并如实记录。
+- [ ] LAY-004 [P1] 拆分 admin/src/admin_app.cpp（3961 行）——路由注册、会话、授权、各管理域和健康代理集中（file:line：admin/src/admin_app.cpp:201）
+- [ ] LAY-005 [P2] 拆分 server/tests/test_files_api.cpp（3428 行）——按内网文件、uplink、任务、凭据和群工具 API 分套（file:line：server/tests/test_files_api.cpp:1）
+- [ ] LAY-006 [P1] 拆分 server/src/main.cpp（3156 行）——CLI 解析、serve 装配、十多个子命令与诊断混杂（file:line：server/src/main.cpp:3093）
+- [ ] LAY-007 [P2] 拆分 client/engine/collab/files_client.cpp（1829 行）——会话、上传、下载、备忘录、任务与群文件客户端混杂（file:line：client/engine/collab/files_client.cpp:1）
+- [ ] LAY-008 [P2] 拆分 admin/www/admin.js（1801 行）——零构建 SPA 的路由、API、表格、表单和文案同文件（file:line：admin/www/admin.js:1）
+- [ ] LAY-009 [P2] 拆分 admin/tests/test_admin_api.cpp（1779 行）——按账号、策略、任务、归档和健康接口分套（file:line：admin/tests/test_admin_api.cpp:1）
+- [ ] LAY-010 [P1] 拆分 server/src/store.hpp（1725 行）——所有领域行类型与 ServerStore 访问器声明集中（file:line：server/src/store.hpp:257）
+- [ ] LAY-011 [P2] 拆分 client/tests/test_theme.cpp（1298 行）——主题、设置持久化、多窗口与可访问性断言集中（file:line：client/tests/test_theme.cpp:1）
+- [ ] LAY-012 [P2] 拆分 client/app/task_dialog.cpp（1286 行）——任务列表、看板、筛选、提醒和创建对话框同文件（file:line：client/app/task_dialog.cpp:54）
+- [ ] LAY-013 [P2] 拆分 client/engine/collab/collab_engine.cpp（1178 行）——连接生命周期、握手、消息、群、组织和文件判权处理集中（file:line：client/engine/collab/collab_engine.cpp:1）
+- [ ] LAY-014 [P2] 拆分 client/tests/test_mode_switch.cpp（1170 行）——直连/协作切换、状态持久化与多窗口回归集中（file:line：client/tests/test_mode_switch.cpp:1）
+- [ ] LAY-015 [P2] 拆分 server/src/session.cpp（1073 行）——帧解析、登录、消息、组织、群、回执和文件判权 handler 同文件（file:line：server/src/session.cpp:154）
+- [ ] LAY-016 [P2] 拆分 client/app/settings_window.cpp（1051 行）——通用、通知、隐私、高级和任务源设置面板集中（file:line：client/app/settings_window.cpp:1）
+- [ ] LAY-017 [P2] 拆分 client/app/group_vault_dialog.cpp（1044 行）——密码箱 UI、解锁生命周期、条目表和加密提示同文件（file:line：client/app/group_vault_dialog.cpp:1）
+- [ ] 为 compose YAML 生成添加严格转义或白名单校验并补恶意值测试（`server/src/storage.cpp:298-330`）——阻止凭据/路径元字符改变容器配置。
+- [ ] 给 S3 桶引导添加当前凭据所有权/读写探针，仅证明可控制桶时接受 `ALREADY_EXISTS`（`server/src/storage.cpp:62-92`）——避免误接他人桶。
+- [ ] 将 `list_objects()` 失败显式传给 `files verify`，失败时一致性核对不得通过（`server/src/storage.cpp:145-152`, `server/src/files_server/server.cpp:87-112`）——消除备份核对假绿。
+- [ ] 严格化 `serve_args` 数字/未知/缺值解析并补负值、溢出、`--flag=value`、未知参数测试（`server/src/serve_args.cpp:42-190`）——防止配置拼写错误静默改变端口与安全开关。
+- [ ] 将 compose 测试临时文件改为唯一临时目录并 RAII 清理（`server/tests/test_storage_mock.cpp:574-583`, `server/tests/test_files_meta.cpp:57-83`）——消除固定 `/tmp` 测试竞态和残留。
+- [ ] 为 S3 wrapper 增加 0 字节 PutObject/UploadPart 回归（`server/tests/test_storage_mock.cpp:476-516`）——覆盖空载荷与签名策略边界。 
+- [ ] 为 `QtNetworkTaskHttp` 增加 context object 提前销毁的回调契约测试（`client/engine/task/tests/test_task_http.cpp:104-205`）——锁定防悬垂语义。 
+- [ ] 为 `serve_args` 公共 API 显式文档化 argv 必须为剥离子命令后的口径并补完整 argv 回归腿（`server/src/serve_args.hpp:50-52`）——防止未来调用契约误用。 
+- [ ] 将覆盖率复查条目改成显式状态并保存 gcovr 命令/报告路径（`todo.md:686-693`）——使覆盖率声明可复核。 
+- [ ] 分离当前工作区无关的 docs 依赖与截图变更（`docs/package.json:11-12`, `docs/pnpm-lock.yaml`）——避免混入后续代码审查提交。
