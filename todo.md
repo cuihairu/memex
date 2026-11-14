@@ -768,7 +768,8 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
   完成=serve_args.cpp 重写解析循环：`parse_int()` 严格十进制（可选负号＋全数字，空串/杂字符/溢出 nullopt——atoi「abc→0/99999999999→回绕」死法堵死）；取值旗标统一 `take()`（内联形态优先，否则吃下一参；尾旗标缺值 rc2——旧口径静默跳过＝端口/开关悄悄走默认）；未知旗标 rc2「未知旗标」、位置参数（非 `--` 开头）rc2、布尔旗标带值 rc2；全旗标支持 `--flag=value` 内联；端口族负值拒绝（旧 `--port -1` 经 uint16_t 回绕成 65535 的死法堵死）；文件头注释同步（「代码逐字保留」口径作废）。测试：test_serve_args `--uplink-port abc` 腿改判 rc2＋新溢出/负值/空串/未知/位置/缺值/布尔带值/内联形态（端口族、s3、max-mb、ldap-group-role、assistant、denylist）全腿。实现期踩两坑已修：while 重构漏推进（无限循环 Timeout）＋take 双推进（值取错位）；修复后门禁 ctest 94/94（300.5s）。commit a3d0794。
 - [x] 将 compose 测试临时文件改为唯一临时目录并 RAII 清理（`server/tests/test_storage_mock.cpp:574-583`, `server/tests/test_files_meta.cpp:57-83`）——消除固定 `/tmp` 测试竞态和残留。
   完成=两测试文件各置 `TempDir`（mkdtemp 0700＋pid 后缀＋析构 remove_all RAII；test_storage_mock 用既有 760 引入的同一结构）；test_files_meta 五处固定 `/tmp` 全改（默认凭据 compose、compose 回读、files_meta.db、memos.db、r233 迁移 db——条目面引用的两处 compose 之外，同文件同病的三处 db 一并治）；test_storage_mock compose 落盘腿改 TempDir；冗余 std::remove 摘除（RAII 收口）。门禁：ctest 94/94（245.8s）。commit 00123af。
-- [ ] 为 S3 wrapper 增加 0 字节 PutObject/UploadPart 回归（`server/tests/test_storage_mock.cpp:476-516`）——覆盖空载荷与签名策略边界。 
+- [x] 为 S3 wrapper 增加 0 字节 PutObject/UploadPart 回归（`server/tests/test_storage_mock.cpp:476-516`）——覆盖空载荷与签名策略边界。
+  完成=test_storage_mock 新增 0 字节载荷腿：空 body `put_object`（aws-chunked 解帧 n==0 分支＋Content-Length: 0 签名策略路径）→ head size==0 → get 回空体（哨兵值覆盖断言）→ 分片链（发起/一空片/合并/abort）全通。门禁：全量 ctest 93/94＋group_vault_dialog 孤红隔离复跑绿（6.2s，loadavg 14——Load flake 实录先例，服务端 delta 与该 Qt 用例无交集）。commit 97a243d。
 - [ ] 为 `QtNetworkTaskHttp` 增加 context object 提前销毁的回调契约测试（`client/engine/task/tests/test_task_http.cpp:104-205`）——锁定防悬垂语义。 
 - [ ] 为 `serve_args` 公共 API 显式文档化 argv 必须为剥离子命令后的口径并补完整 argv 回归腿（`server/src/serve_args.hpp:50-52`）——防止未来调用契约误用。 
 - [x] 将覆盖率复查条目改成显式状态并保存 gcovr 命令/报告路径（`todo.md:686-693`）——使覆盖率声明可复核。
