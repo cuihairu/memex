@@ -777,3 +777,4 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] 将覆盖率复查条目改成显式状态并保存 gcovr 命令/报告路径（`todo.md:686-693`）——使覆盖率声明可复核。
   完成=新增 `scripts/coverage_report.sh`（gcovr 调用与 CI「Coverage report」步逐字一致；报告落 `build-ci/coverage.xml`＋`build-ci/coverage-summary.txt`；含本机陈旧 gcda/gcno 剔除——gcovr 8.x 不剔会把已删源文件的 gcno-only 单元按 0% 计入，本机实测撑大分母 16,839 行/18 组）；「2026-11-12 复查」块补显式状态行（见 `todo.md` 复核行）；本机重跑 53,389/61,694=86.54% 与记录值逐字一致。 
 - [ ] 分离当前工作区无关的 docs 依赖与截图变更（`docs/package.json:11-12`, `docs/pnpm-lock.yaml`）——避免混入后续代码审查提交。
+  BLOCKED（2026-11-14）：docs/package.json/pnpm-lock.yaml/src/public 截图、apps/ios/Package.resolved、docs/pnpm-workspace.yaml 属另一并行会话的进行中改动（docs 站点重构＋截图重录），非本会话产物；全局红线「绝不暂存既有脏文件」禁止代为切分/提交——须由改动所属会话自行收口，或用户明示合并口径后再动。本会话全部提交已按文件名精确暂存，未触碰该集合（各 commit 的 git show 文件清单可证）。
