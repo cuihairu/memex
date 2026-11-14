@@ -3,10 +3,14 @@
 // 冲突返回已有行 id、异属主不命中、隔离态不参与秒传）、群/人两级配额
 //（无行=0 用量 0 上限、UPSERT 累加、负上限拒绝、两级独立）、外网收件箱
 // 留痕（uplink_logs 追加/过滤/倒序）、RustFS compose 生成内容契约。
+#include <sys/types.h>
+#include <unistd.h>
+
 #include <cstdio>
 #include <iostream>
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -33,6 +37,26 @@ int g_failures = 0;
 using memex::server::RustFSCompose;
 using memex::server::S3Config;
 
+// 唯一临时目录（mkdtemp 0700）＋RAII 清理——固定 /tmp 路径在并行跑同
+// 套件/异常中断时会竞态互踩、留残渣（codex-762）
+struct TempDir {
+  std::string path;
+  TempDir() {
+    std::string tmpl =
+        (std::filesystem::temp_directory_path() /
+         ("memex-files-meta-" + std::to_string(::getpid()) + "-XXXXXX"))
+            .string();
+    std::vector<char> buf(tmpl.begin(), tmpl.end());
+    buf.push_back('\0');
+    if (char* d = ::mkdtemp(buf.data())) path = d;
+  }
+  ~TempDir() {
+    if (!path.empty()) std::filesystem::remove_all(path);
+  }
+  TempDir(const TempDir&) = delete;
+  TempDir& operator=(const TempDir&) = delete;
+};
+
 // CR-3：shell 单引号转义——compose_path/endpoint 含空格/单引号/元字符时
 // std::system 命令串必须仍按字面执行（注入/破句防护）。
 void test_shell_quote() {
@@ -56,7 +80,8 @@ void test_default_credential() {
   CHECK(!is_default_credential("", ""));
 
   // 默认凭据落盘：写成功、内容如实含默认值，且 stderr 警告触发
-  const std::string p = "/tmp/memex_test_rustfs_default_creds.yml";
+  TempDir td;
+  const std::string p = td.path + "/rustfs_default_creds.yml";
   std::ostringstream captured;
   std::streambuf* old = std::cerr.rdbuf(captured.rdbuf());
   const bool ok = RustFSCompose::write_compose_file(
@@ -70,7 +95,6 @@ void test_default_credential() {
   ss << ifs.rdbuf();
   CHECK(ss.str().find("RUSTFS_ACCESS_KEY: \"minioadmin\"") !=
         std::string::npos);
-  std::remove(p.c_str());
 
   // 强凭据：不告警（静默放行非默认值）
   std::ostringstream captured2;
@@ -81,7 +105,6 @@ void test_default_credential() {
   std::cerr.rdbuf(old2);
   CHECK(ok2);
   CHECK(captured2.str().find("[MEMEX][警告]") == std::string::npos);
-  std::remove(p.c_str());
 }
 using ServerStore = memex::server::ServerStore;
 
@@ -370,8 +393,8 @@ int main() {
 
   // —— 持久化：文件库重开 schema 幂等、数据仍在 ——
   {
-    const std::string path = "/tmp/memex_test_files_meta.db";
-    std::remove(path.c_str());
+    TempDir tdp;
+    const std::string path = tdp.path + "/files_meta.db";
     {
       ServerStore s;
       CHECK(s.open(path));
@@ -386,7 +409,6 @@ int main() {
       CHECK(s.check_second_transfer("alice", "H1", "g1", "").has_value());
       CHECK(s.get_group_quota("g1")->limit_bytes == 4096);
     }
-    std::remove(path.c_str());
   }
 
   // —— R23-3 kind 空间隔离：收件箱与个人空间互不秒传串用、列表按类目过滤 ——
@@ -479,8 +501,8 @@ int main() {
 
   // —— R23-3 备忘录持久化：重开数据仍在 ——
   {
-    const std::string path = "/tmp/memex_test_memos.db";
-    std::remove(path.c_str());
+    TempDir tdm;
+    const std::string path = tdm.path + "/memos.db";
     {
       ServerStore s;
       CHECK(s.open(path));
@@ -493,13 +515,12 @@ int main() {
       CHECK(rows.size() == 1 && rows[0].content == "keep" &&
             rows[0].created_ms == 111 && rows[0].updated_ms == 111);
     }
-    std::remove(path.c_str());
   }
 
   // —— R23-3 迁移：R23-2 形态旧库（files 无 kind 列）→ open 迁移保数据 ——
   {
-    const std::string path = "/tmp/memex_test_files_migrate_r233.db";
-    std::remove(path.c_str());
+    TempDir tdg;
+    const std::string path = tdg.path + "/files_migrate_r233.db";
     {
       sqlite3* db = nullptr;
       CHECK(sqlite3_open(path.c_str(), &db) == SQLITE_OK);
@@ -563,7 +584,6 @@ int main() {
       CHECK(s.list_files("", "", 200, 0, -1).size() == 2);
       CHECK(s.list_memos("alice").size() == 1);
     }
-    std::remove(path.c_str());
   }
 
   // —— RustFS compose 生成契约（镜像/凭据/端口/卷/健康检查）——
@@ -585,7 +605,8 @@ int main() {
     CHECK(yaml.find("admin") == std::string::npos);
 
     // 落盘回读一致（自定义端口也应生效）
-    const std::string p = "/tmp/memex_test_rustfs_compose.yml";
+    TempDir td2;
+    const std::string p = td2.path + "/rustfs_compose.yml";
     CHECK(RustFSCompose::write_compose_file(p, "/data/rustfs", "ak2", "sk2",
                                             19000, 19001));
     std::ifstream ifs(p);
@@ -593,7 +614,6 @@ int main() {
     ss << ifs.rdbuf();
     CHECK(ss.str() == RustFSCompose::generate_compose("/data/rustfs", "ak2",
                                                       "sk2", 19000, 19001));
-    std::remove(p.c_str());
   }
 
   // —— 恶意值腿（codex-758）：凭据/路径带 YAML 元字符不得改变结构——

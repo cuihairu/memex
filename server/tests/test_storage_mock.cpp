@@ -677,7 +677,8 @@ int main() {
   CHECK(compose.find("/var/lib/memex/files:/data") != std::string::npos);
 
   // 落盘往返＋默认凭据告警腿（警告不失败——CR-4 大声警告语义）
-  const char* tmp = "/tmp/memex-test-compose.yml";
+  TempDir tdw;
+  const std::string tmp = tdw.path + "/compose.yml";
   CHECK(memex::server::RustFSCompose::write_compose_file(
       tmp, "/data", "minioadmin", "minioadmin", 9000, 9001));
   {
