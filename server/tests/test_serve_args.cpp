@@ -127,6 +127,9 @@ int main() {
     CHECK(a.assistant_bot == "bot-x");
     CHECK(run({"--uplink-ext-denylist=exe,dll"}, a) == 0);
     CHECK(a.uplink_policy.ext_denylist.size() == 2);
+    // argv 契约腿（codex-765）：必须传剥离子命令后的段——argv[0] 带
+    // 程序名（未剥离的完整 argv 误用形态）按位置参数 rc2 拒
+    CHECK(run({"memex_server", "--port", "24370"}, a) == 2);
   }
 
   // —— 群内助手与凭据/拉取密钥旗标 ——

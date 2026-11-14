@@ -48,7 +48,10 @@ struct ServeArgs {
 };
 
 // 解析 serve 面旗标＋S3/LDAP 环境变量兜底（旗标恒赢）。返回 0=成功；
-// 2=用法错（文案与原版逐字一致）。
+// 2=用法错。argv 契约：必须是「剥离子命令」后的参数段——argv[0] 即
+// 首个旗标（如 {"--port","24370"}），不带程序名/子命令（裸词一律按
+// 位置参数 rc2 拒）；argc=0 合法（全默认值）。严格解析口径见
+// serve_args.cpp 头注释（未知旗标/缺值/布尔带值/非严格数字均 rc2）。
 int parse_serve_args(int argc, char** argv, ServeArgs& out);
 
 } // namespace memex::server
