@@ -78,18 +78,28 @@ class S3StorageImpl final : public S3Storage {
     // 值的 body 会回 NoSuchBucket（实测 1.0.1）；无 body 建桶实测成功。
     auto outcome = client_->CreateBucket(cb);
     if (outcome.IsSuccess()) return true;
-    // 兼容层竞态/语义差异：他人已建也视为引导完成（私有部署单凭据场景）
     const auto& err = outcome.GetError();
     const auto t = err.GetErrorType();
-    if (t != Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU &&
-        t != Aws::S3::S3Errors::BUCKET_ALREADY_EXISTS) {
+    // OWNED_BY_YOU：服务端已证归属，幂等引导直接成功
+    if (t == Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU) return true;
+    if (t != Aws::S3::S3Errors::BUCKET_ALREADY_EXISTS) {
       // 引导失败不静默：网络/签名/兼容层问题在此最先暴露（部署排障第一现场）
       std::cerr << "[MEMEX] s3 create_bucket " << cfg_.bucket
                 << " 失败: " << err.GetExceptionName() << " - "
                 << err.GetMessage() << std::endl;
+      return false;
     }
-    return t == Aws::S3::S3Errors::BUCKET_ALREADY_OWNED_BY_YOU ||
-           t == Aws::S3::S3Errors::BUCKET_ALREADY_EXISTS;
+    // ALREADY_EXISTS＝桶在、归属未证（可能他人桶，旧口径直接当成功＝
+    // 误接他人桶把数据写进无权清理的外部桶）：凭据探针验控制权——用
+    // 当前凭据对桶内探针键走 put/get/delete 往返，全通才接受引导完成
+    //（codex-759）
+    if (!probe_bucket_control()) {
+      std::cerr << "[MEMEX] s3 create_bucket " << cfg_.bucket
+                << " 已存在但凭据探针未通过（非当前凭据可控的桶，拒绝引导）"
+                << std::endl;
+      return false;
+    }
+    return true;
   }
 
   bool put_object(const std::string& key,
@@ -290,6 +300,17 @@ class S3StorageImpl final : public S3Storage {
   }
 
  private:
+  // 所有权探针（codex-759）：当前凭据对桶内保留键写/读（内容一致）/删
+  // 三步全成＝「当前凭据可控制此桶」；任何一步失败即 false
+  bool probe_bucket_control() {
+    const std::string key = ".memex-bootstrap-probe";
+    const std::string body = "memex";
+    if (!put_object(key, body, nullptr)) return false;
+    std::string got;
+    if (!get_object(key, &got) || got != body) return false;
+    return delete_object(key);
+  }
+
   S3Config cfg_;
   std::unique_ptr<Aws::S3::S3Client> client_;
 };

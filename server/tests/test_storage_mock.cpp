@@ -106,6 +106,11 @@ class MockS3 {
   std::atomic<int> list_calls{0};
   // 全前缀 list 故障注入（files verify 假绿腿）：true 时 ListObjectsV2 恒 500
   std::atomic<bool> fail_all_lists{false};
+  // CreateBucket 分档（桶引导所有权腿，codex-759）：0=200 建成；1=409
+  // BucketAlreadyOwnedByYou；2=409 BucketAlreadyExists（探针键放行＝可控）；
+  // 3=409 BucketAlreadyExists＋探针键 403＝非当前凭据可控
+  std::atomic<int> create_bucket_mode{0};
+  std::atomic<int> probe_puts{0}; // 探针键 PUT 计数（探针真走到断言）
 
  private:
   static void reply(asio::ip::tcp::socket& s, int status,
@@ -113,7 +118,9 @@ class MockS3 {
                     const std::string& body) {
     const char* phrase = status == 200 ? "OK"
                          : status == 204 ? "No Content"
+                         : status == 403 ? "Forbidden"
                          : status == 404 ? "Not Found"
+                         : status == 409 ? "Conflict"
                                          : "Internal Error";
     std::string r = "HTTP/1.1 " + std::to_string(status) + ' ' + phrase +
                     "\r\n";
@@ -284,9 +291,17 @@ class MockS3 {
         reply(s, bucket_created_ ? 200 : 404, {}, "");
         return;
       }
-      if (method == "PUT") { // CreateBucket
-        bucket_created_ = true;
-        reply(s, 200, {}, "");
+      if (method == "PUT") { // CreateBucket：mode 分档（见成员注释）
+        if (create_bucket_mode == 0) {
+          bucket_created_ = true;
+          reply(s, 200, {}, "");
+          return;
+        }
+        const char* code = create_bucket_mode == 1
+                               ? "BucketAlreadyOwnedByYou"
+                               : "BucketAlreadyExists";
+        reply(s, 409, {},
+              std::string("<Error><Code>") + code + "</Code></Error>");
         return;
       }
       if (method == "GET") { // ListObjectsV2：prefix 过滤排序；paged/ 强制
@@ -368,6 +383,11 @@ class MockS3 {
       reply(s, 500, {}, "<Error><Code>InternalError</Code></Error>");
       return;
     }
+    // 桶引导探针拒绝腿（mode 3）：所有权探针键一切 403（非本凭据可控）
+    if (create_bucket_mode == 3 && key == ".memex-bootstrap-probe") {
+      reply(s, 403, {}, "<Error><Code>AccessDenied</Code></Error>");
+      return;
+    }
 
     if (method == "PUT") {
       if (query.count("uploadId") > 0) { // UploadPart
@@ -393,6 +413,7 @@ class MockS3 {
                   << "\n  bodyhex: " << hex << '\n';
       }
       objects[key] = body; // PutObject
+      if (key == ".memex-bootstrap-probe") ++probe_puts; // 所有权探针计数
       reply(s, 200, {{"ETag", "\"etag-" + key + "\""}}, "");
       return;
     }
@@ -619,6 +640,29 @@ int main() {
         std::string::npos);
   CHECK(gu.find(kBucket) != std::string::npos && gu.find("alpha") !=
         std::string::npos);
+
+  // —— 桶引导所有权腿（codex-759）：ALREADY_EXISTS 不再无条件当成功 ——
+  //    OWNED_BY_YOU 幂等直过；ALREADY_EXISTS 须凭据探针（探针键 put/get/
+  //    delete 往返）证明当前凭据可控；探针 403 拒绝引导（防误接他人桶）
+  {
+    MockS3 s3b;
+    s3b.create_bucket_mode = 1; // OWNED_BY_YOU：服务端已证归属
+    s3b.start();
+    memex::server::S3Config cfgb = cfg;
+    cfgb.endpoint = "http://127.0.0.1:" + std::to_string(s3b.port());
+    const auto stb = memex::server::S3Storage::create(cfgb);
+    CHECK(static_cast<bool>(stb));
+    CHECK(stb->create_bucket());
+    CHECK(s3b.probe_puts == 0); // OWNED_BY_YOU 腿不走探针
+
+    s3b.create_bucket_mode = 2; // ALREADY_EXISTS＋探针放行
+    CHECK(stb->create_bucket());
+    CHECK(s3b.probe_puts == 1); // 探针真走到（put 一次）
+
+    s3b.create_bucket_mode = 3; // ALREADY_EXISTS＋探针 403
+    CHECK(!stb->create_bucket()); // 非当前凭据可控：拒绝引导
+    CHECK(s3b.probe_puts == 1); // 探针被 403 拦（未计成）
+  }
 
   // —— RustFSCompose 纯逻辑：compose 文案契约（RUSTFS_ADDRESS/healthcheck
   //    /凭据/端口映射，对真容器验证过的两处契约不能回退）——
