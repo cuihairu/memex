@@ -1,7 +1,8 @@
 // serve 面旗标解析验收（parse_serve_args 直打，不起进程）：默认值、端口
-// 界（0/负/越界→rc2）、uplink 防护参数（黑/白名单整表替换、空表清空、
-// max-mb 换算与负值拒、二次口令）、S3/LDAP 旗标＋env 兜底（旗标恒赢）、
-// LDAP 组→角色映射（旗标与 env 逗号分隔多组、坏形态 rc2）。
+// 界（0/负/越界/溢出/杂字符→rc2）、uplink 防护参数（黑/白名单整表替换、
+// 空表清空、max-mb 换算与负值拒、二次口令）、S3/LDAP 旗标＋env 兜底
+//（旗标恒赢）、LDAP 组→角色映射（旗标与 env 逗号分隔多组、坏形态 rc2）、
+// 严格解析腿（未知旗标/位置参数/缺值/布尔带值 rc2；--flag=value 内联）。
 #include <cstdlib>
 #include <iostream>
 #include <string>
@@ -92,8 +93,40 @@ int main() {
     CHECK(run({"--webhook-port", "-1"}, a) == 2);
     CHECK(run({"--model-port", "-2"}, a) == 2);
     CHECK(run({"--files-port", "70000"}, a) == 2);
-    // 非数字 atoi→0＝「接受为关闭」（与原口径一致；只有 --port 0 才 rc2）
-    CHECK(run({"--uplink-port", "abc"}, a) == 0);
+    // 严格解析（codex-761）：非数字不再 atoi→0 静默当「接受为关闭」，
+    // 溢出不再回绕（atoi("99999999999")→截断值）——一律 rc2
+    CHECK(run({"--uplink-port", "abc"}, a) == 2);
+    CHECK(run({"--uplink-port", "12ab"}, a) == 2);
+    CHECK(run({"--uplink-port", ""}, a) == 2); // 空串＝缺值语义
+    CHECK(run({"--port", "99999999999"}, a) == 2); // 溢出不回绕
+    CHECK(run({"--port", "-1"}, a) == 2); // 负值（uint16_t 静默换 65535 死）
+    CHECK(run({"--ldap-timeout-ms", "-5"}, a) == 2);
+    CHECK(run({"--ldap-recheck-seconds", "-1"}, a) == 2);
+  }
+
+  // —— 严格解析腿（codex-761）：未知旗标/位置参数/缺值/布尔带值 rc2；
+  //    --flag=value 内联形态全旗标可用 ——
+  {
+    ServeArgs a;
+    CHECK(run({"--prot", "24370"}, a) == 2); // 未知旗标（拼写错不静默漏配）
+    CHECK(run({"extra"}, a) == 2);           // 位置参数（sub_argv 无裸词）
+    CHECK(run({"--port"}, a) == 2);          // 缺值（尾旗标不再静默跳过）
+    CHECK(run({"--s3-endpoint"}, a) == 2);   // 缺值（串旗标同口径）
+    CHECK(run({"--s3-use-ssl=true"}, a) == 2); // 布尔旗标带值
+    CHECK(run({"--ldap-starttls=1"}, a) == 2);
+    // 内联形态（值旗标全支持）
+    CHECK(run({"--port=24371", "--files-port=24381"}, a) == 0);
+    CHECK(a.port == 24371);
+    CHECK(a.files_port == 24381);
+    CHECK(run({"--s3-endpoint=http://x:9000", "--uplink-max-mb=2",
+               "--ldap-group-role=g=admin", "--assistant=bot-x"},
+              a) == 0);
+    CHECK(a.s3.endpoint == "http://x:9000");
+    CHECK(a.uplink_policy.max_upload_bytes == 2 * 1024 * 1024);
+    CHECK(a.ldap_cfg.group_roles.size() == 1);
+    CHECK(a.assistant_bot == "bot-x");
+    CHECK(run({"--uplink-ext-denylist=exe,dll"}, a) == 0);
+    CHECK(a.uplink_policy.ext_denylist.size() == 2);
   }
 
   // —— 群内助手与凭据/拉取密钥旗标 ——
