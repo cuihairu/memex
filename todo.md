@@ -760,7 +760,8 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [ ] LAY-017 [P2] 拆分 client/app/group_vault_dialog.cpp（1044 行）——密码箱 UI、解锁生命周期、条目表和加密提示同文件（file:line：client/app/group_vault_dialog.cpp:1）
 - [ ] 为 compose YAML 生成添加严格转义或白名单校验并补恶意值测试（`server/src/storage.cpp:298-330`）——阻止凭据/路径元字符改变容器配置。
 - [ ] 给 S3 桶引导添加当前凭据所有权/读写探针，仅证明可控制桶时接受 `ALREADY_EXISTS`（`server/src/storage.cpp:62-92`）——避免误接他人桶。
-- [ ] 将 `list_objects()` 失败显式传给 `files verify`，失败时一致性核对不得通过（`server/src/storage.cpp:145-152`, `server/src/files_server/server.cpp:87-112`）——消除备份核对假绿。
+- [x] 将 `list_objects()` 失败显式传给 `files verify`，失败时一致性核对不得通过（`server/src/storage.cpp:145-152`, `server/src/files_server/server.cpp:87-112`）——消除备份核对假绿。
+  完成=带成败通道虚函数 `S3Storage::list_objects_checked(prefix,max_keys,out)`（storage.hpp 内联默认转调 `list_objects` 返 true——四个内存假桩零改动；`S3StorageImpl` 实覆写：翻页中途 `!outcome.IsSuccess()` 返 false 不吞错）；`verify_file_objects` 孤儿核对改走 checked 通道、`FilesVerifyReport.objects_listed` 旗标（false＝孤儿核对残缺）；`memex_server files verify` 见 false 即 stderr 明示「清单不完整…不判通过」＋退出码 1（usage 文案同步）；旧 `list_objects()` 留注释警告核对面禁用。测试：test_files_verify 腿⑦（fail_list→`!objects_listed` 且不出孤儿结论，还原后恢复）＋test_storage_mock（mock `fail_all_lists` 500 腿→`list_objects_checked` 返 false＋空清单；CLI 进程级腿：`files verify` 打真 mock，fail→rc 1＋「不判通过」，恢复→rc 0「一致」控制腿）。门禁：ctest 94/94（243.8s，loadavg≈20）。commit 3a380a7。
 - [ ] 严格化 `serve_args` 数字/未知/缺值解析并补负值、溢出、`--flag=value`、未知参数测试（`server/src/serve_args.cpp:42-190`）——防止配置拼写错误静默改变端口与安全开关。
 - [ ] 将 compose 测试临时文件改为唯一临时目录并 RAII 清理（`server/tests/test_storage_mock.cpp:574-583`, `server/tests/test_files_meta.cpp:57-83`）——消除固定 `/tmp` 测试竞态和残留。
 - [ ] 为 S3 wrapper 增加 0 字节 PutObject/UploadPart 回归（`server/tests/test_storage_mock.cpp:476-516`）——覆盖空载荷与签名策略边界。 
