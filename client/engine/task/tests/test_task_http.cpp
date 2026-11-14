@@ -1,7 +1,8 @@
 // R27-3 QtNetwork 传输实现验收（本地真 TCP 桩，不打外网）：GET/POST/PUT/
 // PATCH 四动词分派（PATCH 走 sendCustomRequest 腿）、自定义头透传、请求体
 // 到达、200 回调三元组（status/body/err）、网络错腿（拒连 → status=0 带
-// error 文案）。真 QNetworkAccessManager × QEventLoop，回调在循环内收口。
+// error 文案）、上下文亡腿（实现对象先亡 → 回调不得再达，codex-764 防
+// 悬垂契约锁定）。真 QNetworkAccessManager × QEventLoop，回调在循环内收口。
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QHostAddress>
@@ -43,6 +44,7 @@ struct Captured {
 };
 
 Captured g_last;
+bool g_hold = false; // true＝桩延迟回包（上下文亡腿用）
 
 } // namespace
 
@@ -88,10 +90,18 @@ int main(int argc, char** argv) {
       g_last.path = QString::fromLatin1(rl[1]);
       g_last.body = body.left(want_body);
       g_last.complete = true;
-      sock->write("HTTP/1.1 200 OK\r\nContent-Length: 7\r\n"
-                  "Connection: close\r\n\r\nstub-ok");
-      sock->disconnectFromHost();
       *handled = true;
+      const QByteArray resp = "HTTP/1.1 200 OK\r\nContent-Length: 7\r\n"
+                              "Connection: close\r\n\r\nstub-ok";
+      if (g_hold) { // 延迟回包（上下文 sock——sock 亡不发）
+        QTimer::singleShot(200, sock, [sock, resp] {
+          sock->write(resp);
+          sock->disconnectFromHost();
+        });
+        return;
+      }
+      sock->write(resp);
+      sock->disconnectFromHost();
     });
   });
 
@@ -200,6 +210,30 @@ int main(int argc, char** argv) {
               {}, {}, &status, &body, &err);
     CHECK(status == 0);
     CHECK(!err.isEmpty());
+  }
+
+  // —— 上下文亡腿（codex-764）：实现对象先亡 → 回调不得再达（防悬垂
+  //    契约锁定）；桩延迟回包照达＝腿真实走完交换，非提前收口 ——
+  {
+    g_last = Captured{};
+    g_hold = true;
+    QNetworkAccessManager nam2;
+    bool called = false;
+    {
+      QtNetworkTaskHttp http2(&nam2);
+      http2.request("GET",
+                    QUrl(QString("http://127.0.0.1:%1/ctx").arg(port)), {},
+                    {},
+                    [&](int, const QByteArray&, const QString&) {
+                      called = true;
+                    });
+    } // http2 亡于回包前（延迟回包仍会在 200ms 后照常到达）
+    QEventLoop settle;
+    QTimer::singleShot(600, &settle, &QEventLoop::quit);
+    settle.exec();
+    CHECK(g_last.complete); // 桩已收请求并延迟回包（腿真实走到回包时点）
+    CHECK(!called);         // 实现对象亡后回调不得再达
+    g_hold = false;
   }
 
   if (g_failures == 0) std::cout << "task_http: all ok\n";
