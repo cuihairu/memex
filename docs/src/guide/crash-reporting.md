@@ -106,6 +106,6 @@
      [qobjectdefs_impl.h:548]` (that is the triggering lambda), `main.cpp:71` visible;
      crash reason `SIGSEGV / SEGV_MAPERR @ 0x0` (null-pointer write);
   4. full ctest 61/61 green (the new crash leg about 3.3s).
-     Note: 61/61 was the baseline as of 2026-10-08; the baseline has since grown to 88
-     registered tests (ctest names deduplicated, see the
+     Note: 61/61 was the baseline as of 2026-10-08; the baseline has since grown to 94
+     registered tests (`ctest -N` names deduplicated, see the
      [Delivery Acceptance Matrix](/guide/delivery-matrix)).

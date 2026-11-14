@@ -3,8 +3,8 @@
 > 口径铁律：**CI 绿 ≠ 全平台可交付**。CI 只在 ubuntu-latest 跑，其余平台的证据
 > 到哪一档就写哪一档。本页把「平台 × 通信模式 × 账号状态 × 网络状态 × 权限角色」
 > 的组合如实分档，报告引用平台能力时以本页为准，不得混写。
-> 核验日期：2026-10-13。证据只取仓库内：CI 工作流定义（`.github/workflows/`）、
-> ctest 测试名（88 项，ctest 名去重）、各端 README/BUGS 记录、带日期的实跑页
+> 核验日期：2026-10-13（ctest 项数 2026-11-14 复核）。证据只取仓库内：CI 工作流定义（`.github/workflows/`）、
+> ctest 测试名（94 项，`ctest -N` 名去重）、各端 README/BUGS 记录、带日期的实跑页
 > （`platform-adapter.md`、`wan-drill.md` 均为 2026-10-03 记录）。
 
 ## 分档定义
@@ -31,7 +31,7 @@ deb/rpm 只是同架构产物，未在目标系统安装过；**Windows** 只有
 | 移动端 App 可构建 | — | — | — | — | — | 🔧 ¹ | ⬛ ² | 🔧 ³ |
 | 安装包产物 | 🔧 tar+deb/rpm | 🔧 zip+setup.exe | 🔧 ⁴ | 🔧 ⁴ | 🔧 dmg×2 | 🔧 apk(debug) | ⬛ | — |
 | 安装后自检冒烟（--self-test 仅服务端；客户端＝--version/--smoke） | 🔧 nightly | 🔧 nightly | ⬛ | ⬛ | 🔧 nightly | — | — | — |
-| 全量自动化测试（ctest 88 项） | ✅ ci.yml | ⬛ | ⬛ | ⬛ | ⬛ | — | — | — |
+| 全量自动化测试（ctest 94 项） | ✅ ci.yml | ⬛ | ⬛ | ⬛ | ⬛ | — | — | — |
 
 ¹ `assembleDebug` 本地产物（BUGS.md 记录在案）；无 CI 作业。release 变体单测偶发红＝BUG-005，2026-10-10 已修（定性后修测试面断言，双变体 84/84×2 全绿收口）。
 ² ArkTS HAP 编译腿无 OHOS runner——harmony.yml 明示「不在此伪造编译通过」；纯逻辑层有 CI（见下表）。

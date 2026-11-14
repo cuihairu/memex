@@ -317,3 +317,43 @@ AI-flavor sweep: no actionable hits — 自研/100%/永不 occurrences are decis
 records, coverage figures and design invariants (legal per the copy standard).
 todo.md: already in the compact requirement+evidence format (676 lines, 169
 evidenced done rows); no changes.
+
+---
+## Re-audit 2026-11-14 (G2 batch)
+
+Scope: the surfaces that drift after recent code churn — test-count claims,
+platform/install matrices, CLI flag inventory, README badges and About line,
+nightly artifact channel. Prior rounds (2026-10-08 / 10-19 / 11-02) not
+re-litigated. All claims below re-evidenced against source this round; every fix
+is a doc-side change, source untouched.
+
+Three buckets: **code ahead of doc 0 · doc missing 1 · mismatch 2** (P0 0 · P1 0 · P2 3).
+
+| ID | Doc page | Claim | Source evidence (file:line) | Category | Severity | Fix |
+|----|----------|-------|------------------------------|----------|----------|-----|
+| G2-1 | docs/src/guide/delivery-matrix.md:9,39 and docs/src/zh/guide/delivery-matrix.md:7,34 | "ctest test names (88 items, ctest names deduplicated)" / "ctest 88 项" | `ctest -N` → 94 registered names, all distinct (0 duplicates); 94 `add_test(` declarations across server/ (35) + client/ (57) + admin/ (1) + common/ (1) | Mismatch (stale figure) | P2 | 88 → 94 in both languages, both lines each; wording tightened to "`ctest -N` names deduplicated" |
+| G2-2 | docs/src/guide/crash-reporting.md:109-110 and docs/src/zh/guide/crash-reporting.md:92 | "the baseline has since grown to 88 registered tests (ctest names deduplicated)" | same as G2-1 | Mismatch (stale figure) | P2 | 88 → 94 in both languages |
+| G2-3 | docs/src/guide/delivery-matrix.md:8 and docs/src/zh/guide/delivery-matrix.md:6 | "Verification date: 2026-10-13" standing as the page's only currency marker, one month on | re-verification run 2026-11-14 over the evidence classes named on that same line (`.github/workflows/`, `ctest -N`) | Mismatch (no re-check marker) | P2 | Date line now reads "2026-10-13 (ctest item count re-checked 2026-11-14)" in both languages |
+| G2-4 | no doc page | strict CLI parsing semantics undocumented | server/src/serve_args.cpp:90-92 — `--assistant`, `--files-port`, `--model-port`, `--port`, `--webhook-port` et al.; strict rules (unknown flag rc2, bare positional rc2, missing trailing value rc2, negative port rejected, `--flag=value` inline form) have no page describing them (config-effects.md covers in-app settings and only `--uplink-port` as a server CLI key) | Code ahead of doc (missing) | P2 | Not fixed this round — todo.md entry (needs a new page, not an inline edit) |
+
+Verified, no action: 23 EN guide pages ↔ 23 ZH pages, `comm -23` on basenames empty
+(no EN page lacking a ZH twin); install.sh / install.ps1 both present and match the
+README file-tree rows 81-83; nightly artifact channel claim (Actions artifacts are
+intermediates, the rolling `nightly` Release plus `sha-`/latest image tags are the
+delivery face) matches .github/workflows/nightly.yml:3-7 and README:332; README
+platform badge (Windows | Linux | macOS | Android | iOS | HarmonyOS) matches the About
+line's honest per-end status (Android shipped, iOS code-only with CI, HarmonyOS NEXT
+code-only with CI logic verification); no ipk/OpenWrt artifacts claimed (none exist in
+nightly.yml); C++17 + Qt 6 badge matches the CMake presets.
+
+Language face: conforms to sanctioned form ② (vitepress `locales` — root = English,
+`/zh/` = Chinese, both declared at docs/src/.vitepress/config.mts:98,126) **plus**
+sanctioned form ① (README.md ↔ README.zh.md). URL contract probe passes:
+`/` → 200, html lang `en`, first-screen CJK 4; `/zh/` → 200, html lang `zh-CN`,
+first-screen CJK 46. Note: the probe's candidate-path list misses
+`docs/src/.vitepress`, so memex reads `site=null` there — the site is real.
+**No browser-language auto-switch**: no `navigator.language` / `rootLocale` /
+`detectLocale` / Accept-Language handling anywhere in the config or in
+docs/src/.vitepress/theme/index.ts (theme only registers ShowcaseCarousel and
+imports custom.css). Recorded as "manual switching + explicit links only";
+todo.md carries the P2 entry for the user to decide the scope.

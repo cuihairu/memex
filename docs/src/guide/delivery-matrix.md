@@ -5,8 +5,8 @@
 > reaches. This page grades the combinations of 「平台 × 通信模式 × 账号状态 × 网络状态 ×
 > 权限角色」 honestly, and any report that cites platform capability takes this page as
 > authoritative — tiers must not be mixed.
-> Verification date: 2026-10-13. Evidence is taken only from inside the repo: CI workflow
-> definitions (`.github/workflows/`), ctest test names (88 items, ctest names deduplicated),
+> Verification date: 2026-10-13 (ctest item count re-checked 2026-11-14). Evidence is taken only from inside the repo: CI workflow
+> definitions (`.github/workflows/`), ctest test names (94 items, `ctest -N` names deduplicated),
 > each end's README/BUGS records, and the dated live-run pages (`platform-adapter.md` and
 > `wan-drill.md`, both recorded 2026-10-03).
 
@@ -36,7 +36,7 @@ review's five-platform list).
 | Mobile app buildable | — | — | — | — | — | 🔧 ¹ | ⬛ ² | 🔧 ³ |
 | Installer artifacts | 🔧 tar+deb/rpm | 🔧 zip+setup.exe | 🔧 ⁴ | 🔧 ⁴ | 🔧 dmg×2 | 🔧 apk(debug) | ⬛ | — |
 | Post-install self-check smoke (`--self-test` server only; client = `--version`/`--smoke`) | 🔧 nightly | 🔧 nightly | ⬛ | ⬛ | 🔧 nightly | — | — | — |
-| Full automated test suite (88 ctest items) | ✅ ci.yml | ⬛ | ⬛ | ⬛ | ⬛ | — | — | — |
+| Full automated test suite (94 ctest items) | ✅ ci.yml | ⬛ | ⬛ | ⬛ | ⬛ | — | — | — |
 
 ¹ Local `assembleDebug` artifact (on the record in BUGS.md); no CI job. The occasional red
 release-variant unit test = BUG-005, fixed 2026-10-10 (after triage, the test-side assertion
