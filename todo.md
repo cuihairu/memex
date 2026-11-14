@@ -691,6 +691,7 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
   - CI 同口径 gcovr（filter common/server/client，exclude third_party/vcpkg/tests；剔除三处已删源文件的陈旧 gcda：`client/app/main_window.cpp`、`server/src/files_server.cpp`、`server/src/store.cpp`——CI 干净 runner 天然无此项）：全库 **85.95% → 86.54%**（53,389 / 61,694 行），生产源码 **82.16% → 82.93%**（33,253 / 40,098 行），测试代码 93.24%（20,136 / 21,596 行）。
   - GUI 层不入测理由（任务要求逐项列明，不凑数）：`main_window.cpp` 1,804 行（消息槽/绘图/焦点/托盘事件循环，离屏无渲染面）、`main_window/groups.cpp` 597（24.2%，群列表交互与拖拽）、`main_window/dialogs.cpp` 171（12.3%）、`main_window/lifecycle.cpp` 224、`group_vault_dialog.cpp` 250（69.4%）、`screenshot_tool.cpp` 228（57.9%，X11 抓屏/热键）、`avatar.cpp` 112（32.9%，QPainter 裁圆与缓存）、`task_dialog.cpp` 105（89.1%）——均需真实窗口系统/合成输入/离屏渲染断言，QTest 模拟易碎（2026-11-10 已有 `crop_dialog` 同结论），按「不写易碎测试」纪律不入测；`ldap.cpp` 173（71.6%，真 LDAP 外呼）、`file_transfer.cpp` 146、`local_store.cpp` 150、`files_client.cpp` 201、`collab_engine.cpp` 132 同理（外部 I/O 或需进程级装配）。
   - 结论：`codecov.yml` 的 project/patch 状态本就 `target: auto`＋`informational: true`（趋势信号，无硬 98% 门）；98% 在「不改生产行为、不写凑数测试、不引入真实外部容器/窗口系统」约束下不可达成，已把可测缺口按优先级（存储核心→任务引擎→服务入口）压到 82.93% 并如实记录。剩余最大缺口 `server/src/main.cpp` 1,017 行集中在 `cmd_serve` 之后的装配与生命周期（起真实监听、LDAP/S3 连接、信号与线程回收），要再进一步需进程级 e2e 而非单测。
+  - 复核（2026-11-14 补，巡检条目「覆盖率声明可复核」落地）：状态=已完成（截至 ca7777f 口径，三批 commit 后无新生产码）；复核命令=`scripts/coverage_report.sh`（gcovr 调用与 `.github/workflows/ci.yml`「Coverage report」步逐字一致＋一道本机卫生步：剔除「源文件已不存在」的陈旧 gcda/gcno——LAY-001/002/003 拆分残留，CI 干净 runner 天然无此项，gcovr 8.x 不剔会把 gcno-only 单元按 0% 计入撑大分母，实测多计 16,839 行）；报告路径=`build-ci/coverage.xml`＋`build-ci/coverage-summary.txt`；本机重跑值 **53,389/61,694=86.54%**（生产 33,253/40,098=82.93%、测试 20,136/21,596=93.24%）与上文记录逐字一致（重跑时剔除陈旧覆盖产物 18 组）。
 
 ### 抽象层清单
 
@@ -763,5 +764,6 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [ ] 为 S3 wrapper 增加 0 字节 PutObject/UploadPart 回归（`server/tests/test_storage_mock.cpp:476-516`）——覆盖空载荷与签名策略边界。 
 - [ ] 为 `QtNetworkTaskHttp` 增加 context object 提前销毁的回调契约测试（`client/engine/task/tests/test_task_http.cpp:104-205`）——锁定防悬垂语义。 
 - [ ] 为 `serve_args` 公共 API 显式文档化 argv 必须为剥离子命令后的口径并补完整 argv 回归腿（`server/src/serve_args.hpp:50-52`）——防止未来调用契约误用。 
-- [ ] 将覆盖率复查条目改成显式状态并保存 gcovr 命令/报告路径（`todo.md:686-693`）——使覆盖率声明可复核。 
+- [x] 将覆盖率复查条目改成显式状态并保存 gcovr 命令/报告路径（`todo.md:686-693`）——使覆盖率声明可复核。
+  完成=新增 `scripts/coverage_report.sh`（gcovr 调用与 CI「Coverage report」步逐字一致；报告落 `build-ci/coverage.xml`＋`build-ci/coverage-summary.txt`；含本机陈旧 gcda/gcno 剔除——gcovr 8.x 不剔会把已删源文件的 gcno-only 单元按 0% 计入，本机实测撑大分母 16,839 行/18 组）；「2026-11-12 复查」块补显式状态行（见 `todo.md` 复核行）；本机重跑 53,389/61,694=86.54% 与记录值逐字一致。 
 - [ ] 分离当前工作区无关的 docs 依赖与截图变更（`docs/package.json:11-12`, `docs/pnpm-lock.yaml`）——避免混入后续代码审查提交。
