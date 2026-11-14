@@ -137,6 +137,37 @@ inline std::string shell_quote(const std::string& s) {
   return out;
 }
 
+// YAML 双引号标量转义（compose 生成用，评审 codex-758）：access_key/
+// secret_key/data_dir 来自 CLI/env/部署输入，直接拼进 compose 文本＝恶意
+// 值可注入任意 YAML 键（如凭据带换行即插入新顶级键 privileged: true）。
+// 返回值自带两端双引号；`\`/`"`/换行/控制字符全部按 YAML 双引号转义集
+// 转义（\\ \" \n \r \t，其余控制字符 \xNN）——单行引号标量，结构不变。
+inline std::string yaml_quote(const std::string& s) {
+  static const char* hex = "0123456789abcdef";
+  std::string out;
+  out.reserve(s.size() + 2);
+  out += '"';
+  for (const unsigned char c : s) {
+    switch (c) {
+      case '\\': out += "\\\\"; break;
+      case '"':  out += "\\\""; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '\t': out += "\\t"; break;
+      default:
+        if (c < 0x20 || c == 0x7f) {
+          out += "\\x";
+          out += hex[c >> 4];
+          out += hex[c & 0x0f];
+        } else {
+          out += static_cast<char>(c);
+        }
+    }
+  }
+  out += '"';
+  return out;
+}
+
 // RustFS compose 编排（R23-1）：
 // - 单节点 RustFS 即可（自托管、零依赖、Rust 单二进制）
 // - 端口 9000（S3 API）、9001（控制台）

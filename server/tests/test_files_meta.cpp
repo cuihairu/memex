@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <iostream>
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -593,6 +594,32 @@ int main() {
     CHECK(ss.str() == RustFSCompose::generate_compose("/data/rustfs", "ak2",
                                                       "sk2", 19000, 19001));
     std::remove(p.c_str());
+  }
+
+  // —— 恶意值腿（codex-758）：凭据/路径带 YAML 元字符不得改变结构——
+  // 引号/换行进双引号标量须转义成字面 \\、\n：不增删行、顶级键不出现
+  {
+    const std::string benign = RustFSCompose::generate_compose(
+        "/data", "ak", "sk", 9000, 9001);
+    const auto line_count = [](const std::string& s) {
+      return static_cast<std::size_t>(
+          std::count(s.begin(), s.end(), '\n'));
+    };
+    const std::string evil_key = RustFSCompose::generate_compose(
+        "/data", "ak\"\n    privileged: true\n#", "sk", 9000, 9001);
+    CHECK(line_count(evil_key) == line_count(benign)); // 转义不增删行
+    CHECK(evil_key.find("\n    privileged: true\n") == std::string::npos);
+    // 凭据值仍是单行双引号标量（整值在一行内、行首环境键前缀不动）
+    CHECK(evil_key.find("RUSTFS_ACCESS_KEY: \"ak\\\"") != std::string::npos);
+    const std::string evil_dir = RustFSCompose::generate_compose(
+        "/tmp/x\"\n  privileged: true", "a", "s", 9000, 9001);
+    CHECK(line_count(evil_dir) == line_count(benign));
+    CHECK(evil_dir.find("\n  privileged: true:/data") == std::string::npos);
+    // 反斜杠/制表符/回车同样转义（不被 YAML 当转义序列或折叠符）
+    const std::string evil_bs = RustFSCompose::generate_compose(
+        "/data", "a\\\t\rz", "sk", 9000, 9001);
+    CHECK(line_count(evil_bs) == line_count(benign));
+    CHECK(evil_bs.find("a\\\\\\t\\rz") != std::string::npos);
   }
 
   // —— S3Config 默认值：内网 http + path-style（S3 兼容层语义）——

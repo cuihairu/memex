@@ -643,6 +643,25 @@ int main() {
     CHECK(ss.str().find("minioadmin") != std::string::npos);
   }
 
+  // —— 恶意值腿（codex-758）：凭据带 YAML 元字符（引号/换行）不得注入
+  //    新键——转义后换行变字面 \n 两字符，行数与良性 compose 一致 ——
+  {
+    const auto line_count = [](const std::string& s) {
+      return static_cast<std::size_t>(
+          std::count(s.begin(), s.end(), '\n'));
+    };
+    const std::string benign = memex::server::RustFSCompose::generate_compose(
+        "/data", "ak", "sk", 9000, 9001);
+    const auto evil = memex::server::RustFSCompose::generate_compose(
+        "/data", "ak\"\n    privileged: true\n#", "sk", 9000, 9001);
+    CHECK(line_count(evil) == line_count(benign));
+    CHECK(evil.find("\n    privileged: true\n") == std::string::npos);
+    const auto evil_dir = memex::server::RustFSCompose::generate_compose(
+        "/tmp/x\"\n  privileged: true", "a", "s", 9000, 9001);
+    CHECK(line_count(evil_dir) == line_count(benign));
+    CHECK(evil_dir.find("\n  privileged: true:/data") == std::string::npos);
+  }
+
   // —— files verify CLI 进程级腿：list 中途失败不得判通过（假绿堵死）——
   // 空库也走到全桶 list 步：mock fail_all_lists → 退出码 1＋明示文案；
   // 关掉后同一库/桶 → 退出码 0「一致」（控制腿，证明失败腿非空转）
