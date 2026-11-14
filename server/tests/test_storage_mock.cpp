@@ -3,9 +3,13 @@
 // style）——存储实现类的每个 SDK 调用与错误分支都过真网络：桶引导幂等、
 // put/get 往返、404/500 错误腿、列表翻页（IsTruncated+token）与 max 截断、
 // 分片上传（发起/两片/合并/中止/坏 uploadId）、HeadObject、批量删、预签名
-// URL；RustFSCompose 纯逻辑腿（compose 文案/tmp 落盘/默认凭据告警）。
+// URL；RustFSCompose 纯逻辑腿（compose 文案/tmp 落盘/默认凭据告警）；
+// files verify CLI 进程级腿（list 中途失败→退出码 1 不判通过）。
 // docker compose up/down 是外部进程依赖（CI 无 docker），不入测。
 #include <asio.hpp>
+
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -13,6 +17,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -99,6 +104,8 @@ class MockS3 {
 
   std::map<std::string, std::string> objects; // key -> body
   std::atomic<int> list_calls{0};
+  // 全前缀 list 故障注入（files verify 假绿腿）：true 时 ListObjectsV2 恒 500
+  std::atomic<bool> fail_all_lists{false};
 
  private:
   static void reply(asio::ip::tcp::socket& s, int status,
@@ -284,8 +291,9 @@ class MockS3 {
       }
       if (method == "GET") { // ListObjectsV2：prefix 过滤排序；paged/ 强制
                              // 每页 2 条 + truncated（踩 SDK token 翻页腿）
-        if (query.count("prefix") > 0 &&
-            query.at("prefix").rfind("fail500", 0) == 0) {
+        if (fail_all_lists ||
+            (query.count("prefix") > 0 &&
+             query.at("prefix").rfind("fail500", 0) == 0)) {
           reply(s, 500, {}, "<Error><Code>InternalError</Code></Error>");
           return;
         }
@@ -457,6 +465,51 @@ class MockS3 {
 
 } // namespace
 
+#ifndef MEMEX_SERVER_BIN
+#error "MEMEX_SERVER_BIN 未定义（应传入 $<TARGET_FILE:memex_server>）"
+#endif
+
+namespace {
+
+// 唯一临时目录（mkdtemp 0700）＋进程退出自动清理——固定 /tmp 路径在并行
+// 跑同套件/异常中断时会竞态互踩、留残渣
+struct TempDir {
+  std::string path;
+  TempDir() {
+    std::string tmpl =
+        (std::filesystem::temp_directory_path() /
+         ("memex-storage-mock-" + std::to_string(::getpid()) + "-XXXXXX"))
+            .string();
+    std::vector<char> buf(tmpl.begin(), tmpl.end());
+    buf.push_back('\0');
+    if (char* d = ::mkdtemp(buf.data())) path = d;
+  }
+  ~TempDir() {
+    if (!path.empty()) std::filesystem::remove_all(path);
+  }
+  TempDir(const TempDir&) = delete;
+  TempDir& operator=(const TempDir&) = delete;
+};
+
+// CLI 进程级腿：真 memex_server files verify 打到本 mock（退出码＋全输出）
+int run_files_verify(const std::string& db, std::uint16_t port,
+                     std::string* out) {
+  const std::string log = db + ".verify.log";
+  const std::string cmd =
+      std::string("'" MEMEX_SERVER_BIN "' files verify --db '") + db +
+      "' --s3-endpoint 'http://127.0.0.1:" + std::to_string(port) +
+      "' --s3-bucket " + kBucket +
+      " --s3-access-key test-ak --s3-secret-key test-sk > '" + log + "' 2>&1";
+  const int rc = std::system(cmd.c_str());
+  std::ifstream f(log);
+  std::stringstream ss;
+  ss << f.rdbuf();
+  *out = ss.str();
+  return WEXITSTATUS(rc);
+}
+
+} // namespace
+
 int main() {
   MockS3 s3;
   s3.start();
@@ -496,6 +549,14 @@ int main() {
   CHECK(la.size() == 2);
   if (la.size() == 2) CHECK(la[0] == "a/1" && la[1] == "a/2");
   CHECK(st->list_objects("fail500/", 1000).empty());
+  // 带成败通道：500 → false（旧口径只见空清单，调用方无从判残缺）
+  {
+    std::vector<std::string> keys;
+    CHECK(!st->list_objects_checked("fail500/", 1000, keys));
+    CHECK(keys.empty());
+    CHECK(st->list_objects_checked("a/", 1000, keys));
+    CHECK(keys.size() == 2);
+  }
   const auto lall = st->list_objects("", 1000);
   CHECK(lall.size() >= 4); // alpha/a/1/a/2/b/1（fail500-x put 失败不落表）
 
@@ -580,6 +641,23 @@ int main() {
     std::stringstream ss;
     ss << f.rdbuf();
     CHECK(ss.str().find("minioadmin") != std::string::npos);
+  }
+
+  // —— files verify CLI 进程级腿：list 中途失败不得判通过（假绿堵死）——
+  // 空库也走到全桶 list 步：mock fail_all_lists → 退出码 1＋明示文案；
+  // 关掉后同一库/桶 → 退出码 0「一致」（控制腿，证明失败腿非空转）
+  {
+    TempDir td;
+    const std::string db = td.path + "/verify.db";
+    s3.fail_all_lists = true;
+    std::string out;
+    CHECK(run_files_verify(db, s3.port(), &out) == 1);
+    CHECK(out.find("清单不完整") != std::string::npos);
+    CHECK(out.find("不判通过") != std::string::npos);
+    s3.fail_all_lists = false;
+    std::string out_ok;
+    CHECK(run_files_verify(db, s3.port(), &out_ok) == 0);
+    CHECK(out_ok.find("一致") != std::string::npos);
   }
 
   if (g_failures == 0) {

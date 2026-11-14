@@ -290,9 +290,12 @@ if(MEMEX_BUILD_TESTS)
 
   # S3Storage 全接口验收（本地 mock S3 兼容层）：AWS SDK 真 SigV4/HTTP 路径
   # 打 127.0.0.1 mock——桶引导幂等/put/get/404/500 腿/列表翻页+截断/分片
-  # 上传四段/HeadObject/批量删/预签名；RustFSCompose 纯逻辑与告警腿
+  # 上传四段/HeadObject/批量删/预签名；RustFSCompose 纯逻辑与告警腿；
+  # 带成败通道的 list（中途失败回 false）＋files verify CLI 进程级腿
   add_executable(test_storage_mock tests/test_storage_mock.cpp)
   target_link_libraries(test_storage_mock PRIVATE memex_server_core)
+  target_compile_definitions(test_storage_mock PRIVATE
+    MEMEX_SERVER_BIN="$<TARGET_FILE:memex_server>")
   add_test(NAME storage_mock COMMAND test_storage_mock)
   set_tests_properties(storage_mock PROPERTIES TIMEOUT 120)
 

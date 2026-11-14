@@ -136,9 +136,18 @@ class S3StorageImpl final : public S3Storage {
 
   std::vector<std::string> list_objects(const std::string& prefix,
                                         int max_keys) override {
+    // 无成败通道旧口径：失败＝返回已取得部分（files verify 走
+    // list_objects_checked，不得用本方法下「核对通过」结论）
+    std::vector<std::string> keys;
+    list_objects_checked(prefix, max_keys, keys);
+    return keys;
+  }
+
+  bool list_objects_checked(const std::string& prefix, int max_keys,
+                            std::vector<std::string>& out) override {
     // 服务端单请求上限 1000：要大清单（如 files verify 全桶核对）须按
     // continuation token 翻页，max_keys 仍是返回总量上限
-    std::vector<std::string> keys;
+    out.clear();
     Aws::String token;
     for (;;) {
       Aws::S3::Model::ListObjectsV2Request req;
@@ -148,21 +157,21 @@ class S3StorageImpl final : public S3Storage {
       if (!token.empty()) req.SetContinuationToken(token);
       auto outcome = client_->ListObjectsV2(req);
       if (!outcome.IsSuccess()) {
-        return keys; // 中途失败：返回已取得部分（调用方按短清单处理）
+        return false; // 中途失败：out 留已取得部分＋false（不吞错）
       }
       for (const auto& obj : outcome.GetResult().GetContents()) {
-        keys.push_back(obj.GetKey());
+        out.push_back(obj.GetKey());
       }
       if (!outcome.GetResult().GetIsTruncated() ||
-          static_cast<int>(keys.size()) >= max_keys) {
+          static_cast<int>(out.size()) >= max_keys) {
         break;
       }
       token = outcome.GetResult().GetNextContinuationToken();
     }
-    if (static_cast<int>(keys.size()) > max_keys) {
-      keys.resize(static_cast<std::size_t>(max_keys));
+    if (static_cast<int>(out.size()) > max_keys) {
+      out.resize(static_cast<std::size_t>(max_keys));
     }
-    return keys;
+    return true;
   }
 
   std::optional<std::string> create_multipart_upload(

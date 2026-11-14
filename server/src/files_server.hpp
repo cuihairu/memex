@@ -77,6 +77,8 @@ struct FilesVerifyMismatch {
 struct FilesVerifyReport {
   std::size_t checked{0};    // 受检 status=normal 行数
   std::size_t objects{0};    // 桶内对象总数（全前缀 list）
+  bool objects_listed{true}; // false＝桶内清单中途失败（孤儿核对残缺，
+                             // 一致性核对不得判通过）
   std::vector<std::string> missing;            // 元数据在、对象缺
   std::vector<FilesVerifyMismatch> mismatches; // 大小不符
   std::vector<std::string> orphans;            // 对象在、无元数据引用

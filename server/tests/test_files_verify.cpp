@@ -5,7 +5,8 @@
 // ③ 大小不符（对象字节被换）→ mismatches（期望/实际大小齐带）；
 // ④ 孤儿对象（桶里有、无元数据引用）→ orphans 只告警不判死；
 // ⑤ 隔离/过期行不算孤儿（引用面含全部状态）也不受检（只核 normal）；
-// ⑥ 空 object_key 行（无字节面）跳过不核。
+// ⑥ 空 object_key 行（无字节面）跳过不核；
+// ⑦ 清单中途失败（objects_listed=false）——孤儿核对残缺不得判通过。
 #include <map>
 #include <optional>
 #include <string>
@@ -37,6 +38,7 @@ int g_failures = 0;
 class FakeS3 : public S3Storage {
 public:
   std::map<std::string, std::string> objects_;
+  bool fail_list{false}; // 中途失败注入（假绿腿：清单通道必须带成败）
 
   bool create_bucket() override { return true; }
   bool put_object(const std::string& key, const std::string& body,
@@ -63,6 +65,12 @@ public:
       if (k.rfind(prefix, 0) == 0) out.push_back(k);
     }
     return out;
+  }
+  bool list_objects_checked(const std::string& prefix, int max_keys,
+                            std::vector<std::string>& out) override {
+    if (fail_list) return false; // 中途失败：清单残缺（核对不得判通过）
+    out = list_objects(prefix, max_keys);
+    return true;
   }
   std::optional<std::string> create_multipart_upload(
       const std::string&) override {
@@ -195,6 +203,20 @@ int main() {
     // 全删字节后恢复，保持底数（后续腿/重跑）
     CHECK(s3.put_object("users/alice/hq", std::string(9, 'q')));
     CHECK(s3.put_object("users/bob/he", std::string(11, 'e')));
+  }
+  { // ⑦ 清单中途失败（假绿堵死）：objects_listed=false，孤儿核对残缺——
+    // 总体不得判通过；head/missing 面不受影响
+    s3.fail_list = true;
+    const auto rep = verify_file_objects(store, s3);
+    CHECK(!rep.objects_listed);
+    CHECK(rep.checked == 3);
+    CHECK(rep.missing.empty());
+    CHECK(rep.orphans.empty()); // 残缺清单不出孤儿结论
+    s3.fail_list = false;
+    // 还原后 objects_listed 恢复 true（口径只认成功通道）
+    const auto rep2 = verify_file_objects(store, s3);
+    CHECK(rep2.objects_listed);
+    CHECK(rep2.objects == 5);
   }
 
   if (g_failures == 0) {

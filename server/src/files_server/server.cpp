@@ -102,7 +102,11 @@ FilesVerifyReport verify_file_objects(ServerStore& store, S3Storage& storage) {
       rep.mismatches.push_back({m.object_key, m.file_size, size});
     }
   }
-  for (const auto& key : storage.list_objects("", 1000000)) {
+  // 孤儿核对走带成败通道的全量列举：list 中途失败（网络/兼容层错）时
+  // 短清单静默当「桶内全核过」＝假绿——objects_listed=false 由 CLI 判不通过
+  std::vector<std::string> bucket_keys;
+  rep.objects_listed = storage.list_objects_checked("", 1000000, bucket_keys);
+  for (const auto& key : bucket_keys) {
     ++rep.objects;
     if (referenced.find(key) == referenced.end()) {
       rep.orphans.push_back(key); // 对象在、无元数据引用＝孤儿（告警不判死）

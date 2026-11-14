@@ -71,6 +71,15 @@ class S3Storage {
   virtual std::vector<std::string> list_objects(const std::string& prefix,
                                                 int max_keys = 1000) = 0;
 
+  // 全量列举带成败通道（files verify 专用）：false＝中途失败（out 只含
+  // 已取得部分，调用方不得据此下「核对通过」结论）。缺省实现复用
+  // list_objects 恒回 true（内存桩/兼容实现沿用旧口径，无需感知成败）。
+  virtual bool list_objects_checked(const std::string& prefix, int max_keys,
+                                    std::vector<std::string>& out) {
+    out = list_objects(prefix, max_keys);
+    return true;
+  }
+
   // —— 分片上传（大文件/断点续传/秒传预检） ——
   // 1. 发起分片上传，返回 upload_id
   virtual std::optional<std::string> create_multipart_upload(const std::string& key) = 0;

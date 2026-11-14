@@ -2644,8 +2644,8 @@ int cmd_files(int argc, char** argv, const std::string& db_path) {
     std::cerr << "用法：files verify [--s3-endpoint E --s3-bucket B "
                  "--s3-access-key A --s3-secret-key K] [--s3-region R]"
                  " [--s3-use-ssl]\n"
-              << "  核对 R23 文件元数据 ↔ 对象字节：缺对象/大小不符→"
-                 "退出码 1；孤儿对象只告警\n"
+              << "  核对 R23 文件元数据 ↔ 对象字节：缺对象/大小不符/"
+                 "桶清单失败→退出码 1；孤儿对象只告警\n"
               << "  S3 旗标缺省回落环境变量 MEMEX_S3_ENDPOINT/MEMEX_S3_BUCKET"
                  "/MEMEX_S3_ACCESS_KEY/MEMEX_S3_SECRET_KEY（与 serve 同族）\n";
     return 2;
@@ -2701,6 +2701,12 @@ int cmd_files(int argc, char** argv, const std::string& db_path) {
   }
   for (const auto& k : rep.orphans) {
     std::cout << "孤儿对象（无元数据引用，仅告警）：" << k << "\n";
+  }
+  if (!rep.objects_listed) {
+    // 桶内清单中途失败：孤儿核对残缺——「一致」结论不成立（假绿堵死）
+    std::cerr << "桶内对象清单不完整（list 中途失败）：孤儿核对未完成，"
+                 "本次核对不判通过\n";
+    return 1;
   }
   if (!rep.missing.empty() || !rep.mismatches.empty()) {
     std::cout << "不一致：缺 " << rep.missing.size() << " 条、大小不符 "
