@@ -623,6 +623,29 @@ int main() {
   CHECK(hetag == "\"etag-alpha\"");
   CHECK(!st->head_object("ghost", &size, &hetag));
 
+  // —— 0 字节载荷腿（codex-763）：空 body 的 put/head/get/分片全链路——
+  //    空载荷在 aws-chunked 解帧/Content-Length: 0 签名策略下最易破
+  CHECK(st->put_object("empty.bin", "", nullptr));
+  std::int64_t esize = -1;
+  std::string eetag;
+  CHECK(st->head_object("empty.bin", &esize, &eetag));
+  CHECK(esize == 0);
+  std::string ebody = "sentinel";
+  CHECK(st->get_object("empty.bin", &ebody));
+  CHECK(ebody.empty());
+  const auto eid = st->create_multipart_upload("empty-big.bin");
+  CHECK(eid.has_value());
+  const auto epart = st->upload_part("empty-big.bin", *eid, 1, "");
+  CHECK(epart.has_value());
+  {
+    std::vector<memex::server::UploadPartResult> eparts;
+    eparts.push_back({1, *epart});
+    const auto er =
+        st->complete_multipart_upload("empty-big.bin", *eid, eparts);
+    CHECK(er.has_value());
+  }
+  CHECK(st->abort_multipart_upload("empty-big.bin", *eid));
+
   // —— 批量删；空表直成功 ——
   CHECK(st->delete_objects({"a/1", "a/2"}));
   CHECK(st->delete_objects({}));
