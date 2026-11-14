@@ -357,3 +357,44 @@ first-screen CJK 46. Note: the probe's candidate-path list misses
 docs/src/.vitepress/theme/index.ts (theme only registers ShowcaseCarousel and
 imports custom.css). Recorded as "manual switching + explicit links only";
 todo.md carries the P2 entry for the user to decide the scope.
+
+---
+## Re-audit 2026-11-15 (G2 re-verify)
+
+Re-verification of the 2026-11-14 G2 batch, plus one new surface the prior
+round did not cover: cross-locale link leakage (a zh page linking to an English
+absolute route). VitePress does not rewrite absolute routes, so a `/zh/` page
+emitting `href="/guide/x"` sends Chinese readers to the English page. Every
+prior-round row below was re-evidenced against source this round; nothing in it
+is false.
+
+Three buckets: **code ahead of doc 0 · doc missing 0 · mismatch 1** (P0 0 · P1 0 · P2 1).
+
+| ID | Doc page | Claim | Source evidence (file:line) | Category | Severity | Fix |
+|----|----------|-------|------------------------------|----------|----------|-----|
+| G2R-1 | docs/src/zh/index.md:14,17,20 (hero `actions` block) | The three hero CTAs (`产品定位` / `界面原型` / `需求与验收`) used `link: /guide/product`, `/guide/prototypes`, `/guide/requirements` — absolute EN routes | Local rebuild + scan of `dist/zh/**.html`: 23/24 zh pages were clean (their single EN href is VitePress's own translations switcher, and the one cross-ref in `zh/guide/architecture.md:5` is the explicitly labelled `英文页为` bilingual pointer); `dist/zh/index.html` alone emitted 3 CTAs at `href="/memex/guide/{product,prototypes,requirements}"`. Reproduced on the live site `https://cuihairu.github.io/memex/zh/`, which returns the same three `VPButton` hrefs — a zh reader landing on the zh index clicks through to the English pages | Mismatch (wrong-language redirect) | P2 | Hero links now `/zh/guide/{product,prototypes,requirements}`; rebuild re-scanned, zero non-switcher EN hrefs left in `dist/zh/**` |
+
+Verified, no action: all four prior-round rows hold — `add_test(` declarations are
+exactly 94 (server 35 / client 57 / admin 1 / common 1) matching the "94 项" figures
+at `delivery-matrix.md:9,39` / `crash-reporting.md:109` and their zh twins; the
+re-check date marker is in place in both languages; `todo.md` carries G2-DOCS-001
+(todo.md:784) for the missing strict-CLI page; `git tag -l` = `nightly` only, so the
+README "no version tags" wording (README.md:332 / README.zh.md:276) is honest.
+Badges deduped to 7 per README as recorded. GitHub About line's Drogon admin console
+confirmed in code (admin/CMakeLists.txt:5 `find_package(Drogon CONFIG REQUIRED)`,
+admin/src/admin_app.hpp). Live URL probe: `/`, `/zh/`, `/guide/product` all 200 —
+the site is published despite the fleet baseline classifying memex as "no docs site",
+so a local rebuild and the deployed artifact agree.
+
+Language face: unchanged from the prior round — sanctioned form ② (vitepress
+`locales`, root = English at config.mts:98, `/zh/` at :126) **plus** form ①
+(README.md ↔ README.zh.md). **No browser-language auto-switch**: no
+`navigator.languages` / `rootLocale` / `detectLocale` / Accept-Language handling
+anywhere in `docs/src` (config, theme/index.ts, or any page source). G2-LANG-001
+(todo.md:785) stands, awaiting the user's call.
+
+Build note: `pnpm docs:build` fails on this tree with `ERR_PNPM_VERIFY_DEPS_BEFORE_RUN`
+(node_modules out of sync with pnpm-lock.yaml; the overrides moved to the untracked
+`docs/pnpm-workspace.yaml`), so the gate ran `docs/node_modules/.bin/vitepress
+build src` directly — builds clean in ~6s. This is a pre-existing dirty-tree
+condition, not a doc defect; the tree was left exactly as found.

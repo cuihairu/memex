@@ -11,13 +11,13 @@ hero:
   actions:
     - theme: brand
       text: 产品定位
-      link: /guide/product
+      link: /zh/guide/product
     - theme: alt
       text: 界面原型
-      link: /guide/prototypes
+      link: /zh/guide/prototypes
     - theme: alt
       text: 需求与验收
-      link: /guide/requirements
+      link: /zh/guide/requirements
 
 features:
   - icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 7v10m6-10v10M8.5 3.5h7M12 3.5V7M5 9v6m14-6v6M4 21h16a1 1 0 0 0 1-1v-3H3v3a1 1 0 0 0 1 1Z"/></svg>'
