@@ -770,7 +770,8 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
   完成=两测试文件各置 `TempDir`（mkdtemp 0700＋pid 后缀＋析构 remove_all RAII；test_storage_mock 用既有 760 引入的同一结构）；test_files_meta 五处固定 `/tmp` 全改（默认凭据 compose、compose 回读、files_meta.db、memos.db、r233 迁移 db——条目面引用的两处 compose 之外，同文件同病的三处 db 一并治）；test_storage_mock compose 落盘腿改 TempDir；冗余 std::remove 摘除（RAII 收口）。门禁：ctest 94/94（245.8s）。commit 00123af。
 - [x] 为 S3 wrapper 增加 0 字节 PutObject/UploadPart 回归（`server/tests/test_storage_mock.cpp:476-516`）——覆盖空载荷与签名策略边界。
   完成=test_storage_mock 新增 0 字节载荷腿：空 body `put_object`（aws-chunked 解帧 n==0 分支＋Content-Length: 0 签名策略路径）→ head size==0 → get 回空体（哨兵值覆盖断言）→ 分片链（发起/一空片/合并/abort）全通。门禁：全量 ctest 93/94＋group_vault_dialog 孤红隔离复跑绿（6.2s，loadavg 14——Load flake 实录先例，服务端 delta 与该 Qt 用例无交集）。commit 97a243d。
-- [ ] 为 `QtNetworkTaskHttp` 增加 context object 提前销毁的回调契约测试（`client/engine/task/tests/test_task_http.cpp:104-205`）——锁定防悬垂语义。 
+- [x] 为 `QtNetworkTaskHttp` 增加 context object 提前销毁的回调契约测试（`client/engine/task/tests/test_task_http.cpp:104-205`）——锁定防悬垂语义。
+  完成=实现修正＋契约腿双落地。实现（task_http.cpp）：回调连线上下文由 `reply` 改 `this`（实现对象）——原实现头注释声称「QObject 只为回调上下文（对象亡则不回调）」但代码上下文挂 reply＝实现对象亡后回包照达、done 捕获的属主指针悬垂（注释/代码不一致实录）；reply 清理改独立连线（上下文 reply 自身）＝实现对象先亡时 finished 照常 deleteLater 不漏回收。测试（test_task_http.cpp）：桩加 `g_hold` 延迟回包（200ms，上下文 sock）＋新腿「作用域内析构 QtNetworkTaskHttp → 泵 600ms 等回包真实到达 → 断言回调未达＋桩侧请求已收」（旧代码此腿必红：回包 200ms 到达时回调仍连）。门禁：ctest 94/94（259.3s）。commit 49f853e。
 - [ ] 为 `serve_args` 公共 API 显式文档化 argv 必须为剥离子命令后的口径并补完整 argv 回归腿（`server/src/serve_args.hpp:50-52`）——防止未来调用契约误用。 
 - [x] 将覆盖率复查条目改成显式状态并保存 gcovr 命令/报告路径（`todo.md:686-693`）——使覆盖率声明可复核。
   完成=新增 `scripts/coverage_report.sh`（gcovr 调用与 CI「Coverage report」步逐字一致；报告落 `build-ci/coverage.xml`＋`build-ci/coverage-summary.txt`；含本机陈旧 gcda/gcno 剔除——gcovr 8.x 不剔会把已删源文件的 gcno-only 单元按 0% 计入，本机实测撑大分母 16,839 行/18 组）；「2026-11-12 复查」块补显式状态行（见 `todo.md` 复核行）；本机重跑 53,389/61,694=86.54% 与记录值逐字一致。 
