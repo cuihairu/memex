@@ -777,10 +777,11 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 - [x] 将覆盖率复查条目改成显式状态并保存 gcovr 命令/报告路径（`todo.md:686-693`）——使覆盖率声明可复核。
   完成=新增 `scripts/coverage_report.sh`（gcovr 调用与 CI「Coverage report」步逐字一致；报告落 `build-ci/coverage.xml`＋`build-ci/coverage-summary.txt`；含本机陈旧 gcda/gcno 剔除——gcovr 8.x 不剔会把已删源文件的 gcno-only 单元按 0% 计入，本机实测撑大分母 16,839 行/18 组）；「2026-11-12 复查」块补显式状态行（见 `todo.md` 复核行）；本机重跑 53,389/61,694=86.54% 与记录值逐字一致。 
 - [ ] 分离当前工作区无关的 docs 依赖与截图变更（`docs/package.json:11-12`, `docs/pnpm-lock.yaml`）——避免混入后续代码审查提交。
+  BLOCKED（2026-11-15 巡检）：该批 docs/package.json、pnpm-lock.yaml 与 docs/src/public/** 截图改动是另一会话在途未暂存工作，本会话不许代为暂存或回滚（跨会话纪律）；等属主会话自行提交后本项自然解除。
   BLOCKED（2026-11-14）：docs/package.json/pnpm-lock.yaml/src/public 截图、apps/ios/Package.resolved、docs/pnpm-workspace.yaml 属另一并行会话的进行中改动（docs 站点重构＋截图重录），非本会话产物；全局红线「绝不暂存既有脏文件」禁止代为切分/提交——须由改动所属会话自行收口，或用户明示合并口径后再动。本会话全部提交已按文件名精确暂存，未触碰该集合（各 commit 的 git show 文件清单可证）。
 
 ## 文档一致性再审计 G2 轮（2026-11-14 · 舰队巡检单 fleet-docs-audit-G2）
 
 - [x] G2-DOCS-001 [P2] 补服务端 CLI 严格解析口径的文档页（`server/src/serve_args.cpp:90-92`）——现有 config-effects.md 只覆盖应用内设置，服务端 CLI 键仅 `--uplink-port` 一条，全套旗标（`--assistant`/`--files-port`/`--model-port`/`--port`/`--webhook-port`/`--s3-*`/`--task-pull-secret`/`--tool-cred-secret`/`--uplink-*`/16 个 `--ldap-*`）与严格规则（未知旗标 rc2、裸位置参数 rc2、尾旗标缺值 rc2、负值端口拒绝、`--flag=value` 内联形态）无页面描述。修法＝新增页面而非行内补字，须与 `docs/src/zh/guide/` 成对建页（英＋中孪生）。
   证据：新增 `docs/src/guide/serve-args.md`＋`docs/src/zh/guide/serve-args.md`（成对孪生，侧栏双 locale 注册 config.mts）；全文 40 旗标实测清单（`grep -oP 'arg == "--\\K[a-z0-9-]+'` ＝40，其中 `--ldap-*` 实为 21 个非 16）；直跑 `vitepress build src` 绿、双页渲染、交叉链接零死链；验收测试 `ctest -R serve_args`（server/tests/test_serve_args.cpp）。
-- [ ] G2-LANG-001 [P2] 浏览器语言自动识别范围待用户拍板（文档站 `docs/src/.vitepress/config.mts:98,126`）——现状＝受规形态②（vitepress locales：root＝英文、`/zh/`＝中文）叠加形态①（README.md ↔ README.zh.md），URL 契约探针通过（`/` 200 lang=en 首屏 CJK 4；`/zh/` 200 lang=zh-CN 首屏 CJK 46），但 config 与 `docs/src/.vitepress/theme/index.ts` 均无 `navigator.language`/`rootLocale`/`detectLocale`/Accept-Language 处理＝**无双语自动切换，仅手动链接**。默认按受规基线「手动切换＋显式链接」，自动跳转属增强项——是否上、上哪些仓由用户拍板，本轮不实施。
+- [ ] G2-LANG-001 [P2] 【BLOCKED＝等用户拍板，本轮不实施】浏览器语言自动识别范围待用户拍板（文档站 `docs/src/.vitepress/config.mts:98,126`）——现状＝受规形态②（vitepress locales：root＝英文、`/zh/`＝中文）叠加形态①（README.md ↔ README.zh.md），URL 契约探针通过（`/` 200 lang=en 首屏 CJK 4；`/zh/` 200 lang=zh-CN 首屏 CJK 46），但 config 与 `docs/src/.vitepress/theme/index.ts` 均无 `navigator.language`/`rootLocale`/`detectLocale`/Accept-Language 处理＝**无双语自动切换，仅手动链接**。默认按受规基线「手动切换＋显式链接」，自动跳转属增强项——是否上、上哪些仓由用户拍板，本轮不实施。
