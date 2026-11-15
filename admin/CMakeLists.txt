@@ -6,7 +6,17 @@ find_package(Drogon CONFIG REQUIRED) # vcpkg 装的是 DrogonConfig.cmake（大�
 
 # 业务核心库：setup()（配置＋路由注册）单列，供 memex_admin 主程序与
 # API 验收测试（进程内 setup + 另线程 run）共用同一份真实路由面。
-add_library(memex_admin_core STATIC src/admin_app.cpp)
+add_library(memex_admin_core STATIC
+  src/admin_app.cpp
+  src/admin_app/common.cpp
+  src/admin_app/auth.cpp
+  src/admin_app/accounts.cpp
+  src/admin_app/audit_devices.cpp
+  src/admin_app/notify.cpp
+  src/admin_app/files_quota.cpp
+  src/admin_app/groups.cpp
+  src/admin_app/flows.cpp
+  src/admin_app/brand_health.cpp)
 target_compile_features(memex_admin_core PRIVATE cxx_std_17)
 target_include_directories(memex_admin_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src)
