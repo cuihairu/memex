@@ -72,7 +72,17 @@ target_link_libraries(memex_server_core PUBLIC
   aws-cpp-sdk-core
   Drogon::Drogon)
 
-add_executable(memex_server src/main.cpp)
+add_executable(memex_server
+  src/main.cpp
+  src/server_cli/serve.cpp
+  src/server_cli/account.cpp
+  src/server_cli/messages.cpp
+  src/server_cli/audit_brand.cpp
+  src/server_cli/org.cpp
+  src/server_cli/policy.cpp
+  src/server_cli/assist.cpp
+  src/server_cli/services.cpp
+  src/server_cli/groups_files.cpp)
 target_compile_features(memex_server PRIVATE cxx_std_17)
 target_link_libraries(memex_server PRIVATE memex_server_core)
 target_compile_definitions(memex_server PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
