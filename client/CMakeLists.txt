@@ -1408,6 +1408,13 @@ if(MEMEX_BUILD_TESTS)
   # 链接面与 test_screenshot 一致（含 main_window.cpp/引擎）——否则接线无覆盖
   add_executable(test_theme
     tests/test_theme.cpp
+    # LAY-011 按场景域拆分（对外不变：同目标、同 ctest 名 theme）；公共面
+    # 在 tests/theme/common.hpp
+    tests/theme/tokens.cpp
+    tests/theme/default_themes.cpp
+    tests/theme/app_pages.cpp
+    tests/theme/custom_theme.cpp
+    tests/theme/skin_pack.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
