@@ -33,6 +33,13 @@ target_link_libraries(memex_engine_direct PUBLIC memex_core memex_common
 
 add_library(memex_engine_collab STATIC
   engine/collab/collab_engine.cpp
+  # LAY-013 collab_engine 按域拆分（对外 API 仍是 collab_engine.hpp，共享面在
+  # collab_engine/common.hpp）
+  engine/collab/collab_engine/outgoing.cpp
+  engine/collab/collab_engine/wire.cpp
+  engine/collab/collab_engine/frames.cpp
+  engine/collab/collab_engine/inbound.cpp
+  engine/collab/collab_engine/connection.cpp
   # LAY-007 files_client 按域拆分（对外 API 仍是 files_client.hpp，共享面在
   # files/common.hpp）
   engine/collab/files/files.cpp
