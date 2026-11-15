@@ -33,7 +33,23 @@ if(MEMEX_BUILD_TESTS)
   # admin 后台 API 验收：真 admin 进程（setup+run 进程内）× 真库 ＋
   # 登录门/角色门/账号组织/策略/留存/审计红线（auditor 证）/设备台账/
   # 健康面逐腿打穿；org-admin 越权 403 与 CLI 同口径。
-  add_executable(test_admin_api tests/test_admin_api.cpp)
+  # LAY-009 按接口域拆分（对外不变：同目标、同 ctest 名 admin_api）；公共
+  # 面在 tests/admin_api/common.hpp，入口 tests/test_admin_api.cpp 只留造库
+  # 调用、起服、逐腿调用序与收尾
+  add_executable(test_admin_api
+    tests/test_admin_api.cpp
+    tests/admin_api/common.hpp
+    tests/admin_api/seed.cpp
+    tests/admin_api/auth.cpp
+    tests/admin_api/policy.cpp
+    tests/admin_api/archive.cpp
+    tests/admin_api/surface.cpp
+    tests/admin_api/notify.cpp
+    tests/admin_api/files.cpp
+    tests/admin_api/groups.cpp
+    tests/admin_api/bizflow.cpp
+    tests/admin_api/brand.cpp
+    tests/admin_api/tasks_pull.cpp)
   target_include_directories(test_admin_api PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src)
   target_link_libraries(test_admin_api PRIVATE memex_admin_core)
