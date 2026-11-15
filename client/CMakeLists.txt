@@ -992,6 +992,11 @@ if(MEMEX_BUILD_TESTS)
   # 服务端不可达回落直连态并提示「消息不进归档」、停服后直连仍可用
   add_executable(test_mode_switch
     tests/test_mode_switch.cpp
+    # LAY-014 test_mode_switch 按腿域拆分（对外不变：同目标、同 ctest 名 mode_switch）；公共面在 tests/mode_switch/common.hpp
+    tests/mode_switch/boot_direct.cpp
+    tests/mode_switch/collab.cpp
+    tests/mode_switch/msg_cross.cpp
+    tests/mode_switch/fallback_settings.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
     app/settings_window.cpp
     app/archive_console.cpp
