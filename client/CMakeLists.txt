@@ -74,6 +74,15 @@ set(MEMEX_MAIN_WINDOW_SRCS
   app/main_window/rail_devices.cpp
   app/main_window/avatar.cpp)
 
+# LAY-012 task_dialog 按职责拆分（对外 API 仍是 task_dialog.hpp，模块公共面
+# 在 task_dialog/common.hpp；主程序与 14 个测试目标共用同一份模块清单）
+set(MEMEX_TASK_DIALOG_SRCS
+  app/task_dialog.cpp
+  app/task_dialog/view.cpp
+  app/task_dialog/kanban.cpp
+  app/task_dialog/providers.cpp
+  app/task_dialog/populate.cpp)
+
 qt_add_executable(memex_client
   app/main.cpp
   ${MEMEX_MAIN_WINDOW_SRCS}
@@ -116,7 +125,7 @@ qt_add_executable(memex_client
   app/file_assistant.hpp
   app/emoji_pack_dialog.cpp
   app/emoji_pack_dialog.hpp
-  app/task_dialog.cpp
+  ${MEMEX_TASK_DIALOG_SRCS}
   app/approval_dialog.cpp
   app/report_dialog.cpp
   app/group_tools_dialog.cpp
@@ -481,7 +490,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_task_dialog
     app/net_guard.cpp
     app/tests/test_task_dialog.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/approval_dialog.cpp
     app/report_dialog.cpp
     app/group_tools_dialog.cpp
@@ -664,7 +673,7 @@ if(MEMEX_BUILD_TESTS)
     app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -728,7 +737,7 @@ if(MEMEX_BUILD_TESTS)
     app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -796,7 +805,7 @@ if(MEMEX_BUILD_TESTS)
     app/crop_dialog.cpp
     app/emoji_pack_dialog.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -998,7 +1007,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -1067,7 +1076,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -1136,7 +1145,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -1206,7 +1215,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -1273,7 +1282,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -1362,7 +1371,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -1437,7 +1446,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -1503,7 +1512,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -1570,7 +1579,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
@@ -1665,7 +1674,7 @@ if(MEMEX_BUILD_TESTS)
     app/net_remote_settings.cpp
     app/away_settings.cpp
     app/file_assistant.cpp
-    app/task_dialog.cpp
+    ${MEMEX_TASK_DIALOG_SRCS}
     app/task_provider_store.cpp
     app/task_provider_settings.cpp
     app/task_template_settings.cpp
