@@ -37,6 +37,23 @@ private:
   void handle_message(const memex::protocol::Message& msg);
   void handle_login(const memex::protocol::Message& msg);
   void handle_logout();
+  // LAY-015 各域 handler：handle_message switch 臂提取，定义在 session/ 各模块
+  void h_org_query(const memex::protocol::Message& msg);
+  void h_text(const memex::protocol::Message& msg);
+  void h_group_cmd(const memex::protocol::Message& msg);
+  void h_group_query(const memex::protocol::Message& msg);
+  void h_cross_log(const memex::protocol::Message& msg);
+  void h_ack(const memex::protocol::Message& msg);
+  void h_read(const memex::protocol::Message& msg);
+  void h_receipt_query(const memex::protocol::Message& msg);
+  void h_message_query(const memex::protocol::Message& msg);
+  void h_presence_query(const memex::protocol::Message& msg);
+  void h_fav_query(const memex::protocol::Message& msg);
+  void h_fav_cmd(const memex::protocol::Message& msg);
+  void h_profile_cmd(const memex::protocol::Message& msg);
+  void h_nudge(const memex::protocol::Message& msg);
+  void h_recall(const memex::protocol::Message& msg);
+  void h_file_authz(const memex::protocol::Message& msg);
   void send(std::string frame); // 写队列单链驱动
   void do_write();
   void close();

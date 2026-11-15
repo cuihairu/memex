@@ -15,6 +15,11 @@ find_package(Drogon CONFIG REQUIRED)
 add_library(memex_server_core STATIC
   src/server.cpp
   src/session.cpp
+  # LAY-015 session 按 handler 域拆分（入口仍是 session.cpp，公共面 session/common.hpp）
+  src/session/login.cpp
+  src/session/org_receipts.cpp
+  src/session/msg.cpp
+  src/session/group.cpp
   # LAY-001 store 按领域拆分（对外 API 仍是 store.hpp，共享小工具在 store/common.hpp）
   src/store/schema.cpp
   src/store/account.cpp
