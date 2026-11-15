@@ -55,10 +55,10 @@
 
 ## 6. Admin/Ops Console
 
-- **Implementation:** `setup()` registers `/api/*` Drogon routes and static SPA hosting (`admin/src/admin_app.cpp:201`, `admin/src/admin_app.cpp:3937`); `AdminContext` owns the `ServerStore`, authorization service, and health URLs (`admin/src/admin_app.cpp:153`); vanilla JS implements hash routing and same-origin API calls (`admin/www/admin.js:1`, `admin/www/admin.js:7`).
+- **Implementation:** `setup()` registers `/api/*` Drogon routes and static SPA hosting (`admin/src/admin_app.cpp:201`, `admin/src/admin_app.cpp:3937`); `AdminContext` owns the `ServerStore`, authorization service, and health URLs (`admin/src/admin_app.cpp:153`); vanilla JS implements hash routing and same-origin API calls (`admin/www/admin/helpers.js:1`, `admin/www/admin/helpers.js:16`).
 - **Configuration schema:** CLI overrides followed by `MEMEX_ADMIN_*`, `MEMEX_FILES_URL`, and `MEMEX_STORAGE_URL` env inputs (`admin/src/admin_app.cpp:201`, `admin/src/admin_app.cpp:218`).
 - **Dedicated protocol file:** none. Admin uses same-origin `/api/*` JSON; only file health is proxied (`admin/src/admin_app.cpp:3914`).
-- **Text/copy location:** the Chinese UI copy is in `admin/www/admin.js`; server-side errors are also returned from route handlers (`admin/src/admin_app.cpp:162`, `admin/src/admin_app.cpp:3946`).
+- **Text/copy location:** the Chinese UI copy lives in the page modules `admin/www/admin/*.js` (shared helpers and routing entry in `admin/www/admin/helpers.js`, `admin/www/admin/admin.js`); server-side errors are also returned from route handlers (`admin/src/admin_app.cpp:162`, `admin/src/admin_app.cpp:3946`).
 
 ## 7. Desktop Client
 
@@ -98,7 +98,7 @@
 | Desktop / mobile client | TCP 24360 protobuf | Collaboration Plane | `server/src/main.cpp:43`, `apps/ios/Sources/MemexKit/ServerAddress.swift:12`, `apps/harmony/core/address.ts:8` |
 | Desktop / mobile client | HTTP 24561 JSON/files | File, Tool, and Integration Plane | `client/app/collab_defaults.hpp:23`, `apps/ios/Sources/MemexKit/FilesClient.swift:64`, `apps/harmony/core/files_client.ts:83` |
 | Desktop | UDP 2425 discovery; TCP 2426–2437 peer transfer | Desktop peer | `client/engine/direct/discovery.hpp:27`, `client/engine/direct/direct_transport.hpp:2`, `client/engine/direct/direct_transport.hpp:30` |
-| Browser | Same-origin HTTP `/api/*` | Admin/Ops Console backend | `admin/www/admin.js:3`, `admin/src/admin_app.cpp:3937` |
+| Browser | Same-origin HTTP `/api/*` | Admin/Ops Console backend | `admin/www/admin/helpers.js:3`, `admin/src/admin_app.cpp:3937` |
 | Admin backend | Direct library call | ServerStore | `admin/src/admin_app.cpp:235` |
 | Admin backend | HTTP `/files/health` proxy | File plane | `admin/src/admin_app.cpp:3914` |
 | External webhook producer | Independent HTTP port | WebhookServer | `server/src/main.cpp:44`, `server/src/webhook.hpp:54` |

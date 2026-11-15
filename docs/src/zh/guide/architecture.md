@@ -54,10 +54,10 @@
 
 ## 6. 管理/运维台
 
-- **实现：** `setup()` 注册 Drogon `/api/*` 路由并托管静态 SPA（`admin/src/admin_app.cpp:201`、`admin/src/admin_app.cpp:3937`）；`AdminContext` 持有 `ServerStore`、授权服务和健康检查 URL（`admin/src/admin_app.cpp:153`）；vanilla JS 实现 hash 路由和同源 API 调用（`admin/www/admin.js:1`、`admin/www/admin.js:7`）。
+- **实现：** `setup()` 注册 Drogon `/api/*` 路由并托管静态 SPA（`admin/src/admin_app.cpp:201`、`admin/src/admin_app.cpp:3937`）；`AdminContext` 持有 `ServerStore`、授权服务和健康检查 URL（`admin/src/admin_app.cpp:153`）；vanilla JS 实现 hash 路由和同源 API 调用（`admin/www/admin/helpers.js:1`、`admin/www/admin/helpers.js:16`）。
 - **配置 schema：** CLI 优先，随后读取 `MEMEX_ADMIN_*`、`MEMEX_FILES_URL`、`MEMEX_STORAGE_URL`（`admin/src/admin_app.cpp:201`、`admin/src/admin_app.cpp:218`）。
 - **专属协议文件：** 无。管理台使用同源 `/api/*` JSON；仅文件健康检查做 HTTP 代理（`admin/src/admin_app.cpp:3914`）。
-- **文案挂点：** 中文 UI 文案在 `admin/www/admin.js`；服务端错误也由路由处理器返回（`admin/src/admin_app.cpp:162`、`admin/src/admin_app.cpp:3946`）。
+- **文案挂点：** 中文 UI 文案在各页模块 `admin/www/admin/*.js`（公共面与路由入口在 `admin/www/admin/helpers.js`、`admin/www/admin/admin.js`）；服务端错误也由路由处理器返回（`admin/src/admin_app.cpp:162`、`admin/src/admin_app.cpp:3946`）。
 
 ## 7. 桌面客户端
 
@@ -97,7 +97,7 @@
 | 桌面/移动客户端 | TCP 24360 protobuf | 协作面 | `server/src/main.cpp:43`、`apps/ios/Sources/MemexKit/ServerAddress.swift:12`、`apps/harmony/core/address.ts:8` |
 | 桌面/移动客户端 | HTTP 24561 JSON/文件 | 文件、工具与集成面 | `client/app/collab_defaults.hpp:23`、`apps/ios/Sources/MemexKit/FilesClient.swift:64`、`apps/harmony/core/files_client.ts:83` |
 | 桌面 | UDP 2425 发现；TCP 2426–2437 点对点传输 | 桌面对端 | `client/engine/direct/discovery.hpp:27`、`client/engine/direct/direct_transport.hpp:2`、`client/engine/direct/direct_transport.hpp:30` |
-| 浏览器 | 同源 HTTP `/api/*` | 管理/运维台后端 | `admin/www/admin.js:3`、`admin/src/admin_app.cpp:3937` |
+| 浏览器 | 同源 HTTP `/api/*` | 管理/运维台后端 | `admin/www/admin/helpers.js:3`、`admin/src/admin_app.cpp:3937` |
 | 管理台后端 | 直接库调用 | ServerStore | `admin/src/admin_app.cpp:235` |
 | 管理台后端 | HTTP `/files/health` 代理 | 文件面 | `admin/src/admin_app.cpp:3914` |
 | 外部 webhook 生产方 | 独立 HTTP 端口 | WebhookServer | `server/src/main.cpp:44`、`server/src/webhook.hpp:54` |

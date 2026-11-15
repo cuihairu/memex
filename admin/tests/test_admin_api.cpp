@@ -18,6 +18,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <cred.hpp>
 #include <store.hpp>
@@ -629,7 +630,8 @@ int main() {
   }
 
   PHASE("leg-18");
-  // ⑱ 静态页：/ 回 index.html
+  // ⑱ 静态页：/ 回 index.html；LAY-008 拆分后 index.html 引用的页面模块
+  //    须真能取到（目录内静态路由，缺一个则前端加载期直接崩）
   {
     static trantor::EventLoopThread loop3;
     static auto c3 = [&] {
@@ -640,8 +642,23 @@ int main() {
     req->setMethod(drogon::Get);
     req->setPath("/");
     const auto [result, resp] = c3->sendRequest(req, 5.0);
+    const std::string home = resp ? std::string(resp->getBody()) : "";
     CHECK(result == drogon::ReqResult::Ok && resp &&
-          resp->getBody().find("Memex 管理后台") != std::string::npos);
+          home.find("Memex 管理后台") != std::string::npos);
+    // index.html 里每个 script src 逐一取回：200＋非空，且引用顺序即加载序
+    const std::vector<std::string> scripts = {
+      "/admin/helpers.js", "/admin/accounts.js", "/admin/policy.js",
+      "/admin/messages.js", "/admin/notify.js", "/admin/tasks.js",
+      "/admin/files.js", "/admin/groups.js", "/admin/flow.js",
+      "/admin/brand.js", "/admin/admin.js"};
+    for (const auto& s : scripts) {
+      CHECK(home.find(s) != std::string::npos);
+      const auto r = http("GET", s);
+      CHECK(r.code == 200 && !r.text.empty());
+    }
+    // 公共面须先于入口加载（pages 注册表在 helpers，路由在 admin.js）
+    CHECK(home.find("/admin/helpers.js") != std::string::npos &&
+          home.find("/admin/helpers.js") < home.find("/admin/admin.js"));
   }
 
   PHASE("leg-20");

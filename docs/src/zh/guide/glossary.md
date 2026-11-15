@@ -25,7 +25,7 @@
 | 服务器 agent | Server agent | 轻量常驻代理：向文件面心跳上报本机负载，只读采样且不开监听 | `server/src/agent_main.cpp:1` |
 | 凭据面 | Credential plane | PBKDF2 口令摘要加上服务端 AES-256-GCM 凭据密封 | `server/src/cred.hpp:16`, `server/src/cred.hpp:27` |
 | 管理台上下面 | Admin context | Admin 进程长命状态：ServerStore、授权服务、健康检查 URL 和互斥锁 | `admin/src/admin_app.cpp:153` |
-| 管理台前端 | Admin SPA | 零构建 vanilla JS hash 路由，所有改写请求带 CSRF 轻闸头 | `admin/www/admin.js:1` |
+| 管理台前端 | Admin SPA | 零构建 vanilla JS hash 路由，所有改写请求带 CSRF 轻闸头 | `admin/www/admin/helpers.js:1` |
 | 客户端 UI 层 | Client UI layer | Qt 主窗和对话框，承载窗口、托盘、通知、截图、主题与系统集成 | `client/app/main_window.cpp:66` |
 | 客户端直连引擎 | Client direct engine | 免登录直连态：UDP 发现、TCP 点对点文本、文件传输和本地历史 | `client/engine/direct/direct_engine.hpp:38` |
 | 发现服务 | Discovery service | UDP 2425 周期宣告与同网段在线表；可伴发飞秋/IPMSG 兼容报文 | `client/engine/direct/discovery.hpp:53` |

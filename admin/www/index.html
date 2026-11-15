@@ -47,6 +47,18 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="/admin.js"></script>
+  <!-- 零构建多脚本：同一经典全局作用域，按依赖序加载——公共面在前、
+       各域页面注册模块居中、路由与登录态入口最后（LAY-008）。 -->
+  <script src="/admin/helpers.js"></script>
+  <script src="/admin/accounts.js"></script>
+  <script src="/admin/policy.js"></script>
+  <script src="/admin/messages.js"></script>
+  <script src="/admin/notify.js"></script>
+  <script src="/admin/tasks.js"></script>
+  <script src="/admin/files.js"></script>
+  <script src="/admin/groups.js"></script>
+  <script src="/admin/flow.js"></script>
+  <script src="/admin/brand.js"></script>
+  <script src="/admin/admin.js"></script>
 </body>
 </html>

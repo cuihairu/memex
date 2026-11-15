@@ -45,7 +45,7 @@
 | 文件会话表 | File sessions | FileServer 进程内 Bearer 令牌到账号/过期/scope 的映射 | `server/src/files_server.cpp:190` |
 | Uplink 策略 | Uplink policy | 外网单向面的扩展名黑白名单、独立上限、二次验证等安全参数 | `server/src/files_server.hpp:88` |
 | 任务 Provider 存储 | Task provider store | 桌面任务源凭据的 AES-256-GCM 加密包，经 QSettings 落盘 | `client/app/task_provider_store.cpp:19`, `client/app/task_provider_store.cpp:91` |
-| 管理台前端 | Admin SPA | 零构建 vanilla JS hash 路由；所有改写请求带同源 CSRF 轻闸头 | `admin/www/admin.js:1` |
+| 管理台前端 | Admin SPA | 零构建 vanilla JS hash 路由；所有改写请求带同源 CSRF 轻闸头 | `admin/www/admin/helpers.js:1` |
 | 配置输入（管理台） | Admin config input | CLI 优先，随后读取 `MEMEX_ADMIN_*`、文件与存储 URL | `admin/src/admin_app.cpp:201`, `admin/src/admin_app.cpp:218` |
 | 移动协作客户端 | Mobile collab client | Android/iOS/鸿蒙仅登录后的协作态，各自实现传输、会话与 UI 桥 | `apps/android/app/src/main/java/com/memex/im/core/MemexClient.kt:51`, `apps/ios/Sources/MemexKit/MemexClient.swift:29`, `apps/harmony/core/client.ts:27` |
 | 移动会话 | Mobile chat session | 平台长连接对象：分帧、发送 seq、ACK/KICK 分发和本地落库 | `apps/android/app/src/main/java/com/memex/im/core/ChatSession.kt:40`, `apps/ios/Sources/MemexKit/ChatSession.swift:62`, `apps/harmony/core/session.ts:63` |
