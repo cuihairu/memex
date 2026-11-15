@@ -89,6 +89,14 @@ set(MEMEX_TASK_DIALOG_SRCS
   app/task_dialog/kanban.cpp
   app/task_dialog/providers.cpp
   app/task_dialog/populate.cpp)
+# LAY-016 settings_window 按设置域拆分（入口仍是 settings_window.cpp，控件工厂在 settings_window/common.hpp）
+set(MEMEX_SETTINGS_WINDOW_SRCS
+  app/settings_window.cpp
+  app/settings_window/general.cpp
+  app/settings_window/account.cpp
+  app/settings_window/message.cpp
+  app/settings_window/privacy.cpp
+  app/settings_window/advanced.cpp)
 
 qt_add_executable(memex_client
   app/main.cpp
@@ -116,7 +124,7 @@ qt_add_executable(memex_client
   app/brand_kit.hpp
   app/brand_settings_page.cpp
   app/shortcut_settings.cpp
-  app/settings_window.cpp
+  ${MEMEX_SETTINGS_WINDOW_SRCS}
   app/settings_window.hpp
   app/lock_screen.cpp
   app/net_guard.cpp
@@ -671,7 +679,7 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/brand_kit.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -735,7 +743,7 @@ if(MEMEX_BUILD_TESTS)
     app/away_settings.cpp
     app/brand_kit.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -796,7 +804,7 @@ if(MEMEX_BUILD_TESTS)
 
   add_executable(test_settings_window
     app/tests/test_settings_window.cpp
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/shortcut_settings.cpp
     app/lock_screen.cpp
     app/net_guard.cpp
@@ -998,7 +1006,7 @@ if(MEMEX_BUILD_TESTS)
     tests/mode_switch/msg_cross.cpp
     tests/mode_switch/fallback_settings.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1071,7 +1079,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_live_shots
     tests/test_live_shots.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1140,7 +1148,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_mailbox_view
     tests/test_mailbox.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1206,7 +1214,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_tray
     tests/test_tray.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1273,7 +1281,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_screenshot
     tests/test_screenshot.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1362,7 +1370,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_icon
     tests/test_icon.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1437,7 +1445,7 @@ if(MEMEX_BUILD_TESTS)
     tests/theme/custom_theme.cpp
     tests/theme/skin_pack.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1503,7 +1511,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_chat_actions
     tests/test_chat_actions.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1574,7 +1582,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_watch_reminder
     tests/test_watch_reminder.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
@@ -1665,7 +1673,7 @@ if(MEMEX_BUILD_TESTS)
   add_executable(test_flash_alert
     tests/test_flash_alert.cpp
     ${MEMEX_MAIN_WINDOW_SRCS}
-    app/settings_window.cpp
+    ${MEMEX_SETTINGS_WINDOW_SRCS}
     app/archive_console.cpp
     app/message_search_dialog.cpp
     app/rail_nav.cpp
