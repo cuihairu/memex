@@ -97,6 +97,12 @@ set(MEMEX_SETTINGS_WINDOW_SRCS
   app/settings_window/message.cpp
   app/settings_window/privacy.cpp
   app/settings_window/advanced.cpp)
+# LAY-017 group_vault_dialog 按箱域拆分（入口仍是 group_vault_dialog.cpp，KDF 常量等在 group_vault_dialog/common.hpp）
+set(MEMEX_GROUP_VAULT_DIALOG_SRCS
+  app/group_vault_dialog.cpp
+  app/group_vault_dialog/lifecycle.cpp
+  app/group_vault_dialog/entries.cpp
+  app/group_vault_dialog/crypto.cpp)
 
 qt_add_executable(memex_client
   app/main.cpp
@@ -176,7 +182,7 @@ qt_add_executable(memex_client
   app/task_provider_settings.hpp
   app/task_template_settings.cpp
   app/task_template_settings.hpp
-  app/group_vault_dialog.cpp
+  ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
   app/group_vault_dialog.hpp)
 target_include_directories(memex_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_compile_definitions(memex_client PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
@@ -420,7 +426,7 @@ if(MEMEX_BUILD_TESTS)
   # （成员 403/名单收窄/审计管理面）走 test_files_client 引擎级腿，不在此重复
   add_executable(test_group_vault_dialog
     app/tests/test_group_vault_dialog.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_vault_crypto.cpp
     app/theme.cpp
     app/theme_pack.cpp)
@@ -705,7 +711,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -769,7 +775,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -837,7 +843,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -1044,7 +1050,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -1113,7 +1119,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -1182,7 +1188,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -1252,7 +1258,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -1319,7 +1325,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -1408,7 +1414,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -1483,7 +1489,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -1549,7 +1555,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -1616,7 +1622,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
@@ -1711,7 +1717,7 @@ if(MEMEX_BUILD_TESTS)
     engine/task/feishu_provider.cpp
     app/group_memo_dialog.cpp
     app/group_vault_crypto.cpp
-    app/group_vault_dialog.cpp
+    ${MEMEX_GROUP_VAULT_DIALOG_SRCS}
     app/group_ci_dialog.cpp
     app/group_pack_dialog.cpp
     app/group_server_dialog.cpp
