@@ -713,20 +713,6 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
   证据：1f196de；client/app/main_window/ 17 模块＋common.hpp（lifecycle 1145／groups 1056／rail_devices 746／chat_render 742／org_view 712／wire 599／transfers 580／common 491／chat_send 425／collab_mode 327／integration 304／dialogs 296／avatar 257／watch 245／theme 244／chat_input 222／view_switch 166，共 8717 行＝基线 +4.7%，每模块 <1200）；对外 API 不变（main_window.hpp 未动，主程序与 13 个测试目标的源清单由 CMake 变量 MEMEX_MAIN_WINDOW_SRCS 统一供给）；纯代码搬移（拆分脚本逐行非空行等值校验通过），文件头匿名命名空间 helper 区收进 main_window/common.hpp（OrgCardClick 事件过滤类收编为 org_view 模块局部类），≥5 模块共用的 include 统一上提 common.hpp；dev 与 ci 两套构建绿，两套 ctest 均 90/90。
 - [x] LAY-003 [P1] 拆分 server/src/files_server.cpp（7100 行）——请求解析、鉴权、内网文件、uplink、群工具、任务与凭据路由同文件（file:line：server/src/files_server.cpp:808）
   证据：e8b904b；server/src/files_server/ 15 模块＋3 内部头（router 442／session 221／tasks 510／approval 459／audit 440／assets 421／assist 338／files 372／memo 489／vault 415／tools 935／interact 675／servers 409／conn 164／server 114，common.hpp 199／impl.hpp 487／conn.hpp 260，共 7350 行＝基线 +3.5%，每模块 <1000）；对外 API 不变（files_server.hpp 未动，server/CMakeLists.txt 源清单直接列出 15 个 .cpp）；纯代码搬移（拆分脚本逐行非空行等值校验通过），文件级私有类 FileConn/FileServer::Impl 定义收进内部头 conn.hpp/impl.hpp、成员函数按路由域类外定义，匿名命名空间小工具 inline 化收进 common.hpp；dev 与 ci 两套构建绿，两套 ctest 均 90/90。
-- [ ] LAY-004 [P1] 拆分 admin/src/admin_app.cpp（3961 行）——路由注册、会话、授权、各管理域和健康代理集中（file:line：admin/src/admin_app.cpp:201）
-- [ ] LAY-005 [P2] 拆分 server/tests/test_files_api.cpp（3428 行）——按内网文件、uplink、任务、凭据和群工具 API 分套（file:line：server/tests/test_files_api.cpp:1）
-- [ ] LAY-006 [P1] 拆分 server/src/main.cpp（3156 行）——CLI 解析、serve 装配、十多个子命令与诊断混杂（file:line：server/src/main.cpp:3093）
-- [ ] LAY-007 [P2] 拆分 client/engine/collab/files_client.cpp（1829 行）——会话、上传、下载、备忘录、任务与群文件客户端混杂（file:line：client/engine/collab/files_client.cpp:1）
-- [ ] LAY-008 [P2] 拆分 admin/www/admin.js（1801 行）——零构建 SPA 的路由、API、表格、表单和文案同文件（file:line：admin/www/admin.js:1）
-- [ ] LAY-009 [P2] 拆分 admin/tests/test_admin_api.cpp（1779 行）——按账号、策略、任务、归档和健康接口分套（file:line：admin/tests/test_admin_api.cpp:1）
-- [ ] LAY-010 [P1] 拆分 server/src/store.hpp（1725 行）——所有领域行类型与 ServerStore 访问器声明集中（file:line：server/src/store.hpp:257）
-- [ ] LAY-011 [P2] 拆分 client/tests/test_theme.cpp（1298 行）——主题、设置持久化、多窗口与可访问性断言集中（file:line：client/tests/test_theme.cpp:1）
-- [ ] LAY-012 [P2] 拆分 client/app/task_dialog.cpp（1286 行）——任务列表、看板、筛选、提醒和创建对话框同文件（file:line：client/app/task_dialog.cpp:54）
-- [ ] LAY-013 [P2] 拆分 client/engine/collab/collab_engine.cpp（1178 行）——连接生命周期、握手、消息、群、组织和文件判权处理集中（file:line：client/engine/collab/collab_engine.cpp:1）
-- [ ] LAY-014 [P2] 拆分 client/tests/test_mode_switch.cpp（1170 行）——直连/协作切换、状态持久化与多窗口回归集中（file:line：client/tests/test_mode_switch.cpp:1）
-- [ ] LAY-015 [P2] 拆分 server/src/session.cpp（1073 行）——帧解析、登录、消息、组织、群、回执和文件判权 handler 同文件（file:line：server/src/session.cpp:154）
-- [ ] LAY-016 [P2] 拆分 client/app/settings_window.cpp（1051 行）——通用、通知、隐私、高级和任务源设置面板集中（file:line：client/app/settings_window.cpp:1）
-- [ ] LAY-017 [P2] 拆分 client/app/group_vault_dialog.cpp（1044 行）——密码箱 UI、解锁生命周期、条目表和加密提示同文件（file:line：client/app/group_vault_dialog.cpp:1）
 
 ### 目录/分类问题
 
@@ -744,7 +730,8 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
 
 - [x] **COV-98 · P1 · C++ 行覆盖率 98%**：按 CI 同口径构建并运行全量 CTest（88/88 绿），`gcovr` 排除 `third_party/**`、`vcpkg_installed*/**`、`docs/**`、`build*/**`、`**/tests/**` 后实测 **85.06%**（51,353 / 60,370 行）。排除生成代码后再分母拆分：生产源码 **81.00%**（32,441 / 40,049 行），测试代码 93.07%；Cobertura XML 实际未把 MOC / protobuf / qrc 当作 class 计入，因此“排除生成代码”后的 Codecov 口径仍受 Qt 事件循环 / Qt 对话框 / AWS S3 SDK / 容器集成 / 进程入口等外部 I/O 代码主导。缺口集中在 `client/app/main_window.cpp`（1,808 行未覆盖）、`server/src/main.cpp`（1,133 行）、`server/src/files_server.cpp`（877 行）、`server/src/store.cpp`（409 行）、`client/core/local_store.cpp`（260 行）、`client/app/group_vault_dialog.cpp`（250 行）、`client/app/screenshot_tool.cpp`（226 行）、`client/engine/collab/files_client.cpp`（201 行）、`server/src/storage.cpp`（199 行，AWS S3 客户端封装）。`server/src/storage.cpp` 的真实 S3 全接口往返已由 `test_s3_e2e` 覆盖，但该测试默认跳过（依赖 Docker / RustFS 容器），CI 不把容器化外呼当常跑单元测试；`main.cpp` 的服务装配和 Qt 主窗口的消息/绘图/焦点事件循环也不适合为凑数字启动真实 X11、外部 LDAP/S3 或无限循环。本次新增 `server/tests/test_server_cli.cpp` 覆盖此前库级测试未触达的管理 CLI（身份绑定、常用联系人、跨态会话、坏参数、存储编排），把 `server/src/main.cpp` 从 44.45% 提升到 48.71%，全库从 84.89% 提升到 85.06%。98% 在“不修改生产行为、不写无意义测试、不在 CI 引入真实外部容器”的约束下不可达成；已提高到上述数字并如实记录。
   完成=2026-11-08~11-12 三批复查后终值：生产 **82.93%**（33,253/40,098）、全库 **86.54%**（53,389/61,694）、测试 93.24%（ddbbd5d/6918546/a02c48a＋此前批次，明细见下方复查条目）；98% 不可达成结论成立（逐文件排除理由见 GUI 层不入测理由清单）；复核命令与报告路径=`scripts/coverage_report.sh`＋`build-ci/coverage.{xml,summary.txt}`（2026-11-14 重跑与终值逐字一致）。
-- [ ] LAY-004 [P1] 拆分 admin/src/admin_app.cpp（3961 行）——路由注册、会话、授权、各管理域和健康代理集中（file:line：admin/src/admin_app.cpp:201）
+- [x] LAY-004 [P1] 拆分 admin/src/admin_app.cpp（3961 行）——路由注册、会话、授权、各管理域和健康代理集中（file:line：admin/src/admin_app.cpp:201）
+  证据：4494e4e；admin/src/admin_app/ 8 域模块＋common.hpp/cpp＋装配（auth 92／accounts 522／audit_devices 263／notify 500／files_quota 335／groups 947／flows 707／brand_health 368／common.hpp 106＋common.cpp 173＋装配 admin_app.cpp 138，共 4151 行＝基线 +4.8%，每模块 <950）；对外 API 不变（admin_app.hpp 未动，setup/run 签名照旧，admin/CMakeLists.txt 源清单直列 10 个 .cpp）；处理器体逐字搬移，例外清单＝①匿名空间小工具/判权门上提 common（now_ms 收头文件 inline，同 store/common.hpp 口径）②Handler/Guarded 别名收 common.hpp、guarded 定义与 8 个 register_* 入口改用别名 ③处理器 ctx 按值捕获 shared_ptr<AdminContext>——修复 2026-11-14 前次拆分尝试的悬垂捕获段错误（局部量按引用捕获进长命处理器＝UB，common.hpp 有注记；前席的 [MARK] 插桩与 TEMP-ASAN 已剥）。全量 ctest 94/94（build-ci Debug，CI 同口径；原跑 mode_switch/live_shots 两腿 load 50-73 Timeout 假红，隔离复跑绿：live_shots 64s/预算 120）；另删 d2734af 误贴的 LAY 重贴块（todo 未勾数不再双计）。
 - [ ] LAY-005 [P2] 拆分 server/tests/test_files_api.cpp（3428 行）——按内网文件、uplink、任务、凭据和群工具 API 分套（file:line：server/tests/test_files_api.cpp:1）
 - [ ] LAY-006 [P1] 拆分 server/src/main.cpp（3156 行）——CLI 解析、serve 装配、十多个子命令与诊断混杂（file:line：server/src/main.cpp:3093）
 - [ ] LAY-007 [P2] 拆分 client/engine/collab/files_client.cpp（1829 行）——会话、上传、下载、备忘录、任务与群文件客户端混杂（file:line：client/engine/collab/files_client.cpp:1）
