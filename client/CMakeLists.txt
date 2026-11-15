@@ -33,7 +33,19 @@ target_link_libraries(memex_engine_direct PUBLIC memex_core memex_common
 
 add_library(memex_engine_collab STATIC
   engine/collab/collab_engine.cpp
-  engine/collab/files_client.cpp)
+  # LAY-007 files_client 按域拆分（对外 API 仍是 files_client.hpp，共享面在
+  # files/common.hpp）
+  engine/collab/files/files.cpp
+  engine/collab/files/vault_ci.cpp
+  engine/collab/files/tools.cpp
+  engine/collab/files/tasks_reports.cpp
+  engine/collab/files/archive_maps.cpp
+  engine/collab/files/group_tools.cpp
+  engine/collab/files/brand_emoji.cpp
+  engine/collab/files/avatar_mailbox.cpp
+  # 头显式入列：AUTOMOC 靠同名 .cpp 才发现 Q_OBJECT 头，拆分后无同名源，
+  # 不入列则信号 file_deleted 缺 moc 定义（链接期未定义引用）
+  engine/collab/files_client.hpp)
 target_include_directories(memex_engine_collab PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(memex_engine_collab PUBLIC memex_core memex_common Qt6::Core Qt6::Network)
 target_compile_definitions(memex_engine_collab PRIVATE MEMEX_VERSION="${PROJECT_VERSION}")
