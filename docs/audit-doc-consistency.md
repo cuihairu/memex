@@ -398,3 +398,13 @@ Build note: `pnpm docs:build` fails on this tree with `ERR_PNPM_VERIFY_DEPS_BEFO
 `docs/pnpm-workspace.yaml`), so the gate ran `docs/node_modules/.bin/vitepress
 build src` directly — builds clean in ~6s. This is a pre-existing dirty-tree
 condition, not a doc defect; the tree was left exactly as found.
+
+> Closure 2026-11-15: G2-4 fixed — new paired pages `docs/src/guide/serve-args.md`
+> + `docs/src/zh/guide/serve-args.md` document the full 40-flag inventory (5
+> ports/faces, 2 assistant, 4 uplink-policy, 2 feature keys, 6 S3, 21 LDAP),
+> the rc2 strict-parse contract, env fallbacks with flag-wins, and assembly
+> gates, every claim carrying a `serve_args.cpp`/`main.cpp`/`ldap.cpp`
+> file:line citation. Sidebar registered in both locales. Verified: direct
+> `vitepress build src` (the documented dirty-tree workaround) green, both
+> pages render, all guide cross-links resolve, `ctest -R serve_args` is the
+> standing acceptance test.
