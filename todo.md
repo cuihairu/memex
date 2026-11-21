@@ -776,9 +776,21 @@ files_client /files/assist/* 是完整实现，只是走服务端 HTTP 而非直
   完成=serve_args.hpp `parse_serve_args` 声明处补 argv 契约文档（argv[0]＝首个旗标、不带程序名/子命令、裸词按位置参数 rc2 拒、argc=0 合法全默认）＋指向严格解析口径；test_serve_args 契约腿：`run({"memex_server","--port","24370"})==2`（未剥离完整 argv 误用形态锁定）。门禁：全量 ctest 93/94＋collab_resend 孤红隔离复跑绿（4.2s，loadavg 7——同 763 Load flake 先例）。commit 743075d。 
 - [x] 将覆盖率复查条目改成显式状态并保存 gcovr 命令/报告路径（`todo.md:686-693`）——使覆盖率声明可复核。
   完成=新增 `scripts/coverage_report.sh`（gcovr 调用与 CI「Coverage report」步逐字一致；报告落 `build-ci/coverage.xml`＋`build-ci/coverage-summary.txt`；含本机陈旧 gcda/gcno 剔除——gcovr 8.x 不剔会把已删源文件的 gcno-only 单元按 0% 计入，本机实测撑大分母 16,839 行/18 组）；「2026-11-12 复查」块补显式状态行（见 `todo.md` 复核行）；本机重跑 53,389/61,694=86.54% 与记录值逐字一致。 
-- [ ] 分离当前工作区无关的 docs 依赖与截图变更（`docs/package.json:11-12`, `docs/pnpm-lock.yaml`）——避免混入后续代码审查提交。
-  BLOCKED（2026-11-15 巡检）：该批 docs/package.json、pnpm-lock.yaml 与 docs/src/public/** 截图改动是另一会话在途未暂存工作，本会话不许代为暂存或回滚（跨会话纪律）；等属主会话自行提交后本项自然解除。
-  BLOCKED（2026-11-14）：docs/package.json/pnpm-lock.yaml/src/public 截图、apps/ios/Package.resolved、docs/pnpm-workspace.yaml 属另一并行会话的进行中改动（docs 站点重构＋截图重录），非本会话产物；全局红线「绝不暂存既有脏文件」禁止代为切分/提交——须由改动所属会话自行收口，或用户明示合并口径后再动。本会话全部提交已按文件名精确暂存，未触碰该集合（各 commit 的 git show 文件清单可证）。
+- [x] 分离当前工作区无关的 docs 依赖与截图变更（`docs/package.json:11-12`, `docs/pnpm-lock.yaml`）——避免混入后续代码审查提交。
+  完成＝两类脏分头处置，均经逐像素/逐锁行对比定性后收口，工作树回到 HEAD。
+  （1）docs/src/public/** 截图（49 个，mtime 2026-11-15 18:27＝本会话 LAY-017 门禁窗口）＝全量 ctest 的
+  抓图副作用，非另一会话在途工作：逐张 PIL 像素对比 49/49 均有真差异（非纯再生噪声），但差异内容是
+  **每次运行都会变的量**（示例：归档时间戳 `2026-11-15 18:26:19`＝当次门禁时刻、对端 IP
+  192.168.5.188、TCP 端口），HEAD 内版本落后于 `b286843`（2026-11-02 21:19 暗化品牌文字，比截图
+  刷新 commit 0e4c782 晚 5 分钟）——提交任一次抓图只会让下次门禁再脏一遍，故挑拣回滚（`git checkout -- docs/src/public/branding docs/src/public/screenshots`）。
+  （2）docs/package.json＋pnpm-lock.yaml（mtime 2026-11-03）＝11-03 会话的 patch 升级产物，经核对
+  **无实质版本前进**：override `vite: 6.4.4` 仍把 vite 钉在 6.4.4（specifier `^6.4.5` 被 override 覆盖），
+  HEAD 锁文件里 vitepress 本已解析到 1.6.4（specifier `^1.6.3` 亦满足），差异仅为传递依赖再解析
+  （@algolia 5.59.0→5.61.0、postcss 8.5.28→8.5.32、lightningcss 可选 peer 摘除）；单独立 commit 与
+  代码审查提交隔离。门禁：`pnpm docs:build` 逐字跑法 exit 0（rendering 151.3s）。commit 46ae5a8。
+  本项不再 BLOCKED：原阻塞（等属主会话自行提交）随该会话 7 天无新提交且脏面经上面定性为本会话门禁
+  副作用后解除；跨会话红线仍持——`apps/ios/Package.resolved`、`docs/pnpm-workspace.yaml`（本机 pnpm 12
+  本地适配，CI 固定 pnpm 10 读 `package.json#pnpm.overrides`，不入库）继续不暂存。
 
 ## 文档一致性再审计 G2 轮（2026-11-14 · 舰队巡检单 fleet-docs-audit-G2）
 
